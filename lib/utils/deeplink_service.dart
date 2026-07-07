@@ -137,15 +137,18 @@ class DeeplinkService {
     int localId, {
     List<Map<String, dynamic>> items = const [],
   }) {
-    var url = linkParaLocal(localId);
+    const webUrl = 'https://databasesvm.github.io/serviexpressweb/';
+    // El deep link se adjunta para usuarios que ya tienen la app instalada
+    var deepLink = linkParaLocal(localId);
     if (items.isNotEmpty) {
       final itemsStr = items
           .map((i) =>
               '${Uri.encodeComponent(i['nombre'].toString())}:${i['cantidad']}')
           .join(',');
-      url += '&items=$itemsStr';
+      deepLink += '&items=$itemsStr';
     }
-    return '🛵 Pide en *$nombreLocal* por ServiExpress:\n$url\n\n🌐 También desde el navegador:\nhttps://databasesvm.github.io/serviexpressweb/';
+    return '🛵 Pide en *$nombreLocal* por ServiExpress:\n$webUrl\n\n'
+        '_(Si tienes la app: $deepLink)_';
   }
 
   static void dispose() {
