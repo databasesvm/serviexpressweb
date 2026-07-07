@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -1868,6 +1868,7 @@ class _CarritoSheetState extends State<_CarritoSheet> {
   bool _enviando = false;
   bool _enCheckout = false;
   XFile? _comprobanteImg;
+  Uint8List? _comprobanteBytes;
   bool _guardarDireccion = false;
   List<String> _direccionesGuardadas = [];
 
@@ -1960,7 +1961,7 @@ class _CarritoSheetState extends State<_CarritoSheet> {
       // ── Subir comprobante si existe ─────────────────────────────────────
       if (_comprobanteImg != null) {
         try {
-          final bytes = await File(_comprobanteImg!.path).readAsBytes();
+          final bytes = _comprobanteBytes ?? await _comprobanteImg!.readAsBytes();
           final ext = _comprobanteImg!.path.split('.').last.toLowerCase();
           final storagePath = 'comprobantes/$pedidoId.$ext';
           await Supabase.instance.client.storage
@@ -2308,11 +2309,11 @@ class _CarritoSheetState extends State<_CarritoSheet> {
                       Text('Adjunta la foto de tu comprobante antes de confirmar.',
                           style: TextStyle(fontSize: 11, color: Colors.grey[600])),
                       const SizedBox(height: 8),
-                      if (_comprobanteImg != null) ...[
+                      if (_comprobanteImg != null && _comprobanteBytes != null) ...[
                         ClipRRect(
                           borderRadius: BorderRadius.circular(8),
-                          child: Image.file(
-                            File(_comprobanteImg!.path),
+                          child: Image.memory(
+                            _comprobanteBytes!,
                             height: 160, width: double.infinity,
                             fit: BoxFit.cover,
                           ),
@@ -2360,7 +2361,10 @@ class _CarritoSheetState extends State<_CarritoSheet> {
                             if (src == null) return;
                             final img = await picker.pickImage(
                                 source: src, imageQuality: 75, maxWidth: 1200);
-                            if (img != null) setState(() => _comprobanteImg = img);
+                            if (img != null) {
+                              final bytes = await img.readAsBytes();
+                              setState(() { _comprobanteImg = img; _comprobanteBytes = bytes; });
+                            }
                           },
                         ),
                       ),
@@ -2463,9 +2467,4 @@ class _CarritoSheetState extends State<_CarritoSheet> {
             decoration: BoxDecoration(
               color: _metodoPago == value
                   ? Colors.black
-                  : Colors.grey[100],
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                  color: _metodoPago == value
-                      ? Colors.black
-                      : Colors.grey[300]!),
+                  : C
