@@ -35,7 +35,7 @@ class _CentralScreenState extends State<CentralScreen>
     with WidgetsBindingObserver {
   // ── URL WEB (Netlify) para el link que se comparte por WhatsApp ──────────
   // Actualiza este valor con tu URL de Netlify cuando la tengas.
-  static const String _kUrlApp = 'https://databasesvm.github.io/serviexpressapp';
+  static const String _kUrlApp = 'https://databasesvm.github.io/serviexpressweb/';
 
   Timer? _reloj;
   final SonidoManager _sonidos = SonidoManager(); // Motor de audio in-app

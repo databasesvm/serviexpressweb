@@ -145,7 +145,7 @@ class DeeplinkService {
           .join(',');
       url += '&items=$itemsStr';
     }
-    return '🛵 Pide en *$nombreLocal* por ServiExpress:\n$url';
+    return '🛵 Pide en *$nombreLocal* por ServiExpress:\n$url\n\n🌐 También desde el navegador:\nhttps://databasesvm.github.io/serviexpressweb/';
   }
 
   static void dispose() {

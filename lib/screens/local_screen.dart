@@ -1401,7 +1401,8 @@ class _LocalScreenState extends State<LocalScreen>
   void _mostrarQrCarta(Map<String, dynamic> perfil) {
     final localId = perfil['id'] as int;
     final nombre = perfil['nombre']?.toString() ?? 'Mi Local';
-    final link = DeeplinkService.linkParaLocal(localId);
+    const webUrl = 'https://databasesvm.github.io/serviexpressweb/';
+    final link = webUrl; // QR apunta a la web para clientes sin la app
     final texto = DeeplinkService.textoCompartible(nombre, localId);
 
     showDialog(
