@@ -2469,16 +2469,3 @@ class _CarritoSheetState extends State<_CarritoSheet> {
                   color: _metodoPago == value
                       ? Colors.black
                       : Colors.grey[300]!),
-            ),
-            child: Text(label,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    color: _metodoPago == value
-                        ? const Color(0xff3AF500)
-                        : Colors.black54)),
-          ),
-        ),
-      );
-}
