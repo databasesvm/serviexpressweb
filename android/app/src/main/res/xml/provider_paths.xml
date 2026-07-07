@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Directorio temporal de la app — aquí se guarda la APK descargada -->
+    <cache-path name="cache" path="." />
+    <!-- Directorio de archivos internos de la app -->
+    <files-path name="files" path="." />
+</paths>

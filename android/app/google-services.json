@@ -1,0 +1,42 @@
+{
+  "project_info": {
+    "project_number": "1055128360248",
+    "project_id": "serviexpress-push",
+    "storage_bucket": "serviexpress-push.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1055128360248:android:d0217701386b7006fc1dcd",
+        "android_client_info": {
+          "package_name": "com.example.serviexpress_app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1055128360248-eklvmql6na2ov593itdls7o1esbal0el.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.serviexpress_app",
+            "certificate_hash": "5b91b9a751c16d90c0691925002a94aa10bce800a"
+          }
+        },
+        {
+          "client_id": "1055128360248-q4epf6f91h4q655klc9spe1slmiamno2.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDgOZjUx0TlUB4RwI0s6G1OUwpxLazkMGc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

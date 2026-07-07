@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__d31f6585-5a7e-4a5e-8d24-8fe4d7c64c21__list_projects",
+      "Bash(flutter analyze *)"
+    ]
+  }
+}
