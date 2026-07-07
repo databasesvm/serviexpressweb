@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'screens/login_screen.dart';
+import 'screens/guest_home_screen.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'utils/deeplink_service.dart';
@@ -90,7 +91,9 @@ class _ServiexpressExpressAppState extends State<ServiexpressExpressApp>
       debugShowCheckedModeBanner: false,
       navigatorKey: navigatorKey,
       theme: ThemeData(primaryColor: Colors.black),
-      home: const LoginScreen(),
+      // En web: arranca directo en la pantalla de invitado (sin fricción de login)
+      // En móvil: arranca en login para operadores/conductores/locales
+      home: kIsWeb ? const GuestHomeScreen() : const LoginScreen(),
     );
   }
 }
