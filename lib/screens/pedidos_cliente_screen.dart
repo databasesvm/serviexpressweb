@@ -121,9 +121,8 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
       final locales = await _db
           .from('usuarios')
           .select(
-              'id, nombre, direccion, foto_perfil_url, activo, tiempo_entrega, categoria_local, horario_apertura, horario_cierre, dias_semana, pedido_minimo')
+              'id, nombre, direccion, foto_perfil_url, activo, domicilios_activo, tiempo_entrega, categoria_local, horario_apertura, horario_cierre, dias_semana, pedido_minimo')
           .eq('rol', 'local')
-          .eq('domicilios_activo', true)
           .order('nombre');
 
       // Ratings por local
@@ -186,12 +185,16 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
           .where((p) => !yaCalificados.contains(p['id'].toString()))
           .toList();
 
-      // Ordenar: abiertos primero, cerrados al final
+      // Ordenar: abiertos primero, cerrados segundo, sin domicilio al final
       final listaLocales = List<Map<String, dynamic>>.from(locales);
       listaLocales.sort((a, b) {
-        final aA = _estaAbierto(a) ? 0 : 1;
-        final bB = _estaAbierto(b) ? 0 : 1;
-        if (aA != bB) return aA - bB;
+        int prioridad(Map<String, dynamic> l) {
+          if (l['domicilios_activo'] != true) return 2; // sin domicilio
+          if (_estaAbierto(l)) return 0;               // abierto
+          return 1;                                     // cerrado
+        }
+        final pa = prioridad(a), pb = prioridad(b);
+        if (pa != pb) return pa - pb;
         return (a['nombre']?.toString() ?? '').compareTo(b['nombre']?.toString() ?? '');
       });
 
@@ -431,7 +434,7 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
                               _searchQuery.isNotEmpty ||
                                       _catFiltro != 'Todos'
                                   ? 'Sin locales que coincidan'
-                                  : 'No hay locales con domicilio activo ahora',
+                                  : 'No hay locales registrados aún',
                               textAlign: TextAlign.center,
                               style: TextStyle(color: Colors.grey[500]),
                             ),
@@ -513,7 +516,8 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
   }
 
   Widget _buildLocalCard(Map<String, dynamic> local) {
-    final abierto = _estaAbierto(local);
+    final tieneDomicilio = local['domicilios_activo'] == true;
+    final abierto = tieneDomicilio && _estaAbierto(local);
     final localId = (local['id'] as num).toInt();
     final rating = _ratingPorLocal[localId];
     final tiempoEntrega =
@@ -522,8 +526,25 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
         (local['pedido_minimo'] as num?)?.toInt() ?? 0;
     final categoria = local['categoria_local']?.toString() ?? '';
 
+    // Texto del badge de estado
+    String badgeLabel = '';
+    Color badgeColor = Colors.red[700]!;
+    if (!tieneDomicilio) {
+      badgeLabel = 'SIN DOMICILIO';
+      badgeColor = Colors.grey[700]!;
+    } else if (!abierto) {
+      final ap = local['horario_apertura']?.toString();
+      badgeLabel = ap != null && ap.length >= 5
+          ? 'CERRADO · Abre ${ap.substring(0, 5)}'
+          : 'CERRADO';
+      badgeColor = Colors.red[700]!;
+    }
+
+    // Abierto = color normal | Cerrado = ligeramente gris | Sin domicilio = muy gris
+    final opacidad = abierto ? 1.0 : (tieneDomicilio ? 0.65 : 0.45);
+
     return Opacity(
-      opacity: abierto ? 1.0 : 0.6,
+      opacity: opacidad,
       child: Card(
         margin: const EdgeInsets.only(bottom: 10),
         shape: RoundedRectangleBorder(
@@ -541,8 +562,9 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
                   ).then((_) => _cargarDatos())
               : () => ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text(
-                          '${local['nombre']} está cerrado ahora'),
+                      content: Text(!tieneDomicilio
+                          ? '${local['nombre']} no tiene domicilio activo aún'
+                          : '${local['nombre']} está cerrado ahora'),
                       behavior: SnackBarBehavior.floating,
                     ),
                   ),
@@ -561,24 +583,22 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
                           fit: BoxFit.cover,
                           errorBuilder: (_, __, ___) =>
                               Container(color: Colors.grey[200])),
-                      if (!abierto)
+                      if (badgeLabel.isNotEmpty)
                         Container(
-                          color: Colors.black
-                              .withValues(alpha: 0.45),
+                          color: Colors.black.withValues(alpha: 0.45),
                           alignment: Alignment.center,
                           child: Container(
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 16, vertical: 6),
                             decoration: BoxDecoration(
-                                color: Colors.red[700],
-                                borderRadius:
-                                    BorderRadius.circular(20)),
-                            child: Text('CERRADO',
-                                style: TextStyle(
+                                color: badgeColor,
+                                borderRadius: BorderRadius.circular(20)),
+                            child: Text(badgeLabel,
+                                style: const TextStyle(
                                     color: Colors.white,
                                     fontWeight: FontWeight.bold,
-                                    fontSize: 13,
-                                    letterSpacing: 1)),
+                                    fontSize: 12,
+                                    letterSpacing: 0.8)),
                           ),
                         ),
                     ],
@@ -617,29 +637,18 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
                                             FontWeight.bold,
                                         fontSize: 15)),
                               ),
-                              if (!abierto)
+                              if (badgeLabel.isNotEmpty)
                                 Container(
-                                  padding:
-                                      const EdgeInsets.symmetric(
-                                          horizontal: 8,
-                                          vertical: 3),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 3),
                                   decoration: BoxDecoration(
-                                      color: Colors.red[100],
-                                      borderRadius:
-                                          BorderRadius.circular(
-                                              20)),
-                                  child: Text(() {
-                                    final ap = local['horario_apertura']?.toString();
-                                    if (ap != null && ap.length >= 5) {
-                                      return 'CERRADO · Abre ${ap.substring(0, 5)}';
-                                    }
-                                    return 'CERRADO';
-                                  }(),
+                                      color: badgeColor.withValues(alpha: 0.15),
+                                      borderRadius: BorderRadius.circular(20)),
+                                  child: Text(badgeLabel,
                                       style: TextStyle(
                                           fontSize: 9,
-                                          fontWeight:
-                                              FontWeight.bold,
-                                          color: Colors.red[800])),
+                                          fontWeight: FontWeight.bold,
+                                          color: badgeColor)),
                                 )
                               else if (abierto)
                                 Container(

@@ -45,6 +45,7 @@ class _ClienteScreenState extends State<ClienteScreen>
   Timer? _reconexionTimer;
 
   final Set<int> _dialogosDeCalificacionMostrados = {};
+  int _tabActual = 0;
 
   @override
   void initState() {
@@ -1117,93 +1118,70 @@ class _ClienteScreenState extends State<ClienteScreen>
       appBar: AppBar(
         title: Text(
           'ServiExpress | ${widget.usuario['nombre'].toString().split(' ')[0]}',
-          style: TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-            fontSize: 16,
-          ),
+          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
         ),
         backgroundColor: Colors.black,
-        iconTheme: IconThemeData(color: Colors.white),
+        iconTheme: const IconThemeData(color: Colors.white),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.manage_accounts_outlined, color: Colors.white),
-            tooltip: 'Mi Perfil',
-            onPressed: () async {
-              // Usar datos en vivo del stream si están disponibles
-              final updated = await Navigator.push<Map<String, dynamic>>(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => ClientePerfilScreen(
-                    usuario: widget.usuario,
-                  ),
-                ),
-              );
-              // Si el usuario guardó cambios, refrescamos el stream
-              if (updated != null) {
-                _construirStreams();
-              }
-            },
-          ),
+          // Solo el indicador de soporte permanece en AppBar (tiene alarma en tiempo real)
           StreamBuilder<List<Map<String, dynamic>>>(
             stream: _streamMiPerfil,
             builder: (context, snap) {
-              bool tieneAlarma = false;
-              if (snap.hasData && snap.data!.isNotEmpty) {
-                tieneAlarma = snap.data!.first['chat_central'] == true;
-              }
-              Widget btnSoporte = IconButton(
+              final tieneAlarma = snap.hasData && snap.data!.isNotEmpty && snap.data!.first['chat_central'] == true;
+              Widget btn = IconButton(
                 icon: Icon(
                   tieneAlarma ? Icons.mark_email_unread : Icons.support_agent,
-                  color: tieneAlarma
-                      ? Colors.redAccent
-                      : const Color(0xff3AF500),
+                  color: tieneAlarma ? Colors.redAccent : const Color(0xff3AF500),
                 ),
                 tooltip: 'Soporte Central',
                 onPressed: () {
-                  Supabase.instance.client
-                      .from('usuarios')
-                      .update({'chat_central': false})
-                      .eq('id', widget.usuario['id']);
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => ChatScreen(
-                        salaId: 'soporte_${widget.usuario['id']}',
-                        miId: widget.usuario['id'],
-                        miNombre: widget.usuario['nombre'],
-                        titulo: 'Soporte Central',
-                        usuarioId: widget.usuario['id'],
-                        alarmaLocal: 'chat_central',
-                        alarmaDestino: 'alarma_soporte',
-                        tipoFaq: TipoFaqChat.cliente,
-                      ),
+                  Supabase.instance.client.from('usuarios').update({'chat_central': false}).eq('id', widget.usuario['id']);
+                  Navigator.push(context, MaterialPageRoute(
+                    builder: (_) => ChatScreen(
+                      salaId: 'soporte_${widget.usuario['id']}',
+                      miId: widget.usuario['id'],
+                      miNombre: widget.usuario['nombre'],
+                      titulo: 'Soporte Central',
+                      usuarioId: widget.usuario['id'],
+                      alarmaLocal: 'chat_central',
+                      alarmaDestino: 'alarma_soporte',
+                      tipoFaq: TipoFaqChat.cliente,
                     ),
-                  );
+                  ));
                 },
               );
-              return tieneAlarma
-                  ? PulsingWidget(child: btnSoporte)
-                  : btnSoporte;
+              return tieneAlarma ? PulsingWidget(child: btn) : btn;
             },
-          ),
-          IconButton(
-            icon: Icon(Icons.history, color: Colors.white),
-            tooltip: 'Historial General',
-            onPressed: () => _mostrarHistorialGlobal(context),
-          ),
-          IconButton(
-            icon: const Icon(Icons.person_remove, color: Colors.red),
-            tooltip: 'Eliminar Cuenta',
-            onPressed: () => _eliminarMiCuenta(context),
-          ),
-          IconButton(
-            icon: const Icon(Icons.power_settings_new, color: Colors.redAccent),
-            onPressed: _cerrarSesionSegura,
           ),
         ],
       ),
-      body: StreamBuilder<List<Map<String, dynamic>>>(
+      body: _buildBodyTab(),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _tabActual,
+        onTap: (i) => setState(() => _tabActual = i),
+        backgroundColor: Colors.black,
+        selectedItemColor: const Color(0xff3AF500),
+        unselectedItemColor: Colors.white54,
+        type: BottomNavigationBarType.fixed,
+        items: const [
+          BottomNavigationBarItem(icon: Icon(Icons.home_outlined), activeIcon: Icon(Icons.home_rounded), label: 'Inicio'),
+          BottomNavigationBarItem(icon: Icon(Icons.history_rounded), label: 'Historial'),
+          BottomNavigationBarItem(icon: Icon(Icons.person_outline_rounded), activeIcon: Icon(Icons.person_rounded), label: 'Mi Cuenta'),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBodyTab() {
+    switch (_tabActual) {
+      case 1: return _buildTabHistorial();
+      case 2: return _buildTabCuenta();
+      default: return _buildTabInicio();
+    }
+  }
+
+  Widget _buildTabInicio() {
+    return StreamBuilder<List<Map<String, dynamic>>>(
         stream: _streamServiciosActivos,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -1496,8 +1474,7 @@ class _ClienteScreenState extends State<ClienteScreen>
             ),
           );
         },
-      ),
-    );
+      );
   }
 
   // Chip de cuenta de pago — nombre fijo de la app + número. Mismo
@@ -1737,6 +1714,243 @@ class _ClienteScreenState extends State<ClienteScreen>
             Icon(Icons.copy, size: 10, color: colorTexto.withValues(alpha: 0.8)),
           ],
         ),
+      ),
+    );
+  }
+
+  // =========================================================================
+  // PESTAÑAS DE NAVEGACIÓN
+  // =========================================================================
+
+  Widget _buildTabHistorial() {
+    return Container(
+      color: const Color(0xFF0D0D0D),
+      child: Column(
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 20, 16, 8),
+            child: Text('MIS PEDIDOS', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white, letterSpacing: 1)),
+          ),
+          Expanded(
+            child: FutureBuilder<List<Map<String, dynamic>>>(
+              future: Supabase.instance.client
+                  .from('servicios')
+                  .select()
+                  .eq('cliente_id', widget.usuario['id'])
+                  .inFilter('estado', ['finalizado', 'cancelado', 'caducado', 'finalizado_por_demora', 'finalizado_con_problema'])
+                  .order('id', ascending: false)
+                  .limit(50),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator(color: Colors.white));
+                }
+                final historial = snapshot.data ?? [];
+                if (historial.isEmpty) {
+                  return const Center(child: Text('No tienes pedidos en tu historial aún.', style: TextStyle(color: Colors.white54)));
+                }
+                return ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: historial.length,
+                  itemBuilder: (context, index) {
+                    final servicio = historial[index];
+                    final estado = servicio['estado'];
+                    Color colorTag = Colors.green;
+                    String label = 'FINALIZADO';
+                    if (estado == 'cancelado') { colorTag = Colors.black54; label = 'CANCELADO'; }
+                    else if (estado == 'finalizado_por_demora') { colorTag = Colors.deepPurple; label = 'DEMORA'; }
+                    else if (estado == 'caducado') { colorTag = Colors.purple[800]!; label = 'CADUCADO'; }
+                    else if (estado == 'finalizado_con_problema' || (servicio['observacion'] ?? '').contains('[MARCA DE FALLA]')) {
+                      colorTag = Colors.red[700]!; label = 'NOVEDAD';
+                    }
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          ListTile(
+                            dense: true,
+                            title: Text(
+                              'Orden #${servicio['numero_cliente'] ?? servicio['id']} | ${servicio['origen']} ➔ ${servicio['destino']}',
+                              style: const TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            subtitle: Text(servicio['observacion'] ?? 'Sin notas.'),
+                            trailing: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text(
+                                  (servicio['tarifa'] == null || servicio['tarifa'] == 0) ? '' : fmtPeso(servicio['tarifa']),
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                                ),
+                                const SizedBox(height: 4),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(color: colorTag, borderRadius: BorderRadius.circular(4)),
+                                  child: Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 8)),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (estado == 'finalizado' && servicio['movil_id'] != null)
+                            Padding(
+                              padding: const EdgeInsets.only(left: 16, bottom: 12, right: 16),
+                              child: servicio['calificacion'] == null
+                                  ? InkWell(
+                                      onTap: () => _mostrarMenuCalificacion(servicio),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                        decoration: BoxDecoration(
+                                          color: Colors.amber[50],
+                                          borderRadius: BorderRadius.circular(6),
+                                          border: Border.all(color: Colors.amber[400]!),
+                                        ),
+                                        child: const Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(Icons.star, size: 14, color: Colors.orange),
+                                            SizedBox(width: 4),
+                                            Text('CALIFICAR SERVICIO', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.orange)),
+                                          ],
+                                        ),
+                                      ),
+                                    )
+                                  : Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: List.generate(servicio['calificacion'] as int, (i) => const Icon(Icons.star, size: 14, color: Colors.amber)),
+                                    ),
+                            ),
+                        ],
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTabCuenta() {
+    final nombre = widget.usuario['nombre']?.toString() ?? '';
+    final correo = widget.usuario['correo']?.toString() ?? '';
+    final iniciales = nombre.trim().isNotEmpty
+        ? nombre.trim().split(' ').map((p) => p.isNotEmpty ? p[0] : '').take(2).join().toUpperCase()
+        : '?';
+
+    return SingleChildScrollView(
+      child: Column(
+        children: [
+          // Header
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 20),
+            decoration: const BoxDecoration(color: Colors.black),
+            child: Column(
+              children: [
+                CircleAvatar(
+                  radius: 36,
+                  backgroundColor: const Color(0xff3AF500),
+                  child: Text(iniciales, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.black)),
+                ),
+                const SizedBox(height: 12),
+                Text(nombre, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                if (correo.isNotEmpty)
+                  Text(correo, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+
+          // Opciones principales
+          Card(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.manage_accounts_outlined),
+                  title: const Text('Mi Perfil', style: TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: const Text('Nombre, dirección, cédula, facturación'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () async {
+                    final updated = await Navigator.push<Map<String, dynamic>>(
+                      context,
+                      MaterialPageRoute(builder: (_) => ClientePerfilScreen(usuario: widget.usuario)),
+                    );
+                    if (updated != null) _construirStreams();
+                  },
+                ),
+                const Divider(height: 1),
+                StreamBuilder<List<Map<String, dynamic>>>(
+                  stream: _streamMiPerfil,
+                  builder: (context, snap) {
+                    final tieneAlarma = snap.hasData && snap.data!.isNotEmpty && snap.data!.first['chat_central'] == true;
+                    return ListTile(
+                      leading: Icon(
+                        tieneAlarma ? Icons.mark_email_unread : Icons.support_agent,
+                        color: tieneAlarma ? Colors.red : Colors.black,
+                      ),
+                      title: Text(
+                        tieneAlarma ? 'Soporte — MENSAJE NUEVO' : 'Soporte Central',
+                        style: TextStyle(fontWeight: FontWeight.bold, color: tieneAlarma ? Colors.red : Colors.black),
+                      ),
+                      subtitle: const Text('Habla con un operador'),
+                      trailing: tieneAlarma
+                          ? Container(width: 10, height: 10, decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle))
+                          : const Icon(Icons.chevron_right),
+                      onTap: () {
+                        Supabase.instance.client.from('usuarios').update({'chat_central': false}).eq('id', widget.usuario['id']);
+                        Navigator.push(context, MaterialPageRoute(
+                          builder: (_) => ChatScreen(
+                            salaId: 'soporte_${widget.usuario['id']}',
+                            miId: widget.usuario['id'],
+                            miNombre: widget.usuario['nombre'],
+                            titulo: 'Soporte Central',
+                            usuarioId: widget.usuario['id'],
+                            alarmaLocal: 'chat_central',
+                            alarmaDestino: 'alarma_soporte',
+                            tipoFaq: TipoFaqChat.cliente,
+                          ),
+                        ));
+                      },
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 16),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text('ZONA DE PELIGRO', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.red[400], letterSpacing: 1.2)),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Card(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.person_remove, color: Colors.red),
+                  title: const Text('Eliminar mi cuenta', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                  subtitle: const Text('Esta acción no se puede deshacer'),
+                  onTap: () => _eliminarMiCuenta(context),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.power_settings_new, color: Colors.red),
+                  title: const Text('Cerrar sesión', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                  onTap: _cerrarSesionSegura,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 32),
+        ],
       ),
     );
   }
