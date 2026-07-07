@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -169,6 +169,7 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
     bool disponible = producto?['disponible'] ?? true;
     String? fotoUrl = producto?['foto_url'];
     XFile? fotoLocal;
+    Uint8List? fotoBytesLocal;
     bool subiendo = false;
 
     showModalBottomSheet(
@@ -183,7 +184,10 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
             final picker = ImagePicker();
             final img =
                 await picker.pickImage(source: source, imageQuality: 70);
-            if (img != null) setLocal(() => fotoLocal = img);
+            if (img != null) {
+              final bytes = await img.readAsBytes();
+              setLocal(() { fotoLocal = img; fotoBytesLocal = bytes; });
+            }
           }
 
           return Padding(
@@ -204,9 +208,9 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
                           color: Colors.grey[100],
                           borderRadius: const BorderRadius.vertical(
                               top: Radius.circular(24)),
-                          image: fotoLocal != null
+                          image: fotoLocal != null && fotoBytesLocal != null
                               ? DecorationImage(
-                                  image: FileImage(File(fotoLocal!.path)),
+                                  image: MemoryImage(fotoBytesLocal!),
                                   fit: BoxFit.contain)
                               : fotoUrl != null
                                   ? DecorationImage(
@@ -1623,15 +1627,4 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
                                     color: Colors.teal,
                                     fontWeight: FontWeight.bold,
                                     fontSize: 13)),
-                          ],
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
+                  
