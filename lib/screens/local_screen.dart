@@ -2062,12 +2062,14 @@ class _LocalScreenState extends State<LocalScreen>
     required List<String> externalIds,
     required String titulo,
     required String mensaje,
-    required int minutosRetardo,
+    int minutosRetardo = 0,
+    int segundosRetardo = 0,
   }) => MotorNotificaciones.programarMisilRetardado(
         externalIds: externalIds,
         titulo: titulo,
         mensaje: mensaje,
         minutosRetardo: minutosRetardo,
+        segundosRetardo: segundosRetardo,
       );
 
   Future<void> _dispararMisilInmediato({
