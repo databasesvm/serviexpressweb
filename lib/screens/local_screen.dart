@@ -2168,7 +2168,6 @@ class _LocalScreenState extends State<LocalScreen>
       }
       if (leyendaIds.isNotEmpty) {
         Future.delayed(const Duration(seconds: 30), () async {
-          if (!mounted) return;
           // Guardia: si el servicio ya no está pendiente (master lo aceptó), no enviar
           final estadoCheck = await Supabase.instance.client
               .from('servicios')
@@ -2314,7 +2313,6 @@ class _LocalScreenState extends State<LocalScreen>
                     .toList();
                 if (targetStd.isNotEmpty) {
                   Future.delayed(const Duration(seconds: 30), () async {
-                    if (!mounted) return;
                     // Guardia: si el servicio ya no está pendiente (master lo aceptó), no enviar
                     final estadoCheck = await Supabase.instance.client
                         .from('servicios')
@@ -2340,7 +2338,6 @@ class _LocalScreenState extends State<LocalScreen>
                 final double? _oLng = (coords?['lng'] as num?)?.toDouble();
 
                 Future.delayed(const Duration(seconds: 60), () async {
-                  if (!mounted) return;
                   final chk = await Supabase.instance.client
                       .from('servicios').select('estado').eq('id', _svcId).maybeSingle();
                   if (chk == null || chk['estado'] != 'pendiente') return;
@@ -2369,7 +2366,6 @@ class _LocalScreenState extends State<LocalScreen>
 
                 // T=+90s: todos los disponibles (ola final)
                 Future.delayed(const Duration(seconds: 90), () async {
-                  if (!mounted) return;
                   final chk = await Supabase.instance.client
                       .from('servicios').select('estado').eq('id', _svcId).maybeSingle();
                   if (chk == null || chk['estado'] != 'pendiente') return;
