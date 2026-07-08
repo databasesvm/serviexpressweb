@@ -3744,21 +3744,20 @@ class _LocalScreenState extends State<LocalScreen>
                               );
                             }
                             if (leyendaVipIds.isNotEmpty) {
-                              Future.delayed(const Duration(seconds: 30), () async {
-                                if (!mounted) return;
-                                // Guardia: si el servicio ya no está pendiente (master lo aceptó), no enviar
-                                final estadoCheck = await Supabase.instance.client
+                              // Misil retardado T+30s — sobrevive si el local navega
+                              // y tiene ID para cancelar si un Master lo acepta antes
+                              final id30sVip = await _programarMisilRetardado(
+                                externalIds: leyendaVipIds,
+                                titulo: '👑 SERVICIO VIP',
+                                mensaje: mensajeVip,
+                                segundosRetardo: 30,
+                              );
+                              if (id30sVip != null) {
+                                await Supabase.instance.client
                                     .from('servicios')
-                                    .select('estado')
-                                    .eq('id', nuevoServicioId)
-                                    .maybeSingle();
-                                if (estadoCheck == null || estadoCheck['estado'] != 'pendiente') return;
-                                await _dispararMisilInmediato(
-                                  externalIds: leyendaVipIds,
-                                  titulo: '👑 SERVICIO VIP',
-                                  mensaje: mensajeVip,
-                                );
-                              });
+                                    .update({'onesignal_30s': id30sVip})
+                                    .eq('id', nuevoServicioId);
+                              }
                             }
                             // Timer 3 min: si nadie acepta → diálogo al local
                             Future.delayed(const Duration(minutes: 3), () {
@@ -3802,8 +3801,9 @@ class _LocalScreenState extends State<LocalScreen>
                                 .toList();
                             if (targetPilotos.isNotEmpty) {
                               // Paradero: siempre notificamos (sin chequeo de cola)
+                              String? id30s;
                               if (retardoProgramado > 0) {
-                                await _programarMisilRetardado(
+                                id30s = await _programarMisilRetardado(
                                   externalIds: targetPilotos,
                                   titulo: 'TU TURNO DE PARADERO',
                                   mensaje: mensajeAlarma,
@@ -3811,12 +3811,19 @@ class _LocalScreenState extends State<LocalScreen>
                                 );
                               } else {
                                 // Misil programado T+30s — no depende del widget montado
-                                await _programarMisilRetardado(
+                                id30s = await _programarMisilRetardado(
                                   externalIds: targetPilotos,
                                   titulo: 'TU TURNO DE PARADERO',
                                   mensaje: mensajeAlarma,
                                   segundosRetardo: 30,
                                 );
+                              }
+                              // Guardar ID para cancelarlo si alguien acepta antes de los 30s
+                              if (id30s != null) {
+                                await Supabase.instance.client
+                                    .from('servicios')
+                                    .update({'onesignal_30s': id30s})
+                                    .eq('id', nuevoServicioId);
                               }
                             }
                           }
@@ -5784,30 +5791,28 @@ class _LocalScreenState extends State<LocalScreen>
         List<String> targetPilotos =
             pilotosSeleccionadosIds.where((id) => !masterIds.contains(id)).toList();
         if (targetPilotos.isNotEmpty) {
-          // Paradero: siempre notificamos (sin chequeo de cola)
+          // Paradero: misil retardado con ID guardado — cancela si alguien acepta antes
+          String? id30s;
           if (retardoProgramado > 0) {
-            await _programarMisilRetardado(
+            id30s = await _programarMisilRetardado(
               externalIds: targetPilotos,
               titulo: 'TU TURNO DE PARADERO',
               mensaje: mensajeAlarma,
               minutosRetardo: retardoProgramado,
             );
           } else {
-            Future.delayed(const Duration(seconds: 30), () async {
-              if (!mounted) return;
-              // Guardia: si el servicio ya no está pendiente (master lo aceptó), no enviar
-              final estadoCheck = await Supabase.instance.client
-                  .from('servicios')
-                  .select('estado')
-                  .eq('id', nuevoServicioId)
-                  .maybeSingle();
-              if (estadoCheck == null || estadoCheck['estado'] != 'pendiente') return;
-              await _dispararMisilInmediato(
-                externalIds: targetPilotos,
-                titulo: 'TU TURNO DE PARADERO',
-                mensaje: mensajeAlarma,
-              );
-            });
+            id30s = await _programarMisilRetardado(
+              externalIds: targetPilotos,
+              titulo: 'TU TURNO DE PARADERO',
+              mensaje: mensajeAlarma,
+              segundosRetardo: 30,
+            );
+          }
+          if (id30s != null) {
+            await Supabase.instance.client
+                .from('servicios')
+                .update({'onesignal_30s': id30s})
+                .eq('id', nuevoServicioId);
           }
         }
       }

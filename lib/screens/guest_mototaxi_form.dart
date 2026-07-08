@@ -203,7 +203,7 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
       if (_origenLng != null) prefs.setDouble('guest_ultima_origen_lng', _origenLng!);
       prefs.setString('guest_ultimo_destino', _destinoCtrl.text.trim().toUpperCase());
 
-      // ---> DISPARO A CENTRAL POR SEGMENTO (más confiable que por IDs) <---
+      // ---> DISPARO A CENTRAL POR SEGMENTO <---
       try {
         await MotorNotificaciones.dispararACentral(
           titulo: '🛵 MOTOTAXI INVITADO',
@@ -213,6 +213,9 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
       } catch (e) {
         debugPrint('Error OneSignal: $e');
       }
+
+      // La cascada a móviles se dispara desde guest_tracking_screen.dart
+      // cuando el invitado aprueba la cotización que envía la Central.
 
       if (mounted) {
         Navigator.pushReplacement(

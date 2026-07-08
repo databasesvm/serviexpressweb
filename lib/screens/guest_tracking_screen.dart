@@ -92,18 +92,19 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
                 .where((e) => e.isNotEmpty && !masterIds.contains(e))
                 .toList();
         if (paraderoIds.isNotEmpty) {
-          Future.delayed(const Duration(seconds: 30), () async {
-            if (!mounted) return;
-            final chk = await Supabase.instance.client
-                .from('servicios').select('estado').eq('id', svcId).maybeSingle();
-            if (chk == null || chk['estado'] != 'pendiente') return;
-            await MotorNotificaciones.dispararRafa(
-              idsDestinos: paraderoIds,
-              titulo: 'TU TURNO DE PARADERO',
-              mensaje: 'Servicio de Invitado disponible.',
-              urgente: true,
-            );
-          });
+          // Misil retardado — sobrevive si el widget se desmonta y tiene ID para cancelar
+          final id30s = await MotorNotificaciones.programarMisilRetardado(
+            externalIds: paraderoIds,
+            titulo: 'TU TURNO DE PARADERO',
+            mensaje: 'Servicio de Invitado disponible.',
+            segundosRetardo: 30,
+          );
+          if (id30s != null) {
+            await Supabase.instance.client
+                .from('servicios')
+                .update({'onesignal_30s': id30s})
+                .eq('id', svcId);
+          }
         }
 
         // T=60s: radio 1km (no Masters, no paradero)

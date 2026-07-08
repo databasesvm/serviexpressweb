@@ -638,7 +638,7 @@ class _MovilScreenState extends State<MovilScreen>
           final esFM = motivoSeleccionado?.$2 ?? false;
           return AlertDialog(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-            title: const Text('¿Por qué cancelas?',
+            title: const Text('¿Por qué liberas el domicilio?',
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             content: SizedBox(
               width: double.maxFinite,
@@ -658,7 +658,7 @@ class _MovilScreenState extends State<MovilScreen>
                       child: Text(
                         esFM
                             ? '✅ Fuerza mayor — no se descuentan puntos.'
-                            : '⚠️ Esta cancelación descontará 1.0 pt de tu puntuación.',
+                            : '⚠️ Esta liberación descontará 1.0 pt de tu puntuación.',
                         style: TextStyle(
                             fontSize: 12,
                             color: esFM ? Colors.green[800] : Colors.red[800],
@@ -712,7 +712,7 @@ class _MovilScreenState extends State<MovilScreen>
                 onPressed: motivoSeleccionado == null
                     ? null
                     : () => Navigator.pop(ctx, true),
-                child: Text('Confirmar',
+                child: Text('Liberar domicilio',
                     style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
               ),
             ],
@@ -729,22 +729,24 @@ class _MovilScreenState extends State<MovilScreen>
         : motivoSeleccionado!.$1;
 
     try {
-      // 1. Desasignar y volver a pendiente
+      final pedidoId = p['id'] as int;
+      final movilId = widget.usuario['id'];
+
+      // 1. Liberar — vuelve a 'pendiente' para que cualquiera pueda tomarlo
       await db.from('pedidos').update({
         'movil_id': null,
-        'estado': 'pendiente_confirmacion',
-      }).eq('id', p['id']);
+        'estado': 'pendiente',
+      }).eq('id', pedidoId);
 
       // 2. Registrar cancelación
       await db.from('cancelaciones_domicilio').insert({
-        'movil_id': p['movil_id'] ?? widget.usuario['id'],
-        'pedido_id': p['id'],
+        'movil_id': p['movil_id'] ?? movilId,
+        'pedido_id': pedidoId,
         'motivo': motivo,
         'fuerza_mayor': esFuerzaMayor,
       });
 
       // 3. Penalizar puntaje solo si NO es fuerza mayor
-      final movilId = widget.usuario['id'];
       if (movilId != null && !esFuerzaMayor) {
         final movilData = await db.from('usuarios').select('puntuacion').eq('id', movilId).maybeSingle();
         if (movilData != null) {
@@ -771,9 +773,66 @@ class _MovilScreenState extends State<MovilScreen>
         );
       }
 
+      // 6. REINICIAR CASCADA — igual que un servicio nuevo
+      final local = p['local_nombre']?.toString() ?? 'local';
+      final msgAlerta = '🔄 Domicilio liberado — busca nuevo móvil para: $local';
+
+      // T=0: Masters + Central
+      final mastersData = await db
+          .from('usuarios')
+          .select('id')
+          .or('rol.eq.central,rol.eq.master,rango_movil.eq.MASTER')
+          .eq('activo', true)
+          .neq('suspendido', true);
+      final masterIds = mastersData.map((u) => u['id'].toString()).toList();
+      if (masterIds.isNotEmpty) {
+        await MotorNotificaciones.dispararRafa(
+          idsDestinos: masterIds,
+          titulo: '🔄 DOMICILIO SIN MÓVIL',
+          mensaje: msgAlerta,
+        );
+      }
+
+      // T=30s: paradero (misil — sobrevive aunque el widget se desmonte)
+      final enParaderoData = await db
+          .from('usuarios')
+          .select('id')
+          .eq('rol', 'movil')
+          .eq('en_linea', true)
+          .neq('suspendido', true)
+          .not('paradero_actual', 'is', null);
+      final paraderoIds = (enParaderoData as List)
+          .map((u) => u['id'].toString())
+          .where((id) => id != movilId?.toString() && !masterIds.contains(id))
+          .toList();
+      if (paraderoIds.isNotEmpty) {
+        await MotorNotificaciones.programarMisilRetardado(
+          externalIds: paraderoIds,
+          titulo: '🔄 DOMICILIO SIN MÓVIL',
+          mensaje: msgAlerta,
+          segundosRetardo: 30,
+        );
+      }
+
+      // T=60s: todos los disponibles (Future.delayed con guardia de estado)
+      Future.delayed(const Duration(seconds: 60), () async {
+        if (!mounted) return;
+        final chk = await db.from('pedidos').select('estado').eq('id', pedidoId).maybeSingle();
+        if (chk == null || chk['estado'] != 'pendiente') return;
+        final todos = await db.from('usuarios').select('id').eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true);
+        final idsTodos = (todos as List).map((u) => u['id'].toString()).where((id) => !masterIds.contains(id)).toList();
+        if (idsTodos.isNotEmpty) {
+          await MotorNotificaciones.dispararRafa(
+            idsDestinos: idsTodos,
+            titulo: '🚨 DOMICILIO SIN TOMAR',
+            mensaje: msgAlerta,
+          );
+        }
+      });
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Domicilio cancelado. Buscaremos otro móvil.'),
+            content: Text('Domicilio liberado. Se está buscando otro móvil.'),
             backgroundColor: Colors.orange));
       }
     } catch (e) {
@@ -920,8 +979,8 @@ class _MovilScreenState extends State<MovilScreen>
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                         padding: const EdgeInsets.symmetric(vertical: 8),
                       ),
-                      icon: const Icon(Icons.cancel_outlined, size: 16),
-                      label: const Text('Cancelar domicilio', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                      icon: const Icon(Icons.lock_open_outlined, size: 16),
+                      label: const Text('Liberar domicilio', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                       onPressed: _cancelarDomicilio,
                     ),
                   ),
@@ -5709,6 +5768,8 @@ class _MovilScreenState extends State<MovilScreen>
                     _detenerMiAlertaPanico(silencioso: true);
                   }
 
+                  if (servicio['onesignal_30s'] != null)
+                    _abortarMisilOneSignal(servicio['onesignal_30s'].toString());
                   if (servicio['onesignal_2m'] != null)
                     _abortarMisilOneSignal(servicio['onesignal_2m'].toString());
                   if (servicio['onesignal_5m'] != null)
@@ -5793,6 +5854,8 @@ class _MovilScreenState extends State<MovilScreen>
         _detenerMiAlertaPanico(silencioso: true);
       }
 
+      if (servicio['onesignal_30s'] != null)
+        _abortarMisilOneSignal(servicio['onesignal_30s'].toString());
       if (servicio['onesignal_2m'] != null)
         _abortarMisilOneSignal(servicio['onesignal_2m'].toString());
       if (servicio['onesignal_5m'] != null)
@@ -5845,6 +5908,14 @@ class _MovilScreenState extends State<MovilScreen>
 
     setState(() => _procesando = true);
     try {
+      // Cancelar misiles pendientes de la asignación anterior antes de reiniciar
+      if (servicio['onesignal_30s'] != null)
+        await MotorNotificaciones.cancelarMisil(servicio['onesignal_30s'].toString());
+      if (servicio['onesignal_2m'] != null)
+        await MotorNotificaciones.cancelarMisil(servicio['onesignal_2m'].toString());
+      if (servicio['onesignal_5m'] != null)
+        await MotorNotificaciones.cancelarMisil(servicio['onesignal_5m'].toString());
+
       await Supabase.instance.client
           .from('servicios')
           .update({
@@ -5852,6 +5923,9 @@ class _MovilScreenState extends State<MovilScreen>
             'estado': 'pendiente',
             'liberacion_at': DateTime.now().toUtc().toIso8601String(),
             'accepted_at': null,
+            'onesignal_30s': null,
+            'onesignal_2m': null,
+            'onesignal_5m': null,
           })
           .eq('id', servicio['id']);
 
@@ -5859,8 +5933,8 @@ class _MovilScreenState extends State<MovilScreen>
       // cancela un servicio (ver canal radar_bg).
       if (_estaEnLinea) _intentarRegistroParadero();
 
-      // CASCADA DE NOTIFICACIONES — igual que creación original del servicio:
-      // T=0: Masters, T=30s: paradero #1, T=2min+T=5min: SQL cron los maneja.
+      // CASCADA DE NOTIFICACIONES — reinicio limpio desde cero:
+      // T=0: Masters, T=30s: paradero #1, T=60s: zona 1km, T=90s: todos
       final servicioId = servicio['id'] as int;
       final destino = servicio['destino']?.toString() ?? 'destino';
       final msgAlerta = '📍 Servicio liberado — disponible para: $destino';
@@ -5869,7 +5943,7 @@ class _MovilScreenState extends State<MovilScreen>
       final mastersData = await Supabase.instance.client
           .from('usuarios')
           .select('id')
-          .or('rol.eq.master,rango_movil.eq.MASTER')
+          .or('rol.eq.central,rol.eq.master,rango_movil.eq.MASTER')
           .eq('activo', true)
           .neq('suspendido', true);
       final masterIds = mastersData.map((u) => u['id'].toString()).toList();
@@ -5881,7 +5955,7 @@ class _MovilScreenState extends State<MovilScreen>
         );
       }
 
-      // T=30s: notificar al #1 de paradero (verificando que sigue pendiente)
+      // T=30s: notificar al #1 de paradero
       final exclusivoStr = servicio['exclusivo_id']?.toString() ?? '';
       final paraderoIds = exclusivoStr.isEmpty
           ? <String>[]
@@ -5892,13 +5966,19 @@ class _MovilScreenState extends State<MovilScreen>
               .toList();
 
       if (paraderoIds.isNotEmpty) {
-        // Misil programado T+30s — no depende del widget montado
-        await MotorNotificaciones.programarMisilRetardado(
+        // Misil programado T+30s — guardar ID para cancelar si alguien acepta
+        final id30s = await MotorNotificaciones.programarMisilRetardado(
           externalIds: paraderoIds,
           titulo: 'TU TURNO DE PARADERO',
           mensaje: msgAlerta,
           segundosRetardo: 30,
         );
+        if (id30s != null) {
+          await Supabase.instance.client
+              .from('servicios')
+              .update({'onesignal_30s': id30s})
+              .eq('id', servicio['id']);
+        }
       }
 
       // T=60s: motos en radio 1km (no Masters, no paradero ya notificado)

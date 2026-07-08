@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:serviexpress_app/utils/widgets_compartidos.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart';
 import 'package:serviexpress_app/utils/permisos_criticos.dart';
@@ -177,7 +178,11 @@ class _ClienteScreenState extends State<ClienteScreen>
     }
   }
 
-  Future<void> _responderCotizacion(int id, bool aprobada) async {
+  Future<void> _responderCotizacion(
+    Map<String, dynamic> servicio,
+    bool aprobada,
+  ) async {
+    final int id = servicio['id'] as int;
     try {
       await Supabase.instance.client
           .from('servicios')
@@ -188,8 +193,101 @@ class _ClienteScreenState extends State<ClienteScreen>
                 : 'Cotización rechazada por cliente.',
           })
           .eq('id', id);
+
+      if (!aprobada) return;
+
+      // CASCADA A MÓVILES — misma lógica que local/central/invitado
+      final String destino = servicio['destino']?.toString() ?? 'destino';
+      final String msgAlerta = '🛵 Servicio cliente — $destino';
+      final exclusivoStr = servicio['exclusivo_id']?.toString() ?? '';
+
+      // T=0: Masters + Central
+      final mastersData = await Supabase.instance.client
+          .from('usuarios')
+          .select('id')
+          .or('rol.eq.central,rol.eq.master,rango_movil.eq.MASTER')
+          .neq('suspendido', true);
+      final masterIds = mastersData.map((u) => u['id'].toString()).toList();
+      if (masterIds.isNotEmpty) {
+        await MotorNotificaciones.dispararRafa(
+          idsDestinos: masterIds,
+          titulo: '👑 NUEVO SERVICIO',
+          mensaje: msgAlerta,
+          urgente: true,
+        );
+      }
+
+      // T+30s: paradero — misil con ID guardado
+      final paraderoIds = exclusivoStr.isEmpty
+          ? <String>[]
+          : exclusivoStr
+              .split(',')
+              .map((e) => e.trim())
+              .where((e) => e.isNotEmpty && !masterIds.contains(e))
+              .toList();
+      if (paraderoIds.isNotEmpty) {
+        final id30s = await MotorNotificaciones.programarMisilRetardado(
+          externalIds: paraderoIds,
+          titulo: 'TU TURNO DE PARADERO',
+          mensaje: msgAlerta,
+          segundosRetardo: 30,
+        );
+        if (id30s != null) {
+          await Supabase.instance.client
+              .from('servicios')
+              .update({'onesignal_30s': id30s})
+              .eq('id', id);
+        }
+      }
+
+      // T+60s y T+90s sin mounted check (sobreviven si el widget navega)
+      final double? origLat = (servicio['origen_lat'] as num?)?.toDouble();
+      final double? origLng = (servicio['origen_lng'] as num?)?.toDouble();
+      final List<String> mSnap = List<String>.from(masterIds);
+      final List<String> pSnap = List<String>.from(paraderoIds);
+
+      Future.delayed(const Duration(seconds: 60), () async {
+        final chk = await Supabase.instance.client
+            .from('servicios').select('estado').eq('id', id).maybeSingle();
+        if (chk == null || chk['estado'] != 'pendiente') return;
+        final candidatos = await Supabase.instance.client
+            .from('usuarios').select('id, latitud, longitud')
+            .eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true)
+            .not('rango_movil', 'in', '("MASTER")');
+        final idsZ = (candidatos as List).where((u) {
+          final uid = u['id'].toString();
+          if (mSnap.contains(uid) || pSnap.contains(uid)) return false;
+          if (origLat == null || origLng == null) return true;
+          final uLat = (u['latitud'] as num?)?.toDouble();
+          final uLng = (u['longitud'] as num?)?.toDouble();
+          if (uLat == null || uLng == null) return false;
+          return const Distance().as(LengthUnit.Meter,
+              LatLng(uLat, uLng), LatLng(origLat, origLng)) <= 1000;
+        }).map((u) => u['id'].toString()).toList();
+        if (idsZ.isNotEmpty) {
+          await MotorNotificaciones.dispararRafa(
+              idsDestinos: idsZ, titulo: '📡 SERVICIO CERCA (1km)', mensaje: msgAlerta);
+        }
+      });
+
+      Future.delayed(const Duration(seconds: 90), () async {
+        final chk = await Supabase.instance.client
+            .from('servicios').select('estado').eq('id', id).maybeSingle();
+        if (chk == null || chk['estado'] != 'pendiente') return;
+        final todos = await Supabase.instance.client
+            .from('usuarios').select('id')
+            .eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true);
+        final idsT = (todos as List)
+            .map((u) => u['id'].toString())
+            .where((uid) => !mSnap.contains(uid))
+            .toList();
+        if (idsT.isNotEmpty) {
+          await MotorNotificaciones.dispararRafa(
+              idsDestinos: idsT, titulo: '🚨 SERVICIO SIN TOMAR', mensaje: msgAlerta);
+        }
+      });
     } catch (e) {
-      // ignore: empty_catches
+      debugPrint('Error responderCotizacion: $e');
     }
   }
 
@@ -678,7 +776,7 @@ class _ClienteScreenState extends State<ClienteScreen>
                       foregroundColor: Colors.red,
                       side: const BorderSide(color: Colors.red),
                     ),
-                    onPressed: () => _responderCotizacion(servicio['id'], false),
+                    onPressed: () => _responderCotizacion(servicio, false),
                     child: const Text(
                       'RECHAZAR',
                       style: TextStyle(fontWeight: FontWeight.bold),
@@ -692,7 +790,7 @@ class _ClienteScreenState extends State<ClienteScreen>
                       backgroundColor: const Color(0xff3AF500),
                       foregroundColor: Colors.black,
                     ),
-                    onPressed: () => _responderCotizacion(servicio['id'], true),
+                    onPressed: () => _responderCotizacion(servicio, true),
                     child: const Text(
                       'PEDIR MÓVIL',
                       style: TextStyle(fontWeight: FontWeight.bold),

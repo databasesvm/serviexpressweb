@@ -2741,23 +2741,27 @@ class _CentralScreenState extends State<CentralScreen>
                           // #1 de la fila antes de abrir el servicio.
                           // Capturamos los valores antes del delay — los
                           // controllers del diálogo pueden disponerse antes.
-                          // T=+30s: notificar al #1 de cada paradero.
-                          // Sin verificación de cola — el moto debe recibir
-                          // el push siempre que haya un servicio nuevo,
-                          // independientemente de otros servicios pendientes.
+                          // T=+30s: misil programado al #1 de cada paradero.
+                          // Misil retardado (no Future.delayed) — sobrevive si
+                          // Central navega fuera de pantalla, y su ID se guarda
+                          // para cancelarlo si alguien acepta antes de los 30s.
                           if (pilotosSeleccionadosIds.isNotEmpty) {
                             final _idsSnap =
                                 List<String>.from(pilotosSeleccionadosIds);
-                            Future.delayed(
-                              const Duration(seconds: 30),
-                              () => MotorNotificaciones.dispararRafa(
-                                idsDestinos: _idsSnap,
-                                titulo: '📍 TU TURNO EN EL PARADERO',
-                                mensaje: 'Un servicio está esperando por ti',
-                                urgente: true,
-                                sonido: Sonidos.movilParadero,
-                              ),
+                            final id30s = await MotorNotificaciones
+                                .programarMisilRetardado(
+                              externalIds: _idsSnap,
+                              titulo: '📍 TU TURNO EN EL PARADERO',
+                              mensaje: 'Un servicio está esperando por ti',
+                              segundosRetardo: 30,
+                              sonido: Sonidos.movilParadero,
                             );
+                            if (id30s != null) {
+                              await Supabase.instance.client
+                                  .from('servicios')
+                                  .update({'onesignal_30s': id30s})
+                                  .eq('id', nuevoServicioId);
+                            }
                           }
 
                           // --- T=+60s ZONAL y T=+90s GLOBAL ---
