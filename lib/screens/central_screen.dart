@@ -4599,7 +4599,66 @@ class _CentralScreenState extends State<CentralScreen>
                     ),
                 ],
               ),
-              trailing: Icon(icono, color: colorBase, size: 16),
+              trailing: (estado == 'cotizacion' || estado == 'cotizada')
+                  ? Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(icono, color: colorBase, size: 16),
+                        const SizedBox(width: 4),
+                        GestureDetector(
+                          onTap: () async {
+                            final confirm = await showDialog<bool>(
+                              context: context,
+                              builder: (ctx) => AlertDialog(
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12)),
+                                title: const Text('❌ Cancelar Cotización',
+                                    style: TextStyle(fontWeight: FontWeight.bold)),
+                                content: const Text(
+                                    '¿Cancelar esta cotización? Desaparecerá del radar y no se enviará ningún móvil.'),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(ctx, false),
+                                    child: const Text('NO',
+                                        style: TextStyle(color: Colors.grey)),
+                                  ),
+                                  ElevatedButton(
+                                    style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.red[700]),
+                                    onPressed: () => Navigator.pop(ctx, true),
+                                    child: const Text('SÍ, CANCELAR',
+                                        style: TextStyle(color: Colors.white)),
+                                  ),
+                                ],
+                              ),
+                            );
+                            if (confirm == true) {
+                              await Supabase.instance.client
+                                  .from('servicios')
+                                  .update({
+                                    'estado': 'cancelado',
+                                    'observacion': (servicio['observacion'] != null
+                                            ? '${servicio['observacion']} | '
+                                            : '') +
+                                        'CANCELADO POR CENTRAL',
+                                  })
+                                  .eq('id', servicio['id']);
+                            }
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.all(4),
+                            decoration: BoxDecoration(
+                              color: Colors.red[50],
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.red[300]!),
+                            ),
+                            child: Icon(Icons.close,
+                                color: Colors.red[700], size: 14),
+                          ),
+                        ),
+                      ],
+                    )
+                  : Icon(icono, color: colorBase, size: 16),
             ),
           ),  // Card
           );  // FadeSlideIn

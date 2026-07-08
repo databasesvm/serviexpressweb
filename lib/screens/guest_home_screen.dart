@@ -4,6 +4,7 @@ import 'package:serviexpress_app/screens/guest_mototaxi_form.dart';
 import 'package:serviexpress_app/screens/guest_shopping_form.dart';
 import 'package:serviexpress_app/screens/guest_food_form.dart'; // <-- EL NUEVO DE COMIDA
 import 'package:serviexpress_app/screens/registro_screen.dart';
+import 'package:serviexpress_app/screens/guest_tracking_screen.dart';
 
 class GuestHomeScreen extends StatelessWidget {
   const GuestHomeScreen({super.key});
@@ -39,7 +40,52 @@ class GuestHomeScreen extends StatelessWidget {
               'Pide rápido sin registrarte. Selecciona el tipo de servicio:',
               style: TextStyle(fontSize: 14, color: Colors.black54),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 16),
+
+            // --- BOTÓN RASTREAR PEDIDO ACTIVO ---
+            GestureDetector(
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const GuestTrackingScreen()),
+              ),
+              child: Container(
+                margin: const EdgeInsets.only(bottom: 20),
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                decoration: BoxDecoration(
+                  color: Colors.black,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xff3AF500), width: 1.5),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.location_on, color: Color(0xff3AF500), size: 24),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '📍 Rastrear mi pedido',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                            ),
+                          ),
+                          SizedBox(height: 2),
+                          Text(
+                            '¿Ya pediste? Toca aquí para ver el estado.',
+                            style: TextStyle(color: Colors.white54, fontSize: 11),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Icon(Icons.arrow_forward_ios_rounded,
+                        color: Color(0xff3AF500), size: 16),
+                  ],
+                ),
+              ),
+            ),
 
             _construirBotonServicio(
               context,
