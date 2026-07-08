@@ -24,23 +24,23 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      # ── Versión 1: clientes/invitados ──────────────────────────────
+      # ── Versión 1: clientes/invitados → ROOT del sitio ────────────
       - name: Build web — clientes (GuestHome)
         run: flutter build web --release --base-href "/serviexpressweb/"
 
-      - name: Guardar build clientes
+      - name: Guardar build clientes en root
         run: |
-          mkdir -p deploy/serviexpressweb
-          cp -r build/web/. deploy/serviexpressweb/
+          mkdir -p deploy
+          cp -r build/web/. deploy/
 
-      # ── Versión 2: operadores (login completo) ─────────────────────
+      # ── Versión 2: operadores (login) → /login/ ───────────────────
       - name: Build web — operadores (Login)
-        run: flutter build web --release --base-href "/serviexpressweb-login/" --dart-define=LOGIN_MODE=true
+        run: flutter build web --release --base-href "/serviexpressweb/login/" --dart-define=LOGIN_MODE=true
 
-      - name: Guardar build operadores
+      - name: Guardar build operadores en /login/
         run: |
-          mkdir -p deploy/serviexpressweb-login
-          cp -r build/web/. deploy/serviexpressweb-login/
+          mkdir -p deploy/login
+          cp -r build/web/. deploy/login/
 
       # ── Deploy ambas a la rama gh-pages ───────────────────────────
       - name: Crear .nojekyll
