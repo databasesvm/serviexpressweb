@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart'; // <-- RUTA CORREGIDA DE ONESIGNAL
+import 'package:serviexpress_app/screens/guest_tracking_screen.dart';
 
 class GuestShoppingForm extends StatefulWidget {
   const GuestShoppingForm({super.key});
@@ -190,13 +191,10 @@ class _GuestShoppingFormState extends State<GuestShoppingForm> {
       }
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('¡Lista de compras enviada a Central!'),
-            backgroundColor: Colors.green,
-          ),
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const GuestTrackingScreen()),
         );
-        Navigator.pop(context);
       }
     } catch (e) {
       if (mounted)

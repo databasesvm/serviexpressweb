@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart'; // <-- RUTA CORREGIDA DE ONESIGNAL
+import 'package:serviexpress_app/screens/guest_tracking_screen.dart';
 
 class GuestMototaxiForm extends StatefulWidget {
   const GuestMototaxiForm({super.key});
@@ -227,13 +228,10 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
       }
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('¡Mototaxi solicitado con éxito!'),
-            backgroundColor: Colors.green,
-          ),
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const GuestTrackingScreen()),
         );
-        Navigator.pop(context);
       }
     } catch (e) {
       if (mounted)

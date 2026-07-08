@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart'; // <-- RUTA CORREGIDA DE ONESIGNAL
+import 'package:serviexpress_app/screens/guest_tracking_screen.dart';
 
 class GuestDeliveryForm extends StatefulWidget {
   const GuestDeliveryForm({super.key});
@@ -238,13 +239,10 @@ class _GuestDeliveryFormState extends State<GuestDeliveryForm> {
       }
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('¡Domicilio solicitado con éxito!'),
-            backgroundColor: Colors.green,
-          ),
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const GuestTrackingScreen()),
         );
-        Navigator.pop(context);
       }
     } catch (e) {
       if (mounted)

@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart'; // <-- RUTA CORREGIDA DE ONESIGNAL
+import 'package:serviexpress_app/screens/guest_tracking_screen.dart';
 
 class GuestFoodForm extends StatefulWidget {
   const GuestFoodForm({super.key});
@@ -188,13 +189,10 @@ class _GuestFoodFormState extends State<GuestFoodForm> {
       }
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('¡Pedido enviado a Central!'),
-            backgroundColor: Colors.green,
-          ),
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const GuestTrackingScreen()),
         );
-        Navigator.pop(context);
       }
     } catch (e) {
       if (mounted)
