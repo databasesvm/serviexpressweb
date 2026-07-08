@@ -203,26 +203,13 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
       if (_origenLng != null) prefs.setDouble('guest_ultima_origen_lng', _origenLng!);
       prefs.setString('guest_ultimo_destino', _destinoCtrl.text.trim().toUpperCase());
 
-      // ---> DISPARO DIRECTO A CENTRAL PARA COTIZAR <---
+      // ---> DISPARO A CENTRAL POR SEGMENTO (más confiable que por IDs) <---
       try {
-        final centralMaster = await Supabase.instance.client
-            .from('usuarios')
-            .select('id')
-            .inFilter('rol', ['central', 'master']);
-
-        List<String> objetivos = centralMaster
-            .map((u) => u['id'].toString())
-            .toList();
-
-        if (objetivos.isNotEmpty) {
-          await MotorNotificaciones.dispararRafa(
-            idsDestinos: objetivos,
-            titulo: '❓ NUEVA COTIZACIÓN (NO REGISTRADO)',
-            mensaje:
-                'Cliente no registrado solicita tarifa hacia: ${_destinoCtrl.text.trim().toUpperCase()}',
-            urgente: true,
-          );
-        }
+        await MotorNotificaciones.dispararACentral(
+          titulo: '🛵 MOTOTAXI INVITADO',
+          mensaje: '${_nombreCtrl.text.trim()} → ${_destinoCtrl.text.trim().toUpperCase()}',
+          urgente: true,
+        );
       } catch (e) {
         debugPrint('Error OneSignal: $e');
       }
