@@ -814,9 +814,8 @@ class _MovilScreenState extends State<MovilScreen>
         );
       }
 
-      // T=60s: todos los disponibles (Future.delayed con guardia de estado)
+      // T=60s: todos los disponibles (guardia de estado en BD)
       Future.delayed(const Duration(seconds: 60), () async {
-        if (!mounted) return;
         final chk = await db.from('pedidos').select('estado').eq('id', pedidoId).maybeSingle();
         if (chk == null || chk['estado'] != 'pendiente') return;
         final todos = await db.from('usuarios').select('id').eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true);
@@ -5985,7 +5984,6 @@ class _MovilScreenState extends State<MovilScreen>
       final double? _origLat = (servicio['origen_lat'] as num?)?.toDouble();
       final double? _origLng = (servicio['origen_lng'] as num?)?.toDouble();
       Future.delayed(const Duration(seconds: 60), () async {
-        if (!mounted) return;
         final estadoCheck = await Supabase.instance.client
             .from('servicios').select('estado').eq('id', servicioId).maybeSingle();
         if (estadoCheck == null || estadoCheck['estado'] != 'pendiente') return;
@@ -6021,7 +6019,6 @@ class _MovilScreenState extends State<MovilScreen>
 
       // T=90s: todos los disponibles (ola final)
       Future.delayed(const Duration(seconds: 90), () async {
-        if (!mounted) return;
         final estadoCheck = await Supabase.instance.client
             .from('servicios').select('estado').eq('id', servicioId).maybeSingle();
         if (estadoCheck == null || estadoCheck['estado'] != 'pendiente') return;

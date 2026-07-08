@@ -109,7 +109,6 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
 
         // T=60s: radio 1km (no Masters, no paradero)
         Future.delayed(const Duration(seconds: 60), () async {
-          if (!mounted) return;
           final chk = await Supabase.instance.client
               .from('servicios').select('estado').eq('id', svcId).maybeSingle();
           if (chk == null || chk['estado'] != 'pendiente') return;
@@ -140,7 +139,6 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
 
         // T=90s: todos los disponibles (ola final)
         Future.delayed(const Duration(seconds: 90), () async {
-          if (!mounted) return;
           final chk = await Supabase.instance.client
               .from('servicios').select('estado').eq('id', svcId).maybeSingle();
           if (chk == null || chk['estado'] != 'pendiente') return;
