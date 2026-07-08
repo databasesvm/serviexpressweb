@@ -458,7 +458,9 @@ class _RegistroScreenState extends State<RegistroScreen> {
           children: [
             _buildBarraProgreso(),
             Expanded(
-              child: SingleChildScrollView(
+              child: Container(
+                color: Colors.white,
+                child: SingleChildScrollView(
                 padding: const EdgeInsets.all(20),
                 child: Center(
                   child: ConstrainedBox(
@@ -481,6 +483,7 @@ class _RegistroScreenState extends State<RegistroScreen> {
                 ),
               ),
             ),
+          ),
             _buildBarraNavegacion(),
           ],
         ),
