@@ -1627,4 +1627,15 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
                                     color: Colors.teal,
                                     fontWeight: FontWeight.bold,
                                     fontSize: 13)),
-                  
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
