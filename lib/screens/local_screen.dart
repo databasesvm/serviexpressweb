@@ -3891,7 +3891,6 @@ class _LocalScreenState extends State<LocalScreen>
                               final double? _oLat2 = (coords['lat'] as num?)?.toDouble();
                               final double? _oLng2 = (coords['lng'] as num?)?.toDouble();
                               Future.delayed(const Duration(seconds: 60), () async {
-                                if (!mounted) return;
                                 final chk = await Supabase.instance.client
                                     .from('servicios').select('estado')
                                     .eq('id', _svcId2).maybeSingle();
@@ -3922,7 +3921,6 @@ class _LocalScreenState extends State<LocalScreen>
                                   );
                               });
                               Future.delayed(const Duration(seconds: 90), () async {
-                                if (!mounted) return;
                                 final chk = await Supabase.instance.client
                                     .from('servicios').select('estado')
                                     .eq('id', _svcId2).maybeSingle();
@@ -5872,7 +5870,6 @@ class _LocalScreenState extends State<LocalScreen>
           final double? _oLat3 = (servicio['origen_lat'] as num?)?.toDouble();
           final double? _oLng3 = (servicio['origen_lng'] as num?)?.toDouble();
           Future.delayed(const Duration(seconds: 60), () async {
-            if (!mounted) return;
             final chk = await Supabase.instance.client
                 .from('servicios').select('estado').eq('id', _svcId3).maybeSingle();
             if (chk == null || chk['estado'] != 'pendiente') return;
@@ -5898,7 +5895,6 @@ class _LocalScreenState extends State<LocalScreen>
                   externalIds: idsZ, titulo: '📡 SERVICIO CERCA (1km)', mensaje: _msg3);
           });
           Future.delayed(const Duration(seconds: 90), () async {
-            if (!mounted) return;
             final chk = await Supabase.instance.client
                 .from('servicios').select('estado').eq('id', _svcId3).maybeSingle();
             if (chk == null || chk['estado'] != 'pendiente') return;
