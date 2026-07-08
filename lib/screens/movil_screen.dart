@@ -5892,20 +5892,13 @@ class _MovilScreenState extends State<MovilScreen>
               .toList();
 
       if (paraderoIds.isNotEmpty) {
-        Future.delayed(const Duration(seconds: 30), () async {
-          if (!mounted) return;
-          final estadoCheck = await Supabase.instance.client
-              .from('servicios')
-              .select('estado')
-              .eq('id', servicioId)
-              .maybeSingle();
-          if (estadoCheck == null || estadoCheck['estado'] != 'pendiente') return;
-          await MotorNotificaciones.dispararRafa(
-            idsDestinos: paraderoIds,
-            titulo: 'TU TURNO DE PARADERO',
-            mensaje: msgAlerta,
-          );
-        });
+        // Misil programado T+30s — no depende del widget montado
+        await MotorNotificaciones.programarMisilRetardado(
+          externalIds: paraderoIds,
+          titulo: 'TU TURNO DE PARADERO',
+          mensaje: msgAlerta,
+          segundosRetardo: 30,
+        );
       }
 
       // T=60s: motos en radio 1km (no Masters, no paradero ya notificado)

@@ -3679,22 +3679,14 @@ class _LocalScreenState extends State<LocalScreen>
 
                         // DISPAROS ONESIGNAL
                         if (esCotizacion) {
-                          final centralMaster = await Supabase.instance.client
-                              .from('usuarios')
-                              .select('id')
-                              .inFilter('rol', ['central', 'master']);
-                          List<String> objetivos = centralMaster
-                              .map((u) => u['id'].toString())
-                              .toList();
-                          if (objetivos.isNotEmpty) {
-                            await _dispararMisilInmediato(
-                              externalIds: objetivos,
-                              titulo: esVip ? '👑 COTIZACIÓN VIP' : '❓ NUEVA COTIZACIÓN',
-                              mensaje: esVip
-                                  ? 'Cotización VIP pendiente de respuesta'
-                                  : 'Un local solicita cotización de tarifa',
-                            );
-                          }
+                          // Segmento Central — más confiable que buscar IDs en tabla
+                          await MotorNotificaciones.dispararACentral(
+                            titulo: esVip ? '👑 COTIZACIÓN VIP' : '❓ NUEVA COTIZACIÓN',
+                            mensaje: esVip
+                                ? 'Cotización VIP pendiente de respuesta'
+                                : 'Un local solicita cotización de tarifa',
+                            urgente: true,
+                          );
                         } else if (esVip) {
                           // ── FLUJO VIP ──────────────────────────────────────────
                           // 1. Notificar Masters inmediatamente (sin paradero).
@@ -3816,23 +3808,12 @@ class _LocalScreenState extends State<LocalScreen>
                                   minutosRetardo: retardoProgramado,
                                 );
                               } else {
-                                Future.delayed(
-                                  const Duration(seconds: 30),
-                                  () async {
-                                    if (!mounted) return;
-                                    // Guardia: si el servicio ya no está pendiente (master lo aceptó), no enviar
-                                    final estadoCheck = await Supabase.instance.client
-                                        .from('servicios')
-                                        .select('estado')
-                                        .eq('id', nuevoServicioId)
-                                        .maybeSingle();
-                                    if (estadoCheck == null || estadoCheck['estado'] != 'pendiente') return;
-                                    await _dispararMisilInmediato(
-                                      externalIds: targetPilotos,
-                                      titulo: 'TU TURNO DE PARADERO',
-                                      mensaje: mensajeAlarma,
-                                    );
-                                  },
+                                // Misil programado T+30s — no depende del widget montado
+                                await _programarMisilRetardado(
+                                  externalIds: targetPilotos,
+                                  titulo: 'TU TURNO DE PARADERO',
+                                  mensaje: mensajeAlarma,
+                                  segundosRetardo: 30,
                                 );
                               }
                             }

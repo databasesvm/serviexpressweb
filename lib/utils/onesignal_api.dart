@@ -127,13 +127,14 @@ class MotorNotificaciones {
     required List<String> externalIds,
     required String titulo,
     required String mensaje,
-    required int minutosRetardo,
+    int minutosRetardo = 0,
+    int segundosRetardo = 0,
     String sonido = 'alerta',
   }) async {
     if (externalIds.isEmpty) return null;
 
     final fechaDisparo = DateTime.now().toUtc().add(
-      Duration(minutes: minutosRetardo),
+      Duration(minutes: minutosRetardo, seconds: segundosRetardo),
     );
     final formatGMT =
         '${fechaDisparo.year}-'
