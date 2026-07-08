@@ -7,6 +7,11 @@ import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'utils/deeplink_service.dart';
 
+/// Flag de compilación: `true` cuando se construye la versión de operadores.
+/// Se activa con `--dart-define=LOGIN_MODE=true` en el build de GitHub Actions.
+/// Por defecto es `false` (versión de clientes/invitados).
+const bool _kLoginMode = bool.fromEnvironment('LOGIN_MODE', defaultValue: false);
+
 /// Clave global del Navigator — permite navegar desde DeeplinkService
 /// sin necesitar un BuildContext explícito.
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -91,9 +96,10 @@ class _ServiexpressExpressAppState extends State<ServiexpressExpressApp>
       debugShowCheckedModeBanner: false,
       navigatorKey: navigatorKey,
       theme: ThemeData(primaryColor: Colors.black),
-      // En web: arranca directo en la pantalla de invitado (sin fricción de login)
-      // En móvil: arranca en login para operadores/conductores/locales
-      home: kIsWeb ? const GuestHomeScreen() : const LoginScreen(),
+      // LOGIN_MODE=true  → versión web para operadores (locales, móviles, central)
+      // LOGIN_MODE=false → versión web para clientes invitados (por defecto)
+      // En móvil siempre arranca en LoginScreen independientemente del flag.
+      home: (kIsWeb && !_kLoginMode) ? const GuestHomeScreen() : const LoginScreen(),
     );
   }
 }

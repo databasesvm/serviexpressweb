@@ -1,4 +1,4 @@
-name: Deploy Flutter Web → GitHub Pages
+name: Deploy Flutter Web → GitHub Pages (dual)
 
 on:
   push:
@@ -6,16 +6,10 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: "pages"
-  cancel-in-progress: false
+  contents: write
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -30,24 +24,31 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Build web
+      # ── Versión 1: clientes/invitados ──────────────────────────────
+      - name: Build web — clientes (GuestHome)
         run: flutter build web --release --base-href "/serviexpressweb/"
 
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
+      - name: Guardar build clientes
+        run: |
+          mkdir -p deploy/serviexpressweb
+          cp -r build/web/. deploy/serviexpressweb/
 
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+      # ── Versión 2: operadores (login completo) ─────────────────────
+      - name: Build web — operadores (Login)
+        run: flutter build web --release --base-href "/serviexpressweb-login/" --dart-define=LOGIN_MODE=true
+
+      - name: Guardar build operadores
+        run: |
+          mkdir -p deploy/serviexpressweb-login
+          cp -r build/web/. deploy/serviexpressweb-login/
+
+      # ── Deploy ambas a la rama gh-pages ───────────────────────────
+      - name: Crear .nojekyll
+        run: touch deploy/.nojekyll
+
+      - name: Deploy a GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
         with:
-          path: ./build/web
-
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./deploy
+          force_orphan: true
