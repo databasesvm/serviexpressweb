@@ -98,8 +98,11 @@ class MotorNotificaciones {
   }
 
   // -----------------------------------------------------------------------
-  // 3. DISPARO A LA CENTRAL — Por segmento OneSignal
+  // 3. DISPARO A LA CENTRAL — Por filtro de tag rol=central
   // -----------------------------------------------------------------------
+  // NOTA: CentralScreen registra OneSignal.User.addTagWithKey('rol', 'central')
+  // para todos los usuarios master y central. Usamos filtro por tag en lugar de
+  // included_segments para no depender de un segmento configurado en el dashboard.
   static Future<void> dispararACentral({
     required String titulo,
     required String mensaje,
@@ -109,7 +112,9 @@ class MotorNotificaciones {
     await _enviarPush(
       body: {
         'app_id': _appId,
-        'included_segments': ['Central'],
+        'filters': [
+          {'field': 'tag', 'key': 'rol', 'relation': '=', 'value': 'central'},
+        ],
         'headings': {'en': titulo, 'es': titulo},
         'contents': {'en': mensaje, 'es': mensaje},
         'priority': 10,
