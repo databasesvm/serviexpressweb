@@ -2289,6 +2289,10 @@ class _MovilScreenState extends State<MovilScreen>
         setState(() {
           _estaEnLinea = false;
         });
+        // Cerrar el diálogo de REPORTE DE ACTIVIDAD si sigue abierto —
+        // sin esto el moto puede tocar "SIGO ACTIVO" después del corte
+        // y el timer se resetea aunque Supabase ya lo desconectó.
+        if (Navigator.of(context).canPop()) Navigator.of(context).pop();
         showDialog(
           context: context,
           barrierDismissible: false,
