@@ -17,7 +17,9 @@
 //   entre el login manual y el auto-login.
 
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:serviexpress_app/utils/auth_helper.dart'; // <-- SEGURIDAD: hash de contraseñas
@@ -310,6 +312,16 @@ class _LoginScreenState extends State<LoginScreen>
     final rol = usuario['rol'];
 
     if (!mounted) return;
+
+    // VINCULAR EXTERNAL USER ID EN ONESIGNAL ─────────────────────────────────
+    // Sin OneSignal.login(id), el dispositivo queda registrado de forma
+    // anónima y include_external_user_ids no puede encontrarlo → 0 pushes.
+    // Se hace aquí para cubrir tanto el login manual como el auto-login.
+    if (!kIsWeb) {
+      try {
+        await OneSignal.login(usuario['id'].toString());
+      } catch (_) {}
+    }
 
     // OTA: verificar si hay nueva versión disponible antes de navegar.
     // Si hay update, muestra el diálogo; el usuario puede instalar o posponer.
