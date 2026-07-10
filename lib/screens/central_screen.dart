@@ -92,27 +92,30 @@ class _CentralScreenState extends State<CentralScreen>
   void initState() {
     super.initState();
 
-    // --- INYECCIÓN TÁCTICA 1: IDENTIDAD Y PERMISOS PUSH (MÓVIL) ---
-    Future.microtask(() async {
-      if (widget.usuario != null) {
-        OneSignal.login(widget.usuario!['id'].toString());
-      } else {
-        // Respaldo táctico: Si no llega desde el login, buscamos el ID de la Central en la base de datos
-        final centralBackup = await Supabase.instance.client
-            .from('usuarios')
-            .select('id')
-            .eq('rol', 'central')
-            .limit(1)
-            .maybeSingle();
-        if (centralBackup != null) {
-          OneSignal.login(centralBackup['id'].toString());
+    // --- INYECCIÓN TÁCTICA 1: IDENTIDAD Y PERMISOS PUSH (SOLO MÓVIL) ---
+    // OneSignal no tiene soporte web — guard kIsWeb obligatorio.
+    if (!kIsWeb) {
+      Future.microtask(() async {
+        if (widget.usuario != null) {
+          OneSignal.login(widget.usuario!['id'].toString());
+        } else {
+          // Respaldo táctico: Si no llega desde el login, buscamos el ID de la Central en la base de datos
+          final centralBackup = await Supabase.instance.client
+              .from('usuarios')
+              .select('id')
+              .eq('rol', 'central')
+              .limit(1)
+              .maybeSingle();
+          if (centralBackup != null) {
+            OneSignal.login(centralBackup['id'].toString());
+          }
         }
-      }
-      // Tag para que dispararACentral pueda encontrar este dispositivo
-      // sin depender de segmentos configurados en el dashboard de OneSignal.
-      OneSignal.User.addTagWithKey('rol', 'central');
-      await OneSignal.Notifications.requestPermission(true);
-    });
+        // Tag para que dispararACentral pueda encontrar este dispositivo
+        // sin depender de segmentos configurados en el dashboard de OneSignal.
+        OneSignal.User.addTagWithKey('rol', 'central');
+        await OneSignal.Notifications.requestPermission(true);
+      });
+    }
 
     WidgetsBinding.instance.addObserver(this);
 

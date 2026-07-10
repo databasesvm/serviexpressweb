@@ -19,7 +19,7 @@ Deno.serve(async (req: Request) => {
     return new Response('ok', { headers: corsHeaders });
   }
 
-  const restKey = Deno.env.get('ONESIGNAL_REST_KEY') ?? '';
+  const restKey = Deno.env.get('ONESIGNAL_REST_API_KEY') ?? '';
 
   try {
     const body = await req.json();
