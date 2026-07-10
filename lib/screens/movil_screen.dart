@@ -1,3 +1,4 @@
+// ignore_for_file: curly_braces_in_flow_control_structures, no_leading_underscores_for_local_identifiers, unnecessary_string_interpolations, empty_catches, deprecated_member_use, use_build_context_synchronously
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:geolocator/geolocator.dart';
@@ -2101,7 +2102,6 @@ class _MovilScreenState extends State<MovilScreen>
             _estabaSuspendido = suspendidoAhora;
           }
         } catch (e) {}
-        // ignore: empty_catches
       }
 
       // 3. Control de Inactividad (80 min desconecta, 60 min avisa)
@@ -2322,7 +2322,6 @@ class _MovilScreenState extends State<MovilScreen>
         );
       }
     } catch (e) {}
-    // ignore: empty_catches
   }
 
   Future<void> _cambiarEstado() async {
@@ -5985,8 +5984,8 @@ class _MovilScreenState extends State<MovilScreen>
       // T=60s: motos en radio 1km (no Masters, no paradero ya notificado)
       // T=+60s y T=+90s — misiles server-side (OneSignal programa en sus servidores)
       // Pre-fetch al momento de liberar; onesignal_2m/5m se cancelan si alguien acepta
-      final double? _origLat = (servicio['origen_lat'] as num?)?.toDouble();
-      final double? _origLng = (servicio['origen_lng'] as num?)?.toDouble();
+      final double? origLat = (servicio['origen_lat'] as num?)?.toDouble();
+      final double? origLng = (servicio['origen_lng'] as num?)?.toDouble();
       final movilesLib = await Supabase.instance.client
           .from('usuarios').select('id, latitud, longitud')
           .eq('rol', 'movil').eq('en_linea', true)
@@ -5995,12 +5994,12 @@ class _MovilScreenState extends State<MovilScreen>
       final idsZona60 = movilesLib.where((u) {
         final id = u['id'].toString();
         if (masterIds.contains(id) || paraderoIds.contains(id)) return false;
-        if (_origLat == null || _origLng == null) return true;
+        if (origLat == null || origLng == null) return true;
         final uLat = (u['latitud'] as num?)?.toDouble();
         final uLng = (u['longitud'] as num?)?.toDouble();
         if (uLat == null || uLng == null) return false;
         return const Distance().as(
-              LengthUnit.Meter, LatLng(uLat, uLng), LatLng(_origLat, _origLng),
+              LengthUnit.Meter, LatLng(uLat, uLng), LatLng(origLat, origLng),
             ) <= 1000;
       }).map((u) => u['id'].toString()).toList();
       final idsTodos90 = movilesLib
@@ -6009,20 +6008,22 @@ class _MovilScreenState extends State<MovilScreen>
           .toList();
       String? idLib60;
       String? idLib90;
-      if (idsZona60.isNotEmpty)
+      if (idsZona60.isNotEmpty) {
         idLib60 = await MotorNotificaciones.programarMisilRetardado(
           externalIds: idsZona60,
           titulo: '📡 SERVICIO CERCA (1km)',
           mensaje: msgAlerta,
           segundosRetardo: 60,
         );
-      if (idsTodos90.isNotEmpty)
+      }
+      if (idsTodos90.isNotEmpty) {
         idLib90 = await MotorNotificaciones.programarMisilRetardado(
           externalIds: idsTodos90,
           titulo: '🚨 SERVICIO SIN TOMAR',
           mensaje: msgAlerta,
           segundosRetardo: 90,
         );
+      }
       if (idLib60 != null || idLib90 != null) {
         await Supabase.instance.client.from('servicios').update({
           if (idLib60 != null) 'onesignal_2m': idLib60,
@@ -6300,7 +6301,7 @@ class _MovilScreenState extends State<MovilScreen>
                     }
                     final historial = snapshot.data ?? [];
 
-                    // Si hay rango seleccionado, sumamos TODO lo que
+                    // Si hay rango seleccionado, sumamos todo lo que
                     // cayó en ese rango. Si no, mantenemos el
                     // comportamiento de siempre: solo HOY.
                     double producidoCalculado = 0;
@@ -7114,7 +7115,7 @@ class _MovilScreenState extends State<MovilScreen>
                               );
                             }
 
-                            // 4. REGLA SUPREMA: MASTERS VEN TODO (T=0)
+                            // 4. REGLA SUPREMA: MASTERS VEN todo (T=0)
                             if (esMaster) {
                               puedeVer = true;
                             }
@@ -7584,4 +7585,3 @@ class _MovilScreenState extends State<MovilScreen>
 // ===========================================================================
 // PAINTER: Overlay circular oscuro con hueco (tutorial de pantalla)
 // ===========================================================================
-        
