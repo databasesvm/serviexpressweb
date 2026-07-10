@@ -70,6 +70,10 @@ class _LocalScreenState extends State<LocalScreen>
   StreamSubscription<List<Map<String, dynamic>>>? _subServiciosLocal;
   Timer? _reconexionTimer;
 
+  // Caché anti-parpadeo: evita spinner al reconectar cada 30s
+  List<Map<String, dynamic>>? _cachePerfilPropio;
+  List<Map<String, dynamic>>? _cacheServiciosLocal;
+
   @override
   void initState() {
     super.initState();
@@ -179,6 +183,7 @@ class _LocalScreenState extends State<LocalScreen>
 
     _subPerfilPropio = crudoPerfil.listen(
       (data) {
+        _cachePerfilPropio = data;
         if (!_ctrlPerfilPropio.isClosed) _ctrlPerfilPropio.add(data);
       },
       onError: (e) {
@@ -187,6 +192,7 @@ class _LocalScreenState extends State<LocalScreen>
     );
     _subServiciosLocal = crudoServicios.listen(
       (data) {
+        _cacheServiciosLocal = data;
         if (!_ctrlServiciosLocal.isClosed) _ctrlServiciosLocal.add(data);
       },
       onError: (e) {
@@ -6168,30 +6174,33 @@ class _LocalScreenState extends State<LocalScreen>
   // ---> INYECCIÓN: NÚCLEO DE LA INTERFAZ CON EL PANEL DE PERFIL <---
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<List<Map<String, dynamic>>>(
-      stream: _streamPerfilPropio,
-      builder: (context, snapshotUsuario) {
-        // Leemos el perfil en vivo de la BD para tener la config actualizada
-        final perfilEnVivo =
-            (snapshotUsuario.hasData && snapshotUsuario.data!.isNotEmpty)
-            ? snapshotUsuario.data!.first
-            : widget.usuario;
+    // DefaultTabController FUERA del StreamBuilder — así el tab activo
+    // no se resetea cuando el stream del perfil reconecta cada 30s.
+    return DefaultTabController(
+      length: 3,
+      child: StreamBuilder<List<Map<String, dynamic>>>(
+        stream: _streamPerfilPropio,
+        initialData: _cachePerfilPropio, // evita spinner al reconectar
+        builder: (context, snapshotUsuario) {
+          // Leemos el perfil en vivo de la BD para tener la config actualizada
+          final perfilEnVivo =
+              (snapshotUsuario.hasData && snapshotUsuario.data!.isNotEmpty)
+              ? snapshotUsuario.data!.first
+              : widget.usuario;
 
-        // Inicializamos los campos del perfil la primera vez
-        if (!_perfilCargado && snapshotUsuario.hasData) {
-          _telLocalController.text =
-              perfilEnVivo['telefono_local']?.toString() ?? '';
-          _instruccionesController.text =
-              perfilEnVivo['instrucciones_recogida']?.toString() ?? '';
-          _tipoServicioDefecto =
-              perfilEnVivo['tipo_servicio_defecto']?.toString() ??
-              _tipoDesdeCategoria(perfilEnVivo['categoria_local']?.toString() ?? '');
-          _perfilCargado = true;
-        }
+          // Inicializamos los campos del perfil la primera vez
+          if (!_perfilCargado && snapshotUsuario.hasData) {
+            _telLocalController.text =
+                perfilEnVivo['telefono_local']?.toString() ?? '';
+            _instruccionesController.text =
+                perfilEnVivo['instrucciones_recogida']?.toString() ?? '';
+            _tipoServicioDefecto =
+                perfilEnVivo['tipo_servicio_defecto']?.toString() ??
+                _tipoDesdeCategoria(perfilEnVivo['categoria_local']?.toString() ?? '');
+            _perfilCargado = true;
+          }
 
-        return DefaultTabController(
-          length: 3, // <--- Mutamos a 3 Pestañas
-          child: Scaffold(
+          return Scaffold(
             backgroundColor: const Color(0xFFF5F5F5),
             appBar: AppBar(
               title: Text(
@@ -6220,8 +6229,9 @@ class _LocalScreenState extends State<LocalScreen>
             ),
             body: StreamBuilder<List<Map<String, dynamic>>>(
               stream: _streamServiciosLocal,
+              initialData: _cacheServiciosLocal, // evita spinner al reconectar
               builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
+                if (!snapshot.hasData) {
                   return const Center(
                     child: CircularProgressIndicator(color: Colors.black),
                   );
@@ -7037,10 +7047,10 @@ class _LocalScreenState extends State<LocalScreen>
                 );
               },
             ),
-          ),
-        );
-      },
-    );
+          );   // Scaffold
+        },     // outer StreamBuilder builder
+      ),       // outer StreamBuilder (child: de DefaultTabController)
+    );         // DefaultTabController
   }
 
   // Perfil rápido del moto visto desde el local — nombre, usuario,
@@ -7250,26 +7260,4 @@ class _LocalScreenState extends State<LocalScreen>
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text('✅ Encargo enrutado a $movilNombre.'),
-                      backgroundColor: Colors.blue[700],
-                      duration: const Duration(seconds: 3),
-                    ),
-                  );
-                }
-              } catch (e) {
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Error al enrutar: $e'),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
-                }
-              }
-            },
-          ),
-        ],
-      ),
-    );
-  }
-}
+                      
