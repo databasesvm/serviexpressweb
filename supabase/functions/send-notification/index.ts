@@ -52,6 +52,13 @@ Deno.serve(async (req: Request) => {
     // Asegurar que el app_id venga correcto (por si el cliente no lo envía)
     body.app_id = ONESIGNAL_APP_ID;
 
+    // FIX CRÍTICO: cuando se usan include_external_user_ids, la API v1 de
+    // OneSignal requiere channel_for_external_user_ids = 'push'. Sin este
+    // campo la solicitud devuelve 200 OK pero recipients = 0 (silencio total).
+    if (body.include_external_user_ids && !body.channel_for_external_user_ids) {
+      body.channel_for_external_user_ids = 'push';
+    }
+
     const r = await fetch(ONESIGNAL_API, {
       method: 'POST',
       headers: {

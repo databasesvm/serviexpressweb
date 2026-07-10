@@ -2164,6 +2164,20 @@ class _CentralScreenState extends State<CentralScreen>
     // Desglose del precio capturado por CampoTarifaInteligente.
     Map<String, dynamic>? detalleActual;
 
+    // Red de direcciones — se carga una vez al abrir el formulario
+    List<String> redDireccionesCentral = [];
+    List<String> sugerenciasDestino = [];
+    Supabase.instance.client
+        .from('red_direcciones')
+        .select('nombre, municipio')
+        .eq('activo', true)
+        .order('nombre', ascending: true)
+        .then((data) {
+      redDireccionesCentral = List<Map<String, dynamic>>.from(data)
+          .map((e) => '${e['nombre']} (${e['municipio']})')
+          .toList();
+    });
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -2380,7 +2394,60 @@ class _CentralScreenState extends State<CentralScreen>
                     isDense: true,
                     prefixIcon: const Icon(Icons.flag, size: 18),
                   ),
+                  onChanged: (texto) {
+                    if (texto.length < 2) {
+                      setDialogState(() => sugerenciasDestino = []);
+                      return;
+                    }
+                    final t = texto.toLowerCase();
+                    setDialogState(() {
+                      sugerenciasDestino = redDireccionesCentral
+                          .where((d) => d.toLowerCase().contains(t))
+                          .take(5)
+                          .toList();
+                    });
+                  },
                 ),
+
+                // Sugerencias de la red de direcciones
+                if (sugerenciasDestino.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6, bottom: 4),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: sugerenciasDestino.map((zona) => InkWell(
+                        onTap: () {
+                          destinoController.text = '$zona - ';
+                          setDialogState(() => sugerenciasDestino = []);
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 7),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[100],
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: Colors.grey[400]!),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.location_city,
+                                  color: Colors.grey[600], size: 14),
+                              const SizedBox(width: 4),
+                              Text(zona,
+                                  style: TextStyle(
+                                    color: Colors.grey[800],
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                  )),
+                            ],
+                          ),
+                        ),
+                      )).toList(),
+                    ),
+                  ),
+
                 const SizedBox(height: 12),
 
                 TextField(
@@ -2828,7 +2895,212 @@ class _CentralScreenState extends State<CentralScreen>
                           }
                         }
 
-                        if (context.mounted) Navigator.pop(context);
+                        if (context.mounted) {
+                          // ---> CIERRE Y OFERTA DE GUARDAR EN LA RED DE DIRECCIONES <---
+                          // Capturamos antes del pop porque los controllers se
+                          // pueden disponer en cuanto el diálogo se destruye.
+                          final String _destinoCapturado =
+                              destinoController.text.trim();
+                          Navigator.pop(context);
+
+                          final String _destinoMayus =
+                              _destinoCapturado.toUpperCase();
+                          // Extraemos el barrio base (la parte antes del " - "
+                          // si el destino viene de un chip de sugerencia, que
+                          // rellena con "ZONA - "; si es texto libre, usamos
+                          // el texto completo).
+                          final String _barrioExtraido =
+                              _destinoMayus.contains(' - ')
+                              ? _destinoMayus.split(' - ')[0].trim()
+                              : _destinoMayus;
+
+                          // Revisamos si ya existe en la red cargada al abrir
+                          // el formulario — comparación nombre vs. nombre.
+                          final bool _yaEstaEnRed = redDireccionesCentral.any((
+                            dir,
+                          ) {
+                            final String nombreDir = dir.contains(' (')
+                                ? dir.split(' (')[0].trim().toUpperCase()
+                                : dir.trim().toUpperCase();
+                            return nombreDir == _barrioExtraido;
+                          });
+
+                          if (tarifaFinal > 0 &&
+                              !_yaEstaEnRed &&
+                              _barrioExtraido.isNotEmpty) {
+                            final barrioCtrl = TextEditingController(
+                              text: _barrioExtraido,
+                            );
+                            String zonaSeleccionada = 'CÚCUTA';
+                            bool guardandoRed = false;
+
+                            // Usamos this.context (del State) en lugar del
+                            // context del builder del diálogo, que ya se
+                            // destruyó con el Navigator.pop de arriba.
+                            showDialog(
+                              context: this.context,
+                              builder: (ctxSave) => StatefulBuilder(
+                                builder: (ctxSave, setSaveState) => AlertDialog(
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  title: const Text(
+                                    '💾 ¿GUARDAR EN LA RED?',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                  content: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      const Text(
+                                        'Esta dirección no está en la red de zonas. '
+                                        '¿La agregamos para que todos los locales '
+                                        'la vean como sugerencia?',
+                                        style: TextStyle(fontSize: 13),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      TextField(
+                                        controller: barrioCtrl,
+                                        textCapitalization:
+                                            TextCapitalization.characters,
+                                        decoration: const InputDecoration(
+                                          labelText:
+                                              'Barrio / Zona (Ej: COCONUCO)',
+                                          border: OutlineInputBorder(),
+                                          isDense: true,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      const Text(
+                                        '¿A qué municipio pertenece?',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      Wrap(
+                                        spacing: 6,
+                                        runSpacing: 0,
+                                        children: [
+                                          'CÚCUTA',
+                                          'LOS PATIOS',
+                                          'V. ROSARIO',
+                                        ].map((z) {
+                                          return ChoiceChip(
+                                            label: Text(
+                                              z,
+                                              style: const TextStyle(
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                            selected: zonaSeleccionada == z,
+                                            selectedColor: Colors.blue[100],
+                                            onSelected: (bool selected) {
+                                              if (selected)
+                                                setSaveState(
+                                                  () => zonaSeleccionada = z,
+                                                );
+                                            },
+                                          );
+                                        }).toList(),
+                                      ),
+                                    ],
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(ctxSave),
+                                      child: const Text(
+                                        'NO GUARDAR',
+                                        style: TextStyle(color: Colors.grey),
+                                      ),
+                                    ),
+                                    ElevatedButton(
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.black,
+                                      ),
+                                      onPressed: guardandoRed
+                                          ? null
+                                          : () async {
+                                              if (barrioCtrl.text
+                                                  .trim()
+                                                  .isEmpty)
+                                                return;
+                                              setSaveState(
+                                                () => guardandoRed = true,
+                                              );
+                                              try {
+                                                await Supabase.instance.client
+                                                    .from('red_direcciones')
+                                                    .insert({
+                                                      'nombre': barrioCtrl.text
+                                                          .trim()
+                                                          .toUpperCase(),
+                                                      'municipio':
+                                                          zonaSeleccionada,
+                                                      'zona_lluvia': 'general',
+                                                      'activo': true,
+                                                    });
+                                                if (ctxSave.mounted) {
+                                                  Navigator.pop(ctxSave);
+                                                  ScaffoldMessenger.of(
+                                                    this.context,
+                                                  ).showSnackBar(
+                                                    const SnackBar(
+                                                      content: Text(
+                                                        '✅ Dirección agregada a la red. '
+                                                        'Todos los locales la verán.',
+                                                      ),
+                                                      backgroundColor:
+                                                          Colors.green,
+                                                    ),
+                                                  );
+                                                }
+                                              } catch (e) {
+                                                setSaveState(
+                                                  () => guardandoRed = false,
+                                                );
+                                                if (ctxSave.mounted)
+                                                  ScaffoldMessenger.of(
+                                                    this.context,
+                                                  ).showSnackBar(
+                                                    SnackBar(
+                                                      content: Text(
+                                                        'Error BD: $e',
+                                                      ),
+                                                      backgroundColor:
+                                                          Colors.red,
+                                                    ),
+                                                  );
+                                              }
+                                            },
+                                      child: guardandoRed
+                                          ? const SizedBox(
+                                              width: 16,
+                                              height: 16,
+                                              child: CircularProgressIndicator(
+                                                color: Color(0xff3AF500),
+                                                strokeWidth: 2,
+                                              ),
+                                            )
+                                          : const Text(
+                                              'GUARDAR EN LA RED',
+                                              style: TextStyle(
+                                                color: Color(0xff3AF500),
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          }
+                        }
                       } catch (e) {
                         setDialogState(() => procesando = false);
                         if (context.mounted)
