@@ -2167,20 +2167,19 @@ class _LocalScreenState extends State<LocalScreen>
         );
       }
       if (leyendaIds.isNotEmpty) {
-        Future.delayed(const Duration(seconds: 30), () async {
-          // Guardia: si el servicio ya no está pendiente (master lo aceptó), no enviar
-          final estadoCheck = await Supabase.instance.client
+        // Misil server-side T+30s para Leyenda VIP — sobrevive en segundo plano
+        final id30sVipV = await _programarMisilRetardado(
+          externalIds: leyendaIds,
+          titulo: '👑 SERVICIO VIP',
+          mensaje: msg,
+          segundosRetardo: 30,
+        );
+        if (id30sVipV != null) {
+          await Supabase.instance.client
               .from('servicios')
-              .select('estado')
-              .eq('id', servicioId)
-              .maybeSingle();
-          if (estadoCheck == null || estadoCheck['estado'] != 'pendiente') return;
-          await _dispararMisilInmediato(
-            externalIds: leyendaIds,
-            titulo: '👑 SERVICIO VIP',
-            mensaje: msg,
-          );
-        });
+              .update({'onesignal_30s': id30sVipV})
+              .eq('id', servicioId);
+        }
       }
       Future.delayed(const Duration(minutes: 3), () {
         _verificarFallbackVip(
@@ -2306,81 +2305,71 @@ class _LocalScreenState extends State<LocalScreen>
                 );
               }
 
-              // T=+30s: notificar al #1 de paradero siempre (sin chequeo de cola)
+              // T=+30s: paradero — misil server-side
               if (pilotosParadero.isNotEmpty) {
                 final List<String> targetStd = pilotosParadero
                     .where((id) => !masterStdIds.contains(id))
                     .toList();
                 if (targetStd.isNotEmpty) {
-                  Future.delayed(const Duration(seconds: 30), () async {
-                    // Guardia: si el servicio ya no está pendiente (master lo aceptó), no enviar
-                    final estadoCheck = await Supabase.instance.client
+                  final id30sStd = await _programarMisilRetardado(
+                    externalIds: targetStd,
+                    titulo: 'TU TURNO DE PARADERO',
+                    mensaje: msgStd,
+                    segundosRetardo: 30,
+                  );
+                  if (id30sStd != null) {
+                    await Supabase.instance.client
                         .from('servicios')
-                        .select('estado')
-                        .eq('id', servicioId)
-                        .maybeSingle();
-                    if (estadoCheck == null || estadoCheck['estado'] != 'pendiente') return;
-                    await _dispararMisilInmediato(
-                      externalIds: targetStd,
-                      titulo: 'TU TURNO DE PARADERO',
-                      mensaje: msgStd,
-                    );
-                  });
+                        .update({'onesignal_30s': id30sStd})
+                        .eq('id', servicioId);
+                  }
                 }
               }
-              // T=+60s: radio 1km (no Masters, no paradero ya notificado)
+              // T=+60s y T=+90s — misiles server-side (pre-fetch al despachar)
               {
-                final int _svcId = servicioId;
-                final String _msg = msgStd;
-                final List<String> _masterSnap = List<String>.from(masterStdIds);
-                final List<String> _paraderoSnap = List<String>.from(pilotosParadero);
                 final double? _oLat = (coords?['lat'] as num?)?.toDouble();
                 final double? _oLng = (coords?['lng'] as num?)?.toDouble();
-
-                Future.delayed(const Duration(seconds: 60), () async {
-                  final chk = await Supabase.instance.client
-                      .from('servicios').select('estado').eq('id', _svcId).maybeSingle();
-                  if (chk == null || chk['estado'] != 'pendiente') return;
-                  final candidatos = await Supabase.instance.client
-                      .from('usuarios').select('id, latitud, longitud')
-                      .eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true)
-                      .not('rango_movil', 'in', '("MASTER")');
-                  final idsZ = (candidatos as List).where((u) {
-                    final id = u['id'].toString();
-                    if (_masterSnap.contains(id) || _paraderoSnap.contains(id)) return false;
-                    if (_oLat == null || _oLng == null) return true;
-                    final uLat = (u['latitud'] as num?)?.toDouble();
-                    final uLng = (u['longitud'] as num?)?.toDouble();
-                    if (uLat == null || uLng == null) return false;
-                    return const Distance().as(
-                          LengthUnit.Meter,
-                          LatLng(uLat, uLng),
-                          LatLng(_oLat, _oLng),
-                        ) <= 1000;
-                  }).map((u) => u['id'].toString()).toList();
-                  if (idsZ.isNotEmpty) {
-                    await _dispararMisilInmediato(
-                        externalIds: idsZ, titulo: '📡 SERVICIO CERCA (1km)', mensaje: _msg);
-                  }
-                });
-
-                // T=+90s: todos los disponibles (ola final)
-                Future.delayed(const Duration(seconds: 90), () async {
-                  final chk = await Supabase.instance.client
-                      .from('servicios').select('estado').eq('id', _svcId).maybeSingle();
-                  if (chk == null || chk['estado'] != 'pendiente') return;
-                  final todos = await Supabase.instance.client
-                      .from('usuarios').select('id')
-                      .eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true);
-                  final idsT = (todos as List)
-                      .map((u) => u['id'].toString())
-                      .where((id) => !_masterSnap.contains(id))
-                      .toList();
-                  if (idsT.isNotEmpty) {
-                    await _dispararMisilInmediato(
-                        externalIds: idsT, titulo: '🚨 SERVICIO SIN TOMAR', mensaje: _msg);
-                  }
-                });
+                final movilesStd = await Supabase.instance.client
+                    .from('usuarios').select('id, latitud, longitud')
+                    .eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true)
+                    .not('rango_movil', 'in', '("MASTER")');
+                final idsZonaStd = movilesStd.where((u) {
+                  final id = u['id'].toString();
+                  if (masterStdIds.contains(id) || pilotosParadero.contains(id)) return false;
+                  if (_oLat == null || _oLng == null) return true;
+                  final uLat = (u['latitud'] as num?)?.toDouble();
+                  final uLng = (u['longitud'] as num?)?.toDouble();
+                  if (uLat == null || uLng == null) return false;
+                  return const Distance().as(
+                        LengthUnit.Meter, LatLng(uLat, uLng), LatLng(_oLat, _oLng),
+                      ) <= 1000;
+                }).map((u) => u['id'].toString()).toList();
+                final idsTodosStd = movilesStd
+                    .map((u) => u['id'].toString())
+                    .where((id) => !masterStdIds.contains(id))
+                    .toList();
+                String? id60sStd;
+                String? id90sStd;
+                if (idsZonaStd.isNotEmpty)
+                  id60sStd = await _programarMisilRetardado(
+                    externalIds: idsZonaStd,
+                    titulo: '📡 SERVICIO CERCA (1km)',
+                    mensaje: msgStd,
+                    segundosRetardo: 60,
+                  );
+                if (idsTodosStd.isNotEmpty)
+                  id90sStd = await _programarMisilRetardado(
+                    externalIds: idsTodosStd,
+                    titulo: '🚨 SERVICIO SIN TOMAR',
+                    mensaje: msgStd,
+                    segundosRetardo: 90,
+                  );
+                if (id60sStd != null || id90sStd != null) {
+                  await Supabase.instance.client.from('servicios').update({
+                    if (id60sStd != null) 'onesignal_2m': id60sStd,
+                    if (id90sStd != null) 'onesignal_5m': id90sStd,
+                  }).eq('id', servicioId);
+                }
               }
 
               if (mounted) {
@@ -7284,3 +7273,4 @@ class _LocalScreenState extends State<LocalScreen>
     );
   }
 }
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    

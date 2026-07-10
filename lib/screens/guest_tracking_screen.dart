@@ -107,57 +107,47 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
           }
         }
 
-        // T=60s: radio 1km (no Masters, no paradero)
-        Future.delayed(const Duration(seconds: 60), () async {
-          final chk = await Supabase.instance.client
-              .from('servicios').select('estado').eq('id', svcId).maybeSingle();
-          if (chk == null || chk['estado'] != 'pendiente') return;
-          final candidatos = await Supabase.instance.client
-              .from('usuarios')
-              .select('id, latitud, longitud')
-              .eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true)
-              .not('rango_movil', 'in', '("MASTER")');
-          final idsZ = (candidatos as List).where((u) {
-            final id = u['id'].toString();
-            if (masterIds.contains(id) || paraderoIds.contains(id)) return false;
-            if (origLat == null || origLng == null) return true;
-            final uLat = (u['latitud'] as num?)?.toDouble();
-            final uLng = (u['longitud'] as num?)?.toDouble();
-            if (uLat == null || uLng == null) return false;
-            return const Distance().as(
-                  LengthUnit.Meter, LatLng(uLat, uLng), LatLng(origLat, origLng)) <= 1000;
-          }).map((u) => u['id'].toString()).toList();
-          if (idsZ.isNotEmpty) {
-            await MotorNotificaciones.dispararRafa(
-              idsDestinos: idsZ,
-              titulo: '📡 SERVICIO CERCA (1km)',
-              mensaje: 'Servicio de Invitado disponible.',
-              urgente: true,
-            );
-          }
-        });
-
-        // T=90s: todos los disponibles (ola final)
-        Future.delayed(const Duration(seconds: 90), () async {
-          final chk = await Supabase.instance.client
-              .from('servicios').select('estado').eq('id', svcId).maybeSingle();
-          if (chk == null || chk['estado'] != 'pendiente') return;
-          final todos = await Supabase.instance.client
-              .from('usuarios').select('id')
-              .eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true);
-          final idsT = (todos as List)
-              .map((u) => u['id'].toString())
-              .where((id) => !masterIds.contains(id))
-              .toList();
-          if (idsT.isNotEmpty) {
-            await MotorNotificaciones.dispararRafa(
-              idsDestinos: idsT,
-              titulo: '🚨 SERVICIO SIN TOMAR',
-              mensaje: 'Servicio de Invitado sin asignar.',
-              urgente: true,
-            );
-          }
-        });
+        // T=+60s y T=+90s — misiles server-side (pre-fetch al aprobar cotización)
+        final movilesG = await Supabase.instance.client
+            .from('usuarios').select('id, latitud, longitud')
+            .eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true)
+            .not('rango_movil', 'in', '("MASTER")');
+        final idsZonaG = movilesG.where((u) {
+          final id = u['id'].toString();
+          if (masterIds.contains(id) || paraderoIds.contains(id)) return false;
+          if (origLat == null || origLng == null) return true;
+          final uLat = (u['latitud'] as num?)?.toDouble();
+          final uLng = (u['longitud'] as num?)?.toDouble();
+          if (uLat == null || uLng == null) return false;
+          return const Distance().as(
+                LengthUnit.Meter, LatLng(uLat, uLng), LatLng(origLat, origLng)) <= 1000;
+        }).map((u) => u['id'].toString()).toList();
+        final idsTodosG = movilesG
+            .map((u) => u['id'].toString())
+            .where((id) => !masterIds.contains(id))
+            .toList();
+        String? id60sG;
+        String? id90sG;
+        if (idsZonaG.isNotEmpty)
+          id60sG = await MotorNotificaciones.programarMisilRetardado(
+            externalIds: idsZonaG,
+            titulo: '📡 SERVICIO CERCA (1km)',
+            mensaje: 'Servicio de Invitado disponible.',
+            segundosRetardo: 60,
+          );
+        if (idsTodosG.isNotEmpty)
+          id90sG = await MotorNotificaciones.programarMisilRetardado(
+            externalIds: idsTodosG,
+            titulo: '🚨 SERVICIO SIN TOMAR',
+            mensaje: 'Servicio de Invitado sin asignar.',
+            segundosRetardo: 90,
+          );
+        if (id60sG != null || id90sG != null) {
+          await Supabase.instance.client.from('servicios').update({
+            if (id60sG != null) 'onesignal_2m': id60sG,
+            if (id90sG != null) 'onesignal_5m': id90sG,
+          }).eq('id', svcId);
+        }
       }
     } catch (e) {}
     // ignore: empty_catches
@@ -844,3 +834,4 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
     );
   }
 }
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      

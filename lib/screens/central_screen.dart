@@ -2776,81 +2776,55 @@ class _CentralScreenState extends State<CentralScreen>
                             final List<String> _paraderoSnap =
                                 List<String>.from(pilotosSeleccionadosIds);
 
-                            // T=+60s: motos en radio 1km (no Masters, no paradero)
+                            // T=+60s y T=+90s — misiles server-side (pre-fetch al despacho)
                             final double? _oLat = origenLatCapturada;
                             final double? _oLng = origenLngCapturada;
-                            Future.delayed(
-                              const Duration(seconds: 60),
-                              () async {
-                                final chk = await Supabase.instance.client
-                                    .from('servicios')
-                                    .select('estado')
-                                    .eq('id', _svcId)
-                                    .maybeSingle();
-                                if (chk == null || chk['estado'] != 'pendiente') return;
-                                final candidatos = await Supabase.instance.client
-                                    .from('usuarios')
-                                    .select('id, latitud, longitud')
-                                    .eq('rol', 'movil')
-                                    .eq('en_linea', true)
-                                    .neq('suspendido', true)
-                                    .not('rango_movil', 'in', '("MASTER")');
-                                final idsZ = (candidatos as List).where((u) {
-                                  final id = u['id'].toString();
-                                  if (_masterSnap.contains(id) || _paraderoSnap.contains(id)) return false;
-                                  if (_oLat == null || _oLng == null) return true;
-                                  final uLat = (u['latitud'] as num?)?.toDouble();
-                                  final uLng = (u['longitud'] as num?)?.toDouble();
-                                  if (uLat == null || uLng == null) return false;
-                                  return const Distance().as(
-                                        LengthUnit.Meter,
-                                        LatLng(uLat, uLng),
-                                        LatLng(_oLat, _oLng),
-                                      ) <= 1000;
-                                }).map((u) => u['id'].toString()).toList();
-                                if (idsZ.isNotEmpty) {
-                                  await MotorNotificaciones.dispararRafa(
-                                    idsDestinos: idsZ,
-                                    titulo: '📡 SERVICIO CERCA (1km)',
-                                    mensaje: _msg,
-                                    urgente: true,
-                                    sonido: Sonidos.movilParadero,
-                                  );
-                                }
-                              },
-                            );
-
-                            // T=+90s: todos los disponibles (ola final)
-                            Future.delayed(
-                              const Duration(seconds: 90),
-                              () async {
-                                final chk = await Supabase.instance.client
-                                    .from('servicios')
-                                    .select('estado')
-                                    .eq('id', _svcId)
-                                    .maybeSingle();
-                                if (chk == null || chk['estado'] != 'pendiente') return;
-                                final todos = await Supabase.instance.client
-                                    .from('usuarios')
-                                    .select('id')
-                                    .eq('rol', 'movil')
-                                    .eq('en_linea', true)
-                                    .neq('suspendido', true);
-                                final idsT = (todos as List)
-                                    .map((u) => u['id'].toString())
-                                    .where((id) => !_masterSnap.contains(id))
-                                    .toList();
-                                if (idsT.isNotEmpty) {
-                                  await MotorNotificaciones.dispararRafa(
-                                    idsDestinos: idsT,
-                                    titulo: '🚨 SERVICIO SIN TOMAR',
-                                    mensaje: _msg,
-                                    urgente: true,
-                                    sonido: Sonidos.movilParadero,
-                                  );
-                                }
-                              },
-                            );
+                            final movilesC = await Supabase.instance.client
+                                .from('usuarios').select('id, latitud, longitud')
+                                .eq('rol', 'movil').eq('en_linea', true)
+                                .neq('suspendido', true)
+                                .not('rango_movil', 'in', '("MASTER")');
+                            final idsZonaC = movilesC.where((u) {
+                              final id = u['id'].toString();
+                              if (_masterSnap.contains(id) || _paraderoSnap.contains(id)) return false;
+                              if (_oLat == null || _oLng == null) return true;
+                              final uLat = (u['latitud'] as num?)?.toDouble();
+                              final uLng = (u['longitud'] as num?)?.toDouble();
+                              if (uLat == null || uLng == null) return false;
+                              return const Distance().as(
+                                    LengthUnit.Meter,
+                                    LatLng(uLat, uLng),
+                                    LatLng(_oLat, _oLng),
+                                  ) <= 1000;
+                            }).map((u) => u['id'].toString()).toList();
+                            final idsTodosC = movilesC
+                                .map((u) => u['id'].toString())
+                                .where((id) => !_masterSnap.contains(id))
+                                .toList();
+                            String? id60sC;
+                            String? id90sC;
+                            if (idsZonaC.isNotEmpty)
+                              id60sC = await MotorNotificaciones.programarMisilRetardado(
+                                externalIds: idsZonaC,
+                                titulo: '📡 SERVICIO CERCA (1km)',
+                                mensaje: _msg,
+                                segundosRetardo: 60,
+                                sonido: Sonidos.movilParadero,
+                              );
+                            if (idsTodosC.isNotEmpty)
+                              id90sC = await MotorNotificaciones.programarMisilRetardado(
+                                externalIds: idsTodosC,
+                                titulo: '🚨 SERVICIO SIN TOMAR',
+                                mensaje: _msg,
+                                segundosRetardo: 90,
+                                sonido: Sonidos.movilParadero,
+                              );
+                            if (id60sC != null || id90sC != null) {
+                              await Supabase.instance.client.from('servicios').update({
+                                if (id60sC != null) 'onesignal_2m': id60sC,
+                                if (id90sC != null) 'onesignal_5m': id90sC,
+                              }).eq('id', _svcId);
+                            }
                           }
                         }
 
@@ -8344,4 +8318,4 @@ class _CentralScreenState extends State<CentralScreen>
 
 // ============================================================
 // PANEL DE PRECIOS POR LOCAL — sectores + tarifas
-// ============================================================
+// ============================================================                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             
