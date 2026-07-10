@@ -197,13 +197,15 @@ class _MovilScreenState extends State<MovilScreen>
       // Obligamos a Android/iOS a pedirle permiso al piloto para la barra de notificaciones
       await OneSignal.Notifications.requestPermission(true);
 
-      // ---> INYECCIÓN: SILENCIADOR DE PRIMER PLANO <---
+      // ---> INYECCIÓN: SONIDO EN PRIMER PLANO <---
       // Guardamos referencia para limpiar en dispose() y no acumular
       // múltiples instancias del listener si la pantalla se reconstruye.
       _onForegroundNotif = (event) {
-        // Si el piloto tiene la app abierta, bloqueamos el aviso de la barra
-        // para que solo actúe el radar interno (el letrero verde).
+        // Suprimimos el banner del sistema (el radar ya muestra el servicio),
+        // pero disparamos el sonido de alerta para que el piloto se entere
+        // aunque tenga la pantalla encendida y la app abierta.
         event.preventDefault();
+        if (mounted) _sonidos.reproducir(Sonidos.alerta);
       };
       OneSignal.Notifications.addForegroundWillDisplayListener(_onForegroundNotif!);
       // --------------------------------------------------
@@ -5036,7 +5038,7 @@ class _MovilScreenState extends State<MovilScreen>
                     onPressed: _procesando ? null : () => _liberarServicio(servicio),
                     icon: const Icon(Icons.replay, size: 18),
                     label: const Text(
-                      'LIBERAR (vuelve a empezar para todos)',
+                      'LIBERAR',
                       style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
                     ),
                   ),
@@ -5880,12 +5882,10 @@ class _MovilScreenState extends State<MovilScreen>
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        title: const Text('Liberar este servicio'),
+        title: const Text('¿Liberar este servicio?'),
         content: const Text(
-          'Vuelve al radar desde cero: primero los Master (0s), luego el '
-          '#1 del paradero (30s), luego los cercanos a 1km (60s) y '
-          'finalmente todos los disponibles (90s). Cualquiera puede '
-          'tomarlo.\n\nSales de este servicio y vuelves a tu fila.',
+          'El servicio volverá al radar para todos los disponibles.\n\n'
+          'Si liberas sin una excusa válida puede afectar tu calificación.',
         ),
         actions: [
           TextButton(
@@ -5981,65 +5981,52 @@ class _MovilScreenState extends State<MovilScreen>
       }
 
       // T=60s: motos en radio 1km (no Masters, no paradero ya notificado)
+      // T=+60s y T=+90s — misiles server-side (OneSignal programa en sus servidores)
+      // Pre-fetch al momento de liberar; onesignal_2m/5m se cancelan si alguien acepta
       final double? _origLat = (servicio['origen_lat'] as num?)?.toDouble();
       final double? _origLng = (servicio['origen_lng'] as num?)?.toDouble();
-      Future.delayed(const Duration(seconds: 60), () async {
-        final estadoCheck = await Supabase.instance.client
-            .from('servicios').select('estado').eq('id', servicioId).maybeSingle();
-        if (estadoCheck == null || estadoCheck['estado'] != 'pendiente') return;
-        final candidatos = await Supabase.instance.client
-            .from('usuarios')
-            .select('id, latitud, longitud')
-            .eq('rol', 'movil')
-            .eq('en_linea', true)
-            .neq('suspendido', true)
-            .not('rango_movil', 'in', '("MASTER")');
-        final idsZonales = (candidatos as List).where((u) {
-          final id = u['id'].toString();
-          if (masterIds.contains(id) || paraderoIds.contains(id)) return false;
-          if (_origLat == null || _origLng == null) return true; // sin coords: incluir todos
-          final uLat = (u['latitud'] as num?)?.toDouble();
-          final uLng = (u['longitud'] as num?)?.toDouble();
-          if (uLat == null || uLng == null) return false;
-          final dist = const Distance().as(
-            LengthUnit.Meter,
-            LatLng(uLat, uLng),
-            LatLng(_origLat, _origLng),
-          );
-          return dist <= 1000;
-        }).map((u) => u['id'].toString()).toList();
-        if (idsZonales.isNotEmpty) {
-          await MotorNotificaciones.dispararRafa(
-            idsDestinos: idsZonales,
-            titulo: '📡 SERVICIO CERCA (1km)',
-            mensaje: msgAlerta,
-          );
-        }
-      });
-
-      // T=90s: todos los disponibles (ola final)
-      Future.delayed(const Duration(seconds: 90), () async {
-        final estadoCheck = await Supabase.instance.client
-            .from('servicios').select('estado').eq('id', servicioId).maybeSingle();
-        if (estadoCheck == null || estadoCheck['estado'] != 'pendiente') return;
-        final todos = await Supabase.instance.client
-            .from('usuarios')
-            .select('id')
-            .eq('rol', 'movil')
-            .eq('en_linea', true)
-            .neq('suspendido', true);
-        final idsTodos = (todos as List)
-            .map((u) => u['id'].toString())
-            .where((id) => !masterIds.contains(id))
-            .toList();
-        if (idsTodos.isNotEmpty) {
-          await MotorNotificaciones.dispararRafa(
-            idsDestinos: idsTodos,
-            titulo: '🚨 SERVICIO SIN TOMAR',
-            mensaje: msgAlerta,
-          );
-        }
-      });
+      final movilesLib = await Supabase.instance.client
+          .from('usuarios').select('id, latitud, longitud')
+          .eq('rol', 'movil').eq('en_linea', true)
+          .neq('suspendido', true)
+          .not('rango_movil', 'in', '("MASTER")');
+      final idsZona60 = movilesLib.where((u) {
+        final id = u['id'].toString();
+        if (masterIds.contains(id) || paraderoIds.contains(id)) return false;
+        if (_origLat == null || _origLng == null) return true;
+        final uLat = (u['latitud'] as num?)?.toDouble();
+        final uLng = (u['longitud'] as num?)?.toDouble();
+        if (uLat == null || uLng == null) return false;
+        return const Distance().as(
+              LengthUnit.Meter, LatLng(uLat, uLng), LatLng(_origLat, _origLng),
+            ) <= 1000;
+      }).map((u) => u['id'].toString()).toList();
+      final idsTodos90 = movilesLib
+          .map((u) => u['id'].toString())
+          .where((id) => !masterIds.contains(id))
+          .toList();
+      String? idLib60;
+      String? idLib90;
+      if (idsZona60.isNotEmpty)
+        idLib60 = await MotorNotificaciones.programarMisilRetardado(
+          externalIds: idsZona60,
+          titulo: '📡 SERVICIO CERCA (1km)',
+          mensaje: msgAlerta,
+          segundosRetardo: 60,
+        );
+      if (idsTodos90.isNotEmpty)
+        idLib90 = await MotorNotificaciones.programarMisilRetardado(
+          externalIds: idsTodos90,
+          titulo: '🚨 SERVICIO SIN TOMAR',
+          mensaje: msgAlerta,
+          segundosRetardo: 90,
+        );
+      if (idLib60 != null || idLib90 != null) {
+        await Supabase.instance.client.from('servicios').update({
+          if (idLib60 != null) 'onesignal_2m': idLib60,
+          if (idLib90 != null) 'onesignal_5m': idLib90,
+        }).eq('id', servicio['id']);
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

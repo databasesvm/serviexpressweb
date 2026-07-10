@@ -3883,59 +3883,54 @@ class _LocalScreenState extends State<LocalScreen>
                                     }).eq('id', _svcId2);
                               }
                             } else {
-                              // Servicio inmediato: T=+60s (1km) y T=+90s via Future.delayed
+                              // Servicio inmediato: T=+60s y T=+90s — misiles server-side
+                              // Pre-fetch al despacho; se cancelan si alguien acepta (onesignal_2m/5m)
                               final double? _oLat2 = (coords['lat'] as num?)?.toDouble();
                               final double? _oLng2 = (coords['lng'] as num?)?.toDouble();
-                              Future.delayed(const Duration(seconds: 60), () async {
-                                final chk = await Supabase.instance.client
-                                    .from('servicios').select('estado')
-                                    .eq('id', _svcId2).maybeSingle();
-                                if (chk == null || chk['estado'] != 'pendiente') return;
-                                final candidatos = await Supabase.instance.client
-                                    .from('usuarios').select('id, latitud, longitud')
-                                    .eq('rol', 'movil').eq('en_linea', true)
-                                    .neq('suspendido', true)
-                                    .not('rango_movil', 'in', '("MASTER")');
-                                final idsZ = (candidatos as List).where((u) {
-                                  final id = u['id'].toString();
-                                  if (_mSnap.contains(id) || _pSnap.contains(id)) return false;
-                                  if (_oLat2 == null || _oLng2 == null) return true;
-                                  final uLat = (u['latitud'] as num?)?.toDouble();
-                                  final uLng = (u['longitud'] as num?)?.toDouble();
-                                  if (uLat == null || uLng == null) return false;
-                                  return const Distance().as(
-                                        LengthUnit.Meter,
-                                        LatLng(uLat, uLng),
-                                        LatLng(_oLat2, _oLng2),
-                                      ) <= 1000;
-                                }).map((u) => u['id'].toString()).toList();
-                                if (idsZ.isNotEmpty)
-                                  await _dispararMisilInmediato(
-                                    externalIds: idsZ,
-                                    titulo: '📡 SERVICIO CERCA (1km)',
-                                    mensaje: _msg2,
-                                  );
-                              });
-                              Future.delayed(const Duration(seconds: 90), () async {
-                                final chk = await Supabase.instance.client
-                                    .from('servicios').select('estado')
-                                    .eq('id', _svcId2).maybeSingle();
-                                if (chk == null || chk['estado'] != 'pendiente') return;
-                                final todos = await Supabase.instance.client
-                                    .from('usuarios').select('id')
-                                    .eq('rol', 'movil').eq('en_linea', true)
-                                    .neq('suspendido', true);
-                                final idsT = (todos as List)
-                                    .map((u) => u['id'].toString())
-                                    .where((id) => !_mSnap.contains(id))
-                                    .toList();
-                                if (idsT.isNotEmpty)
-                                  await _dispararMisilInmediato(
-                                    externalIds: idsT,
-                                    titulo: '🚨 SERVICIO SIN TOMAR',
-                                    mensaje: _msg2,
-                                  );
-                              });
+                              final movilesInm = await Supabase.instance.client
+                                  .from('usuarios').select('id, latitud, longitud')
+                                  .eq('rol', 'movil').eq('en_linea', true)
+                                  .neq('suspendido', true)
+                                  .not('rango_movil', 'in', '("MASTER")');
+                              final idsZona60 = movilesInm.where((u) {
+                                final id = u['id'].toString();
+                                if (_mSnap.contains(id) || _pSnap.contains(id)) return false;
+                                if (_oLat2 == null || _oLng2 == null) return true;
+                                final uLat = (u['latitud'] as num?)?.toDouble();
+                                final uLng = (u['longitud'] as num?)?.toDouble();
+                                if (uLat == null || uLng == null) return false;
+                                return const Distance().as(
+                                      LengthUnit.Meter,
+                                      LatLng(uLat, uLng),
+                                      LatLng(_oLat2, _oLng2),
+                                    ) <= 1000;
+                              }).map((u) => u['id'].toString()).toList();
+                              final idsTodos90 = movilesInm
+                                  .map((u) => u['id'].toString())
+                                  .where((id) => !_mSnap.contains(id))
+                                  .toList();
+                              String? id60s;
+                              String? id90s;
+                              if (idsZona60.isNotEmpty)
+                                id60s = await _programarMisilRetardado(
+                                  externalIds: idsZona60,
+                                  titulo: '📡 SERVICIO CERCA (1km)',
+                                  mensaje: _msg2,
+                                  segundosRetardo: 60,
+                                );
+                              if (idsTodos90.isNotEmpty)
+                                id90s = await _programarMisilRetardado(
+                                  externalIds: idsTodos90,
+                                  titulo: '🚨 SERVICIO SIN TOMAR',
+                                  mensaje: _msg2,
+                                  segundosRetardo: 90,
+                                );
+                              if (id60s != null || id90s != null) {
+                                await Supabase.instance.client.from('servicios').update({
+                                  if (id60s != null) 'onesignal_2m': id60s,
+                                  if (id90s != null) 'onesignal_5m': id90s,
+                                }).eq('id', _svcId2);
+                              }
                             }
                           }
                         }
@@ -5862,49 +5857,53 @@ class _LocalScreenState extends State<LocalScreen>
             }).eq('id', _svcId3);
           }
         } else {
-          // Servicio inmediato: T=+60s (1km) y T=+90s via Future.delayed
+          // Servicio inmediato: T=+60s y T=+90s — misiles server-side
+          // Pre-fetch al momento de aprobación; se cancelan si alguien acepta
           final double? _oLat3 = (servicio['origen_lat'] as num?)?.toDouble();
           final double? _oLng3 = (servicio['origen_lng'] as num?)?.toDouble();
-          Future.delayed(const Duration(seconds: 60), () async {
-            final chk = await Supabase.instance.client
-                .from('servicios').select('estado').eq('id', _svcId3).maybeSingle();
-            if (chk == null || chk['estado'] != 'pendiente') return;
-            final candidatos = await Supabase.instance.client
-                .from('usuarios').select('id, latitud, longitud')
-                .eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true)
-                .not('rango_movil', 'in', '("MASTER")');
-            final idsZ = (candidatos as List).where((u) {
-              final id = u['id'].toString();
-              if (_mSnap3.contains(id) || _pSnap3.contains(id)) return false;
-              if (_oLat3 == null || _oLng3 == null) return true;
-              final uLat = (u['latitud'] as num?)?.toDouble();
-              final uLng = (u['longitud'] as num?)?.toDouble();
-              if (uLat == null || uLng == null) return false;
-              return const Distance().as(
-                    LengthUnit.Meter,
-                    LatLng(uLat, uLng),
-                    LatLng(_oLat3, _oLng3),
-                  ) <= 1000;
-            }).map((u) => u['id'].toString()).toList();
-            if (idsZ.isNotEmpty)
-              await _dispararMisilInmediato(
-                  externalIds: idsZ, titulo: '📡 SERVICIO CERCA (1km)', mensaje: _msg3);
-          });
-          Future.delayed(const Duration(seconds: 90), () async {
-            final chk = await Supabase.instance.client
-                .from('servicios').select('estado').eq('id', _svcId3).maybeSingle();
-            if (chk == null || chk['estado'] != 'pendiente') return;
-            final todos = await Supabase.instance.client
-                .from('usuarios').select('id')
-                .eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true);
-            final idsT = (todos as List)
-                .map((u) => u['id'].toString())
-                .where((id) => !_mSnap3.contains(id))
-                .toList();
-            if (idsT.isNotEmpty)
-              await _dispararMisilInmediato(
-                  externalIds: idsT, titulo: '🚨 SERVICIO SIN TOMAR', mensaje: _msg3);
-          });
+          final movilesInm3 = await Supabase.instance.client
+              .from('usuarios').select('id, latitud, longitud')
+              .eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true)
+              .not('rango_movil', 'in', '("MASTER")');
+          final idsZona3 = movilesInm3.where((u) {
+            final id = u['id'].toString();
+            if (_mSnap3.contains(id) || _pSnap3.contains(id)) return false;
+            if (_oLat3 == null || _oLng3 == null) return true;
+            final uLat = (u['latitud'] as num?)?.toDouble();
+            final uLng = (u['longitud'] as num?)?.toDouble();
+            if (uLat == null || uLng == null) return false;
+            return const Distance().as(
+                  LengthUnit.Meter,
+                  LatLng(uLat, uLng),
+                  LatLng(_oLat3, _oLng3),
+                ) <= 1000;
+          }).map((u) => u['id'].toString()).toList();
+          final idsTodos3 = movilesInm3
+              .map((u) => u['id'].toString())
+              .where((id) => !_mSnap3.contains(id))
+              .toList();
+          String? id60s3;
+          String? id90s3;
+          if (idsZona3.isNotEmpty)
+            id60s3 = await _programarMisilRetardado(
+              externalIds: idsZona3,
+              titulo: '📡 SERVICIO CERCA (1km)',
+              mensaje: _msg3,
+              segundosRetardo: 60,
+            );
+          if (idsTodos3.isNotEmpty)
+            id90s3 = await _programarMisilRetardado(
+              externalIds: idsTodos3,
+              titulo: '🚨 SERVICIO SIN TOMAR',
+              mensaje: _msg3,
+              segundosRetardo: 90,
+            );
+          if (id60s3 != null || id90s3 != null) {
+            await Supabase.instance.client.from('servicios').update({
+              if (id60s3 != null) 'onesignal_2m': id60s3,
+              if (id90s3 != null) 'onesignal_5m': id90s3,
+            }).eq('id', _svcId3);
+          }
         }
       }
 
