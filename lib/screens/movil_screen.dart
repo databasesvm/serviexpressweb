@@ -167,6 +167,12 @@ class _MovilScreenState extends State<MovilScreen>
   // recuperarse era cerrar la app y volver a abrirla.
   Timer? _reconexionTimer;
 
+  // OPTIMIZACIÓN DE REBUILD: en lugar de setState(() {}) cada 5s
+  // (que reconstruye toda la pantalla), solo notificamos al bloque
+  // del radar vía ValueListenableBuilder. El resto de la UI (AppBar,
+  // tabs, perfil) no se toca en cada tick.
+  final ValueNotifier<int> _radarTick = ValueNotifier(0);
+
   @override
   void initState() {
     super.initState();
@@ -1015,6 +1021,7 @@ class _MovilScreenState extends State<MovilScreen>
     _gpsTimer?.cancel();
     _subUsuarios?.cancel();
     _subServicios?.cancel();
+    _radarTick.dispose();
     _ctrlUsuarios.close();
     _ctrlServicios.close();
     _perfilTelefonoCtrl.dispose();
@@ -1186,9 +1193,33 @@ class _MovilScreenState extends State<MovilScreen>
   // widgets, así que no hace falta forzar ningún rebuild para lograrla.
   void _iniciarVigilanteDeConexion() {
     _reconexionTimer?.cancel();
-    _reconexionTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+    _reconexionTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
       if (!mounted) return;
       _construirStreams();
+      // BAN CHECK (movido aquí desde el timer de 5s — era 12 queries/min,
+      // ahora son 2/min, suficiente para detectar suspensión en ≤30s).
+      if (_estaEnLinea || _estabaSuspendido) {
+        try {
+          final myUser = await Supabase.instance.client
+              .from('usuarios')
+              .select('suspendido, en_linea')
+              .eq('id', widget.usuario['id'])
+              .maybeSingle()
+              .timeout(const Duration(seconds: 5));
+          if (!mounted || myUser == null) return;
+          final bool suspendidoAhora = myUser['suspendido'] == true;
+          if (suspendidoAhora && _estaEnLinea) {
+            _ejecutarSuspensionInmediata();
+            _estabaSuspendido = true;
+          } else if (!suspendidoAhora && _estabaSuspendido) {
+            _notificarSuspensionLevantada();
+            _estabaSuspendido = false;
+          } else if (myUser['en_linea'] == false && _estaEnLinea) {
+            setState(() => _estaEnLinea = false);
+          }
+          _estabaSuspendido = suspendidoAhora;
+        } catch (e) {}
+      }
     });
   }
 
@@ -2059,50 +2090,11 @@ class _MovilScreenState extends State<MovilScreen>
   }
 
   void _iniciarRelojSupervisionMultitarea() {
-    _supervisionTimer = Timer.periodic(const Duration(seconds: 5), (
-      timer,
-    ) async {
-      // 1. EL LATIDO TÁCTICO: Redibuja el radar cada 10 segundos SIN EXCEPCIÓN.
-      // Así los pedidos aparecen solos a los 2 y 5 minutos.
-      if (mounted) setState(() {});
-
-      // 2. Control de baneo en vivo — corre mientras esté EN LÍNEA
-      // (para detectar una suspensión nueva) O mientras ya sepamos que
-      // está suspendido (para detectar cuándo lo reactivan). Antes esto
-      // vivía solo dentro de "if (_estaEnLinea)": en el momento exacto
-      // en que detectaba la suspensión, ponía _estaEnLinea en false —
-      // y eso apagaba el propio chequeo que la había detectado. A
-      // partir de ahí, nada volvía a consultar si lo habían reactivado,
-      // salvo que el moto intentara conectarse de nuevo por su cuenta.
-      if (_estaEnLinea || _estabaSuspendido) {
-        try {
-          final myUser = await Supabase.instance.client
-              .from('usuarios')
-              .select('suspendido, en_linea')
-              .eq('id', widget.usuario['id'])
-              .maybeSingle()
-              .timeout(const Duration(seconds: 5));
-          if (myUser != null) {
-            final bool suspendidoAhora = myUser['suspendido'] == true;
-
-            if (suspendidoAhora && _estaEnLinea) {
-              _ejecutarSuspensionInmediata();
-              _estabaSuspendido = true;
-              return;
-            } else if (!suspendidoAhora && _estabaSuspendido) {
-              // Acaban de levantarle la suspensión — avisamos de una vez,
-              // sin que tenga que intentar conectarse para enterarse.
-              _notificarSuspensionLevantada();
-            } else if (myUser['en_linea'] == false && _estaEnLinea) {
-              setState(() {
-                _estaEnLinea = false;
-              });
-            }
-
-            _estabaSuspendido = suspendidoAhora;
-          }
-        } catch (e) {}
-      }
+    _supervisionTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      // OPTIMIZADO: solo notificamos al radar (ValueListenableBuilder),
+      // sin reconstruir toda la pantalla con setState(() {}).
+      // El ban check se movió al timer de 30s para no hacer 12 queries/min.
+      if (mounted) _radarTick.value++;
 
       // 3. Control de Inactividad (80 min desconecta, 60 min avisa)
       if (_estaEnLinea && _serviciosActivosData.isEmpty) {
@@ -6714,9 +6706,13 @@ class _MovilScreenState extends State<MovilScreen>
       // IndexedStack mantiene ambas pestañas vivas en el árbol de widgets,
       // así el radar sigue recibiendo datos del stream mientras el móvil
       // está en Perfil — sin spinner al volver.
-      body: IndexedStack(
+      // OPTIMIZACIÓN: ValueListenableBuilder reconstruye solo el body
+      // (no AppBar/FAB/BottomNav) cuando _radarTick incrementa cada 5s.
+      body: ValueListenableBuilder<int>(
+        valueListenable: _radarTick,
+        builder: (context, _, __) => IndexedStack(
           index: _tabActual,
-        children: [
+          children: [
           StreamBuilder<List<Map<String, dynamic>>>(
         stream: _streamUsuarios,
         initialData: _cacheUsuarios, // evita el spinner al volver de Perfil
@@ -7559,7 +7555,8 @@ class _MovilScreenState extends State<MovilScreen>
           ),
         _construirPerfilTab(),
         ],
-      ),
+        ), // IndexedStack
+      ), // ValueListenableBuilder
     bottomNavigationBar: BottomNavigationBar(
       currentIndex: _tabActual,
       onTap: _cambiarTab,
@@ -7578,10 +7575,3 @@ class _MovilScreenState extends State<MovilScreen>
         ),
       ],
     ),
-  );
-}
-}
-
-// ===========================================================================
-// PAINTER: Overlay circular oscuro con hueco (tutorial de pantalla)
-// ===========================================================================
