@@ -1,3 +1,4 @@
+// ignore_for_file: curly_braces_in_flow_control_structures, no_leading_underscores_for_local_identifiers, use_build_context_synchronously
 import 'dart:async';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -39,6 +40,10 @@ class _LocalScreenState extends State<LocalScreen>
   //   historial empieza colapsado (se guarda cuando el usuario las EXPANDE)
   final Set<int> _tarjetasColapsadasLocal = {};  // activos contraídos
   final Set<int> _tarjetasExpandidasLocal = {};  // historial expandido
+  // Expansión quirúrgica: cambiar expansión NO reconstruye toda la pantalla
+  final ValueNotifier<int> _expansionTick = ValueNotifier(0);
+  // Guard para que Future.microtask en build no inunde Supabase en cada rebuild
+  final Set<int> _liberandoEnProceso = {};
 
   // ---> INYECCIÓN: Controladores locales para la persistencia del perfil
   final _telLocalController = TextEditingController();
@@ -234,6 +239,7 @@ class _LocalScreenState extends State<LocalScreen>
     _ctrlServiciosLocal.close();
     _telLocalController.dispose();
     _instruccionesController.dispose();
+    _expansionTick.dispose();
     _sonidos.silenciar();
     super.dispose();
   }
@@ -2409,24 +2415,23 @@ class _LocalScreenState extends State<LocalScreen>
     List<String> redDirecciones = []; // zonas de la red central (sin precio)
 
     // ---> LIBERADO: Ahora descarga la lista también cuando es Cotización <---
+    // Las dos queries corren en PARALELO para reducir la espera a la mitad
     if (!esPuntoAPunto) {
       try {
-        final res = await Supabase.instance.client
-            .from('tarifas_locales')
-            .select('sector_id, sectores(nombre, municipio), tarifa')
-            .eq('local_id', widget.usuario['id'])
-            .order('tarifa', ascending: true);
+        final results = await Future.wait([
+          Supabase.instance.client
+              .from('tarifas_locales')
+              .select('sector_id, sectores(nombre, municipio), tarifa')
+              .eq('local_id', widget.usuario['id'])
+              .order('tarifa', ascending: true),
+          Supabase.instance.client
+              .from('red_direcciones')
+              .select('nombre, municipio')
+              .eq('activo', true)
+              .order('nombre', ascending: true),
+        ]);
 
-        listaPrecios = List<Map<String, dynamic>>.from(res);
-      } catch (_) {}
-
-      // Red de direcciones compartida de Central (solo nombres, sin precio)
-      try {
-        final red = await Supabase.instance.client
-            .from('red_direcciones')
-            .select('nombre, municipio')
-            .eq('activo', true)
-            .order('nombre', ascending: true);
+        listaPrecios = List<Map<String, dynamic>>.from(results[0]);
 
         // Excluir las que ya están en la lista propia (no duplicar)
         final propias = listaPrecios.map((e) {
@@ -2434,7 +2439,7 @@ class _LocalScreenState extends State<LocalScreen>
           if (s == null) return '';
           return '${s['nombre']} (${s['municipio']})'.toUpperCase();
         }).toSet();
-        redDirecciones = List<Map<String, dynamic>>.from(red)
+        redDirecciones = List<Map<String, dynamic>>.from(results[1])
             .map((e) => '${e['nombre']} (${e['municipio']})')
             .where((nombre) => !propias.contains(nombre.toUpperCase()))
             .toList();
@@ -4394,21 +4399,20 @@ class _LocalScreenState extends State<LocalScreen>
         ? _tarjetasExpandidasLocal.contains(svcId)
         : !_tarjetasColapsadasLocal.contains(svcId);
     void toggleExpansion() {
-      setState(() {
-        if (esHistorial) {
-          if (_tarjetasExpandidasLocal.contains(svcId)) {
-            _tarjetasExpandidasLocal.remove(svcId);
-          } else {
-            _tarjetasExpandidasLocal.add(svcId);
-          }
+      if (esHistorial) {
+        if (_tarjetasExpandidasLocal.contains(svcId)) {
+          _tarjetasExpandidasLocal.remove(svcId);
         } else {
-          if (_tarjetasColapsadasLocal.contains(svcId)) {
-            _tarjetasColapsadasLocal.remove(svcId);
-          } else {
-            _tarjetasColapsadasLocal.add(svcId);
-          }
+          _tarjetasExpandidasLocal.add(svcId);
         }
-      });
+      } else {
+        if (_tarjetasColapsadasLocal.contains(svcId)) {
+          _tarjetasColapsadasLocal.remove(svcId);
+        } else {
+          _tarjetasColapsadasLocal.add(svcId);
+        }
+      }
+      _expansionTick.value++; // rebuild solo la lista, no toda la pantalla
       extraRebuild?.call();
     }
     final estado = servicio['estado'];
@@ -4435,15 +4439,130 @@ class _LocalScreenState extends State<LocalScreen>
         } else {
           textoEstado = 'LIBERANDO AL RADAR...';
 
-          // ---> GATILLO AUTOMÁTICO: Empuja el servicio a la calle al llegar a 0 <---
-          Future.microtask(() async {
-            try {
-              await Supabase.instance.client
-                  .from('servicios')
-                  .update({'estado': 'pendiente'})
-                  .eq('id', servicio['id']);
-            } catch (_) {}
-          });
+          // ---> GATILLO AUTOMÁTICO: Libera el servicio + reinicia cascada con pilotos actuales <---
+          // Guard: se ejecuta una sola vez aunque el widget se reconstruya varias veces
+          if (!_liberandoEnProceso.contains(svcId)) {
+            _liberandoEnProceso.add(svcId);
+            Future.microtask(() async {
+              try {
+                final db = Supabase.instance.client;
+
+                // 1. Cancelar misiles viejos del snapshot de creación
+                final svcOld = await db.from('servicios')
+                    .select('onesignal_30s, onesignal_2m, onesignal_5m')
+                    .eq('id', svcId).maybeSingle();
+                if (svcOld != null) {
+                  if (svcOld['onesignal_30s'] != null)
+                    await MotorNotificaciones.cancelarMisil(svcOld['onesignal_30s'].toString());
+                  if (svcOld['onesignal_2m'] != null)
+                    await MotorNotificaciones.cancelarMisil(svcOld['onesignal_2m'].toString());
+                  if (svcOld['onesignal_5m'] != null)
+                    await MotorNotificaciones.cancelarMisil(svcOld['onesignal_5m'].toString());
+                }
+
+                // 2. Liberar al radar
+                await db.from('servicios').update({'estado': 'pendiente'}).eq('id', svcId);
+
+                // 3. Cascada fresca con pilotos disponibles AHORA
+                final localNombre = widget.usuario['nombre']?.toString() ?? 'Un local';
+                final destino = servicio['destino']?.toString() ?? 'destino';
+                final msgAlarma = '📍 $localNombre solicitó un móvil para $destino.';
+
+                // T=0: Masters
+                final mastersData = await db.from('usuarios').select('id')
+                    .or('rol.eq.central,rol.eq.master,rango_movil.eq.MASTER')
+                    .neq('suspendido', true);
+                final masterIds = mastersData.map((u) => u['id'].toString()).toList();
+                if (masterIds.isNotEmpty) {
+                  await _dispararMisilInmediato(
+                    externalIds: masterIds,
+                    titulo: '👑 SERVICIO ACTIVO',
+                    mensaje: msgAlarma,
+                  );
+                }
+
+                // T+30s: Paradero #1 actual del local
+                final movilesLibres = await db.from('usuarios')
+                    .select('id, paradero_actual, ingreso_fila')
+                    .eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true)
+                    .not('paradero_actual', 'is', null);
+                final Map<String, List<Map<String, dynamic>>> grupos = {};
+                for (var m in movilesLibres) {
+                  final p = m['paradero_actual'].toString().trim().toLowerCase();
+                  grupos.putIfAbsent(p, () => []).add(m);
+                }
+                final Map<String, String> numero1s = {};
+                grupos.forEach((p, fila) {
+                  fila.sort((a, b) =>
+                      DateTime.parse(a['ingreso_fila'] ?? DateTime.now().toIso8601String())
+                          .compareTo(DateTime.parse(b['ingreso_fila'] ?? DateTime.now().toIso8601String())));
+                  for (var c in fila) {
+                    final cId = c['id'].toString();
+                    if (!masterIds.contains(cId)) { numero1s[p] = cId; break; }
+                  }
+                });
+                final paraderosRaw = widget.usuario['paradero_exclusivo']?.toString() ?? '';
+                final paraderosLocal = paraderosRaw
+                    .split(',').map((e) => e.trim().toLowerCase()).where((e) => e.isNotEmpty).toList();
+                List<String> pilotosParadero = paraderosLocal.isEmpty
+                    ? numero1s.values.toList()
+                    : paraderosLocal.where((p) => numero1s.containsKey(p)).map((p) => numero1s[p]!).toList();
+
+                String? id30s;
+                if (pilotosParadero.isNotEmpty) {
+                  id30s = await _programarMisilRetardado(
+                    externalIds: pilotosParadero,
+                    titulo: 'TU TURNO DE PARADERO',
+                    mensaje: msgAlarma,
+                    segundosRetardo: 30,
+                  );
+                }
+
+                // T+60s: zona 1km  |  T+90s: todos
+                final oLat = (servicio['origen_lat'] as num?)?.toDouble();
+                final oLng = (servicio['origen_lng'] as num?)?.toDouble();
+                final movilesStd = await db.from('usuarios').select('id, latitud, longitud')
+                    .eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true)
+                    .not('rango_movil', 'in', '("MASTER")');
+                final idsZona = movilesStd.where((u) {
+                  final id = u['id'].toString();
+                  if (masterIds.contains(id) || pilotosParadero.contains(id)) return false;
+                  if (oLat == null || oLng == null) return true;
+                  final uLat = (u['latitud'] as num?)?.toDouble();
+                  final uLng = (u['longitud'] as num?)?.toDouble();
+                  if (uLat == null || uLng == null) return false;
+                  return const Distance().as(LengthUnit.Meter, LatLng(uLat, uLng), LatLng(oLat, oLng)) <= 1000;
+                }).map((u) => u['id'].toString()).toList();
+                final idsTodos = movilesStd
+                    .map((u) => u['id'].toString())
+                    .where((id) => !masterIds.contains(id) && !pilotosParadero.contains(id))
+                    .toList();
+                String? id60s;
+                String? id90s;
+                if (idsZona.isNotEmpty) {
+                  id60s = await _programarMisilRetardado(
+                    externalIds: idsZona, titulo: '📡 SERVICIO CERCA (1km)',
+                    mensaje: msgAlarma, segundosRetardo: 60,
+                  );
+                }
+                if (idsTodos.isNotEmpty) {
+                  id90s = await _programarMisilRetardado(
+                    externalIds: idsTodos, titulo: '🚨 SERVICIO SIN TOMAR',
+                    mensaje: msgAlarma, segundosRetardo: 90,
+                  );
+                }
+
+                // 4. Guardar IDs de nuevos misiles
+                await db.from('servicios').update({
+                  'onesignal_30s': id30s,
+                  'onesignal_2m': id60s,
+                  'onesignal_5m': id90s,
+                }).eq('id', svcId);
+
+              } catch (_) {}
+              _liberandoEnProceso.remove(svcId);
+            });
+          }
         }
       }
     } else if (estado == 'pendiente') {
@@ -6475,12 +6594,17 @@ class _LocalScreenState extends State<LocalScreen>
                                     ),
                                   ),
                                 )
-                              : ListView.builder(
-                                  padding: const EdgeInsets.all(12),
-                                  itemCount: activos.length,
-                                  itemBuilder: (c, i) => FadeSlideIn(
-                                    key: ValueKey('activo_local_${activos[i]['id']}'),
-                                    child: _construirTarjetaServicio(activos[i]),
+                              : ValueListenableBuilder<int>(
+                                  valueListenable: _expansionTick,
+                                  builder: (_, __, ___) => ListView.builder(
+                                    padding: const EdgeInsets.all(12),
+                                    itemCount: activos.length,
+                                    itemBuilder: (c, i) => RepaintBoundary(
+                                      child: FadeSlideIn(
+                                        key: ValueKey('activo_local_${activos[i]['id']}'),
+                                        child: _construirTarjetaServicio(activos[i]),
+                                      ),
+                                    ),
                                   ),
                                 ),
                         ),
@@ -6498,17 +6622,22 @@ class _LocalScreenState extends State<LocalScreen>
                               ),
                             ),
                           )
-                        : ListView.builder(
-                            padding: const EdgeInsets.all(12),
-                            itemCount: historial.length,
-                            itemBuilder: (c, i) => FadeSlideIn(
-                              key: ValueKey('hist_local_${historial[i]['id']}'),
-                              child: _construirTarjetaServicio(
-                                historial[i],
-                                esHistorial: true,
-                                onOcultar: () => setState(
-                                  () => _serviciosOcultosLocal.add(
-                                    historial[i]['id'],
+                        : ValueListenableBuilder<int>(
+                            valueListenable: _expansionTick,
+                            builder: (_, __, ___) => ListView.builder(
+                              padding: const EdgeInsets.all(12),
+                              itemCount: historial.length,
+                              itemBuilder: (c, i) => RepaintBoundary(
+                                child: FadeSlideIn(
+                                  key: ValueKey('hist_local_${historial[i]['id']}'),
+                                  child: _construirTarjetaServicio(
+                                    historial[i],
+                                    esHistorial: true,
+                                    onOcultar: () => setState(
+                                      () => _serviciosOcultosLocal.add(
+                                        historial[i]['id'],
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),
@@ -7260,4 +7389,26 @@ class _LocalScreenState extends State<LocalScreen>
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      
+                      content: Text('✅ Encargo enrutado a $movilNombre.'),
+                      backgroundColor: Colors.blue[700],
+                      duration: const Duration(seconds: 3),
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Error al enrutar: $e'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              }
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
