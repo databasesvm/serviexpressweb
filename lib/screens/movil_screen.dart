@@ -5978,7 +5978,7 @@ class _MovilScreenState extends State<MovilScreen>
           await Supabase.instance.client
               .from('servicios')
               .update({'onesignal_30s': id30s})
-              .eq('id', servicio['id']);
+              .eq('id', servicioId);
         }
       }
 
@@ -6027,7 +6027,7 @@ class _MovilScreenState extends State<MovilScreen>
         await Supabase.instance.client.from('servicios').update({
           if (idLib60 != null) 'onesignal_2m': idLib60,
           if (idLib90 != null) 'onesignal_5m': idLib90,
-        }).eq('id', servicio['id']);
+        }).eq('id', servicioId);
       }
 
       if (mounted) {
@@ -7584,4 +7584,4 @@ class _MovilScreenState extends State<MovilScreen>
 // ===========================================================================
 // PAINTER: Overlay circular oscuro con hueco (tutorial de pantalla)
 // ===========================================================================
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               
+        
