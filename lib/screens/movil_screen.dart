@@ -816,20 +816,22 @@ class _MovilScreenState extends State<MovilScreen>
         );
       }
 
-      // T=60s: todos los disponibles (guardia de estado en BD)
-      Future.delayed(const Duration(seconds: 60), () async {
-        final chk = await db.from('pedidos').select('estado').eq('id', pedidoId).maybeSingle();
-        if (chk == null || chk['estado'] != 'pendiente') return;
-        final todos = await db.from('usuarios').select('id').eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true);
-        final idsTodos = (todos as List).map((u) => u['id'].toString()).where((id) => !masterIds.contains(id)).toList();
-        if (idsTodos.isNotEmpty) {
-          await MotorNotificaciones.dispararRafa(
-            idsDestinos: idsTodos,
+      // T=60s: todos los disponibles — misil server-side
+      {
+        final todosD = await db.from('usuarios').select('id').eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true);
+        final idsTodosD = (todosD as List).map((u) => u['id'].toString()).where((id) => !masterIds.contains(id)).toList();
+        if (idsTodosD.isNotEmpty) {
+          final id60sD = await MotorNotificaciones.programarMisilRetardado(
+            externalIds: idsTodosD,
             titulo: '🚨 DOMICILIO SIN TOMAR',
             mensaje: msgAlerta,
+            segundosRetardo: 60,
           );
+          if (id60sD != null) {
+            await db.from('pedidos').update({'onesignal_2m': id60sD}).eq('id', pedidoId);
+          }
         }
-      });
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -7582,3 +7584,4 @@ class _MovilScreenState extends State<MovilScreen>
 // ===========================================================================
 // PAINTER: Overlay circular oscuro con hueco (tutorial de pantalla)
 // ===========================================================================
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               

@@ -240,52 +240,49 @@ class _ClienteScreenState extends State<ClienteScreen>
         }
       }
 
-      // T+60s y T+90s sin mounted check (sobreviven si el widget navega)
+      // T+60s y T+90s — misiles server-side (pre-fetch al aprobar cotización)
       final double? origLat = (servicio['origen_lat'] as num?)?.toDouble();
       final double? origLng = (servicio['origen_lng'] as num?)?.toDouble();
-      final List<String> mSnap = List<String>.from(masterIds);
-      final List<String> pSnap = List<String>.from(paraderoIds);
-
-      Future.delayed(const Duration(seconds: 60), () async {
-        final chk = await Supabase.instance.client
-            .from('servicios').select('estado').eq('id', id).maybeSingle();
-        if (chk == null || chk['estado'] != 'pendiente') return;
-        final candidatos = await Supabase.instance.client
-            .from('usuarios').select('id, latitud, longitud')
-            .eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true)
-            .not('rango_movil', 'in', '("MASTER")');
-        final idsZ = (candidatos as List).where((u) {
-          final uid = u['id'].toString();
-          if (mSnap.contains(uid) || pSnap.contains(uid)) return false;
-          if (origLat == null || origLng == null) return true;
-          final uLat = (u['latitud'] as num?)?.toDouble();
-          final uLng = (u['longitud'] as num?)?.toDouble();
-          if (uLat == null || uLng == null) return false;
-          return const Distance().as(LengthUnit.Meter,
-              LatLng(uLat, uLng), LatLng(origLat, origLng)) <= 1000;
-        }).map((u) => u['id'].toString()).toList();
-        if (idsZ.isNotEmpty) {
-          await MotorNotificaciones.dispararRafa(
-              idsDestinos: idsZ, titulo: '📡 SERVICIO CERCA (1km)', mensaje: msgAlerta);
-        }
-      });
-
-      Future.delayed(const Duration(seconds: 90), () async {
-        final chk = await Supabase.instance.client
-            .from('servicios').select('estado').eq('id', id).maybeSingle();
-        if (chk == null || chk['estado'] != 'pendiente') return;
-        final todos = await Supabase.instance.client
-            .from('usuarios').select('id')
-            .eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true);
-        final idsT = (todos as List)
-            .map((u) => u['id'].toString())
-            .where((uid) => !mSnap.contains(uid))
-            .toList();
-        if (idsT.isNotEmpty) {
-          await MotorNotificaciones.dispararRafa(
-              idsDestinos: idsT, titulo: '🚨 SERVICIO SIN TOMAR', mensaje: msgAlerta);
-        }
-      });
+      final movilesK = await Supabase.instance.client
+          .from('usuarios').select('id, latitud, longitud')
+          .eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true)
+          .not('rango_movil', 'in', '("MASTER")');
+      final idsZonaK = movilesK.where((u) {
+        final uid = u['id'].toString();
+        if (masterIds.contains(uid) || paraderoIds.contains(uid)) return false;
+        if (origLat == null || origLng == null) return true;
+        final uLat = (u['latitud'] as num?)?.toDouble();
+        final uLng = (u['longitud'] as num?)?.toDouble();
+        if (uLat == null || uLng == null) return false;
+        return const Distance().as(LengthUnit.Meter,
+            LatLng(uLat, uLng), LatLng(origLat, origLng)) <= 1000;
+      }).map((u) => u['id'].toString()).toList();
+      final idsTodosK = movilesK
+          .map((u) => u['id'].toString())
+          .where((uid) => !masterIds.contains(uid))
+          .toList();
+      String? id60sK;
+      String? id90sK;
+      if (idsZonaK.isNotEmpty)
+        id60sK = await MotorNotificaciones.programarMisilRetardado(
+          externalIds: idsZonaK,
+          titulo: '📡 SERVICIO CERCA (1km)',
+          mensaje: msgAlerta,
+          segundosRetardo: 60,
+        );
+      if (idsTodosK.isNotEmpty)
+        id90sK = await MotorNotificaciones.programarMisilRetardado(
+          externalIds: idsTodosK,
+          titulo: '🚨 SERVICIO SIN TOMAR',
+          mensaje: msgAlerta,
+          segundosRetardo: 90,
+        );
+      if (id60sK != null || id90sK != null) {
+        await Supabase.instance.client.from('servicios').update({
+          if (id60sK != null) 'onesignal_2m': id60sK,
+          if (id90sK != null) 'onesignal_5m': id90sK,
+        }).eq('id', id);
+      }
     } catch (e) {
       debugPrint('Error responderCotizacion: $e');
     }
@@ -1840,3 +1837,4 @@ class _ClienteScreenState extends State<ClienteScreen>
     );
   }
 }
+                                                                                                                                                                                                                                                                                                                                                                                                                                   
