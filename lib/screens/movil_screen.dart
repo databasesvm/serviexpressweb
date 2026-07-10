@@ -7575,3 +7575,10 @@ class _MovilScreenState extends State<MovilScreen>
         ),
       ],
     ),
+  );
+}
+}
+
+// ===========================================================================
+// PAINTER: Overlay circular oscuro con hueco (tutorial de pantalla)
+// ===========================================================================
