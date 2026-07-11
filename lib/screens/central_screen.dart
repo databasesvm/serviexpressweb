@@ -8947,7 +8947,9 @@ class _CentralScreenState extends State<CentralScreen>
 
   @override
   Widget build(BuildContext context) {
-    final esPantallaGrande = MediaQuery.of(context).size.width > 850;
+    // En Web siempre usamos el layout móvil (bottom nav visible).
+    // En dispositivos físicos, pantalla grande si width > 850.
+    final esPantallaGrande = !kIsWeb && MediaQuery.of(context).size.width > 850;
 
     return Scaffold(
       backgroundColor: Colors.grey[300],
