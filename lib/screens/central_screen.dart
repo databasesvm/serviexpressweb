@@ -3197,8 +3197,8 @@ class _CentralScreenState extends State<CentralScreen>
     }
 
     // ── Estado del diálogo ────────────────────────────────────────────────────
-    Map<String, dynamic>? sedeSeleccionada = sedes.first;
-    final Set<int> recogidasIds = {};
+    // Lista dinámica de recogidas (empieza con la primera sede)
+    final List<Map<String, dynamic>?> recogidasSel = [sedes.first];
     final destinoCtrl = TextEditingController();
     final tarifaCtrl = TextEditingController();
     bool procesando = false;
@@ -3208,10 +3208,6 @@ class _CentralScreenState extends State<CentralScreen>
       barrierDismissible: false,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) {
-          // Recogidas = sedes distintas de la sede principal
-          final opcionesRecogida = sedes
-              .where((s) => s['id'] != sedeSeleccionada?['id'])
-              .toList();
 
           return AlertDialog(
             insetPadding: const EdgeInsets.symmetric(
@@ -3245,104 +3241,178 @@ class _CentralScreenState extends State<CentralScreen>
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // ── Sede principal ──────────────────────────────────────
-                    const Text('Recoge en:',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: Colors.black54,
-                            fontSize: 12)),
-                    const SizedBox(height: 4),
-                    DropdownButtonFormField<Map<String, dynamic>>(
-                      value: sedeSeleccionada,
-                      isExpanded: true,
-                      decoration: InputDecoration(
-                        border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8)),
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 8),
+                    // ── Recogidas (búsqueda + lista compacta) ──────────────
+                    Row(
+                      children: [
+                        const Text('Recogidas:',
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.black54,
+                                fontSize: 12)),
+                        const SizedBox(width: 8),
+                        if (recogidasSel.isNotEmpty && recogidasSel[0] != null)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 7, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: Colors.indigo[50],
+                              borderRadius: BorderRadius.circular(5),
+                            ),
+                            child: Text(
+                              _fnLabelZona(recogidasSel[0]!['zona'] as String),
+                              style: TextStyle(
+                                  color: Colors.indigo[800],
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+
+                    // Lista de recogidas seleccionadas
+                    Container(
+                      constraints: const BoxConstraints(maxHeight: 180),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey[300]!),
+                        borderRadius: BorderRadius.circular(8),
                       ),
-                      items: sedes
-                          .map((s) => DropdownMenuItem(
-                                value: s,
-                                child: Text(
-                                  _fnLabelSede(s),
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(fontSize: 13),
-                                ),
-                              ))
-                          .toList(),
-                      onChanged: (v) => setDialogState(() {
-                        sedeSeleccionada = v;
-                        recogidasIds.clear();
+                      child: recogidasSel.isEmpty
+                          ? const Padding(
+                              padding: EdgeInsets.all(12),
+                              child: Text('Sin recogidas',
+                                  style: TextStyle(
+                                      color: Colors.black38, fontSize: 13)),
+                            )
+                          : ListView.separated(
+                              shrinkWrap: true,
+                              padding: const EdgeInsets.symmetric(vertical: 4),
+                              itemCount: recogidasSel.length,
+                              separatorBuilder: (_, __) =>
+                                  Divider(height: 1, color: Colors.grey[200]),
+                              itemBuilder: (_, i) {
+                                final s = recogidasSel[i];
+                                if (s == null) return const SizedBox.shrink();
+                                final tipo = s['tipo'] as String? ?? '';
+                                final esPrincipal = i == 0;
+                                return ListTile(
+                                  dense: true,
+                                  contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 0),
+                                  leading: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 5, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: tipo == 'FN'
+                                          ? Colors.indigo[700]
+                                          : tipo == 'FARMACIA'
+                                              ? Colors.teal[600]
+                                              : Colors.brown[400],
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      tipo == 'FN'
+                                          ? 'FN'
+                                          : tipo == 'FARMACIA'
+                                              ? 'FRM'
+                                              : 'DEP',
+                                      style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
+                                  title: Text(
+                                    _fnLabelSede(s),
+                                    style: const TextStyle(fontSize: 13),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  subtitle: esPrincipal
+                                      ? Text('Principal · recogida 1',
+                                          style: TextStyle(
+                                              fontSize: 10,
+                                              color: Colors.indigo[400]))
+                                      : Text('Recogida ${i + 1}',
+                                          style: const TextStyle(
+                                              fontSize: 10,
+                                              color: Colors.black38)),
+                                  trailing: esPrincipal
+                                      ? Icon(Icons.star,
+                                          size: 16, color: Colors.indigo[300])
+                                      : IconButton(
+                                          icon: const Icon(Icons.close,
+                                              size: 18, color: Colors.red),
+                                          padding: EdgeInsets.zero,
+                                          constraints: const BoxConstraints(),
+                                          onPressed: procesando
+                                              ? null
+                                              : () => setDialogState(
+                                                  () => recogidasSel.removeAt(i)),
+                                        ),
+                                );
+                              },
+                            ),
+                    ),
+                    const SizedBox(height: 6),
+
+                    // Buscador para agregar sedes
+                    Autocomplete<Map<String, dynamic>>(
+                      displayStringForOption: (s) => _fnLabelSede(s),
+                      optionsBuilder: (TextEditingValue tv) {
+                        if (tv.text.isEmpty) return const [];
+                        final q = tv.text.toLowerCase();
+                        return sedes.where((s) =>
+                            _fnLabelSede(s).toLowerCase().contains(q));
+                      },
+                      optionsViewBuilder: (context, onSelected, options) =>
+                          Align(
+                        alignment: Alignment.topLeft,
+                        child: Material(
+                          elevation: 4,
+                          borderRadius: BorderRadius.circular(8),
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxHeight: 200),
+                            child: ListView.builder(
+                              shrinkWrap: true,
+                              padding: EdgeInsets.zero,
+                              itemCount: options.length,
+                              itemBuilder: (_, i) {
+                                final s = options.elementAt(i);
+                                return ListTile(
+                                  dense: true,
+                                  title: Text(_fnLabelSede(s),
+                                      style: const TextStyle(fontSize: 13)),
+                                  onTap: () => onSelected(s),
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      ),
+                      fieldViewBuilder:
+                          (ctx, ctrl, focusNode, onFieldSubmitted) =>
+                              TextField(
+                        controller: ctrl,
+                        focusNode: focusNode,
+                        enabled: !procesando,
+                        decoration: InputDecoration(
+                          hintText: '+ Buscar sede para agregar...',
+                          hintStyle:
+                              TextStyle(fontSize: 13, color: Colors.indigo[300]),
+                          prefixIcon: Icon(Icons.search,
+                              size: 18, color: Colors.indigo[400]),
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8)),
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 8),
+                        ),
+                      ),
+                      onSelected: (s) => setDialogState(() {
+                        recogidasSel.add(s);
                       }),
                     ),
 
-                    // Zona auto-fill (solo lectura)
-                    if (sedeSeleccionada != null) ...[
-                      const SizedBox(height: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: Colors.indigo[50],
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.location_on_outlined,
-                                size: 14, color: Colors.indigo[700]),
-                            const SizedBox(width: 4),
-                            Text(
-                              _fnLabelZona(
-                                  sedeSeleccionada!['zona'] as String),
-                              style: TextStyle(
-                                  color: Colors.indigo[800],
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-
-                    const SizedBox(height: 14),
-
-                    // ── Puntos de recogida adicionales ──────────────────────
-                    if (opcionesRecogida.isNotEmpty) ...[
-                      const Text('Puntos adicionales de recogida:',
-                          style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: Colors.black54,
-                              fontSize: 12)),
-                      const SizedBox(height: 6),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 4,
-                        children: opcionesRecogida.map((s) {
-                          final id = s['id'] as int;
-                          final sel = recogidasIds.contains(id);
-                          return FilterChip(
-                            label: Text(
-                              _fnLabelSede(s),
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: sel
-                                    ? Colors.white
-                                    : Colors.black87,
-                              ),
-                            ),
-                            selected: sel,
-                            selectedColor: Colors.indigo[700],
-                            checkmarkColor: Colors.white,
-                            backgroundColor: Colors.grey[100],
-                            onSelected: (v) => setDialogState(() =>
-                                v ? recogidasIds.add(id) : recogidasIds.remove(id)),
-                          );
-                        }).toList(),
-                      ),
-                      const SizedBox(height: 14),
-                    ],
+                    const SizedBox(height: 8),
 
                     // ── Destino ─────────────────────────────────────────────
                     const Text('Destino:',
@@ -3397,7 +3467,10 @@ class _CentralScreenState extends State<CentralScreen>
                 onPressed: procesando
                     ? null
                     : () async {
-                        if (sedeSeleccionada == null) return;
+                        final sedePrincipal = recogidasSel.isNotEmpty
+                            ? recogidasSel[0]
+                            : null;
+                        if (sedePrincipal == null) return;
                         if (destinoCtrl.text.trim().isEmpty) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
@@ -3412,17 +3485,16 @@ class _CentralScreenState extends State<CentralScreen>
                         setDialogState(() => procesando = true);
 
                         try {
-                          final sede = sedeSeleccionada!;
+                          final sede = sedePrincipal;
                           final zona = sede['zona'] as String;
                           final zonaLabel = _fnLabelZona(zona);
                           final sLat = (sede['lat'] as num?)?.toDouble();
                           final sLng = (sede['lng'] as num?)?.toDouble();
                           final nombreSede = _fnLabelSede(sede);
 
-                          // Recogidas: lista de mapas de las sedes seleccionadas
-                          final recogidasList = sedes
-                              .where((s) =>
-                                  recogidasIds.contains(s['id'] as int))
+                          // Todas las recogidas (incluyendo la principal)
+                          final recogidasList = recogidasSel
+                              .whereType<Map<String, dynamic>>()
                               .map((s) => {
                                     'id': s['id'],
                                     'tipo': s['tipo'],
@@ -8967,16 +9039,20 @@ class _CentralScreenState extends State<CentralScreen>
         actions: esPantallaGrande
             ? [
                 // Botón FN Farmanorte
-                ElevatedButton.icon(
+                ElevatedButton(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.indigo[900],
                     foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 0),
                   ),
                   onPressed: () => _abrirFormularioFN(context),
-                  icon: const Icon(Icons.local_pharmacy, size: 18),
-                  label: const Text(
+                  child: const Text(
                     'FN',
-                    style: TextStyle(fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                        letterSpacing: 2),
                   ),
                 ),
                 const SizedBox(width: 6),
@@ -9034,10 +9110,28 @@ class _CentralScreenState extends State<CentralScreen>
               ]
             : [
                 // Botón FN compacto
-                IconButton(
-                  icon: Icon(Icons.local_pharmacy, color: Colors.indigo[300]),
-                  tooltip: 'Servicio Farmanorte',
-                  onPressed: () => _abrirFormularioFN(context),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: InkWell(
+                    onTap: () => _abrirFormularioFN(context),
+                    borderRadius: BorderRadius.circular(6),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.indigo[900],
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Text(
+                        'FN',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                            letterSpacing: 1.5),
+                      ),
+                    ),
+                  ),
                 ),
                 IconButton(
                   icon: const Icon(Icons.add_box, color: Color(0xff3AF500)),
