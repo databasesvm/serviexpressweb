@@ -446,8 +446,26 @@ class _SedeDialogState extends State<_SedeDialog> {
 
     String urlFinal = raw;
 
-    // URLs cortas: goo.gl o maps.app.goo.gl — Dio expone realUri (URL final real)
+    // URLs cortas: goo.gl o maps.app.goo.gl
     if (raw.contains('goo.gl')) {
+      if (kIsWeb) {
+        // El navegador bloquea redirects cross-origin (CORS).
+        // En producción (Android) esto no ocurre.
+        setState(() => _guardando = false);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'En Web: abre el enlace en el navegador, '
+              'copia la URL completa de la barra de direcciones y pégala aquí.',
+            ),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 6),
+          ),
+        );
+        return;
+      }
+      // Android/iOS: Dio sigue el redirect sin restricción CORS
       try {
         final dio = Dio(BaseOptions(
           headers: {'User-Agent': 'Mozilla/5.0'},
