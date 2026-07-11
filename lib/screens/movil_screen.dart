@@ -4693,6 +4693,11 @@ class _MovilScreenState extends State<MovilScreen>
     );    // AnimatedSwitcher
     }
 
+    // ── Tarjeta exclusiva para servicios FN ────────────────────────────────────
+    if (servicio['tipo_fn'] == true) {
+      return _construirTarjetaActivaFN(servicio, esMaster: esMaster);
+    }
+
     int efectivos = 0;
     int tiempoMeta = servicio['tiempo_estimado_minutos'] ?? 15;
     bool mostrarReloj = false;
@@ -4912,187 +4917,8 @@ class _MovilScreenState extends State<MovilScreen>
                   ),
                 ),
               ),
-            // ─── BLOQUE EXCLUSIVO FN FARMANORTE ─────────────────────────────────────
-            if (servicio['tipo_fn'] == true) ...[
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.indigo[50],
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.indigo[200]!),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Badge FN + zona
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: Colors.indigo[900],
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: const Text(
-                            'FARMANORTE',
-                            style: TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 11),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        if (servicio['zona_fn'] != null)
-                          Text(
-                            _fnZonaLabel(servicio['zona_fn'] as String),
-                            style: TextStyle(
-                                color: Colors.indigo[800],
-                                fontWeight: FontWeight.w600,
-                                fontSize: 13),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-
-                    // Punto de recogida principal (sede)
-                    Text(
-                      '📦 Recoge en: ${servicio['origen'] ?? ''}',
-                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-                    ),
-
-                    // Botón Maps hacia la sede principal
-                    if (servicio['origen_lat'] != null && servicio['origen_lng'] != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 6),
-                        child: SizedBox(
-                          width: double.infinity,
-                          child: OutlinedButton.icon(
-                            style: OutlinedButton.styleFrom(
-                              side: BorderSide(color: Colors.indigo[300]!),
-                              padding: const EdgeInsets.symmetric(vertical: 8),
-                            ),
-                            onPressed: () => _abrirMapsHaciaCoords(
-                              (servicio['origen_lat'] as num).toDouble(),
-                              (servicio['origen_lng'] as num).toDouble(),
-                              servicio['origen'] ?? 'Sede FN',
-                            ),
-                            icon: Icon(Icons.directions, color: Colors.indigo[700], size: 18),
-                            label: Text(
-                              'Navegar a sede principal',
-                              style: TextStyle(color: Colors.indigo[700], fontSize: 13),
-                            ),
-                          ),
-                        ),
-                      ),
-
-                    // Recogidas adicionales
-                    Builder(builder: (_) {
-                      final recogidasRaw = servicio['recogidas'];
-                      if (recogidasRaw == null) return const SizedBox.shrink();
-                      final List<dynamic> recogidas = recogidasRaw is List
-                          ? recogidasRaw
-                          : [];
-                      if (recogidas.isEmpty) return const SizedBox.shrink();
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const SizedBox(height: 10),
-                          Text(
-                            'Paradas adicionales:',
-                            style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.indigo[800],
-                                fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(height: 4),
-                          ...recogidas.map((r) {
-                            final rMap = r as Map<String, dynamic>;
-                            final tipo = rMap['tipo'] as String? ?? '';
-                            final nombre = rMap['nombre'] as String? ?? '';
-                            final numero = rMap['numero'];
-                            final lat = (rMap['lat'] as num?)?.toDouble();
-                            final lng = (rMap['lng'] as num?)?.toDouble();
-                            String label = tipo == 'FN' && numero != null
-                                ? 'FN #$numero – $nombre'
-                                : '$tipo – $nombre';
-                            return Padding(
-                              padding: const EdgeInsets.only(top: 4),
-                              child: Row(
-                                children: [
-                                  Icon(Icons.subdirectory_arrow_right,
-                                      size: 14, color: Colors.indigo[400]),
-                                  const SizedBox(width: 4),
-                                  Expanded(
-                                    child: Text(label,
-                                        style: const TextStyle(fontSize: 13)),
-                                  ),
-                                  if (lat != null && lng != null)
-                                    GestureDetector(
-                                      onTap: () => _abrirMapsHaciaCoords(lat, lng, label),
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 8, vertical: 3),
-                                        decoration: BoxDecoration(
-                                          color: Colors.indigo[700],
-                                          borderRadius: BorderRadius.circular(6),
-                                        ),
-                                        child: const Text(
-                                          'Maps',
-                                          style: TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 11,
-                                              fontWeight: FontWeight.bold),
-                                        ),
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            );
-                          }),
-                        ],
-                      );
-                    }),
-
-                    const SizedBox(height: 10),
-                    // Destino
-                    Text(
-                      '🏁 Entrega: ${servicio['destino'] ?? ''}',
-                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 8),
-
-              // Botón de factura FN
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.indigo[900],
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                  ),
-                  onPressed: () async {
-                    final uri = Uri.parse('https://databasesvm.github.io/appweb/');
-                    if (await canLaunchUrl(uri)) {
-                      launchUrl(uri, mode: LaunchMode.externalApplication);
-                    }
-                  },
-                  icon: const Icon(Icons.receipt_long, size: 20),
-                  label: const Text(
-                    'FACTURA',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-            ],
-            // ────────────────────────────────────────────────────────────────────────
-
-            // Origen / Destino estándar (no FN)
-            if (servicio['tipo_fn'] != true) ...[
+            // Origen / Destino estándar
+            if (true) ...[
             const SizedBox(height: 12),
             Text(
               '📍 Origen: ${servicio['origen']}',
@@ -5516,6 +5342,637 @@ class _MovilScreenState extends State<MovilScreen>
     final uri = Uri.parse(
         'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving');
     if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TARJETA ACTIVA EXCLUSIVA FN FARMANORTE
+  // ═══════════════════════════════════════════════════════════════════════════
+  Widget _construirTarjetaActivaFN(
+    Map<String, dynamic> servicio, {
+    bool esMaster = false,
+  }) {
+    final bool estaExpandida =
+        _serviciosExpandidos.contains(servicio['id'] as int);
+    final estado = servicio['estado'];
+    final bool tieneProblema = estado == 'problema';
+
+    // ── Colapsada ────────────────────────────────────────────────────────────
+    if (!estaExpandida) {
+      return AnimatedSwitcher(
+        duration: const Duration(milliseconds: 220),
+        child: Card(
+          key: ValueKey('fn_col_${servicio['id']}_$estado'),
+          elevation: 2,
+          margin: const EdgeInsets.only(bottom: 10),
+          color: Colors.indigo[50],
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+            side: BorderSide(
+              color: tieneProblema ? Colors.red : Colors.indigo[800]!,
+              width: 1.5,
+            ),
+          ),
+          child: InkWell(
+            onTap: () => setState(
+                () => _serviciosExpandidos.add(servicio['id'] as int)),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.indigo[900],
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Text('FN',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                            letterSpacing: 1.5)),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'ORDEN #${servicio['numero_movil'] ?? servicio['id']}',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                            color: tieneProblema
+                                ? Colors.red
+                                : Colors.indigo[900],
+                          ),
+                        ),
+                        Text(
+                          estado == 'en_ruta_destino'
+                              ? 'Entrega: ${servicio['destino'] ?? ''}'
+                              : 'Recoge: ${servicio['origen'] ?? ''}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              fontSize: 13, color: Colors.indigo[700]),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.expand_more, color: Colors.black54),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    // ── Variables ────────────────────────────────────────────────────────────
+    int efectivos = 0;
+    int tiempoMeta = servicio['tiempo_estimado_minutos'] ?? 20;
+    bool mostrarReloj = false;
+
+    if (estado == 'en_ruta_origen' && servicio['accepted_at'] != null) {
+      efectivos = DateTime.now()
+          .toUtc()
+          .difference(
+              DateTime.parse(servicio['accepted_at']).toUtc())
+          .inMinutes;
+      mostrarReloj = true;
+    } else if (estado == 'en_ruta_destino' &&
+        servicio['picked_up_at'] != null) {
+      efectivos = DateTime.now()
+              .toUtc()
+              .difference(
+                  DateTime.parse(servicio['picked_up_at']).toUtc())
+              .inMinutes -
+          (servicio['extension_minutes'] as int? ?? 0);
+      if (efectivos < 0) efectivos = 0;
+      mostrarReloj = true;
+    }
+
+    final bool estaDemorado = efectivos >= tiempoMeta;
+    final String textoTarifa = _formatearMoneda(servicio['tarifa']);
+    final recogidasRaw = servicio['recogidas'];
+    final List<dynamic> recogidas =
+        recogidasRaw is List ? recogidasRaw : [];
+
+    // ── Botón de acción principal ─────────────────────────────────────────────
+    Widget botonAccion;
+    if (tieneProblema) {
+      botonAccion = ElevatedButton(
+        style:
+            ElevatedButton.styleFrom(backgroundColor: Colors.grey[400]),
+        onPressed: null,
+        child: const Text('⚠️ EN REVISIÓN POR CENTRAL',
+            style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 15)),
+      );
+    } else if (estado == 'en_ruta_origen') {
+      botonAccion = ElevatedButton(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.indigo[900],
+          foregroundColor: Colors.white,
+          elevation: 4,
+        ),
+        onPressed:
+            _procesando ? null : () => _marcarLlegadaOrigen(servicio),
+        child: _procesando
+            ? const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                    color: Colors.white, strokeWidth: 3))
+            : const Text('📍 LLEGUÉ A LA SEDE',
+                style: TextStyle(
+                    fontWeight: FontWeight.bold, fontSize: 16)),
+      );
+    } else if (estado == 'en_origen') {
+      botonAccion = ElevatedButton(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xff3AF500),
+          foregroundColor: Colors.black,
+          elevation: 4,
+        ),
+        onPressed:
+            _procesando ? null : () => _iniciarRutaDestino(servicio),
+        child: _procesando
+            ? const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                    color: Colors.black, strokeWidth: 3))
+            : const Text('INICIAR RUTA DE ENTREGA',
+                style: TextStyle(
+                    fontWeight: FontWeight.bold, fontSize: 16)),
+      );
+    } else {
+      botonAccion = estaDemorado
+          ? ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red[900]),
+              onPressed: () =>
+                  _abrirMenuJustificacion(context, servicio['id']),
+              child: const Text('⚠️ DEMORA - JUSTIFICAR',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15)),
+            )
+          : BotonPresionSostenida(
+              texto: '🏁 MANTÉN PRESIONADO PARA ENTREGAR',
+              colorBase: Colors.indigo[900]!,
+              colorTexto: Colors.white,
+              onCompletado: () =>
+                  _finalizarServicio(servicio, tieneProblema),
+            );
+    }
+
+    // ── Card expandida ────────────────────────────────────────────────────────
+    return Card(
+      elevation: 4,
+      margin: const EdgeInsets.only(bottom: 16),
+      color: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: tieneProblema ? Colors.red : Colors.indigo[800]!,
+          width: 2,
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+
+            // ── Encabezado ────────────────────────────────────────────────
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.indigo[900],
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Text('FN',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                          letterSpacing: 1.5)),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    tieneProblema
+                        ? '⚠️ NOVEDAD (#${servicio['numero_movil'] ?? servicio['id']})'
+                        : 'SERVICIO ACTIVO (#${servicio['numero_movil'] ?? servicio['id']})',
+                    style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: tieneProblema
+                            ? Colors.red[800]
+                            : Colors.black),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.expand_less,
+                      color: Colors.black54),
+                  onPressed: () => setState(() =>
+                      _serviciosExpandidos
+                          .remove(servicio['id'] as int)),
+                ),
+              ],
+            ),
+
+            // ── Tiempo ───────────────────────────────────────────────────
+            if (mostrarReloj) ...[
+              const SizedBox(height: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: estaDemorado
+                      ? Colors.red[50]
+                      : Colors.indigo[50],
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  estado == 'en_ruta_origen'
+                      ? 'Tiempo hacia la sede: $efectivos / $tiempoMeta min'
+                      : 'Tiempo de entrega: $efectivos / $tiempoMeta min',
+                  style: TextStyle(
+                      color: estaDemorado
+                          ? Colors.red[800]
+                          : Colors.indigo[800],
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13),
+                ),
+              ),
+            ],
+
+            const SizedBox(height: 12),
+
+            // ── Bloque de ruta FN ─────────────────────────────────────────
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.indigo[50],
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.indigo[200]!),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Zona
+                  if (servicio['zona_fn'] != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Text(
+                        _fnZonaLabel(
+                            servicio['zona_fn'] as String),
+                        style: TextStyle(
+                            color: Colors.indigo[700],
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13),
+                      ),
+                    ),
+
+                  // Sede principal
+                  Text('📦 Recoge en:',
+                      style: TextStyle(
+                          color: Colors.indigo[800],
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 3),
+                  Text(servicio['origen'] ?? '—',
+                      style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600)),
+                  if (servicio['origen_lat'] != null &&
+                      servicio['origen_lng'] != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            side: BorderSide(
+                                color: Colors.indigo[400]!),
+                            padding: const EdgeInsets.symmetric(
+                                vertical: 8),
+                            foregroundColor: Colors.indigo[700],
+                          ),
+                          onPressed: () =>
+                              _abrirMapsHaciaCoords(
+                            (servicio['origen_lat'] as num)
+                                .toDouble(),
+                            (servicio['origen_lng'] as num)
+                                .toDouble(),
+                            servicio['origen'] ??
+                                'Sede principal',
+                          ),
+                          icon: const Icon(Icons.directions,
+                              size: 18),
+                          label: const Text(
+                              'Navegar a sede principal',
+                              style: TextStyle(fontSize: 13)),
+                        ),
+                      ),
+                    ),
+
+                  // Recogidas adicionales
+                  if (recogidas.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    Text('Paradas adicionales:',
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.indigo[800],
+                            fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 6),
+                    ...recogidas.map((r) {
+                      final rMap = r as Map<String, dynamic>;
+                      final tipo =
+                          rMap['tipo'] as String? ?? '';
+                      final nombre =
+                          rMap['nombre'] as String? ?? '';
+                      final numero = rMap['numero'];
+                      final lat =
+                          (rMap['lat'] as num?)?.toDouble();
+                      final lng =
+                          (rMap['lng'] as num?)?.toDouble();
+                      final label =
+                          tipo == 'FN' && numero != null
+                              ? 'FN #$numero – $nombre'
+                              : '$tipo – $nombre';
+                      return Padding(
+                        padding:
+                            const EdgeInsets.only(bottom: 6),
+                        child: Row(
+                          children: [
+                            Icon(
+                                Icons
+                                    .subdirectory_arrow_right,
+                                size: 14,
+                                color: Colors.indigo[400]),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(label,
+                                  style: const TextStyle(
+                                      fontSize: 13)),
+                            ),
+                            if (lat != null && lng != null)
+                              SizedBox(
+                                height: 30,
+                                child: ElevatedButton.icon(
+                                  style: ElevatedButton
+                                      .styleFrom(
+                                    backgroundColor:
+                                        Colors.indigo[700],
+                                    foregroundColor:
+                                        Colors.white,
+                                    padding:
+                                        const EdgeInsets
+                                            .symmetric(
+                                                horizontal:
+                                                    10),
+                                    shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius
+                                                .circular(
+                                                    6)),
+                                    elevation: 0,
+                                  ),
+                                  onPressed: () =>
+                                      _abrirMapsHaciaCoords(
+                                          lat, lng, label),
+                                  icon: const Icon(
+                                      Icons.navigation,
+                                      size: 14),
+                                  label: const Text('GPS',
+                                      style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight:
+                                              FontWeight
+                                                  .bold)),
+                                ),
+                              ),
+                          ],
+                        ),
+                      );
+                    }),
+                  ],
+
+                  // Destino
+                  const SizedBox(height: 10),
+                  Text('🏁 Entrega:',
+                      style: TextStyle(
+                          color: Colors.indigo[800],
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 2),
+                  Text(servicio['destino'] ?? '—',
+                      style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold)),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 12),
+
+            // ── Cobrar ────────────────────────────────────────────────────
+            Text(
+              'Cobrar: $textoTarifa',
+              style: TextStyle(
+                color: textoTarifa == 'SIN TARIFA'
+                    ? Colors.orange[800]
+                    : Colors.green,
+                fontWeight: FontWeight.bold,
+                fontSize: 22,
+              ),
+            ),
+
+            const SizedBox(height: 14),
+
+            // ── Reportar Factura ──────────────────────────────────────────
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.indigo[900],
+                  foregroundColor: Colors.white,
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 13),
+                ),
+                onPressed: () async {
+                  final uri = Uri.parse(
+                      'https://databasesvm.github.io/appweb/');
+                  if (await canLaunchUrl(uri)) {
+                    launchUrl(uri,
+                        mode: LaunchMode.externalApplication);
+                  }
+                },
+                icon: const Icon(Icons.receipt_long, size: 20),
+                label: const Text('REPORTAR FACTURA',
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14)),
+              ),
+            ),
+
+            // ── Navegar al destino (en ruta destino) ──────────────────────
+            if (estado == 'en_ruta_destino' && !tieneProblema)
+              Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 50,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.indigo[600],
+                      foregroundColor: Colors.white,
+                      elevation: 2,
+                    ),
+                    onPressed: _procesando
+                        ? null
+                        : () => _abrirNavegadorSatelital(
+                            servicio, false),
+                    icon: const Icon(Icons.explore, size: 22),
+                    label: const Text('NAVEGAR AL DESTINO',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13)),
+                  ),
+                ),
+              ),
+
+            // ── Liberar (solo Master en ruta origen) ─────────────────────
+            if (esMaster &&
+                estado == 'en_ruta_origen' &&
+                !tieneProblema)
+              Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFFE040FB),
+                      side: const BorderSide(
+                          color: Color(0xFFE040FB)),
+                      padding: const EdgeInsets.symmetric(
+                          vertical: 12),
+                    ),
+                    onPressed: _procesando
+                        ? null
+                        : () => _liberarServicio(servicio),
+                    icon: const Icon(Icons.replay, size: 18),
+                    label: const Text('LIBERAR',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12)),
+                  ),
+                ),
+              ),
+
+            // ── Chat Central ──────────────────────────────────────────────
+            if (!tieneProblema)
+              Padding(
+                padding: const EdgeInsets.only(top: 10, bottom: 4),
+                child: Builder(builder: (context) {
+                  final tieneMsg =
+                      servicio['chat_central_movil'] == true;
+                  if (tieneMsg) {
+                    WidgetsBinding.instance
+                        .addPostFrameCallback((_) => _sonidos
+                            .reproducir(Sonidos.movilChatCentral));
+                  }
+                  return BotonTacticoAccion(
+                    icono: Icons.support_agent,
+                    texto: 'Central',
+                    colorBase: Colors.red[800]!,
+                    colorFondo: Colors.red[50]!,
+                    tieneAlarma: tieneMsg,
+                    onTap: () {
+                      Supabase.instance.client
+                          .from('servicios')
+                          .update({'chat_central_movil': false})
+                          .eq('id', servicio['id']);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => ChatScreen(
+                            salaId:
+                                'soporte_movil_${servicio['id']}',
+                            miId: widget.usuario['id'],
+                            miNombre: widget.usuario['nombre'],
+                            titulo: 'Soporte Central',
+                            servicioId: servicio['id'],
+                            alarmaLocal: 'chat_central_movil',
+                            alarmaDestino: 'chat_movil_central',
+                            tipoFaq: TipoFaqChat.movil,
+                          ),
+                        ),
+                      );
+                    },
+                  );
+                }),
+              ),
+
+            // ── Botón de acción principal ─────────────────────────────────
+            const SizedBox(height: 8),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 280),
+              transitionBuilder: (child, anim) => FadeTransition(
+                opacity: anim,
+                child: ScaleTransition(
+                    scale: Tween(begin: 0.92, end: 1.0)
+                        .animate(anim),
+                    child: child),
+              ),
+              child: SizedBox(
+                key: ValueKey(
+                    'fn_act_$estado${estaDemorado ? '_d' : ''}'),
+                width: double.infinity,
+                height: 70,
+                child: botonAccion,
+              ),
+            ),
+
+            // ── Reportar Problema ─────────────────────────────────────────
+            if (!tieneProblema)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 55,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(
+                          color: Colors.red[700]!, width: 2),
+                    ),
+                    onPressed: () => _mostrarMenuProblema(
+                        context, servicio['id']),
+                    icon: Icon(Icons.warning,
+                        color: Colors.red[700], size: 22),
+                    label: Text('REPORTAR PROBLEMA',
+                        style: TextStyle(
+                            color: Colors.red[700],
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14)),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _construirTarjetaPendiente(
