@@ -137,7 +137,7 @@ class DeeplinkService {
     int localId, {
     List<Map<String, dynamic>> items = const [],
   }) {
-    const webUrl = 'https://databasesvm.github.io/serviexpressweb/';
+    const webUrl = 'https://databasesvm.github.io/serviexpressweb/form/';
     // El deep link se adjunta para usuarios que ya tienen la app instalada
     var deepLink = linkParaLocal(localId);
     if (items.isNotEmpty) {

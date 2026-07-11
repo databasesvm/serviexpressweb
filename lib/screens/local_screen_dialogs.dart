@@ -894,7 +894,7 @@ mixin _DialogsMixin on State<LocalScreen> {
   void _mostrarQrCarta(Map<String, dynamic> perfil) {
     final localId = perfil['id'] as int;
     final nombre = perfil['nombre']?.toString() ?? 'Mi Local';
-    const webUrl = 'https://databasesvm.github.io/serviexpressweb/';
+    const webUrl = 'https://databasesvm.github.io/serviexpressweb/form/';
     final link = webUrl; // QR apunta a la web para clientes sin la app
     final texto = DeeplinkService.textoCompartible(nombre, localId);
 
