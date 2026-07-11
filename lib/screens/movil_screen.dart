@@ -4912,6 +4912,187 @@ class _MovilScreenState extends State<MovilScreen>
                   ),
                 ),
               ),
+            // ─── BLOQUE EXCLUSIVO FN FARMANORTE ─────────────────────────────────────
+            if (servicio['tipo_fn'] == true) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.indigo[50],
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.indigo[200]!),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Badge FN + zona
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: Colors.indigo[900],
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Text(
+                            'FARMANORTE',
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 11),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        if (servicio['zona_fn'] != null)
+                          Text(
+                            _fnZonaLabel(servicio['zona_fn'] as String),
+                            style: TextStyle(
+                                color: Colors.indigo[800],
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+
+                    // Punto de recogida principal (sede)
+                    Text(
+                      '📦 Recoge en: ${servicio['origen'] ?? ''}',
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                    ),
+
+                    // Botón Maps hacia la sede principal
+                    if (servicio['origen_lat'] != null && servicio['origen_lng'] != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              side: BorderSide(color: Colors.indigo[300]!),
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                            ),
+                            onPressed: () => _abrirMapsHaciaCoords(
+                              (servicio['origen_lat'] as num).toDouble(),
+                              (servicio['origen_lng'] as num).toDouble(),
+                              servicio['origen'] ?? 'Sede FN',
+                            ),
+                            icon: Icon(Icons.directions, color: Colors.indigo[700], size: 18),
+                            label: Text(
+                              'Navegar a sede principal',
+                              style: TextStyle(color: Colors.indigo[700], fontSize: 13),
+                            ),
+                          ),
+                        ),
+                      ),
+
+                    // Recogidas adicionales
+                    Builder(builder: (_) {
+                      final recogidasRaw = servicio['recogidas'];
+                      if (recogidasRaw == null) return const SizedBox.shrink();
+                      final List<dynamic> recogidas = recogidasRaw is List
+                          ? recogidasRaw
+                          : [];
+                      if (recogidas.isEmpty) return const SizedBox.shrink();
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const SizedBox(height: 10),
+                          Text(
+                            'Paradas adicionales:',
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.indigo[800],
+                                fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 4),
+                          ...recogidas.map((r) {
+                            final rMap = r as Map<String, dynamic>;
+                            final tipo = rMap['tipo'] as String? ?? '';
+                            final nombre = rMap['nombre'] as String? ?? '';
+                            final numero = rMap['numero'];
+                            final lat = (rMap['lat'] as num?)?.toDouble();
+                            final lng = (rMap['lng'] as num?)?.toDouble();
+                            String label = tipo == 'FN' && numero != null
+                                ? 'FN #$numero – $nombre'
+                                : '$tipo – $nombre';
+                            return Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.subdirectory_arrow_right,
+                                      size: 14, color: Colors.indigo[400]),
+                                  const SizedBox(width: 4),
+                                  Expanded(
+                                    child: Text(label,
+                                        style: const TextStyle(fontSize: 13)),
+                                  ),
+                                  if (lat != null && lng != null)
+                                    GestureDetector(
+                                      onTap: () => _abrirMapsHaciaCoords(lat, lng, label),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 8, vertical: 3),
+                                        decoration: BoxDecoration(
+                                          color: Colors.indigo[700],
+                                          borderRadius: BorderRadius.circular(6),
+                                        ),
+                                        child: const Text(
+                                          'Maps',
+                                          style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.bold),
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            );
+                          }),
+                        ],
+                      );
+                    }),
+
+                    const SizedBox(height: 10),
+                    // Destino
+                    Text(
+                      '🏁 Entrega: ${servicio['destino'] ?? ''}',
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+
+              // Botón de factura FN
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.indigo[900],
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                  onPressed: () async {
+                    final uri = Uri.parse('https://databasesvm.github.io/appweb/');
+                    if (await canLaunchUrl(uri)) {
+                      launchUrl(uri, mode: LaunchMode.externalApplication);
+                    }
+                  },
+                  icon: const Icon(Icons.receipt_long, size: 20),
+                  label: const Text(
+                    'FACTURA',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+            // ────────────────────────────────────────────────────────────────────────
+
+            // Origen / Destino estándar (no FN)
+            if (servicio['tipo_fn'] != true) ...[
             const SizedBox(height: 12),
             Text(
               '📍 Origen: ${servicio['origen']}',
@@ -4921,6 +5102,7 @@ class _MovilScreenState extends State<MovilScreen>
               '🏁 Destino: ${servicio['destino']}',
               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
+            ],
             // ---> INYECCIÓN VISUAL DEL NÚMERO <---
             if (servicio['telefono_receptor'] != null &&
                 servicio['telefono_receptor'].toString().trim().isNotEmpty)
@@ -5319,10 +5501,104 @@ class _MovilScreenState extends State<MovilScreen>
     );
   }
 
+  // ── Etiqueta legible de zona FN ─────────────────────────────────────────────
+  String _fnZonaLabel(String z) {
+    switch (z) {
+      case 'CUCUTA': return 'Cúcuta';
+      case 'LOS_PATIOS': return 'Los Patios';
+      case 'V_ROSARIO': return 'Villa del Rosario';
+      default: return z;
+    }
+  }
+
+  // ── Abrir Google Maps hacia una coordenada ───────────────────────────────────
+  Future<void> _abrirMapsHaciaCoords(double lat, double lng, String label) async {
+    final uri = Uri.parse(
+        'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving');
+    if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
   Widget _construirTarjetaPendiente(
     Map<String, dynamic> servicio, {
     bool esMaster = false,
   }) {
+    // ── TARJETA ESPECIAL FN FARMANORTE ────────────────────────────────────────
+    final bool esFn = servicio['tipo_fn'] == true;
+    if (esFn) {
+      final String zonaFn = servicio['zona_fn'] as String? ?? '';
+      final String zonaLabel = _fnZonaLabel(zonaFn);
+      return Card(
+        elevation: 3,
+        margin: const EdgeInsets.only(bottom: 12),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: Colors.indigo[800]!, width: 2),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.indigo[900]!.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.local_pharmacy,
+                    color: Colors.indigo[800], size: 28),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'TURNO FARMANORTE',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        color: Colors.black87,
+                      ),
+                    ),
+                    if (zonaLabel.isNotEmpty)
+                      Text(
+                        zonaLabel,
+                        style: TextStyle(
+                            color: Colors.indigo[700],
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13),
+                      ),
+                  ],
+                ),
+              ),
+              SizedBox(
+                height: 45,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.indigo[900],
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  onPressed: () => _aceptarServicioConCandado(context, servicio),
+                  child: const Text(
+                    'ACEPTAR',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     final String observacion = servicio['observacion'] ?? '';
     // tipo_servicio es la fuente de verdad — observacion era el fallback
     // anterior pero se borra al reactivar desde Central, causando que todo

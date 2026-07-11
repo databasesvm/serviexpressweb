@@ -1,0 +1,1073 @@
+import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Panel FN – dos pestañas:
+//   • Sedes   → CRUD de fn_sedes (FN numeradas, FARMACIA, DEPOSITO)
+//   • Motos   → Motos disponibles, toggle tiene_fn, contador ignorados del día
+// ─────────────────────────────────────────────────────────────────────────────
+
+class FnPanelScreen extends StatefulWidget {
+  const FnPanelScreen({super.key});
+
+  @override
+  State<FnPanelScreen> createState() => _FnPanelScreenState();
+}
+
+class _FnPanelScreenState extends State<FnPanelScreen>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tab;
+
+  @override
+  void initState() {
+    super.initState();
+    _tab = TabController(length: 2, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tab.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF0A0A0A),
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        iconTheme: const IconThemeData(color: Colors.white),
+        title: const Text(
+          'Farmanorte FN',
+          style: TextStyle(
+              color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+        ),
+        bottom: TabBar(
+          controller: _tab,
+          indicatorColor: Colors.indigo[300],
+          labelColor: Colors.white,
+          unselectedLabelColor: Colors.white38,
+          tabs: const [
+            Tab(icon: Icon(Icons.local_pharmacy_outlined), text: 'Sedes'),
+            Tab(icon: Icon(Icons.two_wheeler), text: 'Motos FN'),
+          ],
+        ),
+      ),
+      body: TabBarView(
+        controller: _tab,
+        children: const [
+          _SedesTab(),
+          _MotosTab(),
+        ],
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PESTAÑA: SEDES
+// ═══════════════════════════════════════════════════════════════════════════════
+
+class _SedesTab extends StatefulWidget {
+  const _SedesTab();
+
+  @override
+  State<_SedesTab> createState() => _SedesTabState();
+}
+
+class _SedesTabState extends State<_SedesTab> {
+  final _db = Supabase.instance.client;
+  List<Map<String, dynamic>> _sedes = [];
+  bool _cargando = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargar();
+  }
+
+  Future<void> _cargar() async {
+    setState(() => _cargando = true);
+    try {
+      final data = await _db
+          .from('fn_sedes')
+          .select()
+          .order('tipo')
+          .order('numero', nullsFirst: false)
+          .order('nombre');
+      setState(() => _sedes = List<Map<String, dynamic>>.from(data));
+    } catch (e) {
+      _snack('Error cargando sedes: $e');
+    } finally {
+      setState(() => _cargando = false);
+    }
+  }
+
+  void _snack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  Future<void> _toggleActivo(Map<String, dynamic> sede) async {
+    final nuevo = !(sede['activo'] as bool);
+    try {
+      await _db
+          .from('fn_sedes')
+          .update({'activo': nuevo})
+          .eq('id', sede['id']);
+      setState(() {
+        final i = _sedes.indexOf(sede);
+        if (i >= 0) _sedes[i] = {...sede, 'activo': nuevo};
+      });
+    } catch (e) {
+      _snack('Error actualizando sede: $e');
+    }
+  }
+
+  Future<void> _eliminar(Map<String, dynamic> sede) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Eliminar sede'),
+        content: Text('¿Eliminar ${sede['nombre']}?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Eliminar',
+                  style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await _db.from('fn_sedes').delete().eq('id', sede['id']);
+      setState(() => _sedes.remove(sede));
+    } catch (e) {
+      _snack('Error eliminando: $e');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_cargando) {
+      return const Center(child: CircularProgressIndicator(color: Colors.indigo));
+    }
+
+    return Stack(
+      children: [
+        _sedes.isEmpty
+            ? const Center(
+                child: Text('Sin sedes registradas',
+                    style: TextStyle(color: Colors.white38)))
+            : ListView.builder(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                itemCount: _sedes.length,
+                itemBuilder: (_, i) => _SedeCard(
+                  sede: _sedes[i],
+                  onToggle: () => _toggleActivo(_sedes[i]),
+                  onEdit: () async {
+                    await showDialog(
+                      context: context,
+                      builder: (_) => _SedeDialog(sede: _sedes[i]),
+                    );
+                    _cargar();
+                  },
+                  onDelete: () => _eliminar(_sedes[i]),
+                ),
+              ),
+
+        // FAB
+        Positioned(
+          bottom: 20,
+          right: 20,
+          child: FloatingActionButton.extended(
+            backgroundColor: Colors.indigo[700],
+            icon: const Icon(Icons.add, color: Colors.white),
+            label: const Text('Nueva sede',
+                style: TextStyle(color: Colors.white)),
+            onPressed: () async {
+              await showDialog(
+                context: context,
+                builder: (_) => const _SedeDialog(sede: null),
+              );
+              _cargar();
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─── Tarjeta de sede ──────────────────────────────────────────────────────────
+
+class _SedeCard extends StatelessWidget {
+  final Map<String, dynamic> sede;
+  final VoidCallback onToggle;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  const _SedeCard({
+    required this.sede,
+    required this.onToggle,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  Color _colorTipo(String tipo) {
+    switch (tipo) {
+      case 'FN':
+        return Colors.indigo[700]!;
+      case 'FARMACIA':
+        return Colors.teal[600]!;
+      case 'DEPOSITO':
+        return Colors.brown[600]!;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  IconData _iconoTipo(String tipo) {
+    switch (tipo) {
+      case 'FN':
+        return Icons.local_pharmacy;
+      case 'FARMACIA':
+        return Icons.medication_outlined;
+      case 'DEPOSITO':
+        return Icons.warehouse_outlined;
+      default:
+        return Icons.store;
+    }
+  }
+
+  String _labelZona(String zona) {
+    switch (zona) {
+      case 'CUCUTA':
+        return 'Cúcuta';
+      case 'LOS_PATIOS':
+        return 'Los Patios';
+      case 'V_ROSARIO':
+        return 'Villa del Rosario';
+      default:
+        return zona;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tipo = sede['tipo'] as String;
+    final numero = sede['numero'] as String?;
+    final nombre = sede['nombre'] as String;
+    final zona = sede['zona'] as String;
+    final activo = sede['activo'] as bool;
+    final lat = sede['lat'];
+    final lng = sede['lng'];
+
+    final tieneCoords = lat != null && lng != null;
+    final colorT = _colorTipo(tipo);
+
+    return Card(
+      color: const Color(0xFF1A1A1A),
+      shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      margin: const EdgeInsets.only(bottom: 10),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(
+          children: [
+            // Icono tipo
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: colorT.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(_iconoTipo(tipo), color: colorT, size: 22),
+            ),
+            const SizedBox(width: 12),
+
+            // Info
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: colorT,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        tipo == 'FN' && numero != null
+                            ? 'FN #$numero'
+                            : tipo,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF2A2A2A),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        _labelZona(zona),
+                        style: const TextStyle(
+                            color: Colors.white54, fontSize: 10),
+                      ),
+                    ),
+                  ]),
+                  const SizedBox(height: 4),
+                  Text(
+                    nombre,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600),
+                  ),
+                  if (tieneCoords)
+                    Text(
+                      '${(lat as double).toStringAsFixed(5)}, ${(lng as double).toStringAsFixed(5)}',
+                      style: const TextStyle(
+                          color: Colors.white38, fontSize: 11),
+                    ),
+                ],
+              ),
+            ),
+
+            // Controles
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Switch(
+                  value: activo,
+                  activeColor: Colors.green[400],
+                  onChanged: (_) => onToggle(),
+                ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    GestureDetector(
+                      onTap: onEdit,
+                      child: const Icon(Icons.edit_outlined,
+                          color: Colors.white38, size: 20),
+                    ),
+                    const SizedBox(width: 12),
+                    GestureDetector(
+                      onTap: onDelete,
+                      child: const Icon(Icons.delete_outline,
+                          color: Colors.red, size: 20),
+                    ),
+                  ],
+                )
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Diálogo agregar/editar sede ─────────────────────────────────────────────
+
+class _SedeDialog extends StatefulWidget {
+  final Map<String, dynamic>? sede; // null = nueva
+
+  const _SedeDialog({this.sede});
+
+  @override
+  State<_SedeDialog> createState() => _SedeDialogState();
+}
+
+class _SedeDialogState extends State<_SedeDialog> {
+  final _db = Supabase.instance.client;
+  final _formKey = GlobalKey<FormState>();
+
+  String _tipo = 'FN';
+  String _zona = 'CUCUTA';
+  bool _activo = true;
+
+  final _ctrlNumero = TextEditingController();
+  final _ctrlNombre = TextEditingController();
+  final _ctrlMapsUrl = TextEditingController();
+  final _ctrlLat = TextEditingController();
+  final _ctrlLng = TextEditingController();
+
+  bool _guardando = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final s = widget.sede;
+    if (s != null) {
+      _tipo = s['tipo'] as String;
+      _zona = s['zona'] as String;
+      _activo = s['activo'] as bool;
+      _ctrlNumero.text = s['numero'] ?? '';
+      _ctrlNombre.text = s['nombre'] ?? '';
+      if (s['lat'] != null) _ctrlLat.text = s['lat'].toString();
+      if (s['lng'] != null) _ctrlLng.text = s['lng'].toString();
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctrlNumero.dispose();
+    _ctrlNombre.dispose();
+    _ctrlMapsUrl.dispose();
+    _ctrlLat.dispose();
+    _ctrlLng.dispose();
+    super.dispose();
+  }
+
+  /// Extrae lat/lng de URL de Google Maps
+  void _extraerCoordenadas() {
+    final url = _ctrlMapsUrl.text.trim();
+    if (url.isEmpty) return;
+
+    // Formato: .../@LAT,LNG,zoom  o  ...?q=LAT,LNG
+    final patterns = [
+      RegExp(r'/@(-?\d+\.\d+),(-?\d+\.\d+)'),
+      RegExp(r'[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)'),
+      RegExp(r'[?&]ll=(-?\d+\.\d+),(-?\d+\.\d+)'),
+      RegExp(r'maps\?q=(-?\d+\.\d+),(-?\d+\.\d+)'),
+      RegExp(r'(-?\d{1,3}\.\d{4,}),(-?\d{1,3}\.\d{4,})'),
+    ];
+
+    for (final p in patterns) {
+      final m = p.firstMatch(url);
+      if (m != null) {
+        setState(() {
+          _ctrlLat.text = m.group(1)!;
+          _ctrlLng.text = m.group(2)!;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Coords: ${m.group(1)}, ${m.group(2)}'),
+            backgroundColor: Colors.green[700],
+            duration: const Duration(seconds: 2),
+          ),
+        );
+        return;
+      }
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+            'No se pudo extraer coords. Pega el enlace de "Compartir" de Google Maps.'),
+        backgroundColor: Colors.orange,
+      ),
+    );
+  }
+
+  Future<void> _guardar() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _guardando = true);
+
+    final payload = <String, dynamic>{
+      'tipo': _tipo,
+      'zona': _zona,
+      'nombre': _ctrlNombre.text.trim(),
+      'activo': _activo,
+      'numero': _tipo == 'FN' && _ctrlNumero.text.trim().isNotEmpty
+          ? _ctrlNumero.text.trim()
+          : null,
+      'lat': _ctrlLat.text.isNotEmpty
+          ? double.tryParse(_ctrlLat.text.trim())
+          : null,
+      'lng': _ctrlLng.text.isNotEmpty
+          ? double.tryParse(_ctrlLng.text.trim())
+          : null,
+    };
+
+    try {
+      if (widget.sede == null) {
+        await _db.from('fn_sedes').insert(payload);
+      } else {
+        await _db
+            .from('fn_sedes')
+            .update(payload)
+            .eq('id', widget.sede!['id']);
+      }
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'),
+              backgroundColor: Colors.red[700]),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _guardando = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final esNueva = widget.sede == null;
+
+    return AlertDialog(
+      backgroundColor: const Color(0xFF1A1A1A),
+      title: Text(
+        esNueva ? 'Nueva sede' : 'Editar sede',
+        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+      ),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Tipo
+                _label('Tipo'),
+                DropdownButtonFormField<String>(
+                  value: _tipo,
+                  dropdownColor: const Color(0xFF2A2A2A),
+                  style: const TextStyle(color: Colors.white),
+                  decoration: _inputDeco('Tipo de sede'),
+                  items: const [
+                    DropdownMenuItem(value: 'FN', child: Text('FN (Farmanorte)')),
+                    DropdownMenuItem(
+                        value: 'FARMACIA', child: Text('Farmacia externa')),
+                    DropdownMenuItem(
+                        value: 'DEPOSITO', child: Text('Depósito')),
+                  ],
+                  onChanged: (v) => setState(() => _tipo = v!),
+                ),
+                const SizedBox(height: 12),
+
+                // Número (solo FN)
+                if (_tipo == 'FN') ...[
+                  _label('Número de sede FN'),
+                  TextFormField(
+                    controller: _ctrlNumero,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: _inputDeco('Ej: 1, 2, 3...'),
+                    keyboardType: TextInputType.number,
+                    validator: (v) =>
+                        _tipo == 'FN' && (v == null || v.trim().isEmpty)
+                            ? 'Ingresa el número'
+                            : null,
+                  ),
+                  const SizedBox(height: 12),
+                ],
+
+                // Nombre
+                _label('Nombre / descripción'),
+                TextFormField(
+                  controller: _ctrlNombre,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: _inputDeco('Ej: Farmanorte El Centro, Farmazur...'),
+                  validator: (v) =>
+                      (v == null || v.trim().isEmpty) ? 'Ingresa el nombre' : null,
+                ),
+                const SizedBox(height: 12),
+
+                // Zona
+                _label('Zona'),
+                DropdownButtonFormField<String>(
+                  value: _zona,
+                  dropdownColor: const Color(0xFF2A2A2A),
+                  style: const TextStyle(color: Colors.white),
+                  decoration: _inputDeco('Zona'),
+                  items: const [
+                    DropdownMenuItem(value: 'CUCUTA', child: Text('Cúcuta')),
+                    DropdownMenuItem(
+                        value: 'LOS_PATIOS', child: Text('Los Patios')),
+                    DropdownMenuItem(
+                        value: 'V_ROSARIO', child: Text('Villa del Rosario')),
+                  ],
+                  onChanged: (v) => setState(() => _zona = v!),
+                ),
+                const SizedBox(height: 14),
+
+                // Coords desde Google Maps URL
+                _label('Coordenadas (pega enlace de Google Maps)'),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        controller: _ctrlMapsUrl,
+                        style: const TextStyle(color: Colors.white, fontSize: 12),
+                        decoration:
+                            _inputDeco('https://maps.google.com/...').copyWith(
+                          hintStyle:
+                              const TextStyle(color: Colors.white24, fontSize: 11),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton(
+                      onPressed: _extraerCoordenadas,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.indigo[700],
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 14),
+                      ),
+                      child: const Icon(Icons.my_location,
+                          color: Colors.white, size: 18),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+
+                // Lat / Lng manuales
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        controller: _ctrlLat,
+                        style: const TextStyle(color: Colors.white, fontSize: 13),
+                        decoration: _inputDeco('Latitud'),
+                        keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true, signed: true),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextFormField(
+                        controller: _ctrlLng,
+                        style: const TextStyle(color: Colors.white, fontSize: 13),
+                        decoration: _inputDeco('Longitud'),
+                        keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true, signed: true),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+
+                // Activo
+                Row(
+                  children: [
+                    const Text('Activa',
+                        style: TextStyle(color: Colors.white70)),
+                    const Spacer(),
+                    Switch(
+                      value: _activo,
+                      activeColor: Colors.green[400],
+                      onChanged: (v) => setState(() => _activo = v),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar', style: TextStyle(color: Colors.white38)),
+        ),
+        ElevatedButton(
+          onPressed: _guardando ? null : _guardar,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.indigo[700],
+          ),
+          child: _guardando
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white))
+              : Text(esNueva ? 'Crear' : 'Guardar',
+                  style: const TextStyle(color: Colors.white)),
+        ),
+      ],
+    );
+  }
+
+  Widget _label(String texto) => Padding(
+        padding: const EdgeInsets.only(bottom: 4),
+        child: Text(texto,
+            style: const TextStyle(color: Colors.white54, fontSize: 12)),
+      );
+
+  InputDecoration _inputDeco(String hint) => InputDecoration(
+        hintText: hint,
+        hintStyle: const TextStyle(color: Colors.white24),
+        filled: true,
+        fillColor: const Color(0xFF2A2A2A),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide.none,
+        ),
+      );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PESTAÑA: MOTOS FN
+// ═══════════════════════════════════════════════════════════════════════════════
+
+class _MotosTab extends StatefulWidget {
+  const _MotosTab();
+
+  @override
+  State<_MotosTab> createState() => _MotosTabState();
+}
+
+class _MotosTabState extends State<_MotosTab> {
+  final _db = Supabase.instance.client;
+  List<Map<String, dynamic>> _motos = [];
+  List<Map<String, dynamic>> _filtradas = [];
+  bool _cargando = true;
+  final _busqueda = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _cargar();
+    _busqueda.addListener(_filtrar);
+  }
+
+  @override
+  void dispose() {
+    _busqueda.removeListener(_filtrar);
+    _busqueda.dispose();
+    super.dispose();
+  }
+
+  Future<void> _cargar() async {
+    setState(() => _cargando = true);
+    try {
+      final data = await _db
+          .from('usuarios')
+          .select('id, nombre, telefono, tiene_fn, fn_ignorados_hoy, fn_fecha_ignorados')
+          .eq('rol', 'movil')
+          .order('nombre');
+      setState(() {
+        _motos = List<Map<String, dynamic>>.from(data);
+        _filtrar();
+      });
+    } catch (e) {
+      _snack('Error: $e');
+    } finally {
+      setState(() => _cargando = false);
+    }
+  }
+
+  void _filtrar() {
+    final q = _busqueda.text.trim().toLowerCase();
+    setState(() {
+      _filtradas = q.isEmpty
+          ? List.from(_motos)
+          : _motos
+              .where((m) =>
+                  (m['nombre'] as String? ?? '')
+                      .toLowerCase()
+                      .contains(q) ||
+                  (m['telefono'] as String? ?? '').contains(q))
+              .toList();
+    });
+  }
+
+  Future<void> _toggleFn(Map<String, dynamic> moto) async {
+    final nuevo = !(moto['tiene_fn'] as bool? ?? false);
+    try {
+      await _db
+          .from('usuarios')
+          .update({'tiene_fn': nuevo})
+          .eq('id', moto['id']);
+      final i = _motos.indexWhere((m) => m['id'] == moto['id']);
+      if (i >= 0) {
+        setState(() => _motos[i] = {..._motos[i], 'tiene_fn': nuevo});
+        _filtrar();
+      }
+    } catch (e) {
+      _snack('Error: $e');
+    }
+  }
+
+  Future<void> _resetIgnorados(Map<String, dynamic> moto) async {
+    try {
+      await _db.from('usuarios').update({
+        'fn_ignorados_hoy': 0,
+        'fn_fecha_ignorados': DateTime.now().toIso8601String().substring(0, 10),
+      }).eq('id', moto['id']);
+      final i = _motos.indexWhere((m) => m['id'] == moto['id']);
+      if (i >= 0) {
+        setState(() => _motos[i] = {
+              ..._motos[i],
+              'fn_ignorados_hoy': 0,
+            });
+        _filtrar();
+      }
+    } catch (e) {
+      _snack('Error: $e');
+    }
+  }
+
+  Future<void> _resetTodos() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Resetear todos'),
+        content: const Text(
+            '¿Resetear el contador de ignorados de todos los motos?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Resetear',
+                  style: TextStyle(color: Colors.orange))),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await _db.from('usuarios').update({
+        'fn_ignorados_hoy': 0,
+        'fn_fecha_ignorados': DateTime.now().toIso8601String().substring(0, 10),
+      }).eq('rol', 'movil');
+      _cargar();
+    } catch (e) {
+      _snack('Error: $e');
+    }
+  }
+
+  void _snack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_cargando) {
+      return const Center(
+          child: CircularProgressIndicator(color: Colors.indigo));
+    }
+
+    final totalFn = _motos.where((m) => m['tiene_fn'] == true).length;
+
+    return Column(
+      children: [
+        // Header con stats y botón reset todos
+        Container(
+          color: const Color(0xFF111111),
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+          child: Row(
+            children: [
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: Colors.indigo[900],
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '$totalFn moto${totalFn == 1 ? '' : 's'} FN',
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13),
+                ),
+              ),
+              const Spacer(),
+              TextButton.icon(
+                onPressed: _resetTodos,
+                icon: const Icon(Icons.refresh,
+                    color: Colors.orange, size: 16),
+                label: const Text('Reset todos',
+                    style: TextStyle(color: Colors.orange, fontSize: 12)),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 6),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // Buscador
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+          child: TextField(
+            controller: _busqueda,
+            style: const TextStyle(color: Colors.white),
+            decoration: InputDecoration(
+              hintText: 'Buscar moto...',
+              hintStyle: const TextStyle(color: Colors.white24),
+              prefixIcon:
+                  const Icon(Icons.search, color: Colors.white38),
+              filled: true,
+              fillColor: const Color(0xFF1A1A1A),
+              contentPadding: const EdgeInsets.symmetric(vertical: 0),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide.none,
+              ),
+            ),
+          ),
+        ),
+
+        // Lista
+        Expanded(
+          child: _filtradas.isEmpty
+              ? const Center(
+                  child: Text('Sin resultados',
+                      style: TextStyle(color: Colors.white38)))
+              : ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(12, 6, 12, 20),
+                  itemCount: _filtradas.length,
+                  itemBuilder: (_, i) => _MotoFnCard(
+                    moto: _filtradas[i],
+                    onToggleFn: () => _toggleFn(_filtradas[i]),
+                    onResetIgnorados: () =>
+                        _resetIgnorados(_filtradas[i]),
+                  ),
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─── Tarjeta de moto FN ───────────────────────────────────────────────────────
+
+class _MotoFnCard extends StatelessWidget {
+  final Map<String, dynamic> moto;
+  final VoidCallback onToggleFn;
+  final VoidCallback onResetIgnorados;
+
+  const _MotoFnCard({
+    required this.moto,
+    required this.onToggleFn,
+    required this.onResetIgnorados,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final tieneFn = moto['tiene_fn'] as bool? ?? false;
+    final ignorados = moto['fn_ignorados_hoy'] as int? ?? 0;
+    final nombre = moto['nombre'] as String? ?? '—';
+    final telefono = moto['telefono'] as String? ?? '';
+
+    return Card(
+      color: const Color(0xFF1A1A1A),
+      shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      margin: const EdgeInsets.only(bottom: 8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        child: Row(
+          children: [
+            // Avatar / indicador FN
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: tieneFn
+                    ? Colors.indigo[900]!.withValues(alpha: 0.5)
+                    : const Color(0xFF2A2A2A),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(
+                Icons.two_wheeler,
+                color: tieneFn ? Colors.indigo[300] : Colors.white24,
+                size: 22,
+              ),
+            ),
+            const SizedBox(width: 12),
+
+            // Info
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    nombre,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14),
+                  ),
+                  if (telefono.isNotEmpty)
+                    Text(telefono,
+                        style: const TextStyle(
+                            color: Colors.white38, fontSize: 11)),
+                ],
+              ),
+            ),
+
+            // Ignorados hoy
+            if (ignorados > 0)
+              GestureDetector(
+                onTap: onResetIgnorados,
+                child: Container(
+                  margin: const EdgeInsets.only(right: 10),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: ignorados >= 5
+                        ? Colors.red[900]
+                        : Colors.orange[900],
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '$ignorados',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15),
+                      ),
+                      const Text(
+                        'ign.',
+                        style: TextStyle(
+                            color: Colors.white54, fontSize: 9),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+            // Toggle FN
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Switch(
+                  value: tieneFn,
+                  activeColor: Colors.indigo[300],
+                  onChanged: (_) => onToggleFn(),
+                ),
+                Text(
+                  tieneFn ? 'FN' : 'Off',
+                  style: TextStyle(
+                      color: tieneFn ? Colors.indigo[300] : Colors.white24,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

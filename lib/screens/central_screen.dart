@@ -19,6 +19,7 @@ import 'package:serviexpress_app/utils/sonido_manager.dart'; // SONIDOS: motor d
 import 'package:serviexpress_app/utils/panico_widgets.dart'; // Botón de pánico
 import 'package:serviexpress_app/utils/campo_tarifa_inteligente.dart'; // Motor de tarifas
 import 'package:serviexpress_app/services/ota_updater.dart'; // OTA updates
+import 'package:serviexpress_app/screens/fn_panel_screen.dart'; // Panel FN Farmanorte
 part 'central_panel_precios.dart';
 part 'central_corte_financiero.dart';
 part 'central_gestion_usuarios.dart';
@@ -3138,6 +3139,446 @@ class _CentralScreenState extends State<CentralScreen>
     );
   }
 
+  // ─── HELPERS FN ────────────────────────────────────────────────────────────
+
+  String _fnLabelZona(String z) {
+    switch (z) {
+      case 'CUCUTA':
+        return 'Cúcuta';
+      case 'LOS_PATIOS':
+        return 'Los Patios';
+      case 'V_ROSARIO':
+        return 'Villa del Rosario';
+      default:
+        return z;
+    }
+  }
+
+  String _fnLabelSede(Map<String, dynamic> s) {
+    final tipo = s['tipo'] as String;
+    final nombre = s['nombre'] as String;
+    if (tipo == 'FN') return 'FN #${s['numero']} – $nombre';
+    return '$tipo – $nombre';
+  }
+
+  // ─── FORMULARIO FN ─────────────────────────────────────────────────────────
+  // Crea un servicio FARMANORTE con cascada FN de 2 olas:
+  //   T=0   → FN motos dentro de 2km de la sede (si vacío → todos)
+  //   T+31s → Todos los FN motos (solo si T=0 fue subconjunto)
+
+  void _abrirFormularioFN(BuildContext context) async {
+    // ── Cargar sedes activas ──────────────────────────────────────────────────
+    List<Map<String, dynamic>> sedes = [];
+    try {
+      sedes = List<Map<String, dynamic>>.from(
+        await Supabase.instance.client
+            .from('fn_sedes')
+            .select()
+            .eq('activo', true)
+            .order('tipo')
+            .order('numero', nullsFirst: false)
+            .order('nombre'),
+      );
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error cargando sedes FN: $e')));
+      }
+      return;
+    }
+
+    if (!context.mounted) return;
+
+    if (sedes.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No hay sedes FN activas. Créalas en Gestión → Farmanorte FN.')),
+      );
+      return;
+    }
+
+    // ── Estado del diálogo ────────────────────────────────────────────────────
+    Map<String, dynamic>? sedeSeleccionada = sedes.first;
+    final Set<int> recogidasIds = {};
+    final destinoCtrl = TextEditingController();
+    final tarifaCtrl = TextEditingController();
+    bool procesando = false;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          // Recogidas = sedes distintas de la sede principal
+          final opcionesRecogida = sedes
+              .where((s) => s['id'] != sedeSeleccionada?['id'])
+              .toList();
+
+          return AlertDialog(
+            insetPadding: const EdgeInsets.symmetric(
+                horizontal: 12, vertical: 24),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12)),
+            backgroundColor: Colors.white,
+            title: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: Colors.indigo[900],
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.local_pharmacy,
+                      color: Colors.white, size: 18),
+                ),
+                const SizedBox(width: 10),
+                const Text(
+                  'SERVICIO FARMANORTE',
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 15),
+                ),
+              ],
+            ),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // ── Sede principal ──────────────────────────────────────
+                    const Text('Recoge en:',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black54,
+                            fontSize: 12)),
+                    const SizedBox(height: 4),
+                    DropdownButtonFormField<Map<String, dynamic>>(
+                      value: sedeSeleccionada,
+                      isExpanded: true,
+                      decoration: InputDecoration(
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8)),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                      ),
+                      items: sedes
+                          .map((s) => DropdownMenuItem(
+                                value: s,
+                                child: Text(
+                                  _fnLabelSede(s),
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 13),
+                                ),
+                              ))
+                          .toList(),
+                      onChanged: (v) => setDialogState(() {
+                        sedeSeleccionada = v;
+                        recogidasIds.clear();
+                      }),
+                    ),
+
+                    // Zona auto-fill (solo lectura)
+                    if (sedeSeleccionada != null) ...[
+                      const SizedBox(height: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: Colors.indigo[50],
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.location_on_outlined,
+                                size: 14, color: Colors.indigo[700]),
+                            const SizedBox(width: 4),
+                            Text(
+                              _fnLabelZona(
+                                  sedeSeleccionada!['zona'] as String),
+                              style: TextStyle(
+                                  color: Colors.indigo[800],
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+
+                    const SizedBox(height: 14),
+
+                    // ── Puntos de recogida adicionales ──────────────────────
+                    if (opcionesRecogida.isNotEmpty) ...[
+                      const Text('Puntos adicionales de recogida:',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black54,
+                              fontSize: 12)),
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        children: opcionesRecogida.map((s) {
+                          final id = s['id'] as int;
+                          final sel = recogidasIds.contains(id);
+                          return FilterChip(
+                            label: Text(
+                              _fnLabelSede(s),
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: sel
+                                    ? Colors.white
+                                    : Colors.black87,
+                              ),
+                            ),
+                            selected: sel,
+                            selectedColor: Colors.indigo[700],
+                            checkmarkColor: Colors.white,
+                            backgroundColor: Colors.grey[100],
+                            onSelected: (v) => setDialogState(() =>
+                                v ? recogidasIds.add(id) : recogidasIds.remove(id)),
+                          );
+                        }).toList(),
+                      ),
+                      const SizedBox(height: 14),
+                    ],
+
+                    // ── Destino ─────────────────────────────────────────────
+                    const Text('Destino:',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black54,
+                            fontSize: 12)),
+                    const SizedBox(height: 4),
+                    TextField(
+                      controller: destinoCtrl,
+                      textCapitalization: TextCapitalization.characters,
+                      decoration: InputDecoration(
+                        hintText: 'Dirección o barrio de entrega',
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8)),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 10),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // ── Tarifa ──────────────────────────────────────────────
+                    const Text('Tarifa:',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black54,
+                            fontSize: 12)),
+                    const SizedBox(height: 4),
+                    TextField(
+                      controller: tarifaCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        hintText: '\$0',
+                        prefixIcon: const Icon(Icons.attach_money),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8)),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 10),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed:
+                    procesando ? null : () => Navigator.pop(context),
+                child: const Text('Cancelar'),
+              ),
+              ElevatedButton(
+                onPressed: procesando
+                    ? null
+                    : () async {
+                        if (sedeSeleccionada == null) return;
+                        if (destinoCtrl.text.trim().isEmpty) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                                content: Text('Ingresa el destino')),
+                          );
+                          return;
+                        }
+                        final tarifa = double.tryParse(
+                                tarifaCtrl.text.replaceAll(',', '.')) ??
+                            0;
+
+                        setDialogState(() => procesando = true);
+
+                        try {
+                          final sede = sedeSeleccionada!;
+                          final zona = sede['zona'] as String;
+                          final zonaLabel = _fnLabelZona(zona);
+                          final sLat = (sede['lat'] as num?)?.toDouble();
+                          final sLng = (sede['lng'] as num?)?.toDouble();
+                          final nombreSede = _fnLabelSede(sede);
+
+                          // Recogidas: lista de mapas de las sedes seleccionadas
+                          final recogidasList = sedes
+                              .where((s) =>
+                                  recogidasIds.contains(s['id'] as int))
+                              .map((s) => {
+                                    'id': s['id'],
+                                    'tipo': s['tipo'],
+                                    'nombre': s['nombre'],
+                                    'numero': s['numero'],
+                                    'zona': s['zona'],
+                                    'lat': s['lat'],
+                                    'lng': s['lng'],
+                                  })
+                              .toList();
+
+                          // ── Cargar FN motos online ─────────────────────────
+                          final movilesConFn = await Supabase
+                              .instance.client
+                              .from('usuarios')
+                              .select('id, latitud, longitud')
+                              .eq('rol', 'movil')
+                              .eq('en_linea', true)
+                              .eq('tiene_fn', true)
+                              .neq('suspendido', true);
+
+                          final idsTodos = (movilesConFn as List)
+                              .map<String>((m) => m['id'].toString())
+                              .toList();
+
+                          // ── Calcular ola 1: 2km desde la sede ─────────────
+                          List<String> ids2km = [];
+                          if (sLat != null && sLng != null) {
+                            ids2km = movilesConFn.where((u) {
+                              final uLat =
+                                  (u['latitud'] as num?)?.toDouble();
+                              final uLng =
+                                  (u['longitud'] as num?)?.toDouble();
+                              if (uLat == null || uLng == null) return false;
+                              return const Distance().as(
+                                    LengthUnit.Meter,
+                                    LatLng(uLat, uLng),
+                                    LatLng(sLat, sLng),
+                                  ) <=
+                                  2000;
+                            }).map<String>((u) => u['id'].toString()).toList();
+                          }
+
+                          final wave1Ids =
+                              ids2km.isNotEmpty ? ids2km : idsTodos;
+                          // Ola 2 solo si ola 1 fue subconjunto
+                          final wave2Needed = ids2km.isNotEmpty &&
+                              ids2km.length < idsTodos.length;
+
+                          // ── T=0: Disparo ola 1 ─────────────────────────────
+                          if (wave1Ids.isNotEmpty) {
+                            await MotorNotificaciones.dispararRafa(
+                              idsDestinos: wave1Ids,
+                              titulo: '🟢 TURNO FARMANORTE',
+                              mensaje: 'Servicio FN · $zonaLabel',
+                              urgente: true,
+                              sonido: Sonidos.movilParadero,
+                            );
+                          }
+
+                          // ── Insertar servicio ──────────────────────────────
+                          final insertedSvc = await Supabase
+                              .instance.client
+                              .from('servicios')
+                              .insert({
+                                'origen': nombreSede,
+                                'destino': destinoCtrl.text
+                                    .trim()
+                                    .toUpperCase(),
+                                'tarifa': tarifa,
+                                'estado':
+                                    tarifa > 0 ? 'pendiente' : 'cotizacion',
+                                'creador': 'Central FN',
+                                'tipo_servicio': 'FARMANORTE',
+                                'tipo_fn': true,
+                                'zona_fn': zona,
+                                'fn_sede_id': sede['id'],
+                                'recogidas': recogidasList,
+                                'fn_primera_ola': wave1Ids,
+                                'metodo_pago': 'Efectivo',
+                                'archivado': false,
+                                if (sLat != null) 'origen_lat': sLat,
+                                if (sLng != null) 'origen_lng': sLng,
+                              })
+                              .select('id')
+                              .single();
+
+                          final int nuevoId =
+                              (insertedSvc['id'] as num).toInt();
+
+                          // ── T+31s: Disparo ola 2 (todos FN) ───────────────
+                          if (wave2Needed && idsTodos.isNotEmpty) {
+                            final id31s = await MotorNotificaciones
+                                .programarMisilRetardado(
+                              externalIds: idsTodos,
+                              titulo: '🟡 TURNO FARMANORTE',
+                              mensaje:
+                                  'Servicio FN sin tomar · $zonaLabel',
+                              segundosRetardo: 31,
+                              sonido: Sonidos.movilParadero,
+                            );
+                            if (id31s != null) {
+                              await Supabase.instance.client
+                                  .from('servicios')
+                                  .update({'onesignal_30s': id31s})
+                                  .eq('id', nuevoId);
+                            }
+                          }
+
+                          if (context.mounted) {
+                            Navigator.pop(context);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  wave1Ids.isEmpty
+                                      ? 'Servicio FN creado (sin motos FN en línea)'
+                                      : 'Servicio FN enviado a ${wave1Ids.length} moto${wave1Ids.length == 1 ? '' : 's'}',
+                                ),
+                                backgroundColor: Colors.indigo[700],
+                              ),
+                            );
+                          }
+                        } catch (e) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Error: $e'),
+                                backgroundColor: Colors.red[700],
+                              ),
+                            );
+                            setDialogState(() => procesando = false);
+                          }
+                        }
+                      },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.indigo[900],
+                ),
+                child: procesando
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Text('ENVIAR AL RADAR',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold)),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   void _mostrarMenuAsignacion(BuildContext contextoPrincipal, int servicioId) {
     showDialog(
       context: contextoPrincipal,
@@ -5133,8 +5574,130 @@ class _CentralScreenState extends State<CentralScreen>
                         .where((m) => m['suspendido'] == true)
                         .toList();
 
+                    // ── MOTOS FN FARMANORTE ─────────────────────────────────
+                    final motosFn = moviles
+                        .where(
+                          (m) =>
+                              m['tiene_fn'] == true &&
+                              m['en_linea'] == true &&
+                              m['suspendido'] != true,
+                        )
+                        .toList();
+
                     return ListView(
                       children: [
+                        // ── SECCIÓN FARMANORTE ──────────────────────────────
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          color: Colors.indigo[900],
+                          child: Row(
+                            children: [
+                              const Icon(Icons.local_pharmacy,
+                                  color: Colors.white, size: 13),
+                              const SizedBox(width: 6),
+                              const Expanded(
+                                child: Text(
+                                  'FARMANORTE',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ),
+                              Container(
+                                margin: const EdgeInsets.only(right: 6),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 7, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: motosFn.isNotEmpty
+                                      ? Colors.white24
+                                      : Colors.white10,
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Text(
+                                  '${motosFn.length}',
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (motosFn.isEmpty)
+                          const Padding(
+                            padding: EdgeInsets.all(8),
+                            child: Text(
+                              'Sin motos FN en línea',
+                              style: TextStyle(color: Colors.grey, fontSize: 11),
+                            ),
+                          )
+                        else
+                          ...motosFn.map((m) => FadeSlideIn(
+                                key: ValueKey('fn_${m['id']}'),
+                                child: ListTile(
+                                  dense: true,
+                                  leading: Stack(
+                                    clipBehavior: Clip.none,
+                                    children: [
+                                      CircleAvatar(
+                                        radius: 12,
+                                        backgroundColor: Colors.indigo[900],
+                                        child: Text(
+                                          _extraerNumeroAvatar(m),
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                      Positioned(
+                                        right: -4,
+                                        bottom: -3,
+                                        child: Container(
+                                          width: 12,
+                                          height: 12,
+                                          decoration: BoxDecoration(
+                                            color: Colors.indigo[700],
+                                            shape: BoxShape.circle,
+                                            border: Border.all(
+                                                color: Colors.white, width: 1),
+                                          ),
+                                          child: const Icon(
+                                              Icons.local_pharmacy,
+                                              size: 7,
+                                              color: Colors.white),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  title: Text(
+                                    m['nombre'].toString().toUpperCase(),
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12,
+                                      color: Colors.indigo[900],
+                                    ),
+                                  ),
+                                  subtitle: Text(
+                                    '${m['rango_movil'] ?? 'NOVATO'} · ${m['fn_ignorados_hoy'] ?? 0} ign. hoy',
+                                    style: const TextStyle(
+                                        fontSize: 10, color: Colors.black54),
+                                  ),
+                                  onTap: () =>
+                                      _abrirMenuAccionesMovil(context, m),
+                                ),
+                              )),
+
+                        const Divider(height: 4, color: Colors.transparent),
+                        // ── FIN SECCIÓN FN ──────────────────────────────────
+
                         Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 8,
@@ -5216,18 +5779,7 @@ class _CentralScreenState extends State<CentralScreen>
                               key: ValueKey('exp_${m['id']}'),
                               child: ListTile(
                                 dense: true,
-                                leading: CircleAvatar(
-                                  radius: 12,
-                                  backgroundColor: Colors.blue[800],
-                                  child: Text(
-                                    _extraerNumeroAvatar(m),
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
+                                leading: _paraderoMovilLeading(m, Colors.blue[800]!),
                                 title: Text(
                                   '#$idx. ${m['nombre'].toString().toUpperCase()}',
                                   style: const TextStyle(
@@ -5343,18 +5895,7 @@ class _CentralScreenState extends State<CentralScreen>
                               key: ValueKey('memos_${m['id']}'),
                               child: ListTile(
                                 dense: true,
-                                leading: CircleAvatar(
-                                  radius: 12,
-                                  backgroundColor: Colors.purple[800],
-                                  child: Text(
-                                    _extraerNumeroAvatar(m),
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
+                                leading: _paraderoMovilLeading(m, Colors.purple[800]!),
                                 title: Text(
                                   '#$idx. ${m['nombre'].toString().toUpperCase()}',
                                   style: const TextStyle(
@@ -5472,18 +6013,7 @@ class _CentralScreenState extends State<CentralScreen>
                               key: ValueKey('noc_${m['id']}'),
                               child: ListTile(
                                 dense: true,
-                                leading: CircleAvatar(
-                                  radius: 12,
-                                  backgroundColor: Colors.indigo[400],
-                                child: Text(
-                                  _extraerNumeroAvatar(m),
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
+                                leading: _paraderoMovilLeading(m, Colors.indigo[400]!),
                               title: Text(
                                 '#$idx. ${m['nombre'].toString().toUpperCase()}',
                                 style: const TextStyle(
@@ -5687,18 +6217,7 @@ class _CentralScreenState extends State<CentralScreen>
                               .map(
                                 (m) => ListTile(
                                   dense: true,
-                                  leading: CircleAvatar(
-                                    radius: 12,
-                                    backgroundColor: Colors.green[600],
-                                    child: Text(
-                                      _extraerNumeroAvatar(m),
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
+                                  leading: _paraderoMovilLeading(m, Colors.green[600]!),
                                   title: Text(
                                     m['nombre'].toString().toUpperCase(),
                                     style: const TextStyle(
@@ -5761,18 +6280,7 @@ class _CentralScreenState extends State<CentralScreen>
                             color: Colors.transparent,
                             child: ListTile(
                               dense: true,
-                              leading: CircleAvatar(
-                                radius: 12,
-                                backgroundColor: Colors.red[800],
-                                child: Text(
-                                  _extraerNumeroAvatar(movil),
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
+                              leading: _paraderoMovilLeading(movil, Colors.red[800]!),
                               title: Text(
                                 movil['nombre'] ?? 'Desconocido',
                                 style: TextStyle(
@@ -5888,18 +6396,7 @@ class _CentralScreenState extends State<CentralScreen>
                                   color: Colors.transparent,
                                   child: ListTile(
                                     dense: true,
-                                    leading: CircleAvatar(
-                                      radius: 12,
-                                      backgroundColor: Colors.grey[500],
-                                      child: Text(
-                                        _extraerNumeroAvatar(movil),
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ),
+                                    leading: _paraderoMovilLeading(movil, Colors.grey[500]!),
                                     title: Row(
                                       mainAxisAlignment:
                                           MainAxisAlignment.spaceBetween,
@@ -7258,6 +7755,40 @@ class _CentralScreenState extends State<CentralScreen>
     );
   }
 
+  // ── Avatar de moto en paradero — muestra badge FN en azul marino ────────────
+  Widget _paraderoMovilLeading(Map<String, dynamic> m, Color colorBase) {
+    final esFn = m['tiene_fn'] == true;
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        CircleAvatar(
+          radius: 12,
+          backgroundColor: esFn ? Colors.indigo[900]! : colorBase,
+          child: Text(
+            _extraerNumeroAvatar(m),
+            style: const TextStyle(
+                color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+          ),
+        ),
+        if (esFn)
+          Positioned(
+            right: -4,
+            bottom: -3,
+            child: Container(
+              width: 11,
+              height: 11,
+              decoration: BoxDecoration(
+                color: Colors.indigo[600],
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 1),
+              ),
+              child: const Icon(Icons.local_pharmacy, size: 6, color: Colors.white),
+            ),
+          ),
+      ],
+    );
+  }
+
   Widget _tarjetaGestionConBadge({
     required IconData icono,
     required Color color,
@@ -7397,6 +7928,18 @@ class _CentralScreenState extends State<CentralScreen>
                         context,
                         MaterialPageRoute(
                           builder: (_) => MonitorPedidosScreen(usuario: widget.usuario!),
+                        ),
+                      ),
+                    ),
+                    _tarjetaGestion(
+                      icono: Icons.local_pharmacy,
+                      color: Colors.indigo[900]!,
+                      titulo: 'Farmanorte FN',
+                      subtitulo: 'Sedes, motos FN e ignorados del día',
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const FnPanelScreen(),
                         ),
                       ),
                     ),
@@ -8423,6 +8966,20 @@ class _CentralScreenState extends State<CentralScreen>
         elevation: 0,
         actions: esPantallaGrande
             ? [
+                // Botón FN Farmanorte
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.indigo[900],
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: () => _abrirFormularioFN(context),
+                  icon: const Icon(Icons.local_pharmacy, size: 18),
+                  label: const Text(
+                    'FN',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+                const SizedBox(width: 6),
                 ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xff3AF500),
@@ -8463,6 +9020,12 @@ class _CentralScreenState extends State<CentralScreen>
                 const SizedBox(width: 8),
               ]
             : [
+                // Botón FN compacto
+                IconButton(
+                  icon: Icon(Icons.local_pharmacy, color: Colors.indigo[300]),
+                  tooltip: 'Servicio Farmanorte',
+                  onPressed: () => _abrirFormularioFN(context),
+                ),
                 IconButton(
                   icon: const Icon(Icons.add_box, color: Color(0xff3AF500)),
                   onPressed: () => _abrirFormularioDespacho(context),
