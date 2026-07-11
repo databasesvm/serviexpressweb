@@ -3214,7 +3214,7 @@ class _CentralScreenState extends State<CentralScreen>
     // Helper: dropdown de sedes ordenadas
     Widget _dropdownSede({
       required Map<String, dynamic> value,
-      required void Function(Map<String, dynamic>?) onChanged,
+      void Function(Map<String, dynamic>?)? onChanged,
       String? label,
     }) =>
         DropdownButtonFormField<Map<String, dynamic>>(
