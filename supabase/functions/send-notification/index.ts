@@ -1,10 +1,14 @@
 // supabase/functions/send-notification/index.ts
 // Proxy entre Flutter y OneSignal.
-// La REST API Key vive aquí como secret (ONESIGNAL_REST_KEY) — nunca en el APK.
+// La REST API Key vive aquí como secret (ONESIGNAL_REST_API_KEY) — nunca en el APK.
 //
 // Acciones:
 //   POST { action: 'cancel', notification_id: '...' }  → cancela un misil programado
 //   POST { app_id, include_external_user_ids, ... }     → dispara notificación normal
+//
+// FORMATO DE AUTH:
+//   Claves nuevas (os_v2_...)  → Authorization: Key <clave>
+//   Claves legacy              → Authorization: Basic <clave>
 
 const ONESIGNAL_APP_ID = '207d1d0a-0218-46e0-9f35-7d8d88f6765a';
 const ONESIGNAL_API   = 'https://onesignal.com/api/v1/notifications';
@@ -20,6 +24,11 @@ Deno.serve(async (req: Request) => {
   }
 
   const restKey = Deno.env.get('ONESIGNAL_REST_API_KEY') ?? '';
+
+  // Claves nuevas (os_v2_...) usan "Key", legacy usan "Basic"
+  const authHeader = restKey.startsWith('os_v2_')
+    ? `Key ${restKey}`
+    : `Basic ${restKey}`;
 
   try {
     const body = await req.json();
@@ -37,7 +46,7 @@ Deno.serve(async (req: Request) => {
         `${ONESIGNAL_API}/${notifId}?app_id=${ONESIGNAL_APP_ID}`,
         {
           method: 'DELETE',
-          headers: { Authorization: `Basic ${restKey}` },
+          headers: { Authorization: authHeader },
         },
       );
 
@@ -49,12 +58,10 @@ Deno.serve(async (req: Request) => {
     }
 
     // ── ACCIÓN: DISPARO NORMAL ─────────────────────────────────────────────
-    // Asegurar que el app_id venga correcto (por si el cliente no lo envía)
     body.app_id = ONESIGNAL_APP_ID;
 
-    // FIX CRÍTICO: cuando se usan include_external_user_ids, la API v1 de
-    // OneSignal requiere channel_for_external_user_ids = 'push'. Sin este
-    // campo la solicitud devuelve 200 OK pero recipients = 0 (silencio total).
+    // FIX CRÍTICO: include_external_user_ids requiere channel_for_external_user_ids='push'
+    // en la API v1 de OneSignal. Sin este campo devuelve 200 OK pero recipients = 0.
     if (body.include_external_user_ids && !body.channel_for_external_user_ids) {
       body.channel_for_external_user_ids = 'push';
     }
@@ -63,7 +70,7 @@ Deno.serve(async (req: Request) => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json; charset=utf-8',
-        Authorization: `Basic ${restKey}`,
+        Authorization: authHeader,
       },
       body: JSON.stringify(body),
     });
