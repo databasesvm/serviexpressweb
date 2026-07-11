@@ -4,9 +4,10 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:dio/dio.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Panel FN – dos pestañas:
-//   • Sedes   → CRUD de fn_sedes (FN numeradas, FARMACIA, DEPOSITO)
-//   • Motos   → Motos disponibles, toggle tiene_fn, contador ignorados del día
+// Panel FN – tres pestañas:
+//   • Sedes     → CRUD de fn_sedes (FN numeradas, FARMACIA, DEPOSITO)
+//   • Motos FN  → Motos disponibles, toggle tiene_fn, contador ignorados del día
+//   • Historial → Servicios tipo_fn=true, ordenados por fecha desc
 // ─────────────────────────────────────────────────────────────────────────────
 
 class FnPanelScreen extends StatefulWidget {
@@ -23,7 +24,7 @@ class _FnPanelScreenState extends State<FnPanelScreen>
   @override
   void initState() {
     super.initState();
-    _tab = TabController(length: 2, vsync: this);
+    _tab = TabController(length: 3, vsync: this);
   }
 
   @override
@@ -52,6 +53,7 @@ class _FnPanelScreenState extends State<FnPanelScreen>
           tabs: const [
             Tab(icon: Icon(Icons.local_pharmacy_outlined), text: 'Sedes'),
             Tab(icon: Icon(Icons.two_wheeler), text: 'Motos FN'),
+            Tab(icon: Icon(Icons.history_rounded), text: 'Historial'),
           ],
         ),
       ),
@@ -60,6 +62,7 @@ class _FnPanelScreenState extends State<FnPanelScreen>
         children: const [
           _SedesTab(),
           _MotosTab(),
+          _HistorialTab(),
         ],
       ),
     );
@@ -1124,5 +1127,361 @@ class _MotoFnCard extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PESTAÑA: HISTORIAL FN
+// ═══════════════════════════════════════════════════════════════════════════════
+
+class _HistorialTab extends StatefulWidget {
+  const _HistorialTab();
+
+  @override
+  State<_HistorialTab> createState() => _HistorialTabState();
+}
+
+class _HistorialTabState extends State<_HistorialTab> {
+  final _db = Supabase.instance.client;
+  List<Map<String, dynamic>> _servicios = [];
+  Map<String, String> _nombreMoviles = {};
+  bool _cargando = true;
+  String _filtroEstado = 'todos';
+
+  static const _filtros = [
+    ('todos', 'Todos'),
+    ('pendiente', 'Pendiente'),
+    ('confirmado', 'Confirmado'),
+    ('completado', 'Completado'),
+    ('cancelado', 'Cancelado'),
+    ('cotizacion', 'Cotización'),
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _cargar();
+  }
+
+  Future<void> _cargar() async {
+    setState(() => _cargando = true);
+    try {
+      final data = await _db
+          .from('servicios')
+          .select()
+          .eq('tipo_fn', true)
+          .order('id', ascending: false)
+          .limit(300);
+
+      final lista = List<Map<String, dynamic>>.from(data);
+
+      // Cargar nombres de motos en lote
+      final ids = lista
+          .where((s) => s['movil_id'] != null)
+          .map((s) => s['movil_id'].toString())
+          .toSet()
+          .toList();
+
+      if (ids.isNotEmpty) {
+        final motos = await _db
+            .from('usuarios')
+            .select('id, nombre')
+            .inFilter('id', ids);
+        _nombreMoviles = {
+          for (final m in List<Map<String, dynamic>>.from(motos))
+            m['id'].toString(): (m['nombre'] as String? ?? '—')
+        };
+      }
+
+      setState(() => _servicios = lista);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error cargando historial: $e')));
+      }
+    } finally {
+      setState(() => _cargando = false);
+    }
+  }
+
+  List<Map<String, dynamic>> get _filtrados {
+    if (_filtroEstado == 'todos') return _servicios;
+    return _servicios.where((s) => s['estado'] == _filtroEstado).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        // ── Chips de filtro ───────────────────────────────────────────
+        Container(
+          color: const Color(0xFF0F0F0F),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                for (final (val, label) in _filtros)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: ChoiceChip(
+                      label: Text(label,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: _filtroEstado == val
+                                ? Colors.white
+                                : Colors.white54,
+                          )),
+                      selected: _filtroEstado == val,
+                      onSelected: (_) =>
+                          setState(() => _filtroEstado = val),
+                      selectedColor: Colors.indigo[800],
+                      backgroundColor: const Color(0xFF2A2A2A),
+                      side: BorderSide.none,
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+
+        // ── Lista ─────────────────────────────────────────────────────
+        Expanded(
+          child: _cargando
+              ? const Center(
+                  child: CircularProgressIndicator(color: Colors.indigo))
+              : _filtrados.isEmpty
+                  ? const Center(
+                      child: Text('Sin servicios FN registrados',
+                          style: TextStyle(color: Colors.white38)))
+                  : RefreshIndicator(
+                      onRefresh: _cargar,
+                      color: Colors.indigo,
+                      child: ListView.builder(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        itemCount: _filtrados.length,
+                        itemBuilder: (ctx, i) => _CardServicioFN(
+                          servicio: _filtrados[i],
+                          nombreMovil: _nombreMoviles[
+                              _filtrados[i]['movil_id']?.toString()],
+                        ),
+                      ),
+                    ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Card de servicio FN
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _CardServicioFN extends StatelessWidget {
+  final Map<String, dynamic> servicio;
+  final String? nombreMovil;
+
+  const _CardServicioFN({required this.servicio, this.nombreMovil});
+
+  @override
+  Widget build(BuildContext context) {
+    final estado = servicio['estado'] as String? ?? '';
+    final origen = servicio['origen'] as String? ?? '—';
+    final destino = (servicio['destino'] as String? ?? '').trim();
+    final tarifa = (servicio['tarifa'] as num?)?.toInt() ?? 0;
+    final id = servicio['id'];
+
+    DateTime? fecha;
+    try {
+      fecha =
+          DateTime.parse(servicio['created_at'] as String? ?? '').toLocal();
+    } catch (_) {}
+
+    final recogidas = servicio['recogidas'];
+    final recogidasList =
+        recogidas is List ? recogidas : <dynamic>[];
+
+    final color = _colorEstado(estado);
+
+    return Card(
+      color: const Color(0xFF1A1A1A),
+      margin: const EdgeInsets.only(bottom: 8),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: color.withValues(alpha: 0.35), width: 1),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Encabezado: ID · estado · fecha ──────────────────────
+            Row(
+              children: [
+                Text('#$id',
+                    style: const TextStyle(
+                        color: Colors.white38, fontSize: 11)),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: color, width: 0.6),
+                  ),
+                  child: Text(
+                    estado.toUpperCase(),
+                    style: TextStyle(
+                        color: color,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold),
+                  ),
+                ),
+                const Spacer(),
+                if (fecha != null)
+                  Text(_formatFecha(fecha),
+                      style: const TextStyle(
+                          color: Colors.white38, fontSize: 11)),
+              ],
+            ),
+            const SizedBox(height: 8),
+
+            // ── Sede origen ───────────────────────────────────────────
+            Row(
+              children: [
+                Icon(Icons.local_pharmacy_outlined,
+                    color: Colors.indigo[300], size: 14),
+                const SizedBox(width: 5),
+                Expanded(
+                  child: Text(origen,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13),
+                      overflow: TextOverflow.ellipsis),
+                ),
+              ],
+            ),
+
+            // ── Destino ───────────────────────────────────────────────
+            if (destino.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  const Icon(Icons.place_outlined,
+                      color: Colors.white38, size: 14),
+                  const SizedBox(width: 5),
+                  Expanded(
+                    child: Text(destino,
+                        style: const TextStyle(
+                            color: Colors.white70, fontSize: 12),
+                        overflow: TextOverflow.ellipsis),
+                  ),
+                ],
+              ),
+            ],
+
+            // ── Recogidas ─────────────────────────────────────────────
+            if (recogidasList.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 4,
+                runSpacing: 4,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  const Text('Rec:',
+                      style:
+                          TextStyle(color: Colors.white38, fontSize: 10)),
+                  for (final r in recogidasList)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color:
+                            Colors.indigo[900]!.withValues(alpha: 0.45),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(_labelRecogida(r),
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 10)),
+                    ),
+                ],
+              ),
+            ],
+
+            const SizedBox(height: 8),
+
+            // ── Footer: tarifa · moto ─────────────────────────────────
+            Row(
+              children: [
+                if (tarifa > 0) ...[
+                  const Icon(Icons.attach_money,
+                      color: Colors.green, size: 15),
+                  Text(
+                    '\$${_miles(tarifa)}',
+                    style: const TextStyle(
+                        color: Colors.green,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13),
+                  ),
+                ] else
+                  const Text('Cotización',
+                      style:
+                          TextStyle(color: Colors.orange, fontSize: 12)),
+                const Spacer(),
+                if (nombreMovil != null) ...[
+                  const Icon(Icons.two_wheeler,
+                      color: Colors.white38, size: 14),
+                  const SizedBox(width: 4),
+                  Text(nombreMovil!,
+                      style: const TextStyle(
+                          color: Colors.white54, fontSize: 11)),
+                ],
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _labelRecogida(dynamic r) {
+    if (r is Map) {
+      final tipo = r['tipo'] as String? ?? '';
+      final num = r['numero'] as String?;
+      final nombre = r['nombre'] as String? ?? '';
+      if (tipo == 'FN' && num != null) return 'FN$num';
+      return nombre.isNotEmpty ? nombre : tipo;
+    }
+    return r.toString();
+  }
+
+  Color _colorEstado(String estado) => switch (estado) {
+        'pendiente' => Colors.orange,
+        'confirmado' => Colors.blue,
+        'completado' => Colors.green,
+        'cancelado' => Colors.red,
+        'cotizacion' => Colors.purple,
+        _ => Colors.white38,
+      };
+
+  String _formatFecha(DateTime dt) {
+    final now = DateTime.now();
+    final hm =
+        '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+    if (dt.year == now.year &&
+        dt.month == now.month &&
+        dt.day == now.day) return hm;
+    return '${dt.day}/${dt.month} $hm';
+  }
+
+  String _miles(int n) {
+    final s = n.toString();
+    if (s.length <= 3) return s;
+    final pos = s.length - 3;
+    return '${s.substring(0, pos)}.${s.substring(pos)}';
   }
 }
