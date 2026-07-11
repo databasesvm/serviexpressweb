@@ -96,10 +96,12 @@ class _ServiexpressExpressAppState extends State<ServiexpressExpressApp>
       debugShowCheckedModeBanner: false,
       navigatorKey: navigatorKey,
       theme: ThemeData(primaryColor: Colors.black),
-      // LOGIN_MODE=false (default) → LoginScreen (operadores y móvil nativo)
-      // LOGIN_MODE=true  → GuestHomeScreen (pedidos de invitados, URL secundaria)
-      // En móvil siempre arranca en LoginScreen independientemente del flag.
-      home: (kIsWeb && _kLoginMode) ? const GuestHomeScreen() : const LoginScreen(),
+      // Web: si la URL contiene '/form' → GuestHomeScreen (invitados)
+      //      cualquier otra ruta      → LoginScreen (operadores)
+      // Móvil: siempre LoginScreen.
+      home: (kIsWeb && Uri.base.path.contains('/form'))
+          ? const GuestHomeScreen()
+          : const LoginScreen(),
     );
   }
 }
