@@ -8947,9 +8947,7 @@ class _CentralScreenState extends State<CentralScreen>
 
   @override
   Widget build(BuildContext context) {
-    // En Web siempre usamos el layout móvil (bottom nav visible).
-    // En dispositivos físicos, pantalla grande si width > 850.
-    final esPantallaGrande = !kIsWeb && MediaQuery.of(context).size.width > 850;
+    final esPantallaGrande = MediaQuery.of(context).size.width > 850;
 
     return Scaffold(
       backgroundColor: Colors.grey[300],
@@ -9010,6 +9008,19 @@ class _CentralScreenState extends State<CentralScreen>
                       'Se notificará a TODO el personal en línea (móviles y central) que necesitas su atención urgente.',
                   onActivado: _dispararPanico,
                   onDetener: () => _detenerAlerta(tipo: 'global'),
+                ),
+                const SizedBox(width: 6),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.grey[850],
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: () => _abrirPanelGestion(context),
+                  icon: const Icon(Icons.admin_panel_settings_rounded, size: 18),
+                  label: const Text(
+                    'GESTIÓN',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
                 ),
                 const SizedBox(width: 6),
                 IconButton(
