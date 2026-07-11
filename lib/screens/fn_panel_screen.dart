@@ -93,11 +93,16 @@ class _SedesTabState extends State<_SedesTab> {
     try {
       final data = await _db
           .from('fn_sedes')
-          .select()
-          .order('tipo')
-          .order('numero', nullsFirst: false)
-          .order('nombre');
-      setState(() => _sedes = List<Map<String, dynamic>>.from(data));
+          .select();
+      final lista = List<Map<String, dynamic>>.from(data);
+      lista.sort((a, b) {
+        final na = int.tryParse(a['numero']?.toString() ?? '') ?? 999999;
+        final nb = int.tryParse(b['numero']?.toString() ?? '') ?? 999999;
+        final cmp = na.compareTo(nb);
+        if (cmp != 0) return cmp;
+        return (a['nombre'] ?? '').toString().compareTo((b['nombre'] ?? '').toString());
+      });
+      setState(() => _sedes = lista);
     } catch (e) {
       _snack('Error cargando sedes: $e');
     } finally {
