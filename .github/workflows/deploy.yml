@@ -25,19 +25,21 @@ jobs:
         run: flutter pub get
 
       # ── Versión 1: operadores (login) → ROOT del sitio ───────────
+      # LOGIN_MODE=false (default) → LoginScreen
       - name: Build web — operadores (Login)
-        run: flutter build web --release --base-href "/serviexpressweb/" --dart-define=LOGIN_MODE=true
+        run: flutter build web --release --base-href "/serviexpressweb/"
 
       - name: Guardar build operadores en root
         run: |
           mkdir -p deploy
           cp -r build/web/. deploy/
 
-      # ── Versión 2: clientes/invitados → /form/ ────────────────────
-      - name: Build web — clientes (GuestHome)
-        run: flutter build web --release --base-href "/serviexpressweb/form/"
+      # ── Versión 2: invitados (GuestHome) → /form/ ────────────────
+      # LOGIN_MODE=true → GuestHomeScreen
+      - name: Build web — invitados (GuestHome)
+        run: flutter build web --release --base-href "/serviexpressweb/form/" --dart-define=LOGIN_MODE=true
 
-      - name: Guardar build clientes en /form/
+      - name: Guardar build invitados en /form/
         run: |
           mkdir -p deploy/form
           cp -r build/web/. deploy/form/
