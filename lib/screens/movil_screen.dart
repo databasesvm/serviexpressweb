@@ -7830,6 +7830,34 @@ class _MovilScreenState extends State<MovilScreen>
                             final String exclusivoId =
                                 s['exclusivo_id']?.toString() ?? '';
 
+                            // ─── REGLA FN (FARMANORTE) ────────────────────────
+                            // Lógica propia: ignora paradero y embudo estándar.
+                            //   T=0 a T+30s : solo motos en fn_primera_ola
+                            //   T+31s+      : todos con tiene_fn = true
+                            if (s['tipo_fn'] == true) {
+                              final bool tienePermFN = esMaster ||
+                                  miPerfilEnVivo['tiene_fn'] == true;
+                              if (tienePermFN && tieneCapacidad) {
+                                final primeraOlaRaw = s['fn_primera_ola'];
+                                final List<String> primeraOla =
+                                    primeraOlaRaw is List
+                                        ? (primeraOlaRaw as List)
+                                            .map((e) => e.toString())
+                                            .toList()
+                                        : [];
+                                if (primeraOla.isEmpty ||
+                                    primeraOla.contains(miId)) {
+                                  // En primera ola o sin restricción → visible desde T=0
+                                  puedeVer = true;
+                                } else if (segundos >= 31) {
+                                  // Segunda ola → visible a partir de T+31s
+                                  puedeVer = true;
+                                }
+                              }
+                              if (puedeVer) pendientes.add(s);
+                              continue; // salta embudo estándar
+                            }
+
                             // 3. CÁLCULO DE DISTANCIA OPERATIVA DESDE EL LOCAL
                             double distMetros = 999999;
                             if (_ultimaPosicionConocida != null &&

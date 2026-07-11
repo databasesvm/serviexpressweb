@@ -3528,7 +3528,7 @@ class _CentralScreenState extends State<CentralScreen>
                           if (wave1Ids.isNotEmpty) {
                             await MotorNotificaciones.dispararRafa(
                               idsDestinos: wave1Ids,
-                              titulo: '🟢 TURNO FARMANORTE',
+                              titulo: '🔵 TURNO FARMANORTE',
                               mensaje: 'Servicio FN · $zonaLabel',
                               urgente: true,
                               sonido: Sonidos.movilParadero,
@@ -3570,7 +3570,7 @@ class _CentralScreenState extends State<CentralScreen>
                             final id31s = await MotorNotificaciones
                                 .programarMisilRetardado(
                               externalIds: idsTodos,
-                              titulo: '🟡 TURNO FARMANORTE',
+                              titulo: '🔵 TURNO FARMANORTE',
                               mensaje:
                                   'Servicio FN sin tomar · $zonaLabel',
                               segundosRetardo: 31,
