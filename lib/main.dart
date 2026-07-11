@@ -7,11 +7,6 @@ import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'utils/deeplink_service.dart';
 
-/// Flag de compilación: `true` cuando se construye la versión de operadores.
-/// Se activa con `--dart-define=LOGIN_MODE=true` en el build de GitHub Actions.
-/// Por defecto es `false` (versión de clientes/invitados).
-const bool _kLoginMode = bool.fromEnvironment('LOGIN_MODE', defaultValue: false);
-
 /// Clave global del Navigator — permite navegar desde DeeplinkService
 /// sin necesitar un BuildContext explícito.
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
