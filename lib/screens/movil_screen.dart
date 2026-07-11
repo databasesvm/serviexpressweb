@@ -5644,7 +5644,7 @@ class _MovilScreenState extends State<MovilScreen>
                       ),
                     ),
 
-                  // Sede principal
+                  // Sede solicitante
                   Text('📦 Recoge en:',
                       style: TextStyle(
                           color: Colors.indigo[800],
@@ -5655,37 +5655,42 @@ class _MovilScreenState extends State<MovilScreen>
                       style: const TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w600)),
-                  if (servicio['origen_lat'] != null &&
-                      servicio['origen_lng'] != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 6),
-                      child: SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          style: OutlinedButton.styleFrom(
-                            side: BorderSide(
-                                color: Colors.indigo[400]!),
-                            padding: const EdgeInsets.symmetric(
-                                vertical: 8),
-                            foregroundColor: Colors.indigo[700],
-                          ),
-                          onPressed: () =>
-                              _abrirMapsHaciaCoords(
-                            (servicio['origen_lat'] as num)
-                                .toDouble(),
-                            (servicio['origen_lng'] as num)
-                                .toDouble(),
-                            servicio['origen'] ??
-                                'Sede principal',
-                          ),
-                          icon: const Icon(Icons.directions,
-                              size: 18),
-                          label: const Text(
-                              'Navegar a sede principal',
-                              style: TextStyle(fontSize: 13)),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          side: BorderSide(
+                              color: Colors.indigo[400]!),
+                          padding: const EdgeInsets.symmetric(
+                              vertical: 8),
+                          foregroundColor: Colors.indigo[700],
                         ),
+                        onPressed: () {
+                          final lat = (servicio['origen_lat'] as num?)?.toDouble();
+                          final lng = (servicio['origen_lng'] as num?)?.toDouble();
+                          if (lat != null && lng != null) {
+                            _abrirMapsHaciaCoords(lat, lng,
+                                servicio['origen'] ?? 'Sede solicitante');
+                          } else {
+                            final nombre = Uri.encodeComponent(
+                                servicio['origen'] ?? 'Sede solicitante');
+                            launchUrl(
+                              Uri.parse(
+                                  'https://www.google.com/maps/search/?api=1&query=$nombre'),
+                              mode: LaunchMode.externalApplication,
+                            );
+                          }
+                        },
+                        icon: const Icon(Icons.directions,
+                            size: 18),
+                        label: const Text(
+                            'Navegar a sede solicitante',
+                            style: TextStyle(fontSize: 13)),
                       ),
                     ),
+                  ),
 
                   // Recogidas adicionales
                   if (recogidas.isNotEmpty) ...[
@@ -5727,42 +5732,55 @@ class _MovilScreenState extends State<MovilScreen>
                                   style: const TextStyle(
                                       fontSize: 13)),
                             ),
-                            if (lat != null && lng != null)
-                              SizedBox(
-                                height: 30,
-                                child: ElevatedButton.icon(
-                                  style: ElevatedButton
-                                      .styleFrom(
-                                    backgroundColor:
-                                        Colors.indigo[700],
-                                    foregroundColor:
-                                        Colors.white,
-                                    padding:
-                                        const EdgeInsets
-                                            .symmetric(
-                                                horizontal:
-                                                    10),
-                                    shape: RoundedRectangleBorder(
-                                        borderRadius:
-                                            BorderRadius
-                                                .circular(
-                                                    6)),
-                                    elevation: 0,
-                                  ),
-                                  onPressed: () =>
-                                      _abrirMapsHaciaCoords(
-                                          lat, lng, label),
-                                  icon: const Icon(
-                                      Icons.navigation,
-                                      size: 14),
-                                  label: const Text('GPS',
-                                      style: TextStyle(
-                                          fontSize: 12,
-                                          fontWeight:
-                                              FontWeight
-                                                  .bold)),
+                            SizedBox(
+                              height: 30,
+                              child: ElevatedButton.icon(
+                                style: ElevatedButton
+                                    .styleFrom(
+                                  backgroundColor:
+                                      Colors.indigo[700],
+                                  foregroundColor:
+                                      Colors.white,
+                                  padding:
+                                      const EdgeInsets
+                                          .symmetric(
+                                              horizontal:
+                                                  10),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius:
+                                          BorderRadius
+                                              .circular(
+                                                  6)),
+                                  elevation: 0,
                                 ),
+                                onPressed: () {
+                                  if (lat != null &&
+                                      lng != null) {
+                                    _abrirMapsHaciaCoords(
+                                        lat, lng, label);
+                                  } else {
+                                    final q =
+                                        Uri.encodeComponent(
+                                            label);
+                                    launchUrl(
+                                      Uri.parse(
+                                          'https://www.google.com/maps/search/?api=1&query=$q'),
+                                      mode: LaunchMode
+                                          .externalApplication,
+                                    );
+                                  }
+                                },
+                                icon: const Icon(
+                                    Icons.navigation,
+                                    size: 14),
+                                label: const Text('GPS',
+                                    style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight:
+                                            FontWeight
+                                                .bold)),
                               ),
+                            ),
                           ],
                         ),
                       );
@@ -5811,14 +5829,10 @@ class _MovilScreenState extends State<MovilScreen>
                   padding:
                       const EdgeInsets.symmetric(vertical: 13),
                 ),
-                onPressed: () async {
-                  final uri = Uri.parse(
-                      'https://databasesvm.github.io/appweb/');
-                  if (await canLaunchUrl(uri)) {
-                    launchUrl(uri,
-                        mode: LaunchMode.externalApplication);
-                  }
-                },
+                onPressed: () => launchUrl(
+                  Uri.parse('https://databasesvm.github.io/appweb/'),
+                  mode: LaunchMode.externalApplication,
+                ),
                 icon: const Icon(Icons.receipt_long, size: 20),
                 label: const Text('REPORTAR FACTURA',
                     style: TextStyle(
