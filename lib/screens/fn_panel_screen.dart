@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:http/http.dart' as http;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Panel FN – dos pestañas:
@@ -434,23 +435,48 @@ class _SedeDialogState extends State<_SedeDialog> {
     super.dispose();
   }
 
-  /// Extrae lat/lng de URL de Google Maps
-  void _extraerCoordenadas() {
-    final url = _ctrlMapsUrl.text.trim();
-    if (url.isEmpty) return;
+  /// Extrae lat/lng de URL de Google Maps.
+  /// Soporta URLs completas y URLs cortas (maps.app.goo.gl / goo.gl)
+  /// siguiendo el redirect con una petición HTTP.
+  Future<void> _extraerCoordenadas() async {
+    final raw = _ctrlMapsUrl.text.trim();
+    if (raw.isEmpty) return;
 
-    // Formato: .../@LAT,LNG,zoom  o  ...?q=LAT,LNG
+    setState(() => _guardando = true); // reutilizo el flag para deshabilitar el botón
+
+    String urlFinal = raw;
+
+    // URLs cortas: goo.gl o maps.app.goo.gl — hay que seguir el redirect
+    if (raw.contains('goo.gl')) {
+      try {
+        final resp = await http.get(
+          Uri.parse(raw),
+          headers: {'User-Agent': 'Mozilla/5.0'},
+        );
+        // http sigue redirects automáticamente; la URL final está en request.url
+        urlFinal = resp.request?.url.toString() ?? raw;
+      } catch (_) {
+        // Si falla la red, intentamos con la URL original
+        urlFinal = raw;
+      }
+    }
+
+    setState(() => _guardando = false);
+
+    // Patrones de coordenadas en la URL expandida
     final patterns = [
       RegExp(r'/@(-?\d+\.\d+),(-?\d+\.\d+)'),
       RegExp(r'[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)'),
       RegExp(r'[?&]ll=(-?\d+\.\d+),(-?\d+\.\d+)'),
       RegExp(r'maps\?q=(-?\d+\.\d+),(-?\d+\.\d+)'),
+      RegExp(r'!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)'),  // formato Places
       RegExp(r'(-?\d{1,3}\.\d{4,}),(-?\d{1,3}\.\d{4,})'),
     ];
 
     for (final p in patterns) {
-      final m = p.firstMatch(url);
+      final m = p.firstMatch(urlFinal);
       if (m != null) {
+        if (!mounted) return;
         setState(() {
           _ctrlLat.text = m.group(1)!;
           _ctrlLng.text = m.group(2)!;
@@ -466,10 +492,10 @@ class _SedeDialogState extends State<_SedeDialog> {
       }
     }
 
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text(
-            'No se pudo extraer coords. Pega el enlace de "Compartir" de Google Maps.'),
+        content: Text('No se pudo extraer coords. Pega el enlace de "Compartir" de Google Maps.'),
         backgroundColor: Colors.orange,
       ),
     );
