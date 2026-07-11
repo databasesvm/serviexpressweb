@@ -811,9 +811,9 @@ class _MotosTabState extends State<_MotosTab> {
     try {
       final data = await _db
           .from('usuarios')
-          .select('id, nombre, telefono, tiene_fn, fn_ignorados_hoy, fn_fecha_ignorados')
+          .select('id, usuario, nombre, telefono, tiene_fn, fn_ignorados_hoy, fn_fecha_ignorados')
           .eq('rol', 'movil')
-          .order('nombre');
+          .order('usuario');
       setState(() {
         _motos = List<Map<String, dynamic>>.from(data);
         _filtrar();
@@ -1023,6 +1023,8 @@ class _MotoFnCard extends StatelessWidget {
     final ignorados = moto['fn_ignorados_hoy'] as int? ?? 0;
     final nombre = moto['nombre'] as String? ?? '—';
     final telefono = moto['telefono'] as String? ?? '';
+    final usuario = moto['usuario']?.toString() ?? '';
+    final numStr = RegExp(r'\d+').firstMatch(usuario)?.group(0) ?? '';
 
     return Card(
       color: const Color(0xFF1A1A1A),
@@ -1033,25 +1035,35 @@ class _MotoFnCard extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         child: Row(
           children: [
-            // Avatar / indicador FN
+            // Avatar con número
             Container(
-              width: 42,
-              height: 42,
+              width: 46,
+              height: 46,
               decoration: BoxDecoration(
                 color: tieneFn
-                    ? Colors.indigo[900]!.withValues(alpha: 0.5)
+                    ? Colors.indigo[900]!.withValues(alpha: 0.6)
                     : const Color(0xFF2A2A2A),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: Icon(
-                Icons.two_wheeler,
-                color: tieneFn ? Colors.indigo[300] : Colors.white24,
-                size: 22,
-              ),
+              alignment: Alignment.center,
+              child: numStr.isNotEmpty
+                  ? Text(
+                      '#$numStr',
+                      style: TextStyle(
+                          color: tieneFn
+                              ? Colors.indigo[200]
+                              : Colors.white38,
+                          fontWeight: FontWeight.bold,
+                          fontSize: numStr.length > 2 ? 13 : 15),
+                    )
+                  : Icon(Icons.two_wheeler,
+                      color:
+                          tieneFn ? Colors.indigo[300] : Colors.white24,
+                      size: 22),
             ),
             const SizedBox(width: 12),
 
-            // Info
+            // Info: nombre primario, teléfono secundario
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
