@@ -3196,12 +3196,49 @@ class _CentralScreenState extends State<CentralScreen>
       return;
     }
 
+    // ── Ordenar sedes: numéricamente descendente (mayor a menor) ─────────────
+    final sedesOrdenadas = List<Map<String, dynamic>>.from(sedes)
+      ..sort((a, b) {
+        final na = int.tryParse(a['numero']?.toString() ?? '') ?? -1;
+        final nb = int.tryParse(b['numero']?.toString() ?? '') ?? -1;
+        return nb.compareTo(na);
+      });
+
     // ── Estado del diálogo ────────────────────────────────────────────────────
-    // Lista dinámica de recogidas (empieza con la primera sede)
-    final List<Map<String, dynamic>?> recogidasSel = [sedes.first];
+    Map<String, dynamic> sedeSolicitante = sedesOrdenadas.first;
+    final List<Map<String, dynamic>> recogidasSel = [sedesOrdenadas.first];
     final destinoCtrl = TextEditingController();
     final tarifaCtrl = TextEditingController();
     bool procesando = false;
+
+    // Helper: dropdown de sedes ordenadas
+    Widget _dropdownSede({
+      required Map<String, dynamic> value,
+      required void Function(Map<String, dynamic>?) onChanged,
+      String? label,
+    }) =>
+        DropdownButtonFormField<Map<String, dynamic>>(
+          value: value,
+          isExpanded: true,
+          decoration: InputDecoration(
+            labelText: label,
+            labelStyle: TextStyle(fontSize: 11, color: Colors.indigo[700]),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          ),
+          items: sedesOrdenadas
+              .map((s) => DropdownMenuItem(
+                    value: s,
+                    child: Text(
+                      _fnLabelSede(s),
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                  ))
+              .toList(),
+          onChanged: onChanged,
+        );
 
     showDialog(
       context: context,
@@ -3218,13 +3255,18 @@ class _CentralScreenState extends State<CentralScreen>
             title: Row(
               children: [
                 Container(
-                  padding: const EdgeInsets.all(6),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
                     color: Colors.indigo[900],
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(6),
                   ),
-                  child: const Icon(Icons.local_pharmacy,
-                      color: Colors.white, size: 18),
+                  child: const Text('FN',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                          letterSpacing: 1.5)),
                 ),
                 const SizedBox(width: 10),
                 const Text(
@@ -3241,7 +3283,51 @@ class _CentralScreenState extends State<CentralScreen>
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // ── Recogidas (búsqueda + lista compacta) ──────────────
+
+                    // ── Sede FN Solicitante ─────────────────────────────────
+                    const Text('Sede FN solicitante:',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black54,
+                            fontSize: 12)),
+                    const SizedBox(height: 4),
+                    _dropdownSede(
+                      value: sedeSolicitante,
+                      onChanged: procesando
+                          ? null
+                          : (v) => setDialogState(
+                              () => sedeSolicitante = v ?? sedeSolicitante),
+                    ),
+                    const SizedBox(height: 6),
+                    // Zona chip
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.indigo[50],
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.location_on_outlined,
+                              size: 13, color: Colors.indigo[700]),
+                          const SizedBox(width: 4),
+                          Text(
+                            _fnLabelZona(
+                                sedeSolicitante['zona'] as String),
+                            style: TextStyle(
+                                color: Colors.indigo[800],
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 14),
+
+                    // ── Recogidas (lista dinámica de dropdowns) ─────────────
                     Row(
                       children: [
                         const Text('Recogidas:',
@@ -3249,168 +3335,56 @@ class _CentralScreenState extends State<CentralScreen>
                                 fontWeight: FontWeight.bold,
                                 color: Colors.black54,
                                 fontSize: 12)),
-                        const SizedBox(width: 8),
-                        if (recogidasSel.isNotEmpty && recogidasSel[0] != null)
-                          Container(
+                        const Spacer(),
+                        TextButton.icon(
+                          onPressed: procesando
+                              ? null
+                              : () => setDialogState(() =>
+                                  recogidasSel.add(sedesOrdenadas.first)),
+                          icon: const Icon(Icons.add_circle_outline, size: 16),
+                          label: const Text('Agregar',
+                              style: TextStyle(fontSize: 12)),
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.indigo[700],
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 7, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: Colors.indigo[50],
-                              borderRadius: BorderRadius.circular(5),
-                            ),
-                            child: Text(
-                              _fnLabelZona(recogidasSel[0]!['zona'] as String),
-                              style: TextStyle(
-                                  color: Colors.indigo[800],
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600),
-                            ),
+                                horizontal: 6, vertical: 0),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                           ),
+                        ),
                       ],
                     ),
-                    const SizedBox(height: 6),
-
-                    // Lista de recogidas seleccionadas
-                    Container(
-                      constraints: const BoxConstraints(maxHeight: 180),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.grey[300]!),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: recogidasSel.isEmpty
-                          ? const Padding(
-                              padding: EdgeInsets.all(12),
-                              child: Text('Sin recogidas',
-                                  style: TextStyle(
-                                      color: Colors.black38, fontSize: 13)),
-                            )
-                          : ListView.separated(
-                              shrinkWrap: true,
-                              padding: const EdgeInsets.symmetric(vertical: 4),
-                              itemCount: recogidasSel.length,
-                              separatorBuilder: (_, __) =>
-                                  Divider(height: 1, color: Colors.grey[200]),
-                              itemBuilder: (_, i) {
-                                final s = recogidasSel[i];
-                                if (s == null) return const SizedBox.shrink();
-                                final tipo = s['tipo'] as String? ?? '';
-                                final esPrincipal = i == 0;
-                                return ListTile(
-                                  dense: true,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 10, vertical: 0),
-                                  leading: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 5, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: tipo == 'FN'
-                                          ? Colors.indigo[700]
-                                          : tipo == 'FARMACIA'
-                                              ? Colors.teal[600]
-                                              : Colors.brown[400],
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                    child: Text(
-                                      tipo == 'FN'
-                                          ? 'FN'
-                                          : tipo == 'FARMACIA'
-                                              ? 'FRM'
-                                              : 'DEP',
-                                      style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 9,
-                                          fontWeight: FontWeight.bold),
-                                    ),
-                                  ),
-                                  title: Text(
-                                    _fnLabelSede(s),
-                                    style: const TextStyle(fontSize: 13),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  subtitle: esPrincipal
-                                      ? Text('Principal · recogida 1',
-                                          style: TextStyle(
-                                              fontSize: 10,
-                                              color: Colors.indigo[400]))
-                                      : Text('Recogida ${i + 1}',
-                                          style: const TextStyle(
-                                              fontSize: 10,
-                                              color: Colors.black38)),
-                                  trailing: esPrincipal
-                                      ? Icon(Icons.star,
-                                          size: 16, color: Colors.indigo[300])
-                                      : IconButton(
-                                          icon: const Icon(Icons.close,
-                                              size: 18, color: Colors.red),
-                                          padding: EdgeInsets.zero,
-                                          constraints: const BoxConstraints(),
-                                          onPressed: procesando
-                                              ? null
-                                              : () => setDialogState(
-                                                  () => recogidasSel.removeAt(i)),
-                                        ),
-                                );
-                              },
-                            ),
-                    ),
-                    const SizedBox(height: 6),
-
-                    // Buscador para agregar sedes
-                    Autocomplete<Map<String, dynamic>>(
-                      displayStringForOption: (s) => _fnLabelSede(s),
-                      optionsBuilder: (TextEditingValue tv) {
-                        if (tv.text.isEmpty) return const [];
-                        final q = tv.text.toLowerCase();
-                        return sedes.where((s) =>
-                            _fnLabelSede(s).toLowerCase().contains(q));
-                      },
-                      optionsViewBuilder: (context, onSelected, options) =>
-                          Align(
-                        alignment: Alignment.topLeft,
-                        child: Material(
-                          elevation: 4,
-                          borderRadius: BorderRadius.circular(8),
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxHeight: 200),
-                            child: ListView.builder(
-                              shrinkWrap: true,
-                              padding: EdgeInsets.zero,
-                              itemCount: options.length,
-                              itemBuilder: (_, i) {
-                                final s = options.elementAt(i);
-                                return ListTile(
-                                  dense: true,
-                                  title: Text(_fnLabelSede(s),
-                                      style: const TextStyle(fontSize: 13)),
-                                  onTap: () => onSelected(s),
-                                );
-                              },
+                    const SizedBox(height: 4),
+                    ...List.generate(recogidasSel.length, (i) => Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: _dropdownSede(
+                              value: recogidasSel[i],
+                              label: 'Recogida ${i + 1}',
+                              onChanged: procesando
+                                  ? null
+                                  : (v) => setDialogState(
+                                      () => recogidasSel[i] = v ?? recogidasSel[i]),
                             ),
                           ),
-                        ),
+                          if (recogidasSel.length > 1) ...[
+                            const SizedBox(width: 4),
+                            IconButton(
+                              icon: const Icon(Icons.remove_circle,
+                                  color: Colors.red, size: 20),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                              tooltip: 'Quitar',
+                              onPressed: procesando
+                                  ? null
+                                  : () => setDialogState(
+                                      () => recogidasSel.removeAt(i)),
+                            ),
+                          ],
+                        ],
                       ),
-                      fieldViewBuilder:
-                          (ctx, ctrl, focusNode, onFieldSubmitted) =>
-                              TextField(
-                        controller: ctrl,
-                        focusNode: focusNode,
-                        enabled: !procesando,
-                        decoration: InputDecoration(
-                          hintText: '+ Buscar sede para agregar...',
-                          hintStyle:
-                              TextStyle(fontSize: 13, color: Colors.indigo[300]),
-                          prefixIcon: Icon(Icons.search,
-                              size: 18, color: Colors.indigo[400]),
-                          border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8)),
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 8),
-                        ),
-                      ),
-                      onSelected: (s) => setDialogState(() {
-                        recogidasSel.add(s);
-                      }),
-                    ),
+                    )),
 
                     const SizedBox(height: 8),
 
@@ -3467,10 +3441,6 @@ class _CentralScreenState extends State<CentralScreen>
                 onPressed: procesando
                     ? null
                     : () async {
-                        final sedePrincipal = recogidasSel.isNotEmpty
-                            ? recogidasSel[0]
-                            : null;
-                        if (sedePrincipal == null) return;
                         if (destinoCtrl.text.trim().isEmpty) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
@@ -3485,16 +3455,15 @@ class _CentralScreenState extends State<CentralScreen>
                         setDialogState(() => procesando = true);
 
                         try {
-                          final sede = sedePrincipal;
+                          final sede = sedeSolicitante;
                           final zona = sede['zona'] as String;
                           final zonaLabel = _fnLabelZona(zona);
                           final sLat = (sede['lat'] as num?)?.toDouble();
                           final sLng = (sede['lng'] as num?)?.toDouble();
                           final nombreSede = _fnLabelSede(sede);
 
-                          // Todas las recogidas (incluyendo la principal)
+                          // Recogidas seleccionadas
                           final recogidasList = recogidasSel
-                              .whereType<Map<String, dynamic>>()
                               .map((s) => {
                                     'id': s['id'],
                                     'tipo': s['tipo'],
@@ -7854,7 +7823,12 @@ class _CentralScreenState extends State<CentralScreen>
                 shape: BoxShape.circle,
                 border: Border.all(color: Colors.white, width: 1),
               ),
-              child: const Icon(Icons.local_pharmacy, size: 6, color: Colors.white),
+              child: const Text('FN',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 5,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0)),
             ),
           ),
       ],
