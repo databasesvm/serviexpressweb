@@ -5667,7 +5667,7 @@ class _MovilScreenState extends State<MovilScreen>
                               vertical: 8),
                           foregroundColor: Colors.indigo[700],
                         ),
-                        onPressed: () {
+                        onPressed: () async {
                           final lat = (servicio['origen_lat'] as num?)?.toDouble();
                           final lng = (servicio['origen_lng'] as num?)?.toDouble();
                           if (lat != null && lng != null) {
@@ -5676,7 +5676,7 @@ class _MovilScreenState extends State<MovilScreen>
                           } else {
                             final nombre = Uri.encodeComponent(
                                 servicio['origen'] ?? 'Sede solicitante');
-                            launchUrl(
+                            await launchUrl(
                               Uri.parse(
                                   'https://www.google.com/maps/search/?api=1&query=$nombre'),
                               mode: LaunchMode.externalApplication,
@@ -5753,7 +5753,7 @@ class _MovilScreenState extends State<MovilScreen>
                                                   6)),
                                   elevation: 0,
                                 ),
-                                onPressed: () {
+                                onPressed: () async {
                                   if (lat != null &&
                                       lng != null) {
                                     _abrirMapsHaciaCoords(
@@ -5762,7 +5762,7 @@ class _MovilScreenState extends State<MovilScreen>
                                     final q =
                                         Uri.encodeComponent(
                                             label);
-                                    launchUrl(
+                                    await launchUrl(
                                       Uri.parse(
                                           'https://www.google.com/maps/search/?api=1&query=$q'),
                                       mode: LaunchMode
@@ -7855,7 +7855,7 @@ class _MovilScreenState extends State<MovilScreen>
                                 final primeraOlaRaw = s['fn_primera_ola'];
                                 final List<String> primeraOla =
                                     primeraOlaRaw is List
-                                        ? (primeraOlaRaw as List)
+                                        ? primeraOlaRaw
                                             .map((e) => e.toString())
                                             .toList()
                                         : [];
