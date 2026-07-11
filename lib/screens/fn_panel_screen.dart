@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:http/http.dart' as http;
+import 'package:dio/dio.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Panel FN – dos pestañas:
@@ -446,17 +446,22 @@ class _SedeDialogState extends State<_SedeDialog> {
 
     String urlFinal = raw;
 
-    // URLs cortas: goo.gl o maps.app.goo.gl — hay que seguir el redirect
+    // URLs cortas: goo.gl o maps.app.goo.gl — Dio expone realUri (URL final real)
     if (raw.contains('goo.gl')) {
       try {
-        final resp = await http.get(
-          Uri.parse(raw),
+        final dio = Dio(BaseOptions(
           headers: {'User-Agent': 'Mozilla/5.0'},
+          followRedirects: true,
+          maxRedirects: 6,
+          connectTimeout: const Duration(seconds: 10),
+          receiveTimeout: const Duration(seconds: 10),
+        ));
+        final resp = await dio.get<void>(
+          raw,
+          options: Options(validateStatus: (_) => true),
         );
-        // http sigue redirects automáticamente; la URL final está en request.url
-        urlFinal = resp.request?.url.toString() ?? raw;
+        urlFinal = resp.realUri.toString();
       } catch (_) {
-        // Si falla la red, intentamos con la URL original
         urlFinal = raw;
       }
     }
