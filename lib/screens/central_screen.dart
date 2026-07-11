@@ -3205,21 +3205,23 @@ class _CentralScreenState extends State<CentralScreen>
       });
 
     // ── Estado del diálogo ────────────────────────────────────────────────────
-    Map<String, dynamic> sedeSolicitante = sedesOrdenadas.first;
-    final List<Map<String, dynamic>> recogidasSel = [sedesOrdenadas.first];
+    Map<String, dynamic>? sedeSolicitante;
+    final List<Map<String, dynamic>?> recogidasSel = [null];
     final destinoCtrl = TextEditingController();
     final tarifaCtrl = TextEditingController();
     bool procesando = false;
 
     // Helper: dropdown de sedes ordenadas
     Widget _dropdownSede({
-      required Map<String, dynamic> value,
+      Map<String, dynamic>? value,
       void Function(Map<String, dynamic>?)? onChanged,
       String? label,
     }) =>
         DropdownButtonFormField<Map<String, dynamic>>(
           value: value,
           isExpanded: true,
+          hint: const Text('Seleccionar sede...',
+              style: TextStyle(fontSize: 13, color: Colors.black38)),
           decoration: InputDecoration(
             labelText: label,
             labelStyle: TextStyle(fontSize: 11, color: Colors.indigo[700]),
@@ -3296,34 +3298,35 @@ class _CentralScreenState extends State<CentralScreen>
                       onChanged: procesando
                           ? null
                           : (v) => setDialogState(
-                              () => sedeSolicitante = v ?? sedeSolicitante),
+                              () => sedeSolicitante = v),
                     ),
                     const SizedBox(height: 6),
-                    // Zona chip
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.indigo[50],
-                        borderRadius: BorderRadius.circular(6),
+                    // Zona chip — solo si hay sede seleccionada
+                    if (sedeSolicitante != null)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.indigo[50],
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.location_on_outlined,
+                                size: 13, color: Colors.indigo[700]),
+                            const SizedBox(width: 4),
+                            Text(
+                              _fnLabelZona(
+                                  sedeSolicitante!['zona'] as String),
+                              style: TextStyle(
+                                  color: Colors.indigo[800],
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600),
+                            ),
+                          ],
+                        ),
                       ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.location_on_outlined,
-                              size: 13, color: Colors.indigo[700]),
-                          const SizedBox(width: 4),
-                          Text(
-                            _fnLabelZona(
-                                sedeSolicitante['zona'] as String),
-                            style: TextStyle(
-                                color: Colors.indigo[800],
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600),
-                          ),
-                        ],
-                      ),
-                    ),
 
                     const SizedBox(height: 14),
 
@@ -3340,7 +3343,7 @@ class _CentralScreenState extends State<CentralScreen>
                           onPressed: procesando
                               ? null
                               : () => setDialogState(() =>
-                                  recogidasSel.add(sedesOrdenadas.first)),
+                                  recogidasSel.add(null)),
                           icon: const Icon(Icons.add_circle_outline, size: 16),
                           label: const Text('Agregar',
                               style: TextStyle(fontSize: 12)),
@@ -3365,7 +3368,7 @@ class _CentralScreenState extends State<CentralScreen>
                               onChanged: procesando
                                   ? null
                                   : (v) => setDialogState(
-                                      () => recogidasSel[i] = v ?? recogidasSel[i]),
+                                      () => recogidasSel[i] = v),
                             ),
                           ),
                           if (recogidasSel.length > 1) ...[
@@ -3441,6 +3444,13 @@ class _CentralScreenState extends State<CentralScreen>
                 onPressed: procesando
                     ? null
                     : () async {
+                        if (sedeSolicitante == null) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                                content: Text('Selecciona la sede solicitante')),
+                          );
+                          return;
+                        }
                         if (destinoCtrl.text.trim().isEmpty) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
@@ -3455,15 +3465,16 @@ class _CentralScreenState extends State<CentralScreen>
                         setDialogState(() => procesando = true);
 
                         try {
-                          final sede = sedeSolicitante;
+                          final sede = sedeSolicitante!;
                           final zona = sede['zona'] as String;
                           final zonaLabel = _fnLabelZona(zona);
                           final sLat = (sede['lat'] as num?)?.toDouble();
                           final sLng = (sede['lng'] as num?)?.toDouble();
                           final nombreSede = _fnLabelSede(sede);
 
-                          // Recogidas seleccionadas
+                          // Recogidas seleccionadas (solo las no nulas)
                           final recogidasList = recogidasSel
+                              .whereType<Map<String, dynamic>>()
                               .map((s) => {
                                     'id': s['id'],
                                     'tipo': s['tipo'],
