@@ -89,6 +89,10 @@ class _CentralScreenState extends State<CentralScreen>
   StreamSubscription<List<Map<String, dynamic>>>? _subServiciosMonitor;
   Timer? _reconexionTimer;
 
+  // Caché de motos — se actualiza en el listener de _subUsuariosMoviles
+  // para que _construirBloqueServicios pueda resolver movil_id → #numero real.
+  List<Map<String, dynamic>> _movilesCache = [];
+
   @override
   void initState() {
     super.initState();
@@ -320,6 +324,7 @@ class _CentralScreenState extends State<CentralScreen>
 
     _subUsuariosMoviles = crudoUsuarios.listen(
       (data) {
+        _movilesCache = List.from(data); // Cache para resolver movil_id → #numero
         if (!_ctrlUsuariosMoviles.isClosed) _ctrlUsuariosMoviles.add(data);
       },
       onError: (e) {
@@ -4988,6 +4993,17 @@ class _CentralScreenState extends State<CentralScreen>
           ),
         ),
         ...lista.map((servicio) {
+          // Resolver el número real del moto a partir de su campo 'usuario'
+          // (ej: movil05 → #5). numero_movil es un contador acumulativo de
+          // servicios, no el identificador del moto.
+          final movCacheEntry = _movilesCache.firstWhere(
+            (m) => m['id'] == servicio['movil_id'],
+            orElse: () => <String, dynamic>{},
+          );
+          final movUsuario = movCacheEntry['usuario']?.toString() ?? '';
+          final movNumStr =
+              RegExp(r'\d+').firstMatch(movUsuario)?.group(0) ?? '';
+
           final estado = servicio['estado'];
 
           // --- MOTOR CENTINELA DE RETRASO ---
@@ -5135,7 +5151,11 @@ class _CentralScreenState extends State<CentralScreen>
                           'Cliente #${servicio['numero_cliente']}',
                         if (servicio['numero_local'] != null)
                           'Local #${servicio['numero_local']}',
-                        if (servicio['numero_movil'] != null)
+                        // Usar el número real del moto (extraído de 'usuario')
+                        // en lugar de numero_movil que es contador acumulativo.
+                        if (movNumStr.isNotEmpty)
+                          'Móvil #$movNumStr'
+                        else if (servicio['numero_movil'] != null)
                           'Móvil #${servicio['numero_movil']}',
                       ].join(' · '),
                       style: TextStyle(fontSize: 10, color: Colors.blueGrey[400]),
@@ -7789,12 +7809,13 @@ class _CentralScreenState extends State<CentralScreen>
     );
   }
 
-  // ── Avatar de moto en paradero — color índigo identifica FN ─────────────────
+  // ── Avatar de moto en paradero — color índigo identifica FN conectado ────────
   Widget _paraderoMovilLeading(Map<String, dynamic> m, Color colorBase) {
     final esFn = m['tiene_fn'] == true;
+    final enLinea = m['en_linea'] == true;
     return CircleAvatar(
       radius: 12,
-      backgroundColor: esFn ? const Color(0xFF1A237E) : colorBase,
+      backgroundColor: (esFn && enLinea) ? const Color(0xFF1A237E) : colorBase,
       child: Text(
         _extraerNumeroAvatar(m),
         style: const TextStyle(
@@ -9217,28 +9238,4 @@ class _CentralScreenState extends State<CentralScreen>
                 }
               },
               items: const [
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.people_alt),
-                  label: 'Flota',
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.radar),
-                  label: 'Radar',
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.monitor),
-                  label: 'Servicios',
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.admin_panel_settings_rounded),
-                  label: 'Gestión',
-                ),
-              ],
-            ),
-    );
-  }
-}
-
-// ============================================================
-// PANEL DE PRECIOS POR LOCAL — sectores + tarifas
-// ============================================================                                                                                                                                                                                                                                                                                                                                                         
+           
