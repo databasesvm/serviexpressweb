@@ -119,6 +119,10 @@ class _MovilScreenState extends State<MovilScreen>
   int _serviciosHoy = 0;
   int _serviciosTotal = 0;
   double _producidoHoy = 0;
+  // PRODUCCIÓN FN — historial exclusivo de servicios Farmanorte
+  int _serviciosFnHoy = 0;
+  int _serviciosFnTotal = 0;
+  double _producidoFnHoy = 0;
 
   // =====================================================================
   bool _gpsEnProceso = false;
@@ -145,6 +149,9 @@ class _MovilScreenState extends State<MovilScreen>
   StreamSubscription<List<Map<String, dynamic>>>? _subUsuarios;
   StreamSubscription<List<Map<String, dynamic>>>? _subServicios;
   RealtimeChannel? _canalUpdateServicios; // refresh inmediato al cambiar estado
+  // Fix #2: timestamp de la última emisión real del stream de servicios.
+  // El vigilante solo reconecta si han pasado >35s sin datos nuevos.
+  DateTime? _ultimaEmisionServicios;
 
   // SILENCIADOR PRIMER PLANO: guardamos la referencia para poder removerloen dispose()
   // y evitar que se acumulen listeners si la pantalla se reinicia.
@@ -238,8 +245,10 @@ class _MovilScreenState extends State<MovilScreen>
 
     _construirStreams(); // primera vez — luego se reconstruyen solos
     _iniciarVigilanteDeConexion();
-    _cargarProduccion();
-    _verificarPanicoUsadoHoy();
+    // Fix #3: escalonar operaciones de red del arranque para no saturar
+    // la conexión en el primer segundo (causa de ANR / pantalla congelada).
+    Future.delayed(const Duration(milliseconds: 600), _cargarProduccion);
+    Future.delayed(const Duration(milliseconds: 1000), _verificarPanicoUsadoHoy);
 
     // ---- DOMICILIOS: suscripción a pedidos sin asignar ----
     _suscribirAlertasDomicilio();
@@ -278,9 +287,9 @@ class _MovilScreenState extends State<MovilScreen>
               }
             }
 
-            // El radar sigue recibiendo datos para que el StreamBuilder
-            // de abajo sepa que debe refrescar la pantalla automáticamente.
-            if (mounted) setState(() {});
+            // Notifica solo al ValueListenableBuilder del radar, sin
+            // reconstruir todo el árbol (AppBar, perfil, etc.).
+            if (mounted) _radarTick.value++;
           },
         )
         .subscribe();
@@ -1147,6 +1156,7 @@ class _MovilScreenState extends State<MovilScreen>
     _subServicios = crudoServicios.listen(
       (data) {
         _cacheServicios = data;
+        _ultimaEmisionServicios = DateTime.now(); // Fix #2
         if (!_ctrlServicios.isClosed) _ctrlServicios.add(data);
       },
       onError: (e) {
@@ -1198,7 +1208,11 @@ class _MovilScreenState extends State<MovilScreen>
     _reconexionTimer?.cancel();
     _reconexionTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
       if (!mounted) return;
-      _construirStreams();
+      // Fix #2: reconecta solo si el stream lleva >35s sin emitir (muerto).
+      // Evita cancelar y recrear suscripciones sanas cada 30s innecesariamente.
+      final sinDatos = _ultimaEmisionServicios == null ||
+          DateTime.now().difference(_ultimaEmisionServicios!).inSeconds > 35;
+      if (sinDatos) _construirStreams();
       // BAN CHECK (movido aquí desde el timer de 5s — era 12 queries/min,
       // ahora son 2/min, suficiente para detectar suspensión en ≤30s).
       if (_estaEnLinea || _estabaSuspendido) {
@@ -3053,6 +3067,34 @@ class _MovilScreenState extends State<MovilScreen>
                             ),
                           ),
                         ),
+                        // Badge FN — reconocimiento visible en el perfil
+                        if (miPerfil['tiene_fn'] == true) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF1A237E).withValues(alpha: 0.20),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(color: const Color(0xFF3949AB), width: 1.5),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.local_pharmacy, size: 10, color: Color(0xFF7986CB)),
+                                SizedBox(width: 4),
+                                Text(
+                                  'FN',
+                                  style: TextStyle(
+                                    color: Color(0xFF7986CB),
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 11,
+                                    letterSpacing: 1.2,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ],
@@ -3078,6 +3120,25 @@ class _MovilScreenState extends State<MovilScreen>
                           Icon(Icons.bar_chart, size: 14, color: Colors.black54),
                           const SizedBox(width: 6),
                           const Text('PRODUCCIÓN', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.black45, letterSpacing: 0.8)),
+                          const Spacer(),
+                          // Badge FN en sección de rendimiento
+                          if (miPerfil['tiene_fn'] == true)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF1A237E).withValues(alpha: 0.08),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: const Color(0xFF3949AB).withValues(alpha: 0.6)),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.local_pharmacy, size: 9, color: Color(0xFF3949AB)),
+                                  SizedBox(width: 3),
+                                  Text('FARMANORTE', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Color(0xFF3949AB), letterSpacing: 0.8)),
+                                ],
+                              ),
+                            ),
                         ],
                       ),
                     ),
@@ -3117,6 +3178,82 @@ class _MovilScreenState extends State<MovilScreen>
                   ],
                 ),
               ),
+
+              // 1b. PRODUCCIÓN FN — solo visible si tiene_fn = true
+              if (miPerfil['tiene_fn'] == true)
+                Container(
+                  margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1A237E).withValues(alpha: 0.04),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: const Color(0xFF3949AB).withValues(alpha: 0.5)),
+                  ),
+                  child: Column(
+                    children: [
+                      // Cabecera
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.local_pharmacy, size: 14, color: Color(0xFF3949AB)),
+                            const SizedBox(width: 6),
+                            const Text(
+                              'FARMANORTE',
+                              style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF3949AB), letterSpacing: 0.8),
+                            ),
+                            const Spacer(),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF1A237E),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Text('FN', style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold, letterSpacing: 0.8)),
+                            ),
+                          ],
+                        ),
+                      ),
+                      // Hoy
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.today, size: 16, color: Color(0xFF5C6BC0)),
+                            const SizedBox(width: 8),
+                            const Text('Hoy', style: TextStyle(fontSize: 12, color: Color(0xFF5C6BC0))),
+                            const SizedBox(width: 8),
+                            Text(
+                              '$_serviciosFnHoy',
+                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1A237E)),
+                            ),
+                            const Spacer(),
+                            Text(
+                              _formatearMoneda(_producidoFnHoy, mostrarCero: true),
+                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF1565C0)),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Divider(height: 1, color: const Color(0xFF3949AB).withValues(alpha: 0.15)),
+                      // Total
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.check_circle_outline, size: 16, color: Color(0xFF5C6BC0)),
+                            const SizedBox(width: 8),
+                            const Text('Total FN', style: TextStyle(fontSize: 12, color: Color(0xFF5C6BC0))),
+                            const SizedBox(width: 8),
+                            Text(
+                              '$_serviciosFnTotal',
+                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1A237E)),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
 
               // 2. RANGO Y BENEFICIOS — desplegable, Master oculto para no-masters
               _seccionPerfilDesplegable(
@@ -3647,27 +3784,54 @@ class _MovilScreenState extends State<MovilScreen>
       final hoy = DateTime.now();
       final inicioHoy =
           DateTime(hoy.year, hoy.month, hoy.day).toUtc().toIso8601String();
+      final miId = widget.usuario['id'];
+
+      // Producción general
       final total = await Supabase.instance.client
           .from('servicios')
           .select('id')
-          .eq('movil_id', widget.usuario['id'])
+          .eq('movil_id', miId)
           .eq('estado', 'finalizado');
       final hoyData = await Supabase.instance.client
           .from('servicios')
           .select('id, tarifa')
-          .eq('movil_id', widget.usuario['id'])
+          .eq('movil_id', miId)
           .eq('estado', 'finalizado')
           .gte('created_at', inicioHoy);
+
+      // Producción FN (tipo_fn = true)
+      final fnTotal = await Supabase.instance.client
+          .from('servicios')
+          .select('id')
+          .eq('movil_id', miId)
+          .eq('estado', 'finalizado')
+          .eq('tipo_fn', true);
+      final fnHoyData = await Supabase.instance.client
+          .from('servicios')
+          .select('id, tarifa')
+          .eq('movil_id', miId)
+          .eq('estado', 'finalizado')
+          .eq('tipo_fn', true)
+          .gte('created_at', inicioHoy);
+
       if (mounted) {
         final hoyList = hoyData as List;
         double producido = 0;
         for (final s in hoyList) {
           producido += (s['tarifa'] as num? ?? 0).toDouble();
         }
+        final fnHoyList = fnHoyData as List;
+        double producidoFn = 0;
+        for (final s in fnHoyList) {
+          producidoFn += (s['tarifa'] as num? ?? 0).toDouble();
+        }
         setState(() {
           _serviciosTotal = (total as List).length;
           _serviciosHoy = hoyList.length;
           _producidoHoy = producido;
+          _serviciosFnTotal = (fnTotal as List).length;
+          _serviciosFnHoy = fnHoyList.length;
+          _producidoFnHoy = producidoFn;
         });
       }
     } catch (_) {}
@@ -4522,6 +4686,7 @@ class _MovilScreenState extends State<MovilScreen>
                 var movil = e.value;
                 bool soyYo = movil['id'] == widget.usuario['id'];
                 final bool tieneTicket = movil['ticket_prioridad'] == true;
+                final bool tieneFN = movil['tiene_fn'] == true;
                 final String rango = movil['rango_movil']?.toString().toUpperCase() ?? 'NOVATO';
                 final dynamic calRaw = movil['puntuacion'];
                 final String calTexto = calRaw == null ? '-' : '★ ${(calRaw as num).toDouble().toStringAsFixed(1)}';
@@ -4561,8 +4726,29 @@ class _MovilScreenState extends State<MovilScreen>
                               ),
                             ),
                           ),
+                          if (tieneFN)
+                            Container(
+                              margin: const EdgeInsets.only(left: 4),
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF1A237E),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: const Text(
+                                'FN',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 8,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 0.8,
+                                ),
+                              ),
+                            ),
                           if (tieneTicket)
-                            const Text('🎟️', style: TextStyle(fontSize: 13)),
+                            const Padding(
+                              padding: EdgeInsets.only(left: 2),
+                              child: Text('🎟️', style: TextStyle(fontSize: 13)),
+                            ),
                           if (soyYo)
                             const Padding(
                               padding: EdgeInsets.only(left: 4),
@@ -8285,192 +8471,4 @@ class _MovilScreenState extends State<MovilScreen>
                                             ),
                                             const SizedBox(width: 8),
                                             Text(
-                                              'En fila: $paraderoActual',
-                                              style: TextStyle(
-                                                fontWeight: FontWeight.w600,
-                                                fontSize: 13,
-                                                color: Colors.grey[800],
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                        const SizedBox(height: 10),
-                                        SizedBox(
-                                          width: double.infinity,
-                                          child: OutlinedButton.icon(
-                                            style: OutlinedButton.styleFrom(
-                                              foregroundColor: Colors.red,
-                                              side: const BorderSide(
-                                                color: Colors.red,
-                                              ),
-                                            ),
-                                            onPressed: _procesando
-                                                ? null
-                                                : _salirDelParadero,
-                                            icon: const Icon(
-                                              Icons.exit_to_app,
-                                              size: 16,
-                                            ),
-                                            label: const Text(
-                                              'SALIR DEL PARADERO',
-                                              style: TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 11,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                ),
-                                _construirFilaVirtual(usuariosTotales),
-                                const SizedBox(height: 10),
-                              ],
-
-                              // ---- TARJETA DOMICILIO ACTIVO ----
-                              if (_pedidoDomicilioActivo != null)
-                                _buildTarjetaDomicilio(),
-
-                              if (_serviciosActivosData.isNotEmpty) ...[
-                                Padding(
-                                  padding: const EdgeInsets.only(bottom: 6, left: 2, top: 4),
-                                  child: Row(children: [
-                                    Icon(Icons.local_shipping_outlined, size: 13, color: Colors.black38),
-                                    const SizedBox(width: 5),
-                                    const Text(
-                                      'ÓRDENES EN CURSO',
-                                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.black38, letterSpacing: 0.8),
-                                    ),
-                                  ]),
-                                ),
-                                ..._serviciosActivosData.map(
-                                  (servicio) => AnimatedSize(
-                                    key: ValueKey('size_activa_${servicio['id']}'),
-                                    duration: const Duration(milliseconds: 280),
-                                    curve: Curves.easeInOut,
-                                    alignment: Alignment.topCenter,
-                                    child: FadeSlideIn(
-                                      key: ValueKey('activa_${servicio['id']}'),
-                                      child: _construirTarjetaActiva(
-                                        servicio,
-                                        esMaster: esMaster,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-
-                              // ---> DESTRUCCIÓN DEL CANDADO VISUAL AQUÍ <---
-                              if (tienePermisoDeRadar ||
-                                  pendientes.isNotEmpty) ...[
-                                Padding(
-                                  padding: const EdgeInsets.only(bottom: 6, left: 2, top: 4),
-                                  child: Row(children: [
-                                    Icon(Icons.radar, size: 13, color: Colors.black38),
-                                    const SizedBox(width: 5),
-                                    const Text(
-                                      'RADAR DE DISPONIBLES',
-                                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.black38, letterSpacing: 0.8),
-                                    ),
-                                  ]),
-                                ),
-                                if (pendientes.isEmpty)
-                                  const Padding(
-                                    padding: EdgeInsets.only(top: 20),
-                                    child: Center(
-                                      child: Text(
-                                        'Radar limpio. Sin Servicios.',
-                                        style: TextStyle(
-                                          color: Colors.grey,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ),
-                                  )
-                                else
-                                  ...pendientes.map(
-                                    (servicio) => FadeSlideIn(
-                                      key: ValueKey('pendiente_${servicio['id']}'),
-                                      child: _construirTarjetaPendiente(
-                                        servicio,
-                                        esMaster: esMaster,
-                                      ),
-                                    ),
-                                  ),
-                              ] else if (_serviciosActivosData.isEmpty &&
-                                  !radarAbierto) ...[
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 10),
-                                  child: Container(
-                                    padding: const EdgeInsets.all(16),
-                                    decoration: BoxDecoration(
-                                      color: Colors.orange[50]!,
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(color: Colors.orange[200]!),
-                                    ),
-                                    child: Column(
-                                      children: [
-                                        Icon(
-                                          Icons.lock_clock_outlined,
-                                          color: Colors.orange[700],
-                                          size: 32,
-                                        ),
-                                        const SizedBox(height: 10),
-                                        Text(
-                                          mensajeBloqueo.isNotEmpty
-                                              ? mensajeBloqueo
-                                              : 'Regístrate en un paradero para recibir servicios.',
-                                          textAlign: TextAlign.center,
-                                          style: TextStyle(
-                                            fontSize: 13,
-                                            color: Colors.orange[900],
-                                            fontWeight: FontWeight.w500,
-                                            height: 1.4,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ],
-                          );
-                        },
-                      ),
-                ),
-              ),
-            ],
-          );
-        },
-          ),
-        _construirPerfilTab(),
-        ],
-        ), // IndexedStack
-      ), // ValueListenableBuilder
-    bottomNavigationBar: BottomNavigationBar(
-      currentIndex: _tabActual,
-      onTap: _cambiarTab,
-      selectedItemColor: const Color(0xff3AF500),
-      unselectedItemColor: Colors.white38,
-      backgroundColor: const Color(0xFF0D0D0D),
-      type: BottomNavigationBarType.fixed,
-      items: const [
-        BottomNavigationBarItem(
-          icon: Icon(Icons.radar),
-          label: 'Servicios',
-        ),
-        BottomNavigationBarItem(
-          icon: Icon(Icons.person_outline),
-          label: 'Perfil',
-        ),
-      ],
-    ),
-    ), // ← cierra Scaffold (child: Scaffold)
-    ); // ← cierra PopScope
-  }
-}
-
-// ===========================================================================
-// PAINTER: Overlay circular oscuro con hueco (tutorial de pantalla)
-// ===========================================================================
+                    

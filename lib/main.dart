@@ -46,8 +46,9 @@ Future<void> main() async {
     // Deep links + share intent solo en Android/iOS
     if (!kIsWeb) await DeeplinkService.init();
 
-    // Opción B: inicializar foreground service (no lo arranca, solo lo configura)
-    if (!kIsWeb) await initBackgroundService();
+    // Opción B: inicializar foreground service sin await — no bloquea el hilo
+    // principal al instalar/actualizar la app (previene ANR en arranque frío).
+    if (!kIsWeb) unawaited(initBackgroundService());
   } catch (e, st) {
     debugPrint('ERROR en main() antes de runApp: $e\n$st');
   }
@@ -99,8 +100,4 @@ class _ServiexpressExpressAppState extends State<ServiexpressExpressApp>
       //      cualquier otra ruta      → LoginScreen (operadores)
       // Móvil: siempre LoginScreen.
       home: (kIsWeb && Uri.base.path.contains('/form'))
-          ? const GuestHomeScreen()
-          : const LoginScreen(),
-    );
-  }
-}
+  

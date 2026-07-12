@@ -5859,10 +5859,7 @@ class _CentralScreenState extends State<CentralScreen>
                                     ),
                                   ],
                                 ),
-                                trailing: const Icon(
-                                  Icons.more_vert,
-                                  color: Colors.black38,
-                                ),
+                                trailing: _movilTrailing(m),
                                 onTap: () => _abrirMenuAccionesMovil(context, m),
                               ),
                             );
@@ -5975,10 +5972,7 @@ class _CentralScreenState extends State<CentralScreen>
                                     ),
                                   ],
                                 ),
-                                trailing: const Icon(
-                                  Icons.more_vert,
-                                  color: Colors.black38,
-                                ),
+                                trailing: _movilTrailing(m),
                                 onTap: () => _abrirMenuAccionesMovil(context, m),
                               ),
                             );
@@ -6093,10 +6087,7 @@ class _CentralScreenState extends State<CentralScreen>
                                   ),
                                 ],
                               ),
-                              trailing: const Icon(
-                                Icons.more_vert,
-                                color: Colors.black38,
-                              ),
+                              trailing: _movilTrailing(m),
                               onTap: () => _abrirMenuAccionesMovil(context, m),
                             ),  // ListTile
                           );    // FadeSlideIn
@@ -6284,10 +6275,7 @@ class _CentralScreenState extends State<CentralScreen>
                                       color: Colors.black54,
                                     ),
                                   ),
-                                  trailing: const Icon(
-                                    Icons.more_vert,
-                                    color: Colors.black38,
-                                  ),
+                                  trailing: _movilTrailing(m),
                                   onTap: () =>
                                       _abrirMenuAccionesMovil(context, m),
                                 ),
@@ -6348,10 +6336,7 @@ class _CentralScreenState extends State<CentralScreen>
                                   color: Colors.red[400],
                                 ),
                               ),
-                              trailing: const Icon(
-                                Icons.more_vert,
-                                color: Colors.black38,
-                              ),
+                              trailing: _movilTrailing(movil),
                               onTap: () =>
                                   _abrirMenuAccionesMovil(context, movil),
                             ),
@@ -6501,10 +6486,7 @@ class _CentralScreenState extends State<CentralScreen>
                                         color: Colors.black54,
                                       ),
                                     ),
-                                    trailing: const Icon(
-                                      Icons.more_vert,
-                                      color: Colors.black38,
-                                    ),
+                                    trailing: _movilTrailing(movil),
                                     onTap: () => _abrirMenuAccionesMovil(
                                       context,
                                       movil,
@@ -7807,15 +7789,15 @@ class _CentralScreenState extends State<CentralScreen>
     );
   }
 
-  // ── Avatar de moto en paradero — muestra badge FN en azul marino ────────────
+  // ── Avatar de moto en paradero — muestra badge FN visible ──────────────────
   Widget _paraderoMovilLeading(Map<String, dynamic> m, Color colorBase) {
     final esFn = m['tiene_fn'] == true;
-    return Stack(
-      clipBehavior: Clip.none,
+    return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
         CircleAvatar(
           radius: 12,
-          backgroundColor: esFn ? Colors.indigo[900]! : colorBase,
+          backgroundColor: esFn ? const Color(0xFF1A237E) : colorBase,
           child: Text(
             _extraerNumeroAvatar(m),
             style: const TextStyle(
@@ -7823,25 +7805,58 @@ class _CentralScreenState extends State<CentralScreen>
           ),
         ),
         if (esFn)
-          Positioned(
-            right: -4,
-            bottom: -3,
-            child: Container(
-              width: 11,
-              height: 11,
-              decoration: BoxDecoration(
-                color: Colors.indigo[600],
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 1),
-              ),
-              child: const Text('FN',
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 5,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 0)),
+          Container(
+            margin: const EdgeInsets.only(top: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1A237E),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: const Text(
+              'FN',
+              style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 7,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.5),
             ),
           ),
+      ],
+    );
+  }
+
+  // ── Trailing estándar — muestra badge FN pill + ícono de menú ────────────
+  Widget _movilTrailing(Map<String, dynamic> m) {
+    final esFn = m['tiene_fn'] == true;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (esFn)
+          Container(
+            margin: const EdgeInsets.only(right: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1A237E),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.local_pharmacy, size: 8, color: Colors.white),
+                SizedBox(width: 3),
+                Text(
+                  'FN',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        const Icon(Icons.more_vert, color: Colors.black38),
       ],
     );
   }
@@ -9236,16 +9251,4 @@ class _CentralScreenState extends State<CentralScreen>
                   icon: Icon(Icons.monitor),
                   label: 'Servicios',
                 ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.admin_panel_settings_rounded),
-                  label: 'Gestión',
-                ),
-              ],
-            ),
-    );
-  }
-}
-
-// ============================================================
-// PANEL DE PRECIOS POR LOCAL — sectores + tarifas
-// ============================================================
+                Bo
