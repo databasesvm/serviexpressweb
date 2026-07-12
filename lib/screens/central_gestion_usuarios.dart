@@ -199,8 +199,10 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
         ));
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red[800]));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red[800]));
+      }
     }
   }
 
@@ -566,5 +568,4 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
             final activo = u['activo'] as bool? ?? false;
             final suspendido = u['suspendido'] as bool? ?? false;
             final numMovil = rol == 'movil' ? _numMovil(u['usuario']?.toString()) : '';
-            String estado;
-        
+            fin
