@@ -440,19 +440,15 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
             contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             leading: CircleAvatar(
               radius: 20,
-              backgroundColor: color.withValues(alpha: 0.15),
-              child: Text(_iniciales(u['nombre']), style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 13)),
+              backgroundColor: numMovil.isNotEmpty ? color : color.withValues(alpha: 0.15),
+              child: numMovil.isNotEmpty
+                  ? Text(numMovil, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 10))
+                  : Text(_iniciales(u['nombre']), style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 13)),
             ),
             title: Text(u['nombre'] ?? '—', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
             subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               if ((u['usuario'] ?? '').toString().isNotEmpty)
-                Row(children: [
-                  if (numMovil.isNotEmpty) ...[
-                    Text(numMovil, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 12)),
-                    const SizedBox(width: 5),
-                  ],
-                  Text('@${u['usuario']}', style: const TextStyle(color: Colors.white54, fontSize: 11)),
-                ]),
+                Text('@${u['usuario']}', style: const TextStyle(color: Colors.white54, fontSize: 11)),
               _chip(rol.toUpperCase(), color),
             ]),
             trailing: ElevatedButton(
@@ -498,20 +494,16 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
               Row(children: [
                 CircleAvatar(
                   radius: 18,
-                  backgroundColor: rc.withValues(alpha: 0.15),
-                  child: Text(_iniciales(u['nombre']),
-                      style: TextStyle(color: rc, fontWeight: FontWeight.bold, fontSize: 12)),
+                  backgroundColor: numMovil.isNotEmpty ? rc : rc.withValues(alpha: 0.15),
+                  child: numMovil.isNotEmpty
+                      ? Text(numMovil, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 10))
+                      : Text(_iniciales(u['nombre']),
+                          style: TextStyle(color: rc, fontWeight: FontWeight.bold, fontSize: 12)),
                 ),
                 const SizedBox(width: 10),
                 Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text(u['nombre'] ?? '—', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
-                  Row(children: [
-                    if (numMovil.isNotEmpty) ...[
-                      Text(numMovil, style: TextStyle(color: rc, fontWeight: FontWeight.bold, fontSize: 12)),
-                      const SizedBox(width: 5),
-                    ],
-                    Text('@${u['usuario'] ?? ''}', style: const TextStyle(color: Colors.white38, fontSize: 11)),
-                  ]),
+                  Text('@${u['usuario'] ?? ''}', style: const TextStyle(color: Colors.white38, fontSize: 11)),
                 ])),
                 if (rangoActual != null && rangoActual.isNotEmpty)
                   _chip(rangoActual, rc),
@@ -572,4 +564,7 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
             final rol = u['rol']?.toString() ?? '';
             final color = _colorRol(rol);
             final activo = u['activo'] as bool? ?? false;
-            fin
+            final suspendido = u['suspendido'] as bool? ?? false;
+            final numMovil = rol == 'movil' ? _numMovil(u['usuario']?.toString()) : '';
+            String estado;
+        
