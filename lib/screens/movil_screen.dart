@@ -8534,12 +8534,12 @@ class _MovilScreenState extends State<MovilScreen>
                                 ),
                                 ..._serviciosActivosData.map(
                                   (servicio) => AnimatedSize(
-                                    key: ValueKey('size_activa_\${servicio['id']}'),
+                                    key: ValueKey('size_activa_${servicio["id"]}'),
                                     duration: const Duration(milliseconds: 280),
                                     curve: Curves.easeInOut,
                                     alignment: Alignment.topCenter,
                                     child: FadeSlideIn(
-                                      key: ValueKey('activa_\${servicio['id']}'),
+                                      key: ValueKey('activa_${servicio["id"]}'),
                                       child: _construirTarjetaActiva(
                                         servicio,
                                         esMaster: esMaster,
@@ -8579,7 +8579,7 @@ class _MovilScreenState extends State<MovilScreen>
                                 else
                                   ...pendientes.map(
                                     (servicio) => FadeSlideIn(
-                                      key: ValueKey('pendiente_\${servicio['id']}'),
+                                      key: ValueKey('pendiente_${servicio["id"]}'),
                                       child: _construirTarjetaPendiente(
                                         servicio,
                                         esMaster: esMaster,
