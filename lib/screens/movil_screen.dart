@@ -11,6 +11,7 @@ import 'package:serviexpress_app/utils/sonido_manager.dart'; // Motor de audio i
 import 'package:serviexpress_app/utils/panico_widgets.dart'; // Botón de pánico
 import 'package:serviexpress_app/utils/permisos_criticos.dart'; // Permisos críticos en segundo plano
 import 'package:serviexpress_app/services/ota_updater.dart'; // OTA updates
+import 'package:serviexpress_app/services/background_service.dart'; // Opción B: foreground service
 import 'package:url_launcher/url_launcher.dart';
 import 'package:serviexpress_app/screens/chat_screen.dart';
 import 'package:flutter/foundation.dart';
@@ -45,6 +46,7 @@ class _MovilScreenState extends State<MovilScreen>
 
   Timer? _supervisionTimer;
   StreamSubscription<Position>? _gpsTimer;
+  Timer? _heartbeatTimer; // Opción A: ping cada 60s → cron Supabase limpia zombis
 
   List<Map<String, dynamic>> _serviciosActivosData = [];
   final Set<int> _serviciosOcultosLocales = {};
@@ -1019,6 +1021,7 @@ class _MovilScreenState extends State<MovilScreen>
     _supervisionTimer?.cancel();
     _reconexionTimer?.cancel();
     _gpsTimer?.cancel();
+    _heartbeatTimer?.cancel(); // ← Opción A
     _subUsuarios?.cancel();
     _subServicios?.cancel();
     _radarTick.dispose();
@@ -1533,6 +1536,8 @@ class _MovilScreenState extends State<MovilScreen>
       }
       _gpsTimer?.cancel();
       _supervisionTimer?.cancel();
+      _detenerHeartbeat(); // ← Opción A
+      if (!kIsWeb) stopForegroundService(); // ← Opción B
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('sesion_usuario_json');
@@ -2274,6 +2279,35 @@ class _MovilScreenState extends State<MovilScreen>
     );
   }
 
+  // =========================================================================
+  // OPCIÓN A — HEARTBEAT: ping a BD cada 60s mientras el moto está en línea.
+  // Supabase cron "limpiar_motos_zombis" usa ultimo_ping para detectar motos
+  // que cerraron la app sin desconectarse y los limpia automáticamente.
+  // =========================================================================
+  void _iniciarHeartbeat() {
+    _heartbeatTimer?.cancel();
+    // Ping inmediato al conectar
+    _enviarPing();
+    // Luego cada 60 segundos
+    _heartbeatTimer = Timer.periodic(const Duration(seconds: 60), (_) {
+      if (_estaEnLinea && mounted) _enviarPing();
+    });
+  }
+
+  void _detenerHeartbeat() {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
+  }
+
+  Future<void> _enviarPing() async {
+    try {
+      await Supabase.instance.client
+          .from('usuarios')
+          .update({'ultimo_ping': DateTime.now().toUtc().toIso8601String()})
+          .eq('id', widget.usuario['id']);
+    } catch (_) {} // silencioso — el cron tiene margen de 2 min
+  }
+
   Future<void> _autoDesconectarPorInactividad() async {
     _alertaInactividadMostrada = false;
     try {
@@ -2285,6 +2319,8 @@ class _MovilScreenState extends State<MovilScreen>
             'ingreso_fila': null,
           })
           .eq('id', widget.usuario['id']);
+      _detenerHeartbeat(); // ← Opción A
+      if (!kIsWeb) stopForegroundService(); // ← Opción B
       if (mounted) {
         setState(() {
           _estaEnLinea = false;
@@ -2424,7 +2460,11 @@ class _MovilScreenState extends State<MovilScreen>
           _ultimaActividadUtc = DateTime.now().toUtc();
           _alertaInactividadMostrada = false;
           _iniciarRastreoGps();
+          _iniciarHeartbeat(); // ← Opción A
+          if (!kIsWeb) startForegroundService(widget.usuario['id'].toString()); // ← Opción B
         } else {
+          _detenerHeartbeat(); // ← Opción A
+          if (!kIsWeb) stopForegroundService(); // ← Opción B
           // PÁNICO 24H: si hay una alerta activa dentro de su ventana de
           // 24h, el GPS sigue corriendo aunque el móvil se marque offline.
           // La ubicación de emergencia no se detiene por un toggle de turno.
@@ -7345,9 +7385,81 @@ class _MovilScreenState extends State<MovilScreen>
     }
   }
 
+  // =========================================================================
+  // OPCIÓN C — PopScope: intercepta el botón "atrás" y advierte al moto
+  // cuando intenta salir con estado activo (en línea, en fila, con servicio).
+  // =========================================================================
+  Future<bool> _confirmarSalida() async {
+    if (!_estaEnLinea) return true; // sin estado activo → salir libre
+
+    String titulo;
+    String mensaje;
+
+    if (_tieneServicioActivo) {
+      titulo = '⚠️ Tienes un servicio activo';
+      mensaje =
+          'Si cierras la app, el cliente y el local dejarán de ver tu ubicación '
+          'y el servicio se marcará como demorado.\n\n'
+          'El sistema limpiará tu estado automáticamente en 2 minutos, '
+          'pero puede generar problemas. ¿Seguro que quieres salir?';
+    } else if (_miParaderoCache != null) {
+      titulo = '⚠️ Estás en la fila de $_miParaderoCache';
+      mensaje =
+          'Si cierras la app sin salir de la fila, quedarás como #1 bloqueando '
+          'el turno de tus compañeros.\n\n'
+          'El sistema te sacará automáticamente en ~2 minutos, '
+          'pero afecta el flujo del paradero. ¿Salir de todas formas?';
+    } else {
+      titulo = '⚠️ Estás conectado';
+      mensaje =
+          'Seguirás apareciendo como disponible en el radar y tu '
+          'ubicación se congelará.\n\n'
+          'El sistema te desconectará automáticamente en ~2 minutos.';
+    }
+
+    final confirmar = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: Text(titulo,
+            style: const TextStyle(
+                fontWeight: FontWeight.bold, fontSize: 16)),
+        content: Text(mensaje,
+            style: const TextStyle(fontSize: 14, height: 1.5)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('QUEDARME',
+                style: TextStyle(
+                    color: Color(0xff3AF500),
+                    fontWeight: FontWeight.bold)),
+          ),
+          TextButton(
+            style:
+                TextButton.styleFrom(foregroundColor: Colors.red[700]),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('SALIR DE TODAS FORMAS'),
+          ),
+        ],
+      ),
+    );
+    return confirmar ?? false;
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        final puedeSalir = await _confirmarSalida();
+        if (puedeSalir && context.mounted) {
+          Navigator.of(context).pop();
+        }
+      },
+      child: Scaffold(
       backgroundColor: const Color(0xFF0D0D0D),
       appBar: AppBar(
         title: Text(
@@ -8354,8 +8466,9 @@ class _MovilScreenState extends State<MovilScreen>
         ),
       ],
     ),
-  );
-}
+    ), // ← cierra Scaffold (child: Scaffold)
+    ); // ← cierra PopScope
+  }
 }
 
 // ===========================================================================

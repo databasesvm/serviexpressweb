@@ -6,6 +6,7 @@ import 'screens/guest_home_screen.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'utils/deeplink_service.dart';
+import 'services/background_service.dart';
 
 /// Clave global del Navigator — permite navegar desde DeeplinkService
 /// sin necesitar un BuildContext explícito.
@@ -44,6 +45,9 @@ Future<void> main() async {
 
     // Deep links + share intent solo en Android/iOS
     if (!kIsWeb) await DeeplinkService.init();
+
+    // Opción B: inicializar foreground service (no lo arranca, solo lo configura)
+    if (!kIsWeb) await initBackgroundService();
   } catch (e, st) {
     debugPrint('ERROR en main() antes de runApp: $e\n$st');
   }
