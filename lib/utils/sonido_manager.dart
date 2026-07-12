@@ -57,6 +57,8 @@ class Sonidos {
   static const String movilConfirmar = 'movil_confirmar';
   static const String movilCarga = 'movil_cargar';
   static const String movilParadero = 'movil_paradero';
+  static const String movilConectado = 'movil_conectado';  // Al activar turno
+  static const String movilFinalizar = 'movil_finalizar';  // Al completar servicio (hold)
 
   // LOCAL
   static const String localAccion = 'local_accion';
@@ -160,10 +162,4 @@ class SonidoManager {
 
   // =========================================================================
   // DISPOSE — Llamar en el dispose() del widget que lo inicializó
-  // =========================================================================
-  void dispose() {
-    _playerPrincipal.dispose();
-    _playerSecundario.dispose();
-    _playerPanico.dispose();
-  }
-}
+  // =======================
