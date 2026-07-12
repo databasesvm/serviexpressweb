@@ -1551,7 +1551,7 @@ class _MovilScreenState extends State<MovilScreen>
       _gpsTimer?.cancel();
       _supervisionTimer?.cancel();
       _detenerHeartbeat(); // ← Opción A
-      if (!kIsWeb) stopForegroundService(); // ← Opción B
+      if (!kIsWeb) stopForegroundService().catchError((_) {}); // ← Opción B
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('sesion_usuario_json');
@@ -2334,7 +2334,7 @@ class _MovilScreenState extends State<MovilScreen>
           })
           .eq('id', widget.usuario['id']);
       _detenerHeartbeat(); // ← Opción A
-      if (!kIsWeb) stopForegroundService(); // ← Opción B
+      if (!kIsWeb) stopForegroundService().catchError((_) {}); // ← Opción B
       if (mounted) {
         setState(() {
           _estaEnLinea = false;
@@ -2475,10 +2475,8 @@ class _MovilScreenState extends State<MovilScreen>
           _alertaInactividadMostrada = false;
           _iniciarRastreoGps();
           _iniciarHeartbeat(); // ← Opción A
-          if (!kIsWeb) startForegroundService(widget.usuario['id'].toString()); // ← Opción B
         } else {
           _detenerHeartbeat(); // ← Opción A
-          if (!kIsWeb) stopForegroundService(); // ← Opción B
           // PÁNICO 24H: si hay una alerta activa dentro de su ventana de
           // 24h, el GPS sigue corriendo aunque el móvil se marque offline.
           // La ubicación de emergencia no se detiene por un toggle de turno.
@@ -2492,6 +2490,21 @@ class _MovilScreenState extends State<MovilScreen>
           }
         }
       });
+
+      // Opción B: foreground service FUERA de setState — nunca llamar
+      // métodos async (method channels) dentro de setState().
+      if (!kIsWeb) {
+        try {
+          if (nuevoEstado) {
+            await startForegroundService(widget.usuario['id'].toString());
+          } else {
+            await stopForegroundService();
+          }
+        } catch (_) {
+          // El foreground service es opcional — si falla no debe cerrar la app.
+          // La Opción A (heartbeat) sigue activa como respaldo.
+        }
+      }
     } catch (e) {
       if (mounted)
         ScaffoldMessenger.of(
