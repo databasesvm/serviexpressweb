@@ -48,7 +48,8 @@ Future<void> main() async {
 
     // Opción B: inicializar foreground service sin await — no bloquea el hilo
     // principal al instalar/actualizar la app (previene ANR en arranque frío).
-    if (!kIsWeb) unawaited(initBackgroundService());
+    // ignore: discarded_futures
+    if (!kIsWeb) initBackgroundService();
   } catch (e, st) {
     debugPrint('ERROR en main() antes de runApp: $e\n$st');
   }
@@ -99,5 +100,4 @@ class _ServiexpressExpressAppState extends State<ServiexpressExpressApp>
       // Web: si la URL contiene '/form' → GuestHomeScreen (invitados)
       //      cualquier otra ruta      → LoginScreen (operadores)
       // Móvil: siempre LoginScreen.
-      home: (kIsWeb && Uri.base.path.contains('/form'))
-  
+      home: (kIsWeb && Uri.base.path
