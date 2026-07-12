@@ -1,4 +1,5 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+          xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
@@ -86,10 +87,12 @@
         </provider>
 
         <!-- Opción B: Foreground service — mantiene la app activa mientras el moto está conectado -->
+        <!-- tools:replace resuelve conflicto con el manifest del plugin que declara exported=true -->
         <service
             android:name="id.flutter.flutter_background_service.BackgroundService"
             android:foregroundServiceType="location"
-            android:exported="false" />
+            android:exported="false"
+            tools:replace="android:exported" />
     </application>
     <queries>
         <intent>
@@ -105,10 +108,4 @@
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="http" />
         </intent>
-        <!-- Google Maps navigation -->
-        <intent>
-            <action android:name="android.intent.action.VIEW" />
-            <data android:scheme="geo" />
-        </intent>
-    </queries>
-</manifest>
+      
