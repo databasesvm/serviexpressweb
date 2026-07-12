@@ -45,7 +45,7 @@ Future<void> initBackgroundService() async {
       showNotification: false,
       playSound: false,
     ),
-    foregroundTaskOptions: const ForegroundTaskOptions(
+    foregroundTaskOptions: ForegroundTaskOptions(
       eventAction: ForegroundTaskEventAction.repeat(60000),
       autoRunOnBoot: false,
       autoRunOnMyPackageReplaced: false,
@@ -89,4 +89,4 @@ Future<void> updateForegroundNotification(String texto) async {
 
 // ──────────────────────────────────────────────────────────────────────────────
 // ISOLATE DE FONDO
-// ──────────────────────────────────────────────────────────────────�
+// ────────────────────────────────────────────────────────────────────�
