@@ -77,6 +77,21 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
     }
   }
 
+  Color _colorRango(String? r) => switch (r) {
+    'NOVATO'  => const Color(0xFF6B7280),
+    'PRO'     => const Color(0xFF3B82F6),
+    'ÉLITE'   => const Color(0xFFA855F7),
+    'LEYENDA' => const Color(0xFFEF8C0E),
+    'MASTER'  => const Color(0xFFEF4444),
+    _         => Colors.grey,
+  };
+
+  String _numMovil(String? usuario) {
+    if (usuario == null || usuario.isEmpty) return '';
+    final m = RegExp(r'\d+').firstMatch(usuario);
+    return m != null ? '#${m.group(0)}' : '';
+  }
+
   String _iniciales(String? n) {
     if (n == null || n.trim().isEmpty) return '?';
     final p = n.trim().split(' ');
@@ -213,13 +228,13 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                 ),
                 padding: const EdgeInsets.fromLTRB(16, 60, 16, 10),
                 child: _cargando ? const SizedBox() : Row(children: [
-                  _statBox('${_solicitudes.length}', 'Solicitudes', const Color(0xFFF59E0B)),
+                  _statBox('${_solicitudes.length}', 'Solicitudes', const Color(0xFFF59E0B), onTap: () => _tabCtrl.animateTo(0)),
                   const SizedBox(width: 8),
-                  _statBox('${_activaciones.length}', 'Por activar', const Color(0xFF3B82F6)),
+                  _statBox('${_activaciones.length}', 'Por activar', const Color(0xFF3B82F6), onTap: () => _tabCtrl.animateTo(1)),
                   const SizedBox(width: 8),
-                  _statBox('${_moviles.length}', 'Móviles', const Color(0xff3AF500)),
+                  _statBox('${_moviles.length}', 'Móviles', const Color(0xff3AF500), onTap: () => _tabCtrl.animateTo(2)),
                   const SizedBox(width: 8),
-                  _statBox('${_registros.length}', 'Recientes', const Color(0xFFA855F7)),
+                  _statBox('${_registros.length}', 'Recientes', const Color(0xFFA855F7), onTap: () => _tabCtrl.animateTo(3)),
                 ]),
               ),
             ),
@@ -276,18 +291,22 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
     );
   }
 
-  Widget _statBox(String val, String label, Color color) => Expanded(
-    child: Container(
-      padding: const EdgeInsets.symmetric(vertical: 7),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
+  Widget _statBox(String val, String label, Color color, {VoidCallback? onTap}) => Expanded(
+    child: GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 7),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: color.withValues(alpha: 0.3)),
+        ),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text(val, style: TextStyle(color: color, fontSize: 17, fontWeight: FontWeight.bold)),
+          Text(label, style: const TextStyle(color: Colors.white54, fontSize: 8), textAlign: TextAlign.center),
+        ]),
       ),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Text(val, style: TextStyle(color: color, fontSize: 17, fontWeight: FontWeight.bold)),
-        Text(label, style: const TextStyle(color: Colors.white54, fontSize: 8), textAlign: TextAlign.center),
-      ]),
     ),
   );
 
@@ -409,6 +428,7 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
         final u = lista[i];
         final rol = u['rol']?.toString() ?? '';
         final color = _colorRol(rol);
+        final numMovil = rol == 'movil' ? _numMovil(u['usuario']?.toString()) : '';
         return Container(
           margin: const EdgeInsets.only(bottom: 10),
           decoration: BoxDecoration(
@@ -426,7 +446,13 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
             title: Text(u['nombre'] ?? '—', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
             subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               if ((u['usuario'] ?? '').toString().isNotEmpty)
-                Text('@${u['usuario']}', style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                Row(children: [
+                  if (numMovil.isNotEmpty) ...[
+                    Text(numMovil, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 12)),
+                    const SizedBox(width: 5),
+                  ],
+                  Text('@${u['usuario']}', style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                ]),
               _chip(rol.toUpperCase(), color),
             ]),
             trailing: ElevatedButton(
@@ -457,12 +483,14 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
       itemBuilder: (_, i) {
         final u = lista[i];
         final rangoActual = u['rango_movil']?.toString();
+        final rc = _colorRango(rangoActual);
+        final numMovil = _numMovil(u['usuario']?.toString());
         return Container(
           margin: const EdgeInsets.only(bottom: 10),
           decoration: BoxDecoration(
             color: const Color(0xFF141414),
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: const Color(0xFF3B82F6).withValues(alpha: 0.2)),
+            border: Border.all(color: rc.withValues(alpha: 0.25)),
           ),
           child: Padding(
             padding: const EdgeInsets.all(14),
@@ -470,33 +498,41 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
               Row(children: [
                 CircleAvatar(
                   radius: 18,
-                  backgroundColor: const Color(0xFF3B82F6).withValues(alpha: 0.15),
+                  backgroundColor: rc.withValues(alpha: 0.15),
                   child: Text(_iniciales(u['nombre']),
-                      style: const TextStyle(color: Color(0xFF3B82F6), fontWeight: FontWeight.bold, fontSize: 12)),
+                      style: TextStyle(color: rc, fontWeight: FontWeight.bold, fontSize: 12)),
                 ),
                 const SizedBox(width: 10),
                 Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text(u['nombre'] ?? '—', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
-                  Text('@${u['usuario'] ?? ''}', style: const TextStyle(color: Colors.white38, fontSize: 11)),
+                  Row(children: [
+                    if (numMovil.isNotEmpty) ...[
+                      Text(numMovil, style: TextStyle(color: rc, fontWeight: FontWeight.bold, fontSize: 12)),
+                      const SizedBox(width: 5),
+                    ],
+                    Text('@${u['usuario'] ?? ''}', style: const TextStyle(color: Colors.white38, fontSize: 11)),
+                  ]),
                 ])),
                 if (rangoActual != null && rangoActual.isNotEmpty)
-                  _chip(rangoActual, const Color(0xFF3B82F6)),
+                  _chip(rangoActual, rc),
               ]),
               const SizedBox(height: 10),
               Wrap(spacing: 6, runSpacing: 6, children: rangos.map((r) {
                 final activo = rangoActual == r;
+                final rangoColor = _colorRango(r);
                 return GestureDetector(
+                  behavior: HitTestBehavior.opaque,
                   onTap: () => _cambiarRango(u, r),
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                     decoration: BoxDecoration(
-                      color: activo ? const Color(0xFF3B82F6) : Colors.white.withValues(alpha: 0.06),
+                      color: activo ? rangoColor : Colors.white.withValues(alpha: 0.06),
                       borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: activo ? const Color(0xFF3B82F6) : Colors.white12),
+                      border: Border.all(color: activo ? rangoColor : rangoColor.withValues(alpha: 0.4)),
                     ),
                     child: Text(r,
                         style: TextStyle(
-                          color: activo ? Colors.white : Colors.white54,
+                          color: activo ? Colors.white : rangoColor.withValues(alpha: 0.85),
                           fontSize: 11, fontWeight: activo ? FontWeight.bold : FontWeight.normal)),
                   ),
                 );
@@ -536,40 +572,4 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
             final rol = u['rol']?.toString() ?? '';
             final color = _colorRol(rol);
             final activo = u['activo'] as bool? ?? false;
-            final suspendido = u['suspendido'] as bool? ?? false;
-            String estado;
-            Color estadoColor;
-            if (suspendido)       { estado = 'SUSPENDIDO'; estadoColor = Colors.red; }
-            else if (!activo)     { estado = 'PENDIENTE';  estadoColor = Colors.orange; }
-            else                  { estado = 'HABILITADO'; estadoColor = Colors.green; }
-            return Container(
-              margin: const EdgeInsets.only(bottom: 8),
-              decoration: BoxDecoration(
-                color: const Color(0xFF141414),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: color.withValues(alpha: 0.15)),
-              ),
-              child: ListTile(
-                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                leading: CircleAvatar(
-                  radius: 18,
-                  backgroundColor: color.withValues(alpha: 0.15),
-                  child: Text(_iniciales(u['nombre']),
-                      style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 12)),
-                ),
-                title: Text(u['nombre'] ?? '—',
-                    style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
-                subtitle: Row(children: [
-                  _chip(rol.toUpperCase(), color),
-                  const SizedBox(width: 6),
-                  _chip(estado, estadoColor),
-                ]),
-              ),
-            );
-          },
-        ),
-      ),
-    ]);
-  }
-
-}
+            fin

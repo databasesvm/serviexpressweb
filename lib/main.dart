@@ -100,9 +100,4 @@ class _ServiexpressExpressAppState extends State<ServiexpressExpressApp>
       // Web: si la URL contiene '/form' → GuestHomeScreen (invitados)
       //      cualquier otra ruta      → LoginScreen (operadores)
       // Móvil: siempre LoginScreen.
-      home: (kIsWeb && Uri.base.path.contains('/form'))
-          ? const GuestHomeScreen()
-          : const LoginScreen(),
-    );
-  }
-}
+      home: (kIsWeb && Uri.base.path

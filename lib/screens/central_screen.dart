@@ -3196,12 +3196,12 @@ class _CentralScreenState extends State<CentralScreen>
       return;
     }
 
-    // ── Ordenar sedes: numéricamente descendente (mayor a menor) ─────────────
+    // ── Ordenar sedes: numéricamente ascendente (menor a mayor) ──────────────
     final sedesOrdenadas = List<Map<String, dynamic>>.from(sedes)
       ..sort((a, b) {
         final na = int.tryParse(a['numero']?.toString() ?? '') ?? -1;
         final nb = int.tryParse(b['numero']?.toString() ?? '') ?? -1;
-        return nb.compareTo(na);
+        return na.compareTo(nb);
       });
 
     // ── Estado del diálogo ────────────────────────────────────────────────────
@@ -7789,39 +7789,17 @@ class _CentralScreenState extends State<CentralScreen>
     );
   }
 
-  // ── Avatar de moto en paradero — muestra badge FN visible ──────────────────
+  // ── Avatar de moto en paradero — color índigo identifica FN ─────────────────
   Widget _paraderoMovilLeading(Map<String, dynamic> m, Color colorBase) {
     final esFn = m['tiene_fn'] == true;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        CircleAvatar(
-          radius: 12,
-          backgroundColor: esFn ? const Color(0xFF1A237E) : colorBase,
-          child: Text(
-            _extraerNumeroAvatar(m),
-            style: const TextStyle(
-                color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-          ),
-        ),
-        if (esFn)
-          Container(
-            margin: const EdgeInsets.only(top: 2),
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-            decoration: BoxDecoration(
-              color: const Color(0xFF1A237E),
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: const Text(
-              'FN',
-              style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 7,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 0.5),
-            ),
-          ),
-      ],
+    return CircleAvatar(
+      radius: 12,
+      backgroundColor: esFn ? const Color(0xFF1A237E) : colorBase,
+      child: Text(
+        _extraerNumeroAvatar(m),
+        style: const TextStyle(
+            color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+      ),
     );
   }
 
@@ -9263,4 +9241,4 @@ class _CentralScreenState extends State<CentralScreen>
 
 // ============================================================
 // PANEL DE PRECIOS POR LOCAL — sectores + tarifas
-// ============================================================
+// ============================================================                                                                                                                                                                                                                                                                                                                                                         

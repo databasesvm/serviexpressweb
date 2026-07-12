@@ -2751,8 +2751,7 @@ class _MovilScreenState extends State<MovilScreen>
     setState(() => _serviciosOcultosLocales.add(servicioId));
 
     try {
-      if (!tieneProblema)
-        _sonidos.reproducirSuave(Sonidos.movilFinalizar); // Servicio completado (hold)
+      // Sonido disparado en onCompletado del BotonPresionSostenida
 
       await Supabase.instance.client
           .from('servicios')
@@ -5038,7 +5037,10 @@ class _MovilScreenState extends State<MovilScreen>
               : '🏁 MANTÉN PRESIONADO PARA ENTREGAR',
           colorBase: Colors.black,
           colorTexto: const Color(0xff3AF500),
-          onCompletado: () => _finalizarServicio(servicio, tieneProblema),
+          onCompletado: () {
+            _sonidos.reproducirSuave(Sonidos.movilFinalizar);
+            _finalizarServicio(servicio, tieneProblema);
+          },
         );
       }
     }
@@ -5751,8 +5753,10 @@ class _MovilScreenState extends State<MovilScreen>
               texto: '🏁 MANTÉN PRESIONADO PARA ENTREGAR',
               colorBase: Colors.indigo[900]!,
               colorTexto: Colors.white,
-              onCompletado: () =>
-                  _finalizarServicio(servicio, tieneProblema),
+              onCompletado: () {
+                _sonidos.reproducirSuave(Sonidos.movilFinalizar);
+                _finalizarServicio(servicio, tieneProblema);
+              },
             );
     }
 
@@ -8476,185 +8480,4 @@ class _MovilScreenState extends State<MovilScreen>
                                                 color: Colors.grey[800],
                                               ),
                                             ),
-                                          ],
-                                        ),
-                                        const SizedBox(height: 10),
-                                        SizedBox(
-                                          width: double.infinity,
-                                          child: OutlinedButton.icon(
-                                            style: OutlinedButton.styleFrom(
-                                              foregroundColor: Colors.red,
-                                              side: const BorderSide(
-                                                color: Colors.red,
-                                              ),
-                                            ),
-                                            onPressed: _procesando
-                                                ? null
-                                                : _salirDelParadero,
-                                            icon: const Icon(
-                                              Icons.exit_to_app,
-                                              size: 16,
-                                            ),
-                                            label: const Text(
-                                              'SALIR DEL PARADERO',
-                                              style: TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 11,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                ),
-                                _construirFilaVirtual(usuariosTotales),
-                                const SizedBox(height: 10),
-                              ],
-
-                              // ---- TARJETA DOMICILIO ACTIVO ----
-                              if (_pedidoDomicilioActivo != null)
-                                _buildTarjetaDomicilio(),
-
-                              if (_serviciosActivosData.isNotEmpty) ...[
-                                Padding(
-                                  padding: const EdgeInsets.only(bottom: 6, left: 2, top: 4),
-                                  child: Row(children: [
-                                    Icon(Icons.local_shipping_outlined, size: 13, color: Colors.black38),
-                                    const SizedBox(width: 5),
-                                    const Text(
-                                      'ÓRDENES EN CURSO',
-                                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.black38, letterSpacing: 0.8),
-                                    ),
-                                  ]),
-                                ),
-                                ..._serviciosActivosData.map(
-                                  (servicio) => AnimatedSize(
-                                    key: ValueKey('size_activa_${servicio['id']}'),
-                                    duration: const Duration(milliseconds: 280),
-                                    curve: Curves.easeInOut,
-                                    alignment: Alignment.topCenter,
-                                    child: FadeSlideIn(
-                                      key: ValueKey('activa_${servicio['id']}'),
-                                      child: _construirTarjetaActiva(
-                                        servicio,
-                                        esMaster: esMaster,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-
-                              // ---> DESTRUCCIÓN DEL CANDADO VISUAL AQUÍ <---
-                              if (tienePermisoDeRadar ||
-                                  pendientes.isNotEmpty) ...[
-                                Padding(
-                                  padding: const EdgeInsets.only(bottom: 6, left: 2, top: 4),
-                                  child: Row(children: [
-                                    Icon(Icons.radar, size: 13, color: Colors.black38),
-                                    const SizedBox(width: 5),
-                                    const Text(
-                                      'RADAR DE DISPONIBLES',
-                                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.black38, letterSpacing: 0.8),
-                                    ),
-                                  ]),
-                                ),
-                                if (pendientes.isEmpty)
-                                  const Padding(
-                                    padding: EdgeInsets.only(top: 20),
-                                    child: Center(
-                                      child: Text(
-                                        'Radar limpio. Sin Servicios.',
-                                        style: TextStyle(
-                                          color: Colors.grey,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ),
-                                  )
-                                else
-                                  ...pendientes.map(
-                                    (servicio) => FadeSlideIn(
-                                      key: ValueKey('pendiente_${servicio['id']}'),
-                                      child: _construirTarjetaPendiente(
-                                        servicio,
-                                        esMaster: esMaster,
-                                      ),
-                                    ),
-                                  ),
-                              ] else if (_serviciosActivosData.isEmpty &&
-                                  !radarAbierto) ...[
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 10),
-                                  child: Container(
-                                    padding: const EdgeInsets.all(16),
-                                    decoration: BoxDecoration(
-                                      color: Colors.orange[50]!,
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(color: Colors.orange[200]!),
-                                    ),
-                                    child: Column(
-                                      children: [
-                                        Icon(
-                                          Icons.lock_clock_outlined,
-                                          color: Colors.orange[700],
-                                          size: 32,
-                                        ),
-                                        const SizedBox(height: 10),
-                                        Text(
-                                          mensajeBloqueo.isNotEmpty
-                                              ? mensajeBloqueo
-                                              : 'Regístrate en un paradero para recibir servicios.',
-                                          textAlign: TextAlign.center,
-                                          style: TextStyle(
-                                            fontSize: 13,
-                                            color: Colors.orange[900],
-                                            fontWeight: FontWeight.w500,
-                                            height: 1.4,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ],
-                          );
-                        },
-                      ),
-                ),
-              ),
-            ],
-          );
-        },
-          ),
-        _construirPerfilTab(),
-        ],
-        ), // IndexedStack
-      ), // ValueListenableBuilder
-    bottomNavigationBar: BottomNavigationBar(
-      currentIndex: _tabActual,
-      onTap: _cambiarTab,
-      selectedItemColor: const Color(0xff3AF500),
-      unselectedItemColor: Colors.white38,
-      backgroundColor: const Color(0xFF0D0D0D),
-      type: BottomNavigationBarType.fixed,
-      items: const [
-        BottomNavigationBarItem(
-          icon: Icon(Icons.radar),
-          label: 'Servicios',
-        ),
-        BottomNavigationBarItem(
-          icon: Icon(Icons.person_outline),
-          label: 'Perfil',
-        ),
-      ],
-    ),
-    ), // ← cierra Scaffold (child: Scaffold)
-    ); // ← cierra PopScope
-  }
-}
-
-// ===========================================================================
-// PAINTER: Overlay circular oscuro con hueco (tutorial de pantalla)
-// ===========================================================================
+                               

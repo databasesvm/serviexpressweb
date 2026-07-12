@@ -1051,7 +1051,7 @@ class _MotoFnCard extends StatelessWidget {
                       '#$numStr',
                       style: TextStyle(
                           color: tieneFn
-                              ? Colors.indigo[200]
+                              ? Colors.white
                               : Colors.white38,
                           fontWeight: FontWeight.bold,
                           fontSize: numStr.length > 2 ? 13 : 15),
@@ -1197,12 +1197,17 @@ class _HistorialTabState extends State<_HistorialTab> {
       if (ids.isNotEmpty) {
         final motos = await _db
             .from('usuarios')
-            .select('id, nombre')
+            .select('id, nombre, usuario')
             .inFilter('id', ids);
-        _nombreMoviles = {
-          for (final m in List<Map<String, dynamic>>.from(motos))
-            m['id'].toString(): (m['nombre'] as String? ?? '—')
-        };
+        _nombreMoviles = Map.fromEntries(
+          List<Map<String, dynamic>>.from(motos).map((m) {
+            final nombre = m['nombre'] as String? ?? '—';
+            final usuario = m['usuario']?.toString() ?? '';
+            final numStr = RegExp(r'\d+').firstMatch(usuario)?.group(0) ?? '';
+            final display = numStr.isNotEmpty ? '#$numStr · $nombre' : nombre;
+            return MapEntry(m['id'].toString(), display);
+          }),
+        );
       }
 
       setState(() => _servicios = lista);
@@ -1485,15 +1490,3 @@ class _CardServicioFN extends StatelessWidget {
     final hm =
         '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
     if (dt.year == now.year &&
-        dt.month == now.month &&
-        dt.day == now.day) return hm;
-    return '${dt.day}/${dt.month} $hm';
-  }
-
-  String _miles(int n) {
-    final s = n.toString();
-    if (s.length <= 3) return s;
-    final pos = s.length - 3;
-    return '${s.substring(0, pos)}.${s.substring(pos)}';
-  }
-}

@@ -162,10 +162,4 @@ class SonidoManager {
 
   // =========================================================================
   // DISPOSE — Llamar en el dispose() del widget que lo inicializó
-  // =========================================================================
-  void dispose() {
-    _playerPrincipal.dispose();
-    _playerSecundario.dispose();
-    _playerPanico.dispose();
-  }
-}
+  // =======================
