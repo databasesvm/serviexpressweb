@@ -1490,3 +1490,15 @@ class _CardServicioFN extends StatelessWidget {
     final hm =
         '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
     if (dt.year == now.year &&
+        dt.month == now.month &&
+        dt.day == now.day) return hm;
+    return '\${dt.day}/\${dt.month} \$hm';
+  }
+
+  String _miles(int n) {
+    final s = n.toString();
+    if (s.length <= 3) return s;
+    final pos = s.length - 3;
+    return '\${s.substring(0, pos)}.\${s.substring(pos)}';
+  }
+}

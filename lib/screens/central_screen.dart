@@ -9223,4 +9223,49 @@ class _CentralScreenState extends State<CentralScreen>
               index: _panelActivoMobile,
               children: [
                 RepaintBoundary(child: _construirPanelControl()),
-                RepaintBoundary(child: _construirPa
+                RepaintBoundary(child: _construirPanelMapa()),
+                RepaintBoundary(child: _construirPanelMonitor()),
+              ],
+            ),
+
+      bottomNavigationBar: esPantallaGrande
+          ? null
+          : BottomNavigationBar(
+              backgroundColor: Colors.black,
+              selectedItemColor: const Color(0xff3AF500),
+              unselectedItemColor: Colors.white54,
+              type: BottomNavigationBarType.fixed,
+              currentIndex: _panelActivoMobile,
+              onTap: (index) {
+                if (index == 3) {
+                  _abrirPanelGestion(context);
+                } else {
+                  setState(() => _panelActivoMobile = index);
+                }
+              },
+              items: const [
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.people_alt),
+                  label: 'Flota',
+                ),
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.radar),
+                  label: 'Radar',
+                ),
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.monitor),
+                  label: 'Servicios',
+                ),
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.admin_panel_settings_rounded),
+                  label: 'Gestión',
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+// ============================================================
+// PANEL DE PRECIOS POR LOCAL â€” sectores + tarifas
+// ============================================================

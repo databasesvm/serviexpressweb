@@ -568,4 +568,50 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
             final activo = u['activo'] as bool? ?? false;
             final suspendido = u['suspendido'] as bool? ?? false;
             final numMovil = rol == 'movil' ? _numMovil(u['usuario']?.toString()) : '';
-            fin
+            final String estado;
+            if (suspendido) {
+              estado = 'SUSPENDIDO';
+            } else if (activo) {
+              estado = 'ACTIVO';
+            } else {
+              estado = 'PENDIENTE';
+            }
+            final estadoColor = suspendido
+                ? Colors.red[400]!
+                : activo
+                    ? Colors.green[400]!
+                    : Colors.orange[400]!;
+            return Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFF141414),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: color.withValues(alpha: 0.25)),
+              ),
+              child: ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                leading: CircleAvatar(
+                  radius: 20,
+                  backgroundColor: numMovil.isNotEmpty ? color : color.withValues(alpha: 0.15),
+                  child: numMovil.isNotEmpty
+                      ? Text(numMovil, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 10))
+                      : Text(_iniciales(u['nombre']), style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 13)),
+                ),
+                title: Text(u['nombre'] ?? '—', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  if ((u['usuario'] ?? '').toString().isNotEmpty)
+                    Text('@\${u['usuario']}', style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                  Row(children: [
+                    _chip(rol.toUpperCase(), color),
+                    const SizedBox(width: 6),
+                    _chip(estado, estadoColor),
+                  ]),
+                ]),
+              ),
+            );
+          },
+        ),
+      ),
+    ]);
+  }
+}
