@@ -9251,4 +9251,16 @@ class _CentralScreenState extends State<CentralScreen>
                   icon: Icon(Icons.monitor),
                   label: 'Servicios',
                 ),
-                Bo
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.admin_panel_settings_rounded),
+                  label: 'Gestión',
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+// ============================================================
+// PANEL DE PRECIOS POR LOCAL — sectores + tarifas
+// ============================================================
