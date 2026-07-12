@@ -63,7 +63,7 @@ class _CentralScreenState extends State<CentralScreen>
   // MENÚ DE FILTRO DEL MONITOR — qué secciones se muestran. Vacío =
   // todas visibles (comportamiento de siempre). Las claves coinciden
   // con las usadas en _construirBloqueServicios.
-  Set<String> _seccionesOcultasMonitor = {};
+  final Set<String> _seccionesOcultasMonitor = {};
 
   /// Contadores de mensajes no leídos por sala (sala_id → cantidad).
   /// Se incrementa cuando llega un mensaje ajeno en el canal Realtime.
@@ -525,7 +525,7 @@ class _CentralScreenState extends State<CentralScreen>
         final hoy = DateTime.now();
         edadMovil = hoy.year - f.year;
         if (hoy.month < f.month ||
-            (hoy.month == f.month && hoy.day < f.day)) edadMovil--;
+            (hoy.month == f.month && hoy.day < f.day)) { edadMovil--; }
       } catch (_) {}
     }
 
@@ -582,7 +582,7 @@ class _CentralScreenState extends State<CentralScreen>
     final String? dirCasa = movil['dir_casa']?.toString();
 
     // Sección header de sección
-    Widget _seccionHeader(String titulo) => Padding(
+    Widget seccionHeader(String titulo) => Padding(
           padding: const EdgeInsets.fromLTRB(0, 16, 0, 6),
           child: Row(children: [
             Text(titulo,
@@ -741,7 +741,7 @@ class _CentralScreenState extends State<CentralScreen>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           // —— CONTACTO ——————————————————————————
-                          _seccionHeader('CONTACTO'),
+                          seccionHeader('CONTACTO'),
                           _filaPerfilCentral(
                               Icons.phone, 'Teléfono', movil['telefono']),
                           if (movil['telefono'] != null &&
@@ -791,7 +791,7 @@ class _CentralScreenState extends State<CentralScreen>
                                 'Dirección', dirCasa),
 
                           // —— DATOS PERSONALES ——————————————————
-                          _seccionHeader('DATOS PERSONALES'),
+                          seccionHeader('DATOS PERSONALES'),
                           _filaPerfilCentral(
                               Icons.cake_outlined, 'Nacimiento', fechaNacTexto),
                           if (edadMovil != null)
@@ -801,7 +801,7 @@ class _CentralScreenState extends State<CentralScreen>
                               'Registro', fechaRegistroTexto),
 
                           // —— OPERACIONAL ———————————————————————
-                          _seccionHeader('OPERACIONAL'),
+                          seccionHeader('OPERACIONAL'),
                           if (exclusivo != null && exclusivo.isNotEmpty)
                             _filaPerfilCentral(Icons.place_rounded,
                                 'Exclusivo', exclusivo),
@@ -819,7 +819,7 @@ class _CentralScreenState extends State<CentralScreen>
                           ),
 
                           // —— CUENTAS DE PAGO ———————————————————
-                          _seccionHeader('CUENTAS DE PAGO'),
+                          seccionHeader('CUENTAS DE PAGO'),
                           _filaPagoCentral('Nequi',
                               const Color(0xFFE5007D), Colors.white,
                               movil['pago_nequi']),
@@ -831,7 +831,7 @@ class _CentralScreenState extends State<CentralScreen>
                               movil['pago_bancolombia']),
 
                           // —— CALIFICACIONES (con nombre real del calificador) ——
-                          _seccionHeader('CALIFICACIONES RECIBIDAS'),
+                          seccionHeader('CALIFICACIONES RECIBIDAS'),
                           FutureBuilder<List<Map<String, dynamic>>>(
                             future: Supabase.instance.client
                                 .from('calificaciones')
@@ -1394,10 +1394,10 @@ class _CentralScreenState extends State<CentralScreen>
   /// Abre el diálogo selector de destinatarios para la convocatoria.
   // ignore: unused_element
   void _mostrarDialogoConvocatoria() {
-    String _scope = 'todos';
-    String? _paraderoSel;
-    Map<String, dynamic>? _movilSel;
-    bool _incluirDesconectados = false;
+    String scope = 'todos';
+    String? paraderoSel;
+    Map<String, dynamic>? movilSel;
+    bool incluirDesconectados = false;
     const paraderos = ['EXPUENTE', 'MEMOS', 'NOCTURNO', 'BASE CASA'];
 
     // Carga lista de móviles una sola vez al abrir el diálogo
@@ -1473,44 +1473,44 @@ class _CentralScreenState extends State<CentralScreen>
                     _chipScope(
                       label: 'Todos',
                       icon: Icons.groups_rounded,
-                      selected: _scope == 'todos',
+                      selected: scope == 'todos',
                       onTap: () => setDlg(() {
-                        _scope = 'todos';
-                        _paraderoSel = null;
-                        _movilSel = null;
+                        scope = 'todos';
+                        paraderoSel = null;
+                        movilSel = null;
                       }),
                     ),
                     _chipScope(
                       label: 'Paradero',
                       icon: Icons.place_rounded,
-                      selected: _scope == 'paradero',
+                      selected: scope == 'paradero',
                       onTap: () => setDlg(() {
-                        _scope = 'paradero';
-                        _paraderoSel ??= paraderos.first;
-                        _movilSel = null;
+                        scope = 'paradero';
+                        paraderoSel ??= paraderos.first;
+                        movilSel = null;
                       }),
                     ),
                     _chipScope(
                       label: 'Individual',
                       icon: Icons.person_pin_rounded,
-                      selected: _scope == 'individual',
+                      selected: scope == 'individual',
                       onTap: () => setDlg(() {
-                        _scope = 'individual';
-                        _paraderoSel = null;
+                        scope = 'individual';
+                        paraderoSel = null;
                       }),
                     ),
                   ],
                 ),
                 // Sub-selector de paradero
-                if (_scope == 'paradero') ...[
+                if (scope == 'paradero') ...[
                   const SizedBox(height: 12),
                   Wrap(
                     spacing: 6,
                     runSpacing: 6,
                     children: paraderos.map((p) {
-                      final sel = _paraderoSel == p;
+                      final sel = paraderoSel == p;
                       return GestureDetector(
-                        onTap: () => setDlg(() => _paraderoSel = p),
+                        onTap: () => setDlg(() => paraderoSel = p),
                         child: Container(
                           padding: const EdgeInsets.symmetric(
                               horizontal: 10, vertical: 5),
@@ -1534,7 +1534,7 @@ class _CentralScreenState extends State<CentralScreen>
                   ),
                 ],
                 // Sub-selector individual: lista de móviles
-                if (_scope == 'individual') ...[
+                if (scope == 'individual') ...[
                   const SizedBox(height: 12),
                   FutureBuilder<List<dynamic>>(
                     future: futureMoviles,
@@ -1564,9 +1564,9 @@ class _CentralScreenState extends State<CentralScreen>
                             final m = lista[i];
                             final enLinea = m['en_linea'] == true;
                             final seleccionado =
-                                _movilSel?['id'] == m['id'];
+                                movilSel?['id'] == m['id'];
                             return InkWell(
-                              onTap: () => setDlg(() => _movilSel = m),
+                              onTap: () => setDlg(() => movilSel = m),
                               borderRadius: BorderRadius.circular(8),
                               child: Container(
                                 margin:
@@ -1631,18 +1631,18 @@ class _CentralScreenState extends State<CentralScreen>
                   ),
                 ],
                 // Toggle desconectados — no aplica para individual
-                if (_scope != 'individual') ...[
+                if (scope != 'individual') ...[
                   const SizedBox(height: 16),
                   GestureDetector(
                     onTap: () => setDlg(
-                        () => _incluirDesconectados = !_incluirDesconectados),
+                        () => incluirDesconectados = !incluirDesconectados),
                     child: Row(
                       children: [
                         Icon(
-                          _incluirDesconectados
+                          incluirDesconectados
                               ? Icons.check_box_rounded
                               : Icons.check_box_outline_blank_rounded,
-                          color: _incluirDesconectados
+                          color: incluirDesconectados
                               ? Colors.orange
                               : Colors.white38,
                           size: 20,
@@ -1677,18 +1677,18 @@ class _CentralScreenState extends State<CentralScreen>
               label: const Text('CONVOCAR',
                   style: TextStyle(
                       color: Colors.black, fontWeight: FontWeight.bold)),
-              onPressed: (_scope == 'paradero' && _paraderoSel == null) ||
-                      (_scope == 'individual' && _movilSel == null)
+              onPressed: (scope == 'paradero' && paraderoSel == null) ||
+                      (scope == 'individual' && movilSel == null)
                   ? null
                   : () {
                       Navigator.pop(ctx);
-                      if (_scope == 'individual') {
-                        _dispararPanicoIndividual(_movilSel!);
+                      if (scope == 'individual') {
+                        _dispararPanicoIndividual(movilSel!);
                       } else {
                         _dispararPanico(
-                          scope: _scope,
-                          paradero: _paraderoSel,
-                          incluirDesconectados: _incluirDesconectados,
+                          scope: scope,
+                          paradero: paraderoSel,
+                          incluirDesconectados: incluirDesconectados,
                         );
                       }
                     },
@@ -2246,8 +2246,9 @@ class _CentralScreenState extends State<CentralScreen>
                           if (val) {
                             setDialogState(() {
                               tipoServicio = tipo;
-                              if (tipo != 'PAQUETERÍA')
+                              if (tipo != 'PAQUETERÍA') {
                                 telEmisorController.clear();
+                              }
                             });
                           }
                         },
@@ -2572,26 +2573,19 @@ class _CentralScreenState extends State<CentralScreen>
 
                       if (tipoServicio == 'PAQUETERÍA') {
                         observacionFinal = '[ PAQUETERÍA ]';
-                        if (telEmisor.isNotEmpty)
-                          observacionFinal += ' - 📞 Envía: $telEmisor';
-                        if (telReceptor.isNotEmpty)
-                          observacionFinal += ' | 📞 Recibe: $telReceptor';
-                        if (detalles.isNotEmpty)
-                          observacionFinal += '\n$detalles';
+                        if (telEmisor.isNotEmpty) { observacionFinal += ' - 📞 Envía: $telEmisor'; }
+                        if (telReceptor.isNotEmpty) { observacionFinal += ' | 📞 Recibe: $telReceptor'; }
+                        if (detalles.isNotEmpty) { observacionFinal += '\n$detalles'; }
                       } else if (tipoServicio == 'COMIDA') {
                         observacionFinal = '[ COMIDA ] - 🍔 PEDIDO:\n$detalles';
-                        if (telReceptor.isNotEmpty)
-                          observacionFinal += '\n---\n📞 Tel: $telReceptor';
+                        if (telReceptor.isNotEmpty) { observacionFinal += '\n---\n📞 Tel: $telReceptor'; }
                       } else if (tipoServicio == 'COMPRAS') {
                         observacionFinal = '[ COMPRAS ] - 🛒 LISTA:\n$detalles';
-                        if (telReceptor.isNotEmpty)
-                          observacionFinal += '\n---\n📞 Tel: $telReceptor';
+                        if (telReceptor.isNotEmpty) { observacionFinal += '\n---\n📞 Tel: $telReceptor'; }
                       } else if (tipoServicio == 'MOTOTAXI') {
                         observacionFinal = '[ MOTOTAXI ]';
-                        if (telReceptor.isNotEmpty)
-                          observacionFinal += ' - 📱 Pasajero: $telReceptor';
-                        if (detalles.isNotEmpty)
-                          observacionFinal += '\n$detalles';
+                        if (telReceptor.isNotEmpty) { observacionFinal += ' - 📱 Pasajero: $telReceptor'; }
+                        if (detalles.isNotEmpty) { observacionFinal += '\n$detalles'; }
                       }
 
                       try {
@@ -2822,11 +2816,11 @@ class _CentralScreenState extends State<CentralScreen>
                           // Central navega fuera de pantalla, y su ID se guarda
                           // para cancelarlo si alguien acepta antes de los 30s.
                           if (pilotosSeleccionadosIds.isNotEmpty) {
-                            final _idsSnap =
+                            final idsSnap =
                                 List<String>.from(pilotosSeleccionadosIds);
                             final id30s = await MotorNotificaciones
                                 .programarMisilRetardado(
-                              externalIds: _idsSnap,
+                              externalIds: idsSnap,
                               titulo: '📍 TU TURNO EN EL PARADERO',
                               mensaje: 'Un servicio está esperando por ti',
                               segundosRetardo: 30,
@@ -2844,17 +2838,17 @@ class _CentralScreenState extends State<CentralScreen>
                           // Capturo el servicioId antes del delay para
                           // que no dependa del estado del diálogo.
                           {
-                            final int _svcId = nuevoServicioId;
-                            final String _msg =
+                            final int svcId = nuevoServicioId;
+                            final String msg =
                                 'Nuevo servicio disponible en el radar';
-                            final List<String> _masterSnap =
+                            final List<String> masterSnap =
                                 List<String>.from(idsMasters);
-                            final List<String> _paraderoSnap =
+                            final List<String> paraderoSnap =
                                 List<String>.from(pilotosSeleccionadosIds);
 
                             // T=+60s y T=+90s — misiles server-side (pre-fetch al despacho)
-                            final double? _oLat = origenLatCapturada;
-                            final double? _oLng = origenLngCapturada;
+                            final double? oLat = origenLatCapturada;
+                            final double? oLng = origenLngCapturada;
                             final movilesC = await Supabase.instance.client
                                 .from('usuarios').select('id, latitud, longitud')
                                 .eq('rol', 'movil').eq('en_linea', true)
@@ -2862,44 +2856,46 @@ class _CentralScreenState extends State<CentralScreen>
                                 .not('rango_movil', 'in', '("MASTER")');
                             final idsZonaC = movilesC.where((u) {
                               final id = u['id'].toString();
-                              if (_masterSnap.contains(id) || _paraderoSnap.contains(id)) return false;
-                              if (_oLat == null || _oLng == null) return true;
+                              if (masterSnap.contains(id) || paraderoSnap.contains(id)) return false;
+                              if (oLat == null || oLng == null) return true;
                               final uLat = (u['latitud'] as num?)?.toDouble();
                               final uLng = (u['longitud'] as num?)?.toDouble();
                               if (uLat == null || uLng == null) return false;
                               return const Distance().as(
                                     LengthUnit.Meter,
                                     LatLng(uLat, uLng),
-                                    LatLng(_oLat, _oLng),
+                                    LatLng(oLat, oLng),
                                   ) <= 1000;
                             }).map((u) => u['id'].toString()).toList();
                             final idsTodosC = movilesC
                                 .map((u) => u['id'].toString())
-                                .where((id) => !_masterSnap.contains(id))
+                                .where((id) => !masterSnap.contains(id))
                                 .toList();
                             String? id60sC;
                             String? id90sC;
-                            if (idsZonaC.isNotEmpty)
+                            if (idsZonaC.isNotEmpty) {
                               id60sC = await MotorNotificaciones.programarMisilRetardado(
                                 externalIds: idsZonaC,
                                 titulo: '📡 SERVICIO CERCA (1km)',
-                                mensaje: _msg,
+                                mensaje: msg,
                                 segundosRetardo: 60,
                                 sonido: Sonidos.movilParadero,
                               );
-                            if (idsTodosC.isNotEmpty)
+                            }
+                            if (idsTodosC.isNotEmpty) {
                               id90sC = await MotorNotificaciones.programarMisilRetardado(
                                 externalIds: idsTodosC,
                                 titulo: '🚨 SERVICIO SIN TOMAR',
-                                mensaje: _msg,
+                                mensaje: msg,
                                 segundosRetardo: 90,
                                 sonido: Sonidos.movilParadero,
                               );
+                            }
                             if (id60sC != null || id90sC != null) {
                               await Supabase.instance.client.from('servicios').update({
                                 if (id60sC != null) 'onesignal_2m': id60sC,
                                 if (id90sC != null) 'onesignal_5m': id90sC,
-                              }).eq('id', _svcId);
+                              }).eq('id', svcId);
                             }
                           }
                         }
@@ -2908,37 +2904,37 @@ class _CentralScreenState extends State<CentralScreen>
                           // ---> CIERRE Y OFERTA DE GUARDAR EN LA RED DE DIRECCIONES <---
                           // Capturamos antes del pop porque los controllers se
                           // pueden disponer en cuanto el diálogo se destruye.
-                          final String _destinoCapturado =
+                          final String destinoCapturado =
                               destinoController.text.trim();
                           Navigator.pop(context);
 
-                          final String _destinoMayus =
-                              _destinoCapturado.toUpperCase();
+                          final String destinoMayus =
+                              destinoCapturado.toUpperCase();
                           // Extraemos el barrio base (la parte antes del " - "
                           // si el destino viene de un chip de sugerencia, que
                           // rellena con "ZONA - "; si es texto libre, usamos
                           // el texto completo).
-                          final String _barrioExtraido =
-                              _destinoMayus.contains(' - ')
-                              ? _destinoMayus.split(' - ')[0].trim()
-                              : _destinoMayus;
+                          final String barrioExtraido =
+                              destinoMayus.contains(' - ')
+                              ? destinoMayus.split(' - ')[0].trim()
+                              : destinoMayus;
 
                           // Revisamos si ya existe en la red cargada al abrir
                           // el formulario — comparación nombre vs. nombre.
-                          final bool _yaEstaEnRed = redDireccionesCentral.any((
+                          final bool yaEstaEnRed = redDireccionesCentral.any((
                             dir,
                           ) {
                             final String nombreDir = dir.contains(' (')
                                 ? dir.split(' (')[0].trim().toUpperCase()
                                 : dir.trim().toUpperCase();
-                            return nombreDir == _barrioExtraido;
+                            return nombreDir == barrioExtraido;
                           });
 
                           if (tarifaFinal > 0 &&
-                              !_yaEstaEnRed &&
-                              _barrioExtraido.isNotEmpty) {
+                              !yaEstaEnRed &&
+                              barrioExtraido.isNotEmpty) {
                             final barrioCtrl = TextEditingController(
-                              text: _barrioExtraido,
+                              text: barrioExtraido,
                             );
                             String zonaSeleccionada = 'CÚCUTA';
                             bool guardandoRed = false;
@@ -2947,7 +2943,7 @@ class _CentralScreenState extends State<CentralScreen>
                             // context del builder del diálogo, que ya se
                             // destruyó con el Navigator.pop de arriba.
                             showDialog(
-                              context: this.context,
+                              context: this.context, // ignore: use_build_context_synchronously
                               builder: (ctxSave) => StatefulBuilder(
                                 builder: (ctxSave, setSaveState) => AlertDialog(
                                   shape: RoundedRectangleBorder(
@@ -3010,10 +3006,11 @@ class _CentralScreenState extends State<CentralScreen>
                                             selected: zonaSeleccionada == z,
                                             selectedColor: Colors.blue[100],
                                             onSelected: (bool selected) {
-                                              if (selected)
+                                              if (selected) {
                                                 setSaveState(
                                                   () => zonaSeleccionada = z,
                                                 );
+                                              }
                                             },
                                           );
                                         }).toList(),
@@ -3037,8 +3034,9 @@ class _CentralScreenState extends State<CentralScreen>
                                           : () async {
                                               if (barrioCtrl.text
                                                   .trim()
-                                                  .isEmpty)
+                                                  .isEmpty) {
                                                 return;
+                                              }
                                               setSaveState(
                                                 () => guardandoRed = true,
                                               );
@@ -3057,7 +3055,7 @@ class _CentralScreenState extends State<CentralScreen>
                                                 if (ctxSave.mounted) {
                                                   Navigator.pop(ctxSave);
                                                   ScaffoldMessenger.of(
-                                                    this.context,
+                                                    this.context, // ignore: use_build_context_synchronously
                                                   ).showSnackBar(
                                                     const SnackBar(
                                                       content: Text(
@@ -3073,9 +3071,9 @@ class _CentralScreenState extends State<CentralScreen>
                                                 setSaveState(
                                                   () => guardandoRed = false,
                                                 );
-                                                if (ctxSave.mounted)
+                                                if (ctxSave.mounted) {
                                                   ScaffoldMessenger.of(
-                                                    this.context,
+                                                    this.context, // ignore: use_build_context_synchronously
                                                   ).showSnackBar(
                                                     SnackBar(
                                                       content: Text(
@@ -3085,6 +3083,7 @@ class _CentralScreenState extends State<CentralScreen>
                                                           Colors.red,
                                                     ),
                                                   );
+                                                }
                                               }
                                             },
                                       child: guardandoRed
@@ -3112,13 +3111,14 @@ class _CentralScreenState extends State<CentralScreen>
                         }
                       } catch (e) {
                         setDialogState(() => procesando = false);
-                        if (context.mounted)
+                        if (context.mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
                               content: Text('Error al despachar: $e'),
                               backgroundColor: Colors.red,
                             ),
                           );
+                        }
                       }
                     },
               child: procesando
@@ -3217,13 +3217,13 @@ class _CentralScreenState extends State<CentralScreen>
     bool procesando = false;
 
     // Helper: dropdown de sedes ordenadas
-    Widget _dropdownSede({
+    Widget dropdownSede({
       Map<String, dynamic>? value,
       void Function(Map<String, dynamic>?)? onChanged,
       String? label,
     }) =>
         DropdownButtonFormField<Map<String, dynamic>>(
-          value: value,
+          initialValue: value,
           isExpanded: true,
           hint: const Text('Seleccionar sede...',
               style: TextStyle(fontSize: 13, color: Colors.black38)),
@@ -3298,7 +3298,7 @@ class _CentralScreenState extends State<CentralScreen>
                             color: Colors.black54,
                             fontSize: 12)),
                     const SizedBox(height: 4),
-                    _dropdownSede(
+                    dropdownSede(
                       value: sedeSolicitante,
                       onChanged: procesando
                           ? null
@@ -3367,7 +3367,7 @@ class _CentralScreenState extends State<CentralScreen>
                       child: Row(
                         children: [
                           Expanded(
-                            child: _dropdownSede(
+                            child: dropdownSede(
                               value: recogidasSel[i],
                               label: 'Recogida ${i + 1}',
                               onChanged: procesando
@@ -3666,10 +3666,11 @@ class _CentralScreenState extends State<CentralScreen>
                   ]),
             ]),
             builder: (ctx, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting)
+              if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(
                   child: CircularProgressIndicator(color: Colors.black),
                 );
+              }
 
               final moviles =
                   List<Map<String, dynamic>>.from(snapshot.data?[0] ?? []).map((
@@ -3683,7 +3684,7 @@ class _CentralScreenState extends State<CentralScreen>
                 snapshot.data?[1] ?? [],
               );
 
-              if (moviles.isEmpty)
+              if (moviles.isEmpty) {
                 return const Center(
                   child: Text(
                     'No hay móviles en línea.',
@@ -3693,6 +3694,7 @@ class _CentralScreenState extends State<CentralScreen>
                     ),
                   ),
                 );
+              }
 
               // Motor de Carga
               for (var m in moviles) {
@@ -3704,10 +3706,11 @@ class _CentralScreenState extends State<CentralScreen>
               // Ordenamiento táctico: Primero libres, luego por nombre
               moviles.sort((a, b) {
                 int cmp = (a['carga'] as int).compareTo(b['carga'] as int);
-                if (cmp == 0)
+                if (cmp == 0) {
                   return a['nombre'].toString().compareTo(
                     b['nombre'].toString(),
                   );
+                }
                 return cmp;
               });
 
@@ -3866,13 +3869,14 @@ class _CentralScreenState extends State<CentralScreen>
                 .eq('estado', 'pendiente')
                 .neq('id', svcPrincipal['id']),
             builder: (ctx, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting)
+              if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(
                   child: CircularProgressIndicator(color: Colors.black),
                 );
+              }
 
               final pendientes = snapshot.data ?? [];
-              if (pendientes.isEmpty)
+              if (pendientes.isEmpty) {
                 return const Center(
                   child: Text(
                     'No hay otras órdenes pendientes en el radar para fusionar.',
@@ -3884,6 +3888,7 @@ class _CentralScreenState extends State<CentralScreen>
                     textAlign: TextAlign.center,
                   ),
                 );
+              }
 
               return Column(
                 children: [
@@ -4011,10 +4016,11 @@ class _CentralScreenState extends State<CentralScreen>
 
   Future<void> _abrirWhatsAppCentral(String telefono, int idPedido) async {
     if (telefono.isEmpty) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Sin número registrado.')));
+      }
       return;
     }
     String numero = telefono.replaceAll(RegExp(r'[^0-9]'), '');
@@ -4023,10 +4029,11 @@ class _CentralScreenState extends State<CentralScreen>
       'https://wa.me/$numero?text=${Uri.encodeComponent('Central ServiExpress 📡 | Sobre la Orden #$idPedido: ')}',
     );
     if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
-      if (mounted)
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar( // ignore: use_build_context_synchronously
           const SnackBar(content: Text('No se pudo abrir WhatsApp.')),
         );
+      }
     }
   }
 
@@ -4074,7 +4081,7 @@ class _CentralScreenState extends State<CentralScreen>
     if (!mounted) return false;
 
     final bool? confirmar = await showDialog<bool>(
-      context: context,
+      context: context, // ignore: use_build_context_synchronously
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         title: Row(
@@ -4185,7 +4192,7 @@ class _CentralScreenState extends State<CentralScreen>
       }).eq('id', servicio['id']);
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(context).showSnackBar( // ignore: use_build_context_synchronously
           SnackBar(
             content: Text('⚡ Cotización enviada: $textoTarifa'),
             backgroundColor: Colors.green[700],
@@ -4195,7 +4202,7 @@ class _CentralScreenState extends State<CentralScreen>
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(context).showSnackBar( // ignore: use_build_context_synchronously
           SnackBar(content: Text('Error al cotizar: $e'), backgroundColor: Colors.red),
         );
       }
@@ -4229,7 +4236,7 @@ class _CentralScreenState extends State<CentralScreen>
 
       if (!mounted) return;
       showDialog(
-        context: context,
+        context: context, // ignore: use_build_context_synchronously
         builder: (context) => AlertDialog(
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
@@ -4890,10 +4897,7 @@ class _CentralScreenState extends State<CentralScreen>
                       'finalizado_con_problema',
                     ].contains(estado)) {
                       nuevaObs =
-                          '[MARCA DE FALLA] ' +
-                          (obsAnterior.isEmpty
-                              ? 'Cerrado forzoso por Central'
-                              : obsAnterior);
+                          '[MARCA DE FALLA] ${obsAnterior.isEmpty ? 'Cerrado forzoso por Central' : obsAnterior}';
                     }
                     await Supabase.instance.client
                         .from('servicios')
@@ -5399,10 +5403,9 @@ class _CentralScreenState extends State<CentralScreen>
                                   .from('servicios')
                                   .update({
                                     'estado': 'cancelado',
-                                    'observacion': (servicio['observacion'] != null
-                                            ? '${servicio['observacion']} | '
-                                            : '') +
-                                        'CANCELADO POR CENTRAL',
+                                    'observacion': servicio['observacion'] != null
+                                        ? '${servicio['observacion']} | CANCELADO POR CENTRAL'
+                                        : 'CANCELADO POR CENTRAL',
                                   })
                                   .eq('id', servicio['id']);
                             }
@@ -5549,10 +5552,11 @@ class _CentralScreenState extends State<CentralScreen>
                 return StreamBuilder<List<Map<String, dynamic>>>(
                   stream: _streamUsuariosMoviles,
                   builder: (context, snapshot) {
-                    if (!snapshot.hasData)
+                    if (!snapshot.hasData) {
                       return const Center(
                         child: CircularProgressIndicator(color: Colors.black),
                       );
+                    }
                     // Interceptor táctico para formatear la vista
                     final moviles = (snapshot.data ?? []).map((m) {
                       final map = Map<String, dynamic>.from(m);
@@ -5579,10 +5583,9 @@ class _CentralScreenState extends State<CentralScreen>
                     ) {
                       final ticketA = a['ticket_prioridad'] == true ? 1 : 0;
                       final ticketB = b['ticket_prioridad'] == true ? 1 : 0;
-                      if (ticketA != ticketB)
-                        return ticketB.compareTo(
-                          ticketA,
-                        ); // El que tiene ticket va primero
+                      if (ticketA != ticketB) {
+                        return ticketB.compareTo(ticketA); // El que tiene ticket va primero
+                      }
 
                       final horaA = a['ingreso_fila'] != null
                           ? DateTime.parse(a['ingreso_fila'])
@@ -6571,7 +6574,7 @@ class _CentralScreenState extends State<CentralScreen>
                     Switch(
                       value: _radarActivo,
                       onChanged: (val) => setState(() => _radarActivo = val),
-                      activeColor: const Color(0xff3AF500),
+                      activeThumbColor: const Color(0xff3AF500),
                       activeTrackColor: Colors.green[900],
                       inactiveThumbColor: Colors.redAccent,
                       inactiveTrackColor: Colors.red[900],
@@ -6797,10 +6800,11 @@ class _CentralScreenState extends State<CentralScreen>
             child: StreamBuilder<List<Map<String, dynamic>>>(
               stream: _streamServiciosMonitor,
               builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting)
+                if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(
                     child: CircularProgressIndicator(color: Colors.black),
                   );
+                }
                 final todos = snapshot.data ?? [];
 
                 final problemas = todos
@@ -7457,7 +7461,7 @@ class _CentralScreenState extends State<CentralScreen>
       );
 
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(context).showSnackBar( // ignore: use_build_context_synchronously
           SnackBar(
             content: Text(
               duracion == null
@@ -7551,7 +7555,7 @@ class _CentralScreenState extends State<CentralScreen>
           .update({'paradero_actual': null, 'ingreso_fila': null})
           .eq('id', movil['id']);
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(context).showSnackBar( // ignore: use_build_context_synchronously
           SnackBar(
             content: Text('${movil['nombre']} fue sacado de la fila.'),
             backgroundColor: Colors.black,
@@ -7560,7 +7564,7 @@ class _CentralScreenState extends State<CentralScreen>
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(context).showSnackBar( // ignore: use_build_context_synchronously
           SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
         );
       }
@@ -7609,7 +7613,7 @@ class _CentralScreenState extends State<CentralScreen>
           .update({'paradero_actual': null, 'ingreso_fila': null})
           .inFilter('id', ids);
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(context).showSnackBar( // ignore: use_build_context_synchronously
           SnackBar(
             content: Text(
               '$nombreParadero vaciado — ${fila.length} móviles fuera de la fila.',
@@ -7620,7 +7624,7 @@ class _CentralScreenState extends State<CentralScreen>
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(context).showSnackBar( // ignore: use_build_context_synchronously
           SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
         );
       }
@@ -7759,9 +7763,9 @@ class _CentralScreenState extends State<CentralScreen>
 
                   if (ctxDialog.mounted) {
                     Navigator.pop(ctxDialog);
-                    Navigator.pop(context); // cierra el gestor también
+                    Navigator.pop(context); // ignore: use_build_context_synchronously
                     _abrirGestorParaderos(); // recarga con los nuevos datos
-                    ScaffoldMessenger.of(context).showSnackBar(
+                    ScaffoldMessenger.of(context).showSnackBar( // ignore: use_build_context_synchronously
                       SnackBar(
                         content: Text(
                           'Recargos de ${local['nombre']} actualizados',
@@ -8329,7 +8333,7 @@ class _CentralScreenState extends State<CentralScreen>
                   )
                   .toList();
 
-              Widget _construirListaLocales(
+              Widget construirListaLocales(
                 String titulo,
                 List<Map<String, dynamic>> lista,
                 Color color,
@@ -8452,21 +8456,21 @@ class _CentralScreenState extends State<CentralScreen>
                     style: TextStyle(fontSize: 12, color: Colors.black54),
                   ),
                   const SizedBox(height: 12),
-                  _construirListaLocales(
+                  construirListaLocales(
                     '📍 EXCLUSIVOS EXPUENTE',
                     localesExpuente,
                     Colors.blue[800]!,
                     'EXPUENTE',
                   ),
                   const SizedBox(height: 8),
-                  _construirListaLocales(
+                  construirListaLocales(
                     '📍 EXCLUSIVOS MEMOS',
                     localesMemos,
                     Colors.purple[800]!,
                     'MEMOS',
                   ),
                   const SizedBox(height: 8),
-                  _construirListaLocales(
+                  construirListaLocales(
                     '🟢 LOCALES LIBRES (Por Cercanía)',
                     localesLibres,
                     Colors.green[800]!,
@@ -8594,8 +8598,9 @@ class _CentralScreenState extends State<CentralScreen>
                   child: FutureBuilder<List<Map<String, dynamic>>>(
                     future: sectorsFuture,
                     builder: (_, snap) {
-                      if (snap.connectionState == ConnectionState.waiting)
+                      if (snap.connectionState == ConnectionState.waiting) {
                         return const Center(child: CircularProgressIndicator(color: Colors.indigo));
+                      }
                       final lista = (snap.data ?? [])
                           .where((s) => s['municipio'].toString() == filtro)
                           .toList();
@@ -8805,8 +8810,9 @@ class _CentralScreenState extends State<CentralScreen>
                       child: FutureBuilder<List<Map<String, dynamic>>>(
                         future: dirsFuture,
                         builder: (_, snap) {
-                          if (snap.connectionState == ConnectionState.waiting)
+                          if (snap.connectionState == ConnectionState.waiting) {
                             return const Center(child: CircularProgressIndicator(color: Colors.black));
+                          }
                           final todaDir = snap.data ?? [];
                           final dirs = todaDir.where((d) => d['municipio'].toString() == filtroDir).toList();
                           if (dirs.isEmpty) return Center(child: Text('Sin direcciones en $filtroDir.'));
@@ -9217,25 +9223,4 @@ class _CentralScreenState extends State<CentralScreen>
               index: _panelActivoMobile,
               children: [
                 RepaintBoundary(child: _construirPanelControl()),
-                RepaintBoundary(child: _construirPanelMapa()),
-                RepaintBoundary(child: _construirPanelMonitor()),
-              ],
-            ),
-
-      bottomNavigationBar: esPantallaGrande
-          ? null
-          : BottomNavigationBar(
-              backgroundColor: Colors.black,
-              selectedItemColor: const Color(0xff3AF500),
-              unselectedItemColor: Colors.white54,
-              type: BottomNavigationBarType.fixed,
-              currentIndex: _panelActivoMobile,
-              onTap: (index) {
-                if (index == 3) {
-                  _abrirPanelGestion(context);
-                } else {
-                  setState(() => _panelActivoMobile = index);
-                }
-              },
-              items: const [
-           
+                RepaintBoundary(child: _construirPa
