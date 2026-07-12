@@ -57,4 +57,4 @@ flutter:
   uses-material-design: true
   assets:
     - assets/sounds/
-    - assets/l
+    - assets/logo.png

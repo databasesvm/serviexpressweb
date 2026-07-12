@@ -8527,19 +8527,19 @@ class _MovilScreenState extends State<MovilScreen>
                                     Icon(Icons.local_shipping_outlined, size: 13, color: Colors.black38),
                                     const SizedBox(width: 5),
                                     const Text(
-                                      '”RDENES EN CURSO',
+                                      '√ìRDENES EN CURSO',
                                       style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.black38, letterSpacing: 0.8),
                                     ),
                                   ]),
                                 ),
                                 ..._serviciosActivosData.map(
                                   (servicio) => AnimatedSize(
-                                    key: ValueKey('size_activa_${servicio["id"]}'),
+                                    key: ValueKey('size_activa_${servicio['id']}'),
                                     duration: const Duration(milliseconds: 280),
                                     curve: Curves.easeInOut,
                                     alignment: Alignment.topCenter,
                                     child: FadeSlideIn(
-                                      key: ValueKey('activa_${servicio["id"]}'),
+                                      key: ValueKey('activa_${servicio['id']}'),
                                       child: _construirTarjetaActiva(
                                         servicio,
                                         esMaster: esMaster,
@@ -8549,7 +8549,7 @@ class _MovilScreenState extends State<MovilScreen>
                                 ),
                               ],
 
-                              // ---> DESTRUCCI”N DEL CANDADO VISUAL AQUÕ <---
+                              // ---> DESTRUCCI√ìN DEL CANDADO VISUAL AQU√ç <---
                               if (tienePermisoDeRadar ||
                                   pendientes.isNotEmpty) ...[
                                 Padding(
@@ -8579,7 +8579,7 @@ class _MovilScreenState extends State<MovilScreen>
                                 else
                                   ...pendientes.map(
                                     (servicio) => FadeSlideIn(
-                                      key: ValueKey('pendiente_${servicio["id"]}'),
+                                      key: ValueKey('pendiente_${servicio['id']}'),
                                       child: _construirTarjetaPendiente(
                                         servicio,
                                         esMaster: esMaster,
@@ -8608,7 +8608,7 @@ class _MovilScreenState extends State<MovilScreen>
                                         Text(
                                           mensajeBloqueo.isNotEmpty
                                               ? mensajeBloqueo
-                                              : 'RegiÌstrate en un paradero para recibir servicios.',
+                                              : 'Reg√≠strate en un paradero para recibir servicios.',
                                           textAlign: TextAlign.center,
                                           style: TextStyle(
                                             fontSize: 13,

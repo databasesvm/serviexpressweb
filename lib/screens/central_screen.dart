@@ -9258,7 +9258,7 @@ class _CentralScreenState extends State<CentralScreen>
                 ),
                 BottomNavigationBarItem(
                   icon: Icon(Icons.admin_panel_settings_rounded),
-                  label: 'Gestión',
+                  label: 'GestiÃ³n',
                 ),
               ],
             ),
