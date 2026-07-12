@@ -450,7 +450,7 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
             title: Text(u['nombre'] ?? '—', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
             subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               if ((u['usuario'] ?? '').toString().isNotEmpty)
-                Text('@${u['usuario']}', style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                Text('@\${u["usuario"]}', style: const TextStyle(color: Colors.white54, fontSize: 11)),
               _chip(rol.toUpperCase(), color),
             ]),
             trailing: ElevatedButton(
