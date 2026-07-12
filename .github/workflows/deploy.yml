@@ -19,6 +19,7 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+          flutter-version: '3.29.x'
           cache: true
 
       - name: Install dependencies
@@ -51,5 +52,4 @@ jobs:
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./deploy
-          force_orphan: true
+          publish_dir: ./
