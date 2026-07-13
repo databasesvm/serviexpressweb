@@ -5922,6 +5922,12 @@ class _CentralScreenState extends State<CentralScreen>
                             ),
                           const SizedBox(width: 4),
                           Icon(icono, color: colorBase, size: 14),
+                          const SizedBox(width: 2),
+                          GestureDetector(
+                            onTap: () => _abrirMenuGestion(context, servicio),
+                            child: const Icon(Icons.more_vert,
+                                size: 16, color: Colors.black38),
+                          ),
                         ],
                       ),
                       const SizedBox(height: 3),
@@ -9331,17 +9337,4 @@ class _CentralScreenState extends State<CentralScreen>
             },
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text(
-              'CERRAR',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: Colors.black,
-              ),
-            ),
-          ),
-        ],
-      ),
-   
+  

@@ -76,18 +76,17 @@ class _HistorialServiciosScreenState extends State<HistorialServiciosScreen> {
     });
     try {
       final rango = _obtenerRango();
-      var query = Supabase.instance.client
+      // eq() debe aplicarse ANTES de order() — order() devuelve
+      // PostgrestTransformBuilder que ya no expone filtros.
+      final base = Supabase.instance.client
           .from('servicios')
           .select()
           .gte('created_at', rango.start.toUtc().toIso8601String())
-          .lte('created_at', rango.end.toUtc().toIso8601String())
-          .order('id', ascending: false);
+          .lte('created_at', rango.end.toUtc().toIso8601String());
 
-      if (_estadoFiltro != null) {
-        query = query.eq('estado', _estadoFiltro!);
-      }
-
-      final data = await query;
+      final data = await (_estadoFiltro != null
+          ? base.eq('estado', _estadoFiltro!).order('id', ascending: false)
+          : base.order('id', ascending: false));
       if (mounted) {
         setState(() {
           _servicios = List<Map<String, dynamic>>.from(data);
@@ -415,12 +414,4 @@ class _HistorialServiciosScreenState extends State<HistorialServiciosScreen> {
       );
 }
 
-enum _RangoFecha {
-  hoy('Hoy'),
-  ayer('Ayer'),
-  semana('7 días'),
-  mes('Este mes');
-
-  const _RangoFecha(this.label);
-  final String label;
-}
+enum _RangoFec
