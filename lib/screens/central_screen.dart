@@ -4938,6 +4938,52 @@ class _CentralScreenState extends State<CentralScreen>
     );
   }
 
+  // ── HELPERS MONITOR ────────────────────────────────────────────────────────
+
+  String _tiempoRelativo(DateTime utc) {
+    final diff = DateTime.now().toUtc().difference(utc);
+    if (diff.inMinutes < 1) return 'ahora';
+    if (diff.inMinutes < 60) return 'hace ${diff.inMinutes}min';
+    final h = diff.inHours;
+    final m = diff.inMinutes % 60;
+    return m == 0 ? 'hace ${h}h' : 'hace ${h}h ${m}m';
+  }
+
+  Widget _chipEstadoMonitor(String estado, Color colorBase) {
+    const labels = <String, String>{
+      'pendiente': 'LIBRE',
+      'cotizacion': 'COTIZ.',
+      'cotizada': 'ENVIADA',
+      'cotizacion_aprobada': 'APROB.',
+      'programado': 'PROGR.',
+      'en_ruta_origen': 'RECOG.',
+      'en_origen': 'EN LOCAL',
+      'en_ruta_destino': 'ENTREGA',
+      'problema': 'PROBL.',
+      'finalizado': 'FIN.',
+      'finalizado_con_problema': 'FIN.PROB',
+      'finalizado_por_demora': 'DEMORA',
+      'caducado': 'CADUC.',
+      'cancelado': 'CANCEL.',
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+      decoration: BoxDecoration(
+        color: colorBase.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(3),
+        border: Border.all(color: colorBase.withValues(alpha: 0.6), width: 0.8),
+      ),
+      child: Text(
+        labels[estado] ?? estado.toUpperCase(),
+        style: TextStyle(
+            fontSize: 8,
+            fontWeight: FontWeight.bold,
+            color: colorBase,
+            letterSpacing: 0.3),
+      ),
+    );
+  }
+
   Widget _construirBloqueServicios(
     BuildContext context,
     String titulo,
@@ -5078,354 +5124,317 @@ class _CentralScreenState extends State<CentralScreen>
           return FadeSlideIn(
             key: ValueKey('monitor_${servicio['id']}'),
             child: Card(
-            margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-            elevation: 1,
-            clipBehavior: Clip.antiAlias,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(6),
-              side: BorderSide(
-                color: alarmaCentral ? Colors.red[700]! : tileBorder,
-                width: alarmaCentral ? 2.5 : 1.1,
+              margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              elevation: 0,
+              clipBehavior: Clip.antiAlias,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(6),
+                side: BorderSide(
+                  color: alarmaCentral ? Colors.red[700]! : tileBorder,
+                  width: alarmaCentral ? 2.5 : 1.2,
+                ),
               ),
-            ),
-            child: ListTile(
-              tileColor: tileBackground,
-              dense: true,
-              onTap: () => _abrirMenuGestion(context, servicio),
-              title: Row(
-                children: [
-                  if (servicio['es_vip'] == true)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 5),
-                      child: ShaderMask(
-                        shaderCallback: (bounds) => const LinearGradient(
-                          colors: [Color(0xFFB8860B), Color(0xFFFFD700), Color(0xFFB8860B)],
-                        ).createShader(bounds),
-                        child: const Text(
-                          '👑',
-                          style: TextStyle(fontSize: 14, color: Colors.white),
-                        ),
-                      ),
-                    ),
-                  Expanded(
-                    child: Text(
-                      '${servicio['origen']} ➔ ${servicio['destino']}',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: alarmaCentral ? Colors.red[800] : Colors.black,
-                      ),
-                    ),
-                  ),
-                  if (alarmaCentral)
-                    const Icon(
-                      Icons.mark_email_unread,
-                      color: Colors.red,
-                      size: 16,
-                    ),
-                ],
-              ),
-              subtitle: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    estado == 'cotizacion'
-                        ? (servicio['es_vip'] == true
-                            ? 'Tarifa: PENDIENTE (+\$3.000 VIP se suma al precio)'
-                            : 'Tarifa: PENDIENTE DE PRECIO')
-                        : 'Tarifa: ${_formatearMonedaCentral(servicio['tarifa'])}${servicio['es_vip'] == true ? ' (incl. VIP)' : ''}',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 11,
-                      color:
-                          (servicio['tarifa'] == null ||
-                              servicio['tarifa'] == 0 ||
-                              servicio['tarifa'] == 0.0)
-                          ? Colors.orange[800]
-                          : Colors.black87,
-                    ),
-                  ),
-                  Text(
-                    DateFormat('dd/MM/yyyy · hh:mm a').format(fechaCreacion.toLocal()),
-                    style: TextStyle(fontSize: 10, color: Colors.grey[600]),
-                  ),
-                  if (servicio['numero_cliente'] != null ||
-                      servicio['numero_local'] != null ||
-                      servicio['numero_movil'] != null)
-                    Text(
-                      [
-                        if (servicio['numero_cliente'] != null)
-                          'Cliente #${servicio['numero_cliente']}',
-                        if (servicio['numero_local'] != null)
-                          'Local #${servicio['numero_local']}',
-                        // Usar el número real del moto (extraído de 'usuario')
-                        // en lugar de numero_movil que es contador acumulativo.
-                        if (movNumStr.isNotEmpty)
-                          'Móvil #$movNumStr'
-                        else if (servicio['numero_movil'] != null)
-                          'Móvil #${servicio['numero_movil']}',
-                      ].join(' · '),
-                      style: TextStyle(fontSize: 10, color: Colors.blueGrey[400]),
-                    ),
-
-                  // --- INYECCIÓN VISUAL DE RETRASO ---
-                  if (alertaRetraso)
-                    Container(
-                      margin: const EdgeInsets.only(top: 6, bottom: 4),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.red[900],
-                        borderRadius: BorderRadius.circular(4),
-                        boxShadow: const [
-                          BoxShadow(color: Colors.black12, blurRadius: 2),
-                        ],
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
+              color: tileBackground,
+              child: InkWell(
+                onTap: () => _abrirMenuGestion(context, servicio),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // ── FILA 1: chip estado · ruta · alarma/acción ──────────
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
-                          const Icon(
-                            Icons.warning_amber_rounded,
-                            color: Colors.white,
-                            size: 12,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            estado == 'en_ruta_destino'
-                                ? 'RETRASO CRÍTICO EN ENTREGA'
-                                : 'RETRASO CRÍTICO: $minutosTranscurridos MIN',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 9,
-                              letterSpacing: 0.5,
+                          _chipEstadoMonitor(estado, colorBase),
+                          const SizedBox(width: 5),
+                          if (servicio['es_vip'] == true)
+                            const Text('👑 ', style: TextStyle(fontSize: 11)),
+                          Expanded(
+                            child: Text(
+                              '${servicio["origen"]} ➔ ${servicio["destino"]}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: alarmaCentral ? Colors.red[800] : Colors.black87,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
+                          ),
+                          if (alarmaCentral)
+                            const Padding(
+                              padding: EdgeInsets.only(left: 4),
+                              child: Icon(Icons.mark_email_unread, color: Colors.red, size: 15),
+                            ),
+                          const SizedBox(width: 4),
+                          if (estado == 'cotizacion' || estado == 'cotizada')
+                            GestureDetector(
+                              onTap: () async {
+                                final confirm = await showDialog<bool>(
+                                  context: context,
+                                  builder: (ctx) => AlertDialog(
+                                    shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(12)),
+                                    title: const Text('❌ Cancelar Cotización',
+                                        style: TextStyle(fontWeight: FontWeight.bold)),
+                                    content: const Text(
+                                        '¿Cancelar esta cotización? Desaparecerá del radar y no se enviará ningún móvil.'),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.pop(ctx, false),
+                                        child: const Text('NO',
+                                            style: TextStyle(color: Colors.grey)),
+                                      ),
+                                      ElevatedButton(
+                                        style: ElevatedButton.styleFrom(
+                                            backgroundColor: Colors.red[700]),
+                                        onPressed: () => Navigator.pop(ctx, true),
+                                        child: const Text('SÍ, CANCELAR',
+                                            style: TextStyle(color: Colors.white)),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                                if (confirm == true) {
+                                  await Supabase.instance.client
+                                      .from('servicios')
+                                      .update({
+                                        'estado': 'cancelado',
+                                        'observacion': servicio['observacion'] != null
+                                            ? '${servicio["observacion"]} | CANCELADO POR CENTRAL'
+                                            : 'CANCELADO POR CENTRAL',
+                                      })
+                                      .eq('id', servicio['id']);
+                                }
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.all(3),
+                                decoration: BoxDecoration(
+                                  color: Colors.red[50],
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: Colors.red[300]!),
+                                ),
+                                child: Icon(Icons.close, color: Colors.red[700], size: 13),
+                              ),
+                            )
+                          else
+                            Icon(icono, color: colorBase, size: 14),
+                        ],
+                      ),
+                      const SizedBox(height: 3),
+                      // ── FILA 2: tarifa · moto chip · tiempo relativo ─────────
+                      Row(
+                        children: [
+                          Text(
+                            estado == 'cotizacion'
+                                ? 'PRECIO PEND.'
+                                : _formatearMonedaCentral(servicio['tarifa']),
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: (servicio['tarifa'] == null ||
+                                      servicio['tarifa'] == 0 ||
+                                      servicio['tarifa'] == 0.0)
+                                  ? Colors.orange[700]
+                                  : Colors.black87,
+                            ),
+                          ),
+                          if (servicio['es_vip'] == true)
+                            Text(' +VIP',
+                                style: TextStyle(
+                                    fontSize: 8,
+                                    color: Colors.amber[800],
+                                    fontWeight: FontWeight.bold)),
+                          if (movNumStr.isNotEmpty) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 5, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: Colors.blueGrey[700],
+                                borderRadius: BorderRadius.circular(3),
+                              ),
+                              child: Text(
+                                '🏍 #$movNumStr',
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ] else if (servicio['numero_cliente'] != null ||
+                              servicio['numero_local'] != null) ...[
+                            const SizedBox(width: 6),
+                            Text(
+                              [
+                                if (servicio['numero_cliente'] != null)
+                                  'C#${servicio["numero_cliente"]}',
+                                if (servicio['numero_local'] != null)
+                                  'L#${servicio["numero_local"]}',
+                              ].join(' '),
+                              style: TextStyle(
+                                  fontSize: 9, color: Colors.blueGrey[400]),
+                            ),
+                          ],
+                          const Spacer(),
+                          Text(
+                            _tiempoRelativo(fechaCreacion),
+                            style: TextStyle(
+                                fontSize: 9,
+                                color: alertaRetraso
+                                    ? Colors.red[700]
+                                    : Colors.grey[500]),
                           ),
                         ],
                       ),
-                    ),
-
-                  // ------------------------------------
-                  if (servicio['creador'] != null && servicio['creador'] != 'Central')
-                    Container(
-                      margin: const EdgeInsets.only(top: 4, bottom: 4),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.yellowAccent[700],
-                        borderRadius: BorderRadius.circular(4),
-                        border: Border.all(color: Colors.black87, width: 1),
-                      ),
-                      child: Text(
-                        '🏢 LOCAL: ${servicio['creador'].toString().toUpperCase()}',
-                        style: const TextStyle(
-                          color: Colors.black,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 9,
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                    ),
-                  // ---> INYECCIÓN: RELOJ DE CUENTA REGRESIVA PARA LA CENTRAL <---
-                  if (estado == 'programado' && servicio['liberacion_at'] != null)
-                    Builder(
-                      builder: (context) {
-                        final lib = DateTime.parse(
-                          servicio['liberacion_at'],
-                        ).toLocal();
-                        final diff = lib.difference(DateTime.now()).inMinutes;
-                        return Container(
-                          margin: const EdgeInsets.only(top: 4, bottom: 2),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 3,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.teal[100],
-                            borderRadius: BorderRadius.circular(4),
-                            border: Border.all(color: Colors.teal[300]!),
-                          ),
-                          child: Text(
-                            diff > 0
-                                ? '⏰ Se dispara al radar en: $diff min'
-                                : '⏰ Liberándose al radar...',
-                            style: TextStyle(
-                              color: Colors.teal[900],
-                              fontWeight: FontWeight.bold,
-                              fontSize: 10,
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  if (servicio['movil_id'] != null)
-                    Builder(builder: (context) {
-                      // Usa _movilesCache (siempre actualizado) — sin query extra
-                      final mov = _movilesCache.firstWhere(
-                        (m) => m['id'] == servicio['movil_id'],
-                        orElse: () => {},
-                      );
-                      final nombreReal = mov.isNotEmpty
-                          ? _formatearNombreCentral(mov)
-                          : '—';
-                      return Text(
-                        'Móvil: $nombreReal',
-                        style: TextStyle(
-                          color: Colors.blueGrey[700],
-                          fontWeight: FontWeight.bold,
-                          fontSize: 10,
-                        ),
-                      );
-                    }),
-                  if ([
-                    'en_ruta_origen',
-                    'en_origen',
-                    'en_ruta_destino',
-                  ].contains(estado))
-                    Builder(
-                      builder: (context) {
-                        if (estado == 'en_ruta_origen') {
-                          return const Text(
-                            '🏃 Móvil en camino a recogida...',
-                            style: TextStyle(
-                              color: Colors.blue,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          );
-                        } else if (estado == 'en_origen') {
-                          return const Text(
-                            '🛒 En el local (Reloj en pausa)',
-                            style: TextStyle(
-                              color: Colors.orange,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          );
-                        } else if (estado == 'en_ruta_destino' &&
-                            servicio['picked_up_at'] != null) {
-                          final DateTime startTime = DateTime.parse(
-                            servicio['picked_up_at'],
-                          ).toUtc();
-                          final int elapsed = DateTime.now()
-                              .toUtc()
-                              .difference(startTime)
-                              .inMinutes;
-                          final int extension =
-                              servicio['extension_minutes'] as int? ?? 0;
-                          final int efectivos = elapsed - extension;
-
-                          if (efectivos >= 30) {
-                            return Container(
-                              margin: const EdgeInsets.only(top: 2),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 4,
-                                vertical: 1,
-                              ),
-                              color: Colors.orange[100],
-                              child: Text(
-                                '⏳ Retrasado: $efectivos min efectivos',
+                      // ── FILA 3: sub-estado en curso ──────────────────────────
+                      if (['en_ruta_origen', 'en_origen', 'en_ruta_destino']
+                          .contains(estado)) ...[
+                        const SizedBox(height: 2),
+                        Builder(builder: (context) {
+                          if (estado == 'en_ruta_origen') {
+                            return const Text('🏃 En camino a recogida...',
                                 style: TextStyle(
-                                  color: Colors.orange[900],
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 9,
-                                ),
-                              ),
-                            );
-                          } else {
+                                    color: Colors.blue,
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.bold));
+                          } else if (estado == 'en_origen') {
+                            return const Text('🛒 En el local — reloj pausado',
+                                style: TextStyle(
+                                    color: Colors.orange,
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.bold));
+                          } else if (estado == 'en_ruta_destino' &&
+                              servicio['picked_up_at'] != null) {
+                            final startTime =
+                                DateTime.parse(servicio['picked_up_at']).toUtc();
+                            final efectivos = DateTime.now()
+                                    .toUtc()
+                                    .difference(startTime)
+                                    .inMinutes -
+                                (servicio['extension_minutes'] as int? ?? 0);
                             return Text(
-                              '⏱️ Activo (En entrega): $efectivos min',
-                              style: const TextStyle(
-                                color: Colors.black54,
-                                fontSize: 10,
+                              efectivos >= 30
+                                  ? '⏳ Retrasado en entrega: ${efectivos}min'
+                                  : '🛵 En entrega: ${efectivos}min',
+                              style: TextStyle(
+                                color: efectivos >= 30
+                                    ? Colors.orange[900]
+                                    : Colors.black54,
+                                fontSize: 9,
+                                fontWeight: FontWeight.bold,
                               ),
                             );
                           }
-                        }
-                        return const SizedBox.shrink();
-                      },
-                    ),
-                  if (servicio['observacion'] != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Text(
-                        '📝 ${servicio['observacion']}',
-                        style: TextStyle(
-                          color: Colors.indigo[900],
-                          fontSize: 9,
-                          fontWeight: FontWeight.bold,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                ],
-              ),
-              trailing: (estado == 'cotizacion' || estado == 'cotizada')
-                  ? Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(icono, color: colorBase, size: 16),
-                        const SizedBox(width: 4),
-                        GestureDetector(
-                          onTap: () async {
-                            final confirm = await showDialog<bool>(
-                              context: context,
-                              builder: (ctx) => AlertDialog(
-                                shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12)),
-                                title: const Text('❌ Cancelar Cotización',
-                                    style: TextStyle(fontWeight: FontWeight.bold)),
-                                content: const Text(
-                                    '¿Cancelar esta cotización? Desaparecerá del radar y no se enviará ningún móvil.'),
-                                actions: [
-                                  TextButton(
-                                    onPressed: () => Navigator.pop(ctx, false),
-                                    child: const Text('NO',
-                                        style: TextStyle(color: Colors.grey)),
-                                  ),
-                                  ElevatedButton(
-                                    style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.red[700]),
-                                    onPressed: () => Navigator.pop(ctx, true),
-                                    child: const Text('SÍ, CANCELAR',
-                                        style: TextStyle(color: Colors.white)),
-                                  ),
-                                ],
+                          return const SizedBox.shrink();
+                        }),
+                      ],
+                      // ── FILA 4: badges opcionales (wrap) ─────────────────────
+                      if (alertaRetraso ||
+                          (servicio['creador'] != null &&
+                              servicio['creador'] != 'Central') ||
+                          (estado == 'programado' &&
+                              servicio['liberacion_at'] != null) ||
+                          servicio['observacion'] != null) ...[
+                        const SizedBox(height: 3),
+                        Wrap(
+                          spacing: 4,
+                          runSpacing: 2,
+                          children: [
+                            if (alertaRetraso)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 5, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.red[900],
+                                  borderRadius: BorderRadius.circular(3),
+                                ),
+                                child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.warning_amber_rounded,
+                                          color: Colors.white, size: 10),
+                                      const SizedBox(width: 3),
+                                      Text(
+                                        estado == 'en_ruta_destino'
+                                            ? 'RETRASO ENTREGA'
+                                            : 'RETRASO ${minutosTranscurridos}MIN',
+                                        style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 8,
+                                            fontWeight: FontWeight.bold),
+                                      ),
+                                    ]),
                               ),
-                            );
-                            if (confirm == true) {
-                              await Supabase.instance.client
-                                  .from('servicios')
-                                  .update({
-                                    'estado': 'cancelado',
-                                    'observacion': servicio['observacion'] != null
-                                        ? '${servicio['observacion']} | CANCELADO POR CENTRAL'
-                                        : 'CANCELADO POR CENTRAL',
-                                  })
-                                  .eq('id', servicio['id']);
-                            }
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.all(4),
-                            decoration: BoxDecoration(
-                              color: Colors.red[50],
-                              shape: BoxShape.circle,
-                              border: Border.all(color: Colors.red[300]!),
-                            ),
-                            child: Icon(Icons.close,
-                                color: Colors.red[700], size: 14),
-                          ),
+                            if (servicio['creador'] != null &&
+                                servicio['creador'] != 'Central')
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 5, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.yellowAccent[700],
+                                  borderRadius: BorderRadius.circular(3),
+                                  border:
+                                      Border.all(color: Colors.black45, width: 0.5),
+                                ),
+                                child: Text(
+                                  '🏢 ${servicio["creador"].toString().toUpperCase()}',
+                                  style: const TextStyle(
+                                      color: Colors.black,
+                                      fontSize: 8,
+                                      fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                            if (estado == 'programado' &&
+                                servicio['liberacion_at'] != null)
+                              Builder(builder: (context) {
+                                final lib = DateTime.parse(
+                                        servicio['liberacion_at'])
+                                    .toLocal();
+                                final diff =
+                                    lib.difference(DateTime.now()).inMinutes;
+                                return Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 5, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.teal[100],
+                                    borderRadius: BorderRadius.circular(3),
+                                    border: Border.all(color: Colors.teal[300]!),
+                                  ),
+                                  child: Text(
+                                    diff > 0
+                                        ? '⏰ Disparo en ${diff}min'
+                                        : '⏰ Liberando...',
+                                    style: TextStyle(
+                                        color: Colors.teal[900],
+                                        fontSize: 8,
+                                        fontWeight: FontWeight.bold),
+                                  ),
+                                );
+                              }),
+                            if (servicio['observacion'] != null)
+                              ConstrainedBox(
+                                constraints:
+                                    const BoxConstraints(maxWidth: 240),
+                                child: Text(
+                                  '📝 ${servicio["observacion"]}',
+                                  style: TextStyle(
+                                      color: Colors.indigo[900],
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.bold),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                          ],
                         ),
                       ],
-                    )
-                  : Icon(icono, color: colorBase, size: 16),
+                    ],
+                  ),
+                ),
+              ),
             ),
-          ),  // Card
           );  // FadeSlideIn
         }),
       ],
