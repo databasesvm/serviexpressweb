@@ -24,11 +24,13 @@ import 'package:flutter/gestures.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:serviexpress_app/utils/auth_helper.dart';
+import 'package:serviexpress_app/utils/onesignal_api.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:serviexpress_app/utils/sonido_manager.dart';
 
 // Página temporal de Términos y Política de Privacidad.
 const String _kUrlTerminos = 'https://serviexpressapp.netlify.app/#terminos';
@@ -344,6 +346,32 @@ class _RegistroScreenState extends State<RegistroScreen> {
           .insert(datosInsert)
           .select()
           .single();
+
+      // ── Notificar a central si el usuario requiere activación manual ───────
+      if (!entraActivo) {
+        try {
+          final centralUsers = await Supabase.instance.client
+              .from('usuarios')
+              .select('id')
+              .inFilter('rol', ['central', 'master'])
+              .eq('en_linea', true);
+          final centralIds = (centralUsers as List)
+              .map<String>((u) => u['id'].toString())
+              .toList();
+          if (centralIds.isNotEmpty) {
+            final rolLabel = _rolSeleccionado == 'local' ? 'Local' : 'Móvil';
+            await MotorNotificaciones.dispararRafa(
+              idsDestinos: centralIds,
+              titulo: '👤 NUEVO $rolLabel POR ACTIVAR',
+              mensaje: '${filaInsertada['nombre'] ?? 'Nuevo usuario'} está esperando activación. Ve a Gestión → Usuarios.',
+              urgente: true,
+              sonido: Sonidos.centralRadar,
+            );
+          }
+        } catch (_) {
+          // No bloquear el flujo si falla la notificación
+        }
+      }
 
       if (mounted) {
         if (entraActivo) {
@@ -1278,37 +1306,4 @@ class _LocalPendienteScreen extends StatelessWidget {
                   const SizedBox(height: 10),
                   _estadoFila(Icons.pending_outlined, 'Verificación por Central', Colors.amber[400]!),
                   const SizedBox(height: 10),
-                  _estadoFila(Icons.rocket_launch_outlined, 'Activación de cuenta', Colors.grey[600]!),
-                ]),
-              ),
-              const SizedBox(height: 36),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton(
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white54,
-                    side: const BorderSide(color: Colors.white24),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
-                  onPressed: () =>
-                      Navigator.pushNamedAndRemoveUntil(context, '/', (r) => false),
-                  child: const Text('Volver al inicio'),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _estadoFila(IconData ico, String texto, Color color) {
-    return Row(children: [
-      Icon(ico, size: 18, color: color),
-      const SizedBox(width: 10),
-      Text(texto, style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.w500)),
-    ]);
-  }
-}
+                  _estadoFila(Icons.rocket_launch_outlined, 'Activación
