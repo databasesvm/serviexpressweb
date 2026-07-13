@@ -68,6 +68,9 @@ class _CentralScreenState extends State<CentralScreen>
   // sin reconstruir todo el Scaffold.
   final ValueNotifier<int> _filtroVersion = ValueNotifier(0);
 
+  // Card seleccionado en el monitor (muestra botones de acción)
+  final ValueNotifier<int?> _seleccionadoId = ValueNotifier(null);
+
   // Búsqueda en tiempo real dentro del monitor
   final TextEditingController _busquedaCtrl = TextEditingController();
   String _busquedaTexto = '';
@@ -391,6 +394,7 @@ class _CentralScreenState extends State<CentralScreen>
     _ctrlServiciosMonitor.close();
     _busquedaCtrl.dispose();
     _filtroVersion.dispose();
+    _seleccionadoId.dispose();
     _sonidos.silenciar();
     super.dispose();
   }
@@ -4948,6 +4952,360 @@ class _CentralScreenState extends State<CentralScreen>
     );
   }
 
+  // ── BOTONES DE ACCIÓN EN CARD ─────────────────────────────────────────────
+
+  Widget _botonCard(
+          String label, IconData icon, Color color, VoidCallback onTap) =>
+      GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: color.withValues(alpha: 0.5), width: 0.8),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 11, color: color),
+              const SizedBox(width: 4),
+              Text(label,
+                  style: TextStyle(
+                      fontSize: 10,
+                      color: color,
+                      fontWeight: FontWeight.w700)),
+            ],
+          ),
+        ),
+      );
+
+  List<Widget> _botonesAccion(
+      BuildContext context, Map<String, dynamic> servicio, String estado) {
+    const finales = {
+      'finalizado',
+      'finalizado_con_problema',
+      'finalizado_por_demora',
+      'cancelado',
+    };
+    final btns = <Widget>[];
+
+    // 💰 PRECIO (solo cotizacion — el tap normal ya lo hace pero aquí queda explícito)
+    if (estado == 'cotizacion') {
+      btns.add(_botonCard('PRECIO', Icons.attach_money, Colors.orange[700]!,
+          () => _cotizarRapido(context, servicio)));
+    }
+
+    // 🏍 ASIGNAR
+    if (['pendiente', 'cotizacion_aprobada', 'cotizada'].contains(estado)) {
+      btns.add(_botonCard('ASIGNAR', Icons.motorcycle, Colors.blue[700]!,
+          () => _asignarMotoManual(context, servicio)));
+    }
+
+    // 🔄 REASIGNAR
+    if (estado == 'programado') {
+      btns.add(_botonCard('REASIGNAR', Icons.motorcycle, Colors.blue[600]!,
+          () => _asignarMotoManual(context, servicio)));
+    }
+
+    // ✅ FINALIZAR
+    if (['programado', 'en_ruta_origen', 'en_origen', 'en_ruta_destino']
+        .contains(estado)) {
+      btns.add(_botonCard('FINALIZAR', Icons.check_circle_outline,
+          Colors.green[700]!, () => _finalizarServicio(context, servicio)));
+    }
+
+    // ⚠️ PROBLEMA
+    if (['en_ruta_origen', 'en_origen', 'en_ruta_destino', 'programado']
+        .contains(estado)) {
+      btns.add(_botonCard('PROBLEMA', Icons.warning_amber_rounded,
+          Colors.orange[800]!, () => _marcarProblema(context, servicio)));
+    }
+
+    // 🔄 REACTIVAR
+    if (['cancelado', 'caducado', 'problema', 'finalizado_por_demora']
+        .contains(estado)) {
+      btns.add(_botonCard('REACTIVAR', Icons.refresh, Colors.teal[700]!,
+          () => _reactivarServicio(servicio)));
+    }
+
+    // 🏁 FINALIZAR CON PROBLEMA
+    if (estado == 'problema') {
+      btns.add(_botonCard('FIN+PROB', Icons.flag_outlined, Colors.red[700]!,
+          () => _finalizarConProblema(context, servicio)));
+    }
+
+    // ❌ CANCELAR — todo excepto estados finales y ya cancelado
+    if (!finales.contains(estado)) {
+      btns.add(_botonCard('CANCELAR', Icons.close, Colors.red[700]!,
+          () => _cancelarServicio(context, servicio)));
+    }
+
+    return btns;
+  }
+
+  Future<void> _asignarMotoManual(
+      BuildContext context, Map<String, dynamic> servicio) async {
+    final ahora = DateTime.now().toUtc();
+    final motos = List<Map<String, dynamic>>.from(_movilesCache)
+      ..sort((a, b) {
+        final pa = a['ultimo_ping'] != null
+            ? DateTime.parse(a['ultimo_ping']).toUtc()
+            : DateTime(2000);
+        final pb = b['ultimo_ping'] != null
+            ? DateTime.parse(b['ultimo_ping']).toUtc()
+            : DateTime(2000);
+        return pb.compareTo(pa); // más reciente primero
+      });
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        height: MediaQuery.of(ctx).size.height * 0.6,
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        ),
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 12, bottom: 4),
+              child: Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2)),
+              ),
+            ),
+            Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  const Icon(Icons.motorcycle, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '${servicio["origen"] ?? ""} ➔ ${servicio["destino"] ?? ""}',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 13),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: motos.isEmpty
+                  ? const Center(child: Text('Sin motos registradas'))
+                  : ListView.builder(
+                      itemCount: motos.length,
+                      itemBuilder: (ctx, i) {
+                        final moto = motos[i];
+                        final ping = moto['ultimo_ping'] != null
+                            ? DateTime.parse(moto['ultimo_ping']).toUtc()
+                            : null;
+                        final mins = ping != null
+                            ? ahora.difference(ping).inMinutes
+                            : null;
+                        final conectado = mins != null && mins < 5;
+                        final nombre = _formatearNombreCentral(moto);
+                        final rango =
+                            moto['rango_movil']?.toString() ?? 'NOVATO';
+
+                        return ListTile(
+                          dense: true,
+                          leading: CircleAvatar(
+                            radius: 16,
+                            backgroundColor: conectado
+                                ? Colors.green[50]
+                                : Colors.grey[100],
+                            child: Icon(Icons.motorcycle,
+                                size: 16,
+                                color: conectado
+                                    ? Colors.green[700]
+                                    : Colors.grey[400]),
+                          ),
+                          title: Text(nombre,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13)),
+                          subtitle: Text(
+                            '$rango${mins != null ? " · hace ${mins}min" : " · sin ping"}',
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                          trailing: Icon(Icons.circle,
+                              size: 10,
+                              color: conectado
+                                  ? Colors.green
+                                  : Colors.grey[400]),
+                          onTap: () async {
+                            Navigator.pop(ctx);
+                            await Supabase.instance.client
+                                .from('servicios')
+                                .update({
+                                  'movil_id': moto['id'],
+                                  'estado': 'programado',
+                                })
+                                .eq('id', servicio['id']);
+                            _seleccionadoId.value = null;
+                          },
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _cancelarServicio(
+      BuildContext context, Map<String, dynamic> servicio) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: const Text('Cancelar servicio',
+            style: TextStyle(fontWeight: FontWeight.bold)),
+        content: Text(
+            'Servicio #${servicio["id"]}\n${servicio["origen"]} ➔ ${servicio["destino"]}'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('NO', style: TextStyle(color: Colors.grey))),
+          ElevatedButton(
+            style:
+                ElevatedButton.styleFrom(backgroundColor: Colors.red[700]),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('SÍ, CANCELAR',
+                style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      await Supabase.instance.client.from('servicios').update({
+        'estado': 'cancelado',
+        'observacion': servicio['observacion'] != null
+            ? '${servicio["observacion"]} | Cancelado por central'
+            : 'Cancelado por central',
+      }).eq('id', servicio['id']);
+      _seleccionadoId.value = null;
+    }
+  }
+
+  Future<void> _finalizarServicio(
+      BuildContext context, Map<String, dynamic> servicio) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: const Text('Finalizar servicio',
+            style: TextStyle(fontWeight: FontWeight.bold)),
+        content: Text('¿Marcar #${servicio["id"]} como finalizado?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('NO', style: TextStyle(color: Colors.grey))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green[700]),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('FINALIZAR',
+                style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      await Supabase.instance.client
+          .from('servicios')
+          .update({'estado': 'finalizado'})
+          .eq('id', servicio['id']);
+      _seleccionadoId.value = null;
+    }
+  }
+
+  Future<void> _finalizarConProblema(
+      BuildContext context, Map<String, dynamic> servicio) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: const Text('Finalizar con problema',
+            style: TextStyle(fontWeight: FontWeight.bold)),
+        content:
+            Text('¿Cerrar #${servicio["id"]} como finalizado con problema?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('NO', style: TextStyle(color: Colors.grey))),
+          ElevatedButton(
+            style:
+                ElevatedButton.styleFrom(backgroundColor: Colors.red[700]),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('CONFIRMAR',
+                style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      await Supabase.instance.client
+          .from('servicios')
+          .update({'estado': 'finalizado_con_problema'})
+          .eq('id', servicio['id']);
+      _seleccionadoId.value = null;
+    }
+  }
+
+  Future<void> _marcarProblema(
+      BuildContext context, Map<String, dynamic> servicio) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: const Text('Marcar problema',
+            style: TextStyle(fontWeight: FontWeight.bold)),
+        content: Text('¿Reportar problema en servicio #${servicio["id"]}?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('NO', style: TextStyle(color: Colors.grey))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orange[700]),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('CONFIRMAR',
+                style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      await Supabase.instance.client
+          .from('servicios')
+          .update({'estado': 'problema'})
+          .eq('id', servicio['id']);
+      _seleccionadoId.value = null;
+    }
+  }
+
+  Future<void> _reactivarServicio(Map<String, dynamic> servicio) async {
+    await Supabase.instance.client.from('servicios').update({
+      'estado': 'pendiente',
+      'movil_id': null,
+      'onesignal_30s': null,
+    }).eq('id', servicio['id']);
+    _seleccionadoId.value = null;
+  }
+
   // ── COTIZACIÓN RÁPIDA (bottom sheet) ──────────────────────────────────────
 
   Future<void> _cotizarRapido(
@@ -5361,9 +5719,11 @@ class _CentralScreenState extends State<CentralScreen>
               ),
               color: tileBackground,
               child: InkWell(
-                onTap: () => estado == 'cotizacion'
-                    ? _cotizarRapido(context, servicio)
-                    : _abrirMenuGestion(context, servicio),
+                onTap: () {
+                  final thisId = servicio['id'] as int;
+                  _seleccionadoId.value =
+                      _seleccionadoId.value == thisId ? null : thisId;
+                },
                 onLongPress: () => _abrirMenuGestion(context, servicio),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -5396,58 +5756,7 @@ class _CentralScreenState extends State<CentralScreen>
                               child: Icon(Icons.mark_email_unread, color: Colors.red, size: 15),
                             ),
                           const SizedBox(width: 4),
-                          if (estado == 'cotizacion' || estado == 'cotizada')
-                            GestureDetector(
-                              onTap: () async {
-                                final confirm = await showDialog<bool>(
-                                  context: context,
-                                  builder: (ctx) => AlertDialog(
-                                    shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(12)),
-                                    title: const Text('❌ Cancelar Cotización',
-                                        style: TextStyle(fontWeight: FontWeight.bold)),
-                                    content: const Text(
-                                        '¿Cancelar esta cotización? Desaparecerá del radar y no se enviará ningún móvil.'),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () => Navigator.pop(ctx, false),
-                                        child: const Text('NO',
-                                            style: TextStyle(color: Colors.grey)),
-                                      ),
-                                      ElevatedButton(
-                                        style: ElevatedButton.styleFrom(
-                                            backgroundColor: Colors.red[700]),
-                                        onPressed: () => Navigator.pop(ctx, true),
-                                        child: const Text('SÍ, CANCELAR',
-                                            style: TextStyle(color: Colors.white)),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                                if (confirm == true) {
-                                  await Supabase.instance.client
-                                      .from('servicios')
-                                      .update({
-                                        'estado': 'cancelado',
-                                        'observacion': servicio['observacion'] != null
-                                            ? '${servicio["observacion"]} | CANCELADO POR CENTRAL'
-                                            : 'CANCELADO POR CENTRAL',
-                                      })
-                                      .eq('id', servicio['id']);
-                                }
-                              },
-                              child: Container(
-                                padding: const EdgeInsets.all(3),
-                                decoration: BoxDecoration(
-                                  color: Colors.red[50],
-                                  shape: BoxShape.circle,
-                                  border: Border.all(color: Colors.red[300]!),
-                                ),
-                                child: Icon(Icons.close, color: Colors.red[700], size: 13),
-                              ),
-                            )
-                          else
-                            Icon(icono, color: colorBase, size: 14),
+                          Icon(icono, color: colorBase, size: 14),
                         ],
                       ),
                       const SizedBox(height: 3),
@@ -5658,6 +5967,31 @@ class _CentralScreenState extends State<CentralScreen>
                           ],
                         ),
                       ],
+
+                      // ── FILA 5: acciones rápidas (expandible al seleccionar) ──
+                      ValueListenableBuilder<int?>(
+                        valueListenable: _seleccionadoId,
+                        builder: (context, selId, _) {
+                          final seleccionado = selId == servicio['id'];
+                          final btns = seleccionado
+                              ? _botonesAccion(context, servicio, estado)
+                              : <Widget>[];
+                          return AnimatedSize(
+                            duration: const Duration(milliseconds: 180),
+                            curve: Curves.easeInOut,
+                            child: seleccionado && btns.isNotEmpty
+                                ? Padding(
+                                    padding: const EdgeInsets.only(top: 6),
+                                    child: Wrap(
+                                      spacing: 5,
+                                      runSpacing: 5,
+                                      children: btns,
+                                    ),
+                                  )
+                                : const SizedBox.shrink(),
+                          );
+                        },
+                      ),
                     ],
                   ),
                 ),
@@ -8953,228 +9287,3 @@ class _CentralScreenState extends State<CentralScreen>
                         label: Text(m, style: TextStyle(fontSize: 11, color: sel ? Colors.white : Colors.black87)),
                         selected: sel,
                         selectedColor: Colors.indigo,
-                        backgroundColor: Colors.grey[200],
-                        onSelected: (_) => setSt(() => filtro = m),
-                      ),
-                    );
-                  }).toList()),
-                ),
-                const SizedBox(height: 10),
-                // ── Lista ────────────────────────────────────────────────
-                Expanded(
-                  child: FutureBuilder<List<Map<String, dynamic>>>(
-                    future: sectorsFuture,
-                    builder: (_, snap) {
-                      if (snap.connectionState == ConnectionState.waiting) {
-                        return const Center(child: CircularProgressIndicator(color: Colors.indigo));
-                      }
-                      final lista = (snap.data ?? [])
-                          .where((s) => s['municipio'].toString() == filtro)
-                          .toList();
-                      if (lista.isEmpty) {
-                        return Center(child: Text('Sin sectores en $filtro.',
-                            style: const TextStyle(color: Colors.black54)));
-                      }
-                      return ListView.builder(
-                        itemCount: lista.length,
-                        itemBuilder: (_, i) {
-                          final s = lista[i];
-                          final activo = s['activo'] as bool? ?? true;
-                          return Card(
-                            margin: const EdgeInsets.only(bottom: 6),
-                            elevation: 0,
-                            color: Colors.grey[100],
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                            child: ListTile(
-                              dense: true,
-                              leading: Icon(Icons.location_city,
-                                  color: activo ? Colors.indigo : Colors.grey, size: 20),
-                              title: Text(s['nombre'].toString(),
-                                  style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: activo ? Colors.black : Colors.grey)),
-                              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                                GestureDetector(
-                                  onTap: () async {
-                                    await Supabase.instance.client
-                                        .from('sectores').update({'activo': !activo}).eq('id', s['id']);
-                                    recargar(setSt);
-                                  },
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                    decoration: BoxDecoration(
-                                      color: activo ? Colors.indigo : Colors.grey[200],
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    child: Text(activo ? 'ON' : 'OFF',
-                                        style: TextStyle(
-                                            fontSize: 11, fontWeight: FontWeight.bold,
-                                            color: activo ? Colors.white : Colors.grey)),
-                                  ),
-                                ),
-                                const SizedBox(width: 4),
-                                IconButton(
-                                  icon: const Icon(Icons.delete_outline, color: Colors.red, size: 18),
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                                  onPressed: () async {
-                                    await Supabase.instance.client
-                                        .from('sectores').delete().eq('id', s['id']);
-                                    recargar(setSt);
-                                  },
-                                ),
-                              ]),
-                            ),
-                          );
-                        },
-                      );
-                    },
-                  ),
-                ),
-              ]),
-            ),
-            actions: [TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('CERRAR', style: TextStyle(fontWeight: FontWeight.bold)),
-            )],
-          );
-        },
-      ),
-    );
-  }
-
-
-  // ─────────────────────────────────────────────────────────────
-  // GESTOR DE RED DE DIRECCIONES
-  // ─────────────────────────────────────────────────────────────
-  void _abrirRedDirecciones(BuildContext context) {
-    final nombreCtrl = TextEditingController();
-    String municipioSel = 'Cúcuta';
-    String filtroDir   = 'Cúcuta';
-    int? sectorSel;
-
-    // Futures estables — fuera del builder para no resetear en cada setSt
-    final sectoresFuture = Supabase.instance.client
-        .from('sectores').select().eq('activo', true).order('nombre');
-
-    Future<List<Map<String, dynamic>>> dirsFuture = Supabase.instance.client
-        .from('red_direcciones')
-        .select('id, nombre, municipio, activo, sector_id, sectores(nombre)')
-        .order('municipio').order('nombre');
-
-    void recargar(StateSetter setSt) {
-      dirsFuture = Supabase.instance.client
-          .from('red_direcciones')
-          .select('id, nombre, municipio, activo, sector_id, sectores(nombre)')
-          .order('municipio').order('nombre');
-      setSt(() {});
-    }
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSt) {
-          return AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            title: const Row(children: [
-              Icon(Icons.map_outlined, color: Colors.indigo),
-              SizedBox(width: 8),
-              Text('RED DE DIRECCIONES', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            ]),
-            content: SizedBox(
-              width: double.maxFinite,
-              height: MediaQuery.of(context).size.height * 0.70,
-              child: FutureBuilder<List<Map<String, dynamic>>>(
-                future: sectoresFuture,
-                builder: (_, snapS) {
-                  final sectores = snapS.data ?? [];
-                  return Column(children: [
-                    // ── Filtros por municipio ────────────────────────────
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(children: ['Cúcuta', 'Los Patios', 'V. Rosario'].map((m) {
-                        final sel = filtroDir == m;
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 6, bottom: 8),
-                          child: ChoiceChip(
-                            label: Text(m, style: TextStyle(fontSize: 11, color: sel ? Colors.white : Colors.black87)),
-                            selected: sel,
-                            selectedColor: Colors.indigo,
-                            backgroundColor: Colors.grey[200],
-                            onSelected: (_) => setSt(() => filtroDir = m),
-                          ),
-                        );
-                      }).toList()),
-                    ),
-                    // --- Agregar dirección ---
-                    Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Row(children: [
-                        Expanded(
-                          child: TextField(
-                            controller: nombreCtrl,
-                            textCapitalization: TextCapitalization.words,
-                            decoration: const InputDecoration(labelText: 'Nombre del lugar/dirección', isDense: true, border: OutlineInputBorder()),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        DropdownButton<String>(
-                          value: municipioSel,
-                          isDense: true,
-                          items: ['Cúcuta', 'Los Patios', 'V. Rosario']
-                              .map((m) => DropdownMenuItem(value: m, child: Text(m, style: const TextStyle(fontSize: 12))))
-                              .toList(),
-                          onChanged: (v) => setSt(() => municipioSel = v ?? 'Cúcuta'),
-                        ),
-                      ]),
-                      const SizedBox(height: 8),
-                      Row(children: [
-                        const Text('Sector: ', style: TextStyle(fontSize: 12, color: Colors.black54)),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: DropdownButton<int?>(
-                            value: sectorSel,
-                            isDense: true,
-                            isExpanded: true,
-                            hint: const Text('Sin sector', style: TextStyle(fontSize: 12)),
-                            items: [
-                              const DropdownMenuItem<int?>(value: null, child: Text('Sin sector', style: TextStyle(fontSize: 12))),
-                              ...sectores.map((s) => DropdownMenuItem<int?>(
-                                value: s['id'] as int,
-                                child: Text('${s['nombre']} (${s['municipio']})', style: const TextStyle(fontSize: 12)),
-                              )),
-                            ],
-                            onChanged: (v) => setSt(() => sectorSel = v),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        ElevatedButton(
-                          style: ElevatedButton.styleFrom(backgroundColor: Colors.black, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12)),
-                          onPressed: () async {
-                            final n = nombreCtrl.text.trim();
-                            if (n.isEmpty) return;
-                            try {
-                              await Supabase.instance.client.from('red_direcciones').insert({
-                                'nombre': n, 'municipio': municipioSel,
-                                'zona_lluvia': 'general', 'activo': true,
-                                if (sectorSel != null) 'sector_id': sectorSel,
-                              });
-                              nombreCtrl.clear();
-                              recargar(setSt);
-                            } catch (e) {
-                              if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text('Error al agregar: $e'), backgroundColor: Colors.red),
-                                );
-                              }
-                            }
-                          },
-                          child: const Icon(Icons.add, color: Color(0xff3AF500), size: 18),
-                        ),
-                      ]),
-                    ]),
-                    const Divider(height: 20),
-                    Expanded(
-                      child: FutureBuilder<List<Map<String, dynamic>>>(
-                        future: dirsFuture,
-                        builder: (_, snap) {
-                          if (
