@@ -65,6 +65,9 @@ class _CentralScreenState extends State<CentralScreen>
   // todas visibles (comportamiento de siempre). Las claves coinciden
   // con las usadas en _construirBloqueServicios.
   final Set<String> _seccionesOcultasMonitor = {};
+  // Secciones colapsadas en el panel de flota (Control Operativo).
+  // Claves: 'fn', 'expuente', 'memos', 'nocturno', 'servicio', 'libre'
+  final Set<String> _seccionesOcultasFlota = {};
   // Notifier para que el monitor se actualice solo cuando cambia el filtro,
   // sin reconstruir todo el Scaffold.
   final ValueNotifier<int> _filtroVersion = ValueNotifier(0);
@@ -6512,7 +6515,8 @@ class _CentralScreenState extends State<CentralScreen>
                           (m) =>
                               m['en_linea'] == true &&
                               m['paradero_actual'] == null &&
-                              m['suspendido'] != true,
+                              m['suspendido'] != true &&
+                              !movilesEnServicioIds.contains(m['id']),
                         )
                         .toList();
                     final desconectados = moviles
@@ -6540,113 +6544,131 @@ class _CentralScreenState extends State<CentralScreen>
                     return ListView(
                       children: [
                         // ── SECCIÓN FARMANORTE ──────────────────────────────
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          color: Colors.indigo[900],
-                          child: Row(
-                            children: [
-                              const Icon(Icons.local_pharmacy,
-                                  color: Colors.white, size: 13),
-                              const SizedBox(width: 6),
-                              const Expanded(
-                                child: Text(
-                                  'FARMANORTE',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                    fontSize: 11,
-                                  ),
-                                ),
-                              ),
-                              Container(
-                                margin: const EdgeInsets.only(right: 6),
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 7, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: motosFn.isNotEmpty
-                                      ? Colors.white24
-                                      : Colors.white10,
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                child: Text(
-                                  '${motosFn.length}',
-                                  style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.bold),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        if (motosFn.isEmpty)
-                          const Padding(
-                            padding: EdgeInsets.all(8),
-                            child: Text(
-                              'Sin motos FN en línea',
-                              style: TextStyle(color: Colors.grey, fontSize: 11),
+                        GestureDetector(
+                          onTap: () => setState(() {
+                            if (_seccionesOcultasFlota.contains('fn')) {
+                              _seccionesOcultasFlota.remove('fn');
+                            } else {
+                              _seccionesOcultasFlota.add('fn');
+                            }
+                          }),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
                             ),
-                          )
-                        else
-                          ...motosFn.map((m) => FadeSlideIn(
-                                key: ValueKey('fn_${m['id']}'),
-                                child: ListTile(
-                                  dense: true,
-                                  leading: Stack(
-                                    clipBehavior: Clip.none,
-                                    children: [
-                                      CircleAvatar(
-                                        radius: 12,
-                                        backgroundColor: Colors.indigo[900],
-                                        child: Text(
-                                          _extraerNumeroAvatar(m),
-                                          style: const TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
-                                      Positioned(
-                                        right: -4,
-                                        bottom: -3,
-                                        child: Container(
-                                          width: 12,
-                                          height: 12,
-                                          decoration: BoxDecoration(
-                                            color: Colors.indigo[700],
-                                            shape: BoxShape.circle,
-                                            border: Border.all(
-                                                color: Colors.white, width: 1),
-                                          ),
-                                          child: const Icon(
-                                              Icons.local_pharmacy,
-                                              size: 7,
-                                              color: Colors.white),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  title: Text(
-                                    m['nombre'].toString().toUpperCase(),
+                            color: Colors.indigo[900],
+                            child: Row(
+                              children: [
+                                const Icon(Icons.local_pharmacy,
+                                    color: Colors.white, size: 13),
+                                const SizedBox(width: 6),
+                                const Expanded(
+                                  child: Text(
+                                    'CONTROL OPERATIVO FARMANORTE',
                                     style: TextStyle(
                                       fontWeight: FontWeight.bold,
-                                      fontSize: 12,
-                                      color: Colors.indigo[900],
+                                      color: Colors.white,
+                                      fontSize: 11,
                                     ),
                                   ),
-                                  subtitle: Text(
-                                    '${m['rango_movil'] ?? 'NOVATO'} · ${m['fn_ignorados_hoy'] ?? 0} ign. hoy',
-                                    style: const TextStyle(
-                                        fontSize: 10, color: Colors.black54),
-                                  ),
-                                  onTap: () =>
-                                      _abrirMenuAccionesMovil(context, m),
                                 ),
-                              )),
+                                Container(
+                                  margin: const EdgeInsets.only(right: 4),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 7, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: motosFn.isNotEmpty
+                                        ? Colors.white24
+                                        : Colors.white10,
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Text(
+                                    '${motosFn.length}',
+                                    style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold),
+                                  ),
+                                ),
+                                Icon(
+                                  _seccionesOcultasFlota.contains('fn')
+                                      ? Icons.expand_more
+                                      : Icons.expand_less,
+                                  color: Colors.white70,
+                                  size: 16,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        if (!_seccionesOcultasFlota.contains('fn')) ...[
+                          if (motosFn.isEmpty)
+                            const Padding(
+                              padding: EdgeInsets.all(8),
+                              child: Text(
+                                'Sin motos FN en línea',
+                                style: TextStyle(color: Colors.grey, fontSize: 11),
+                              ),
+                            )
+                          else
+                            ...motosFn.map((m) => FadeSlideIn(
+                                  key: ValueKey('fn_${m['id']}'),
+                                  child: ListTile(
+                                    dense: true,
+                                    leading: Stack(
+                                      clipBehavior: Clip.none,
+                                      children: [
+                                        CircleAvatar(
+                                          radius: 12,
+                                          backgroundColor: Colors.indigo[900],
+                                          child: Text(
+                                            _extraerNumeroAvatar(m),
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                        Positioned(
+                                          right: -4,
+                                          bottom: -3,
+                                          child: Container(
+                                            width: 12,
+                                            height: 12,
+                                            decoration: BoxDecoration(
+                                              color: Colors.indigo[700],
+                                              shape: BoxShape.circle,
+                                              border: Border.all(
+                                                  color: Colors.white, width: 1),
+                                            ),
+                                            child: const Icon(
+                                                Icons.local_pharmacy,
+                                                size: 7,
+                                                color: Colors.white),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    title: Text(
+                                      m['nombre'].toString().toUpperCase(),
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12,
+                                        color: Colors.indigo[900],
+                                      ),
+                                    ),
+                                    subtitle: Text(
+                                      '${m['rango_movil'] ?? 'NOVATO'} · ${m['fn_ignorados_hoy'] ?? 0} ign. hoy',
+                                      style: const TextStyle(
+                                          fontSize: 10, color: Colors.black54),
+                                    ),
+                                    onTap: () =>
+                                        _abrirMenuAccionesMovil(context, m),
+                                  ),
+                                )),
+                        ],
 
                         const Divider(height: 4, color: Colors.transparent),
                         // ── FIN SECCIÓN FN ──────────────────────────────────
@@ -6710,42 +6732,63 @@ class _CentralScreenState extends State<CentralScreen>
                                         MaterialTapTargetSize.shrinkWrap,
                                   ),
                                 ),
+                              IconButton(
+                                onPressed: () => setState(() {
+                                  if (_seccionesOcultasFlota.contains('expuente')) {
+                                    _seccionesOcultasFlota.remove('expuente');
+                                  } else {
+                                    _seccionesOcultasFlota.add('expuente');
+                                  }
+                                }),
+                                icon: Icon(
+                                  _seccionesOcultasFlota.contains('expuente')
+                                      ? Icons.expand_more
+                                      : Icons.expand_less,
+                                  size: 16,
+                                  color: Colors.blue[400],
+                                ),
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                                visualDensity: VisualDensity.compact,
+                              ),
                             ],
                           ),
                         ),
-                        if (filaExpuente.isEmpty)
-                          const Padding(
-                            padding: EdgeInsets.all(8),
-                            child: Text(
-                              'Sin móviles en cola',
-                              style: TextStyle(
-                                color: Colors.grey,
-                                fontSize: 11,
-                              ),
-                            ),
-                          )
-                        else
-                          ...filaExpuente.asMap().entries.map((e) {
-                            int idx = e.key + 1;
-                            var m = e.value;
-                            return FadeSlideIn(
-                              key: ValueKey('exp_${m['id']}'),
-                              child: ListTile(
-                                dense: true,
-                                leading: _paraderoMovilLeading(m, Colors.blue[800]!),
-                                title: Text(
-                                  '#$idx. ${m['nombre'].toString().toUpperCase()}',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 12,
-                                  ),
+                        if (!_seccionesOcultasFlota.contains('expuente')) ...[
+                          if (filaExpuente.isEmpty)
+                            const Padding(
+                              padding: EdgeInsets.all(8),
+                              child: Text(
+                                'Sin móviles en cola',
+                                style: TextStyle(
+                                  color: Colors.grey,
+                                  fontSize: 11,
                                 ),
-                                subtitle: _subtituloMovilFlota(m),
-                                trailing: _movilTrailing(m),
-                                onTap: () => _abrirMenuAccionesMovil(context, m),
                               ),
-                            );
-                          }),
+                            )
+                          else
+                            ...filaExpuente.asMap().entries.map((e) {
+                              int idx = e.key + 1;
+                              var m = e.value;
+                              return FadeSlideIn(
+                                key: ValueKey('exp_${m['id']}'),
+                                child: ListTile(
+                                  dense: true,
+                                  leading: _paraderoMovilLeading(m, Colors.blue[800]!),
+                                  title: Text(
+                                    '#$idx. ${m['nombre'].toString().toUpperCase()}',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  subtitle: _subtituloMovilFlota(m),
+                                  trailing: _movilTrailing(m),
+                                  onTap: () => _abrirMenuAccionesMovil(context, m),
+                                ),
+                              );
+                            }),
+                        ],
 
                         Container(
                           padding: const EdgeInsets.symmetric(
@@ -6804,42 +6847,63 @@ class _CentralScreenState extends State<CentralScreen>
                                         MaterialTapTargetSize.shrinkWrap,
                                   ),
                                 ),
+                              IconButton(
+                                onPressed: () => setState(() {
+                                  if (_seccionesOcultasFlota.contains('memos')) {
+                                    _seccionesOcultasFlota.remove('memos');
+                                  } else {
+                                    _seccionesOcultasFlota.add('memos');
+                                  }
+                                }),
+                                icon: Icon(
+                                  _seccionesOcultasFlota.contains('memos')
+                                      ? Icons.expand_more
+                                      : Icons.expand_less,
+                                  size: 16,
+                                  color: Colors.purple[300],
+                                ),
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                                visualDensity: VisualDensity.compact,
+                              ),
                             ],
                           ),
                         ),
-                        if (filaMemos.isEmpty)
-                          const Padding(
-                            padding: EdgeInsets.all(8),
-                            child: Text(
-                              'Sin móviles en cola',
-                              style: TextStyle(
-                                color: Colors.grey,
-                                fontSize: 11,
-                              ),
-                            ),
-                          )
-                        else
-                          ...filaMemos.asMap().entries.map((e) {
-                            int idx = e.key + 1;
-                            var m = e.value;
-                            return FadeSlideIn(
-                              key: ValueKey('memos_${m['id']}'),
-                              child: ListTile(
-                                dense: true,
-                                leading: _paraderoMovilLeading(m, Colors.purple[800]!),
-                                title: Text(
-                                  '#$idx. ${m['nombre'].toString().toUpperCase()}',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 12,
-                                  ),
+                        if (!_seccionesOcultasFlota.contains('memos')) ...[
+                          if (filaMemos.isEmpty)
+                            const Padding(
+                              padding: EdgeInsets.all(8),
+                              child: Text(
+                                'Sin móviles en cola',
+                                style: TextStyle(
+                                  color: Colors.grey,
+                                  fontSize: 11,
                                 ),
-                                subtitle: _subtituloMovilFlota(m),
-                                trailing: _movilTrailing(m),
-                                onTap: () => _abrirMenuAccionesMovil(context, m),
                               ),
-                            );
-                          }),
+                            )
+                          else
+                            ...filaMemos.asMap().entries.map((e) {
+                              int idx = e.key + 1;
+                              var m = e.value;
+                              return FadeSlideIn(
+                                key: ValueKey('memos_${m['id']}'),
+                                child: ListTile(
+                                  dense: true,
+                                  leading: _paraderoMovilLeading(m, Colors.purple[800]!),
+                                  title: Text(
+                                    '#$idx. ${m['nombre'].toString().toUpperCase()}',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  subtitle: _subtituloMovilFlota(m),
+                                  trailing: _movilTrailing(m),
+                                  onTap: () => _abrirMenuAccionesMovil(context, m),
+                                ),
+                              );
+                            }),
+                        ],
 
                         Container(
                           padding: const EdgeInsets.symmetric(
@@ -6900,42 +6964,63 @@ class _CentralScreenState extends State<CentralScreen>
                                         MaterialTapTargetSize.shrinkWrap,
                                   ),
                                 ),
+                              IconButton(
+                                onPressed: () => setState(() {
+                                  if (_seccionesOcultasFlota.contains('nocturno')) {
+                                    _seccionesOcultasFlota.remove('nocturno');
+                                  } else {
+                                    _seccionesOcultasFlota.add('nocturno');
+                                  }
+                                }),
+                                icon: Icon(
+                                  _seccionesOcultasFlota.contains('nocturno')
+                                      ? Icons.expand_more
+                                      : Icons.expand_less,
+                                  size: 16,
+                                  color: Colors.indigo[200],
+                                ),
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                                visualDensity: VisualDensity.compact,
+                              ),
                             ],
                           ),
                         ),
-                        if (filaNocturno.isEmpty)
-                          const Padding(
-                            padding: EdgeInsets.all(8),
-                            child: Text(
-                              'Sin móviles en cola',
-                              style: TextStyle(
-                                color: Colors.grey,
-                                fontSize: 11,
-                              ),
-                            ),
-                          )
-                        else
-                          ...filaNocturno.asMap().entries.map((e) {
-                            int idx = e.key + 1;
-                            var m = e.value;
-                            return FadeSlideIn(
-                              key: ValueKey('noc_${m['id']}'),
-                              child: ListTile(
-                                dense: true,
-                                leading: _paraderoMovilLeading(m, Colors.indigo[400]!),
-                              title: Text(
-                                '#$idx. ${m['nombre'].toString().toUpperCase()}',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 12,
+                        if (!_seccionesOcultasFlota.contains('nocturno')) ...[
+                          if (filaNocturno.isEmpty)
+                            const Padding(
+                              padding: EdgeInsets.all(8),
+                              child: Text(
+                                'Sin móviles en cola',
+                                style: TextStyle(
+                                  color: Colors.grey,
+                                  fontSize: 11,
                                 ),
                               ),
-                              subtitle: _subtituloMovilFlota(m),
-                              trailing: _movilTrailing(m),
-                              onTap: () => _abrirMenuAccionesMovil(context, m),
-                            ),  // ListTile
-                          );    // FadeSlideIn
-                          }),
+                            )
+                          else
+                            ...filaNocturno.asMap().entries.map((e) {
+                              int idx = e.key + 1;
+                              var m = e.value;
+                              return FadeSlideIn(
+                                key: ValueKey('noc_${m['id']}'),
+                                child: ListTile(
+                                  dense: true,
+                                  leading: _paraderoMovilLeading(m, Colors.indigo[400]!),
+                                  title: Text(
+                                    '#$idx. ${m['nombre'].toString().toUpperCase()}',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  subtitle: _subtituloMovilFlota(m),
+                                  trailing: _movilTrailing(m),
+                                  onTap: () => _abrirMenuAccionesMovil(context, m),
+                                ),  // ListTile
+                              );    // FadeSlideIn
+                            }),
+                        ],
 
                         // =====================================================
                         // SECCIÓN: EN SERVICIO
@@ -6943,26 +7028,52 @@ class _CentralScreenState extends State<CentralScreen>
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                           color: Colors.orange[800],
-                          child: Text(
-                            '🚴 EN SERVICIO  (${movilesEnServicio.length})',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                              fontSize: 11,
-                              letterSpacing: 0.5,
-                            ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  '🚴 EN SERVICIO  (${movilesEnServicio.length})',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                              ),
+                              IconButton(
+                                onPressed: () => setState(() {
+                                  if (_seccionesOcultasFlota.contains('servicio')) {
+                                    _seccionesOcultasFlota.remove('servicio');
+                                  } else {
+                                    _seccionesOcultasFlota.add('servicio');
+                                  }
+                                }),
+                                icon: Icon(
+                                  _seccionesOcultasFlota.contains('servicio')
+                                      ? Icons.expand_more
+                                      : Icons.expand_less,
+                                  size: 16,
+                                  color: Colors.orange[200],
+                                ),
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                                visualDensity: VisualDensity.compact,
+                              ),
+                            ],
                           ),
                         ),
-                        if (movilesEnServicio.isEmpty)
-                          const Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                            child: Text(
-                              'Ningún móvil en campo ahora',
-                              style: TextStyle(color: Colors.grey, fontSize: 11),
-                            ),
-                          )
-                        else
-                          ...movilesEnServicio.map((movil) {
+                        if (!_seccionesOcultasFlota.contains('servicio')) ...[
+                          if (movilesEnServicio.isEmpty)
+                            const Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              child: Text(
+                                'Ningún móvil en campo ahora',
+                                style: TextStyle(color: Colors.grey, fontSize: 11),
+                              ),
+                            )
+                          else
+                            ...movilesEnServicio.map((movil) {
                             final svcsDelMovil = serviciosEnCurso
                                 .where((s) => s['movil_id'] == movil['id'])
                                 .toList();
@@ -7061,6 +7172,7 @@ class _CentralScreenState extends State<CentralScreen>
                               ),  // Material
                             );    // FadeSlideIn
                           }),
+                        ],  // if !servicio oculto
 
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
@@ -7092,40 +7204,58 @@ class _CentralScreenState extends State<CentralScreen>
                                   ),
                                 ),
                               ),
+                              IconButton(
+                                onPressed: () => setState(() {
+                                  if (_seccionesOcultasFlota.contains('libre')) {
+                                    _seccionesOcultasFlota.remove('libre');
+                                  } else {
+                                    _seccionesOcultasFlota.add('libre');
+                                  }
+                                }),
+                                icon: Icon(
+                                  _seccionesOcultasFlota.contains('libre')
+                                      ? Icons.expand_more
+                                      : Icons.expand_less,
+                                  size: 16,
+                                  color: Colors.green[200],
+                                ),
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                                visualDensity: VisualDensity.compact,
+                              ),
                             ],
                           ),
                         ),
-                        if (sinFila.isEmpty)
-                          const Padding(
-                            padding: EdgeInsets.all(8),
-                            child: Text(
-                              'Ninguno rodando libre',
-                              style: TextStyle(
-                                color: Colors.grey,
-                                fontSize: 11,
+                        if (!_seccionesOcultasFlota.contains('libre')) ...[
+                          if (sinFila.isEmpty)
+                            const Padding(
+                              padding: EdgeInsets.all(8),
+                              child: Text(
+                                'Ninguno rodando libre',
+                                style: TextStyle(
+                                  color: Colors.grey,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            )
+                          else
+                            ...sinFila.map(
+                              (m) => ListTile(
+                                dense: true,
+                                leading: _paraderoMovilLeading(m, Colors.green[600]!),
+                                title: Text(
+                                  m['nombre'].toString().toUpperCase(),
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                subtitle: _subtituloMovilFlota(m),
+                                trailing: _movilTrailing(m),
+                                onTap: () => _abrirMenuAccionesMovil(context, m),
                               ),
                             ),
-                          )
-                        else
-                          ...sinFila
-                              .map(
-                                (m) => ListTile(
-                                  dense: true,
-                                  leading: _paraderoMovilLeading(m, Colors.green[600]!),
-                                  title: Text(
-                                    m['nombre'].toString().toUpperCase(),
-                                    style: const TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  subtitle: _subtituloMovilFlota(m),
-                                  trailing: _movilTrailing(m),
-                                  onTap: () =>
-                                      _abrirMenuAccionesMovil(context, m),
-                                ),
-                              )
-                              ,
+                        ],
 
                         // =====================================================
                         // SUSPENDIDOS — antes que desconectados
@@ -10113,199 +10243,4 @@ class _CentralScreenState extends State<CentralScreen>
                     style: TextStyle(fontWeight: FontWeight.bold),
                   ),
                 ),
-                const SizedBox(width: 6),
-                IconButton(
-                  icon: const Icon(Icons.share_rounded, color: Color(0xff25D366)),
-                  tooltip: 'Enviar link de pedido al cliente',
-                  onPressed: () => _enviarLinkInvitado(context),
-                ),
-                const SizedBox(width: 6),
-                BotonPanicoTrigger(
-                  segundos: 2,
-                  icono: Icons.campaign_rounded,
-                  colorAcento: Colors.orange,
-                  titulo: 'CONVOCATORIA GENERAL',
-                  descripcion:
-                      'Se notificará a TODO el personal en línea (móviles y central) que necesitas su atención urgente.',
-                  onActivado: _dispararPanico,
-                  onDetener: () => _detenerAlerta(tipo: 'global'),
-                ),
-                const SizedBox(width: 6),
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.grey[850],
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: () => _abrirPanelGestion(context),
-                  icon: const Icon(Icons.admin_panel_settings_rounded, size: 18),
-                  label: const Text(
-                    'GESTIÓN',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                IconButton(
-                  icon: const Icon(
-                    Icons.power_settings_new,
-                    color: Colors.redAccent,
-                  ),
-                  onPressed: _cerrarSesionSegura,
-                ),
-                const SizedBox(width: 8),
-              ]
-            : [
-                // Botón FN compacto
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: InkWell(
-                    onTap: () => _abrirFormularioFN(context),
-                    borderRadius: BorderRadius.circular(6),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.indigo[900],
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: const Text(
-                        'FN',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
-                            letterSpacing: 1.5),
-                      ),
-                    ),
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.add_box, color: Color(0xff3AF500)),
-                  onPressed: () => _abrirFormularioDespacho(context),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.share_rounded, color: Color(0xff25D366)),
-                  tooltip: 'Enviar link al cliente',
-                  onPressed: () => _enviarLinkInvitado(context),
-                ),
-                BotonPanicoTrigger(
-                  esCompacto: true,
-                  segundos: 2,
-                  icono: Icons.campaign_rounded,
-                  colorAcento: Colors.orange,
-                  titulo: 'CONVOCATORIA GENERAL',
-                  descripcion:
-                      'Se notificará a TODO el personal en línea (móviles y central) que necesitas su atención urgente.',
-                  onActivado: _dispararPanico,
-                  onDetener: () => _detenerAlerta(tipo: 'global'),
-                ),
-                IconButton(
-                  icon: const Icon(
-                    Icons.power_settings_new,
-                    color: Colors.redAccent,
-                  ),
-                  onPressed: _cerrarSesionSegura,
-                ),
-              ],
-      ),
-
-      // ---> BOTÓN FLOTANTE DE SOPORTE <---
-      floatingActionButton: StreamBuilder<List<Map<String, dynamic>>>(
-        stream: Supabase.instance.client
-            .from('usuarios')
-            .stream(primaryKey: ['id']).eq('alarma_soporte', true),
-        builder: (context, snap) {
-          final lista = snap.data ?? [];
-          if (lista.isEmpty) return const SizedBox.shrink();
-          return PulsingPanicoButton(
-            color: Colors.red,
-            child: FloatingActionButton(
-              backgroundColor: Colors.red,
-              onPressed: () => _abrirBuzonSoporte(context, lista),
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  const Icon(Icons.support_agent, color: Colors.white),
-                  Positioned(
-                    right: -6,
-                    top: -6,
-                    child: Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: const BoxDecoration(
-                        color: Colors.white,
-                        shape: BoxShape.circle,
-                      ),
-                      child: Text(
-                        '${lista.length}',
-                        style: const TextStyle(
-                          color: Colors.red,
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-
-      body: esPantallaGrande
-          ? Row(
-              children: [
-                SizedBox(width: 340, child: _construirPanelControl()),
-                Expanded(child: _construirPanelMapa()),
-                SizedBox(width: 340, child: _construirPanelMonitor()),
-              ],
-            )
-          : IndexedStack(
-              index: _panelActivoMobile,
-              children: [
-                RepaintBoundary(child: _construirPanelControl()),
-                RepaintBoundary(child: _construirPanelMapa()),
-                RepaintBoundary(child: _construirPanelMonitor()),
-              ],
-            ),
-
-      bottomNavigationBar: esPantallaGrande
-          ? null
-          : BottomNavigationBar(
-              backgroundColor: Colors.black,
-              selectedItemColor: const Color(0xff3AF500),
-              unselectedItemColor: Colors.white54,
-              type: BottomNavigationBarType.fixed,
-              currentIndex: _panelActivoMobile,
-              onTap: (index) {
-                if (index == 3) {
-                  _abrirPanelGestion(context);
-                } else {
-                  setState(() => _panelActivoMobile = index);
-                }
-              },
-              items: const [
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.people_alt),
-                  label: 'Flota',
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.radar),
-                  label: 'Radar',
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.monitor),
-                  label: 'Servicios',
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.admin_panel_settings_rounded),
-                  label: 'Gestión',
-                ),
-              ],
-            ),
-    );
-  }
-}
-
-// ============================================================
-// PANEL DE PRECIOS POR LOCAL — sectores + tarifas
-// ============================================================
+                const SizedBox(width:
