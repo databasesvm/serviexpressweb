@@ -3517,14 +3517,21 @@ class _CentralScreenState extends State<CentralScreen>
                               .toList();
 
                           // ── Cargar FN motos online ─────────────────────────
+                          // Filtros explícitos para garantizar que desconectados
+                          // y suspendidos nunca reciban heads-up FN:
+                          //   • en_linea = true    → excluye desconectados
+                          //   • activo   = true    → excluye cuentas desactivadas
+                          //   • suspendido IS NOT TRUE → excluye suspendidos;
+                          //     "IS NOT TRUE" incluye NULLs (a diferencia de ≠ true)
                           final movilesConFn = await Supabase
                               .instance.client
                               .from('usuarios')
                               .select('id, latitud, longitud')
                               .eq('rol', 'movil')
                               .eq('en_linea', true)
+                              .eq('activo', true)
                               .eq('tiene_fn', true)
-                              .neq('suspendido', true);
+                              .not('suspendido', 'is', true);
 
                           final idsTodos = (movilesConFn as List)
                               .map<String>((m) => m['id'].toString())
@@ -10243,4 +10250,199 @@ class _CentralScreenState extends State<CentralScreen>
                     style: TextStyle(fontWeight: FontWeight.bold),
                   ),
                 ),
-                const SizedBox(width:
+                const SizedBox(width: 6),
+                IconButton(
+                  icon: const Icon(Icons.share_rounded, color: Color(0xff25D366)),
+                  tooltip: 'Enviar link de pedido al cliente',
+                  onPressed: () => _enviarLinkInvitado(context),
+                ),
+                const SizedBox(width: 6),
+                BotonPanicoTrigger(
+                  segundos: 2,
+                  icono: Icons.campaign_rounded,
+                  colorAcento: Colors.orange,
+                  titulo: 'CONVOCATORIA GENERAL',
+                  descripcion:
+                      'Se notificará a TODO el personal en línea (móviles y central) que necesitas su atención urgente.',
+                  onActivado: _dispararPanico,
+                  onDetener: () => _detenerAlerta(tipo: 'global'),
+                ),
+                const SizedBox(width: 6),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.grey[850],
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: () => _abrirPanelGestion(context),
+                  icon: const Icon(Icons.admin_panel_settings_rounded, size: 18),
+                  label: const Text(
+                    'GESTIÓN',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                IconButton(
+                  icon: const Icon(
+                    Icons.power_settings_new,
+                    color: Colors.redAccent,
+                  ),
+                  onPressed: _cerrarSesionSegura,
+                ),
+                const SizedBox(width: 8),
+              ]
+            : [
+                // Botón FN compacto
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: InkWell(
+                    onTap: () => _abrirFormularioFN(context),
+                    borderRadius: BorderRadius.circular(6),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.indigo[900],
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Text(
+                        'FN',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                            letterSpacing: 1.5),
+                      ),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.add_box, color: Color(0xff3AF500)),
+                  onPressed: () => _abrirFormularioDespacho(context),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.share_rounded, color: Color(0xff25D366)),
+                  tooltip: 'Enviar link al cliente',
+                  onPressed: () => _enviarLinkInvitado(context),
+                ),
+                BotonPanicoTrigger(
+                  esCompacto: true,
+                  segundos: 2,
+                  icono: Icons.campaign_rounded,
+                  colorAcento: Colors.orange,
+                  titulo: 'CONVOCATORIA GENERAL',
+                  descripcion:
+                      'Se notificará a TODO el personal en línea (móviles y central) que necesitas su atención urgente.',
+                  onActivado: _dispararPanico,
+                  onDetener: () => _detenerAlerta(tipo: 'global'),
+                ),
+                IconButton(
+                  icon: const Icon(
+                    Icons.power_settings_new,
+                    color: Colors.redAccent,
+                  ),
+                  onPressed: _cerrarSesionSegura,
+                ),
+              ],
+      ),
+
+      // ---> BOTÓN FLOTANTE DE SOPORTE <---
+      floatingActionButton: StreamBuilder<List<Map<String, dynamic>>>(
+        stream: Supabase.instance.client
+            .from('usuarios')
+            .stream(primaryKey: ['id']).eq('alarma_soporte', true),
+        builder: (context, snap) {
+          final lista = snap.data ?? [];
+          if (lista.isEmpty) return const SizedBox.shrink();
+          return PulsingPanicoButton(
+            color: Colors.red,
+            child: FloatingActionButton(
+              backgroundColor: Colors.red,
+              onPressed: () => _abrirBuzonSoporte(context, lista),
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  const Icon(Icons.support_agent, color: Colors.white),
+                  Positioned(
+                    right: -6,
+                    top: -6,
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: const BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Text(
+                        '${lista.length}',
+                        style: const TextStyle(
+                          color: Colors.red,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+
+      body: esPantallaGrande
+          ? Row(
+              children: [
+                SizedBox(width: 340, child: _construirPanelControl()),
+                Expanded(child: _construirPanelMapa()),
+                SizedBox(width: 340, child: _construirPanelMonitor()),
+              ],
+            )
+          : IndexedStack(
+              index: _panelActivoMobile,
+              children: [
+                RepaintBoundary(child: _construirPanelControl()),
+                RepaintBoundary(child: _construirPanelMapa()),
+                RepaintBoundary(child: _construirPanelMonitor()),
+              ],
+            ),
+
+      bottomNavigationBar: esPantallaGrande
+          ? null
+          : BottomNavigationBar(
+              backgroundColor: Colors.black,
+              selectedItemColor: const Color(0xff3AF500),
+              unselectedItemColor: Colors.white54,
+              type: BottomNavigationBarType.fixed,
+              currentIndex: _panelActivoMobile,
+              onTap: (index) {
+                if (index == 3) {
+                  _abrirPanelGestion(context);
+                } else {
+                  setState(() => _panelActivoMobile = index);
+                }
+              },
+              items: const [
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.people_alt),
+                  label: 'Flota',
+                ),
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.radar),
+                  label: 'Radar',
+                ),
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.monitor),
+                  label: 'Servicios',
+                ),
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.admin_panel_settings_rounded),
+                  label: 'Gestión',
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+// ============================================================
+// PANEL DE PRECIOS POR LOCAL — sectores + tarifas
+// ============================================================
