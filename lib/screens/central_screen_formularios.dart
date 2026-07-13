@@ -791,7 +791,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                             // context del builder del diálogo, que ya se
                             // destruyó con el Navigator.pop de arriba.
                             showDialog(
-                              context: this.context, // ignore: use_build_context_synchronously
+                              context: this.context,
                               builder: (ctxSave) => StatefulBuilder(
                                 builder: (ctxSave, setSaveState) => AlertDialog(
                                   shape: RoundedRectangleBorder(
@@ -903,7 +903,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                                                 if (ctxSave.mounted) {
                                                   Navigator.pop(ctxSave);
                                                   ScaffoldMessenger.of(
-                                                    this.context, // ignore: use_build_context_synchronously
+                                                    this.context,
                                                   ).showSnackBar(
                                                     const SnackBar(
                                                       content: Text(
@@ -921,7 +921,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                                                 );
                                                 if (ctxSave.mounted) {
                                                   ScaffoldMessenger.of(
-                                                    this.context, // ignore: use_build_context_synchronously
+                                                    this.context,
                                                   ).showSnackBar(
                                                     SnackBar(
                                                       content: Text(
@@ -1949,7 +1949,7 @@ extension CentralScreenFormularios on _CentralScreenState {
     );
     if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar( // ignore: use_build_context_synchronously
+        ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('No se pudo abrir WhatsApp.')),
         );
       }
@@ -2000,7 +2000,7 @@ extension CentralScreenFormularios on _CentralScreenState {
     if (!mounted) return false;
 
     final bool? confirmar = await showDialog<bool>(
-      context: context, // ignore: use_build_context_synchronously
+      context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         title: Row(
@@ -2111,7 +2111,7 @@ extension CentralScreenFormularios on _CentralScreenState {
       }).eq('id', servicio['id']);
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar( // ignore: use_build_context_synchronously
+        ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('⚡ Cotización enviada: $textoTarifa'),
             backgroundColor: Colors.green[700],
@@ -2121,7 +2121,7 @@ extension CentralScreenFormularios on _CentralScreenState {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar( // ignore: use_build_context_synchronously
+        ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error al cotizar: $e'), backgroundColor: Colors.red),
         );
       }

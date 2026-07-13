@@ -481,7 +481,7 @@ extension CentralScreenGestion on _CentralScreenState {
       );
 
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar( // ignore: use_build_context_synchronously
+        ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
               duracion == null
@@ -575,7 +575,7 @@ extension CentralScreenGestion on _CentralScreenState {
           .update({'paradero_actual': null, 'ingreso_fila': null})
           .eq('id', movil['id']);
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar( // ignore: use_build_context_synchronously
+        ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('${movil['nombre']} fue sacado de la fila.'),
             backgroundColor: Colors.black,
@@ -584,7 +584,7 @@ extension CentralScreenGestion on _CentralScreenState {
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar( // ignore: use_build_context_synchronously
+        ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
         );
       }
@@ -633,7 +633,7 @@ extension CentralScreenGestion on _CentralScreenState {
           .update({'paradero_actual': null, 'ingreso_fila': null})
           .inFilter('id', ids);
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar( // ignore: use_build_context_synchronously
+        ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
               '$nombreParadero vaciado — ${fila.length} móviles fuera de la fila.',
@@ -644,7 +644,7 @@ extension CentralScreenGestion on _CentralScreenState {
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar( // ignore: use_build_context_synchronously
+        ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
         );
       }
@@ -783,9 +783,9 @@ extension CentralScreenGestion on _CentralScreenState {
 
                   if (ctxDialog.mounted) {
                     Navigator.pop(ctxDialog);
-                    Navigator.pop(context); // ignore: use_build_context_synchronously
+                    Navigator.pop(context);
                     _abrirGestorParaderos(); // recarga con los nuevos datos
-                    ScaffoldMessenger.of(context).showSnackBar( // ignore: use_build_context_synchronously
+                    ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         content: Text(
                           'Recargos de ${local['nombre']} actualizados',
