@@ -6098,11 +6098,81 @@ class _MovilScreenState extends State<MovilScreen>
               ),
             ),
 
+            // ── Método de pago ────────────────────────────────────────────
+            if (servicio['metodo_pago'] == 'Datafono') ...[
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.blue[50],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.blue[300]!),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.credit_card, color: Colors.blue[700], size: 20),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Pago con DATÁFONO',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                        color: Colors.blue[800],
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text('(no efectivo)',
+                        style: TextStyle(fontSize: 12, color: Colors.blue[600])),
+                  ],
+                ),
+              ),
+            ],
+
+            // ── Instrucciones especiales ───────────────────────────────────
+            if (servicio['instrucciones_especiales'] != null &&
+                (servicio['instrucciones_especiales'] as String).trim().isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.amber[50],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.amber[400]!),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.info_outline, color: Colors.amber[800], size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Instrucciones:',
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.amber[900])),
+                          const SizedBox(height: 3),
+                          Text(
+                            servicio['instrucciones_especiales'].toString(),
+                            style: const TextStyle(
+                                fontSize: 13, fontWeight: FontWeight.w500),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
             const SizedBox(height: 12),
 
             // ── Cobrar ────────────────────────────────────────────────────
             Text(
-              'Cobrar: $textoTarifa',
+              'Cobrar: \$textoTarifa',
               style: TextStyle(
                 color: textoTarifa == 'SIN TARIFA'
                     ? Colors.orange[800]
