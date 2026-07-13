@@ -108,4 +108,17 @@ class _ServiexpressExpressAppState extends State<ServiexpressExpressApp>
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-  
+      title: 'Serviexpress Express',
+      debugShowCheckedModeBanner: false,
+      navigatorKey: navigatorKey,
+      theme: ThemeData(primaryColor: Colors.black),
+      scrollBehavior: const _AppScrollBehavior(),
+      // Web: si la URL contiene '/form' → GuestHomeScreen (invitados)
+      //      cualquier otra ruta      → LoginScreen (operadores)
+      // Móvil: siempre LoginScreen.
+      home: (kIsWeb && Uri.base.path.contains('/form'))
+          ? const GuestHomeScreen()
+          : const LoginScreen(),
+    );
+  }
+}
