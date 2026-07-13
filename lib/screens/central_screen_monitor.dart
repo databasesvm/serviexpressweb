@@ -2249,4 +2249,21 @@ extension CentralScreenMonitor on _CentralScreenState {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('Radar limpio. Servicios purgados con éxito.'),
-              backgroundColor: Colors.gr 
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error al archivar: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    }
+  }
+
+}
