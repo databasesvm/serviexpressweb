@@ -652,7 +652,7 @@ extension CentralScreenPanico on _CentralScreenState {
     final numero = tel.startsWith('57') ? tel : '57$tel';
     final mensaje = Uri.encodeComponent(
       '¡Hola! 👋 Puedes hacer tu pedido de Serviexpress directamente desde aquí:\n'
-      '$_kUrlApp\n\n'
+      '${_CentralScreenState._kUrlApp}\n\n'
       'Solo abre el link, elige el tipo de servicio y nosotros te atendemos. '
       '¡También puedes registrarte para guardar tus datos! 🛵',
     );
@@ -947,8 +947,4 @@ extension CentralScreenPanico on _CentralScreenState {
             ),
           ),
         ],
-      ),
-    );
-  }
-
-}
+ 
