@@ -8649,4 +8649,83 @@ class _MovilScreenState extends State<MovilScreen>
                                       key: ValueKey('pendiente_${servicio['id']}'),
                                       child: _construirTarjetaPendiente(
                                         servicio,
-                              
+                                                                      esMaster: esMaster,
+                                      ),
+                                    ),
+                                  ),
+                              ] else if (_serviciosActivosData.isEmpty &&
+                                  !radarAbierto) ...[
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 10),
+                                  child: Container(
+                                    padding: const EdgeInsets.all(16),
+                                    decoration: BoxDecoration(
+                                      color: Colors.orange[50]!,
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(color: Colors.orange[200]!),
+                                    ),
+                                    child: Column(
+                                      children: [
+                                        Icon(
+                                          Icons.lock_clock_outlined,
+                                          color: Colors.orange[700],
+                                          size: 32,
+                                        ),
+                                        const SizedBox(height: 10),
+                                        Text(
+                                          mensajeBloqueo.isNotEmpty
+                                              ? mensajeBloqueo
+                                              : 'Regístrate en un paradero para recibir servicios.',
+                                          textAlign: TextAlign.center,
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            color: Colors.orange[900],
+                                            fontWeight: FontWeight.w500,
+                                            height: 1.4,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          );
+                        },
+                      ),
+                ),
+              ),
+            ],
+          );
+        },
+          ),
+        _construirPerfilTab(),
+        ],
+        ), // IndexedStack
+      ), // ValueListenableBuilder
+    bottomNavigationBar: BottomNavigationBar(
+      currentIndex: _tabActual,
+      onTap: _cambiarTab,
+      selectedItemColor: const Color(0xff3AF500),
+      unselectedItemColor: Colors.white38,
+      backgroundColor: const Color(0xFF0D0D0D),
+      type: BottomNavigationBarType.fixed,
+      items: const [
+        BottomNavigationBarItem(
+          icon: Icon(Icons.radar),
+          label: 'Servicios',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.person_outline),
+          label: 'Perfil',
+        ),
+      ],
+    ),
+    ), // ← cierra Scaffold (child: Scaffold)
+    ); // ← cierra PopScope
+  }
+}
+
+// ===========================================================================
+// PAINTER: Overlay circular oscuro con hueco (tutorial de pantalla)
+// ===========================================================================
