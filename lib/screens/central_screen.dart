@@ -4948,6 +4948,196 @@ class _CentralScreenState extends State<CentralScreen>
     );
   }
 
+  // ── COTIZACIÓN RÁPIDA (bottom sheet) ──────────────────────────────────────
+
+  Future<void> _cotizarRapido(
+      BuildContext context, Map<String, dynamic> servicio) async {
+    final TextEditingController precioCtrl = TextEditingController();
+    bool esVip = servicio['es_vip'] == true;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => Padding(
+          padding:
+              EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+          child: Container(
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+            ),
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Handle visual
+                Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.grey[300],
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+
+                // Ruta
+                Row(
+                  children: [
+                    const Icon(Icons.route, size: 16, color: Colors.black54),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        '${servicio["origen"] ?? "—"} ➔ ${servicio["destino"] ?? "—"}',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 14),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+                if (servicio['cliente_nombre'] != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    '👤 ${servicio["cliente_nombre"]}',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  ),
+                ],
+                const SizedBox(height: 16),
+
+                // Campo precio
+                TextField(
+                  controller: precioCtrl,
+                  autofocus: true,
+                  keyboardType: TextInputType.number,
+                  style: const TextStyle(
+                      fontSize: 22, fontWeight: FontWeight.bold),
+                  decoration: InputDecoration(
+                    prefixText: '\$ ',
+                    prefixStyle: const TextStyle(
+                        fontSize: 22, fontWeight: FontWeight.bold),
+                    hintText: '0',
+                    labelText: 'Precio del servicio',
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide:
+                          const BorderSide(color: Colors.black, width: 2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                // Toggle VIP
+                GestureDetector(
+                  onTap: () => setSheet(() => esVip = !esVip),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: esVip
+                          ? const Color(0xFFFFF8E1)
+                          : Colors.grey[100],
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: esVip
+                            ? const Color(0xFFFFD700)
+                            : Colors.grey[300]!,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Text(esVip ? '👑' : '⬜',
+                            style: const TextStyle(fontSize: 18)),
+                        const SizedBox(width: 10),
+                        const Expanded(
+                          child: Text('Servicio VIP  (+\$3.000)',
+                              style: TextStyle(fontWeight: FontWeight.w600)),
+                        ),
+                        Switch(
+                          value: esVip,
+                          onChanged: (v) => setSheet(() => esVip = v),
+                          activeColor: const Color(0xFFB8860B),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // Botones
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          side: const BorderSide(color: Colors.black38),
+                        ),
+                        child: const Text('Cancelar'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      flex: 2,
+                      child: ElevatedButton(
+                        onPressed: () async {
+                          final raw = precioCtrl.text
+                              .replaceAll(RegExp(r'[^0-9]'), '');
+                          final base = int.tryParse(raw) ?? 0;
+                          if (base <= 0) {
+                            ScaffoldMessenger.of(ctx).showSnackBar(
+                              const SnackBar(
+                                  content: Text('Ingresa un precio válido'),
+                                  duration: Duration(seconds: 2)),
+                            );
+                            return;
+                          }
+                          final tarifaFinal = esVip ? base + 3000 : base;
+                          Navigator.pop(ctx);
+                          await Supabase.instance.client
+                              .from('servicios')
+                              .update({
+                                'tarifa': tarifaFinal,
+                                'es_vip': esVip,
+                                'estado': 'cotizada',
+                              })
+                              .eq('id', servicio['id']);
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.black,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                        ),
+                        child: const Text(
+                          'CONFIRMAR PRECIO',
+                          style: TextStyle(
+                            color: Color(0xff3AF500),
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    precioCtrl.dispose();
+  }
+
   // ── HELPERS MONITOR ────────────────────────────────────────────────────────
 
   Widget _kpiChip(String label, int count, Color color) => Container(
@@ -5171,7 +5361,10 @@ class _CentralScreenState extends State<CentralScreen>
               ),
               color: tileBackground,
               child: InkWell(
-                onTap: () => _abrirMenuGestion(context, servicio),
+                onTap: () => estado == 'cotizacion'
+                    ? _cotizarRapido(context, servicio)
+                    : _abrirMenuGestion(context, servicio),
+                onLongPress: () => _abrirMenuGestion(context, servicio),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   child: Column(
@@ -7023,6 +7216,7 @@ class _CentralScreenState extends State<CentralScreen>
                         Expanded(
                           child: ListView(
                             padding: const EdgeInsets.only(bottom: 10),
+                            physics: const AlwaysScrollableScrollPhysics(),
                             children: [
                               _construirBloqueServicios(
                                 context,
@@ -8983,462 +9177,4 @@ class _CentralScreenState extends State<CentralScreen>
                       child: FutureBuilder<List<Map<String, dynamic>>>(
                         future: dirsFuture,
                         builder: (_, snap) {
-                          if (snap.connectionState == ConnectionState.waiting) {
-                            return const Center(child: CircularProgressIndicator(color: Colors.black));
-                          }
-                          final todaDir = snap.data ?? [];
-                          final dirs = todaDir.where((d) => d['municipio'].toString() == filtroDir).toList();
-                          if (dirs.isEmpty) return Center(child: Text('Sin direcciones en $filtroDir.'));
-                          return ListView.builder(
-                            itemCount: dirs.length,
-                            itemBuilder: (_, i) {
-                              final d = dirs[i];
-                              final activo = d['activo'] as bool? ?? true;
-                              final sectorNombre = d['sectores'] != null ? (d['sectores'] as Map)['nombre'] : null;
-                              return ListTile(
-                                dense: true,
-                                leading: Icon(Icons.place, color: activo ? Colors.indigo : Colors.grey, size: 18),
-                                title: Text(d['nombre'].toString(), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: activo ? Colors.black : Colors.grey)),
-                                subtitle: Text(
-                                  '${d['municipio']}${sectorNombre != null ? ' · $sectorNombre' : ''}',
-                                  style: const TextStyle(fontSize: 11),
-                                ),
-                                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                                  GestureDetector(
-                                    onTap: () async {
-                                      try {
-                                        await Supabase.instance.client.from('red_direcciones').update({'activo': !activo}).eq('id', d['id']);
-                                        recargar(setSt);
-                                      } catch (_) {}
-                                    },
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                      decoration: BoxDecoration(
-                                        color: activo ? Colors.indigo : Colors.grey[200],
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                      child: Text(activo ? 'ON' : 'OFF',
-                                          style: TextStyle(
-                                              fontSize: 11, fontWeight: FontWeight.bold,
-                                              color: activo ? Colors.white : Colors.grey)),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  IconButton(
-                                    icon: const Icon(Icons.delete_outline, color: Colors.red, size: 18),
-                                    padding: EdgeInsets.zero,
-                                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                                    onPressed: () async {
-                                      try {
-                                        await Supabase.instance.client.from('red_direcciones').delete().eq('id', d['id']);
-                                        recargar(setSt);
-                                      } catch (_) {}
-                                    },
-                                  ),
-                                ]),
-                              );
-                            },
-                          );
-                        },
-                      ),
-                    ),
-                  ]);
-                },
-              ),
-            ),
-            actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('CERRAR', style: TextStyle(fontWeight: FontWeight.bold)))],
-          );
-        },
-      ),
-    );
-  }
-
-  // ─────────────────────────────────────────────────────────────
-  // GESTOR DE LISTAS DE PRECIOS (por local, por sector)
-  // ─────────────────────────────────────────────────────────────
-  void _abrirListasPrecios(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) {
-        String? localSelId;
-        String localSelNombre = '';
-        final localesFuture = Supabase.instance.client
-            .from('usuarios').select('id, nombre').eq('rol', 'local').order('nombre');
-        return StatefulBuilder(
-        builder: (ctx, setSt) {
-          return AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            title: const Row(children: [
-              Icon(Icons.price_change_outlined, color: Colors.orange),
-              SizedBox(width: 8),
-              Text('LISTAS DE PRECIOS', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            ]),
-            content: SizedBox(
-              width: double.maxFinite,
-              height: MediaQuery.of(context).size.height * 0.70,
-              child: FutureBuilder<List<Map<String, dynamic>>>(
-                future: localesFuture,
-                builder: (_, snapL) {
-                  final locales = snapL.data ?? [];
-                  if (locales.isEmpty) return const Center(child: Text('Sin locales registrados.'));
-                  if (localSelId == null) {
-                    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      const Text('Selecciona un local para ver o editar su lista de precios:', style: TextStyle(fontSize: 13, color: Colors.black54)),
-                      const SizedBox(height: 12),
-                      Expanded(
-                        child: ListView.builder(
-                          itemCount: locales.length,
-                          itemBuilder: (_, i) {
-                            final l = locales[i];
-                            return Card(
-                              margin: const EdgeInsets.only(bottom: 8),
-                              child: ListTile(
-                                leading: const Icon(Icons.store, color: Colors.orange),
-                                title: Text(l['nombre'].toString(), style: const TextStyle(fontWeight: FontWeight.bold)),
-                                trailing: const Icon(Icons.chevron_right),
-                                onTap: () => setSt(() { localSelId = l['id'].toString(); localSelNombre = l['nombre'].toString(); }),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                    ]);
-                  }
-                  return _PanelPreciosLocal(localId: localSelId!, localNombre: localSelNombre, onBack: () => setSt(() => localSelId = null));
-                },
-              ),
-            ),
-            actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('CERRAR', style: TextStyle(fontWeight: FontWeight.bold)))],
-          );
-        },
-      );
-      },
-    );
-  }
-
-  void _abrirBuzonSoporte(
-    BuildContext context,
-    List<Map<String, dynamic>> usuariosConAlarma,
-  ) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        title: const Text(
-          '🚨 BUZÓN DE SOPORTE GENERAL',
-          style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
-        ),
-        content: SizedBox(
-          width: 400,
-          height: 400,
-          child: ListView.builder(
-            itemCount: usuariosConAlarma.length,
-            itemBuilder: (context, index) {
-              final u = usuariosConAlarma[index];
-              return Card(
-                elevation: 2,
-                margin: const EdgeInsets.only(bottom: 8),
-                shape: RoundedRectangleBorder(
-                  side: const BorderSide(color: Colors.red, width: 1.5),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: ListTile(
-                  leading: const CircleAvatar(
-                    backgroundColor: Colors.red,
-                    child: Icon(Icons.warning, color: Colors.white, size: 20),
-                  ),
-                  title: Text(
-                    u['nombre'].toString().toUpperCase(),
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  subtitle: Text('Rol: ${u['rol'].toString().toUpperCase()}'),
-                  trailing: const Icon(Icons.chat, color: Colors.blue),
-                  onTap: () {
-                    setState(() => _noLeidos.remove('soporte_${u['id']}'));
-                    Supabase.instance.client
-                        .from('usuarios')
-                        .update({'alarma_soporte': false})
-                        .eq('id', u['id']);
-                    Navigator.pop(ctx);
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => ChatScreen(
-                          salaId: 'soporte_${u['id']}',
-                          miId: 0,
-                          miNombre: 'Central',
-                          titulo: 'Soporte ➔ ${u['nombre']}',
-                          usuarioId: u['id'],
-                          alarmaLocal: 'alarma_soporte',
-                          alarmaDestino: 'chat_central',
-                          destinatarioId: u['id'] as int?,
-                          tipoFaq: TipoFaqChat.central,
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              );
-            },
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text(
-              'CERRAR',
-              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final esPantallaGrande = MediaQuery.of(context).size.width > 850;
-
-    return Scaffold(
-      backgroundColor: Colors.grey[300],
-      appBar: AppBar(
-        title: Text(
-          esPantallaGrande
-              ? 'ServiExpress | Comando Central'
-              : 'Comando Central',
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-            fontSize: 16,
-          ),
-        ),
-        backgroundColor: Colors.black,
-        elevation: 0,
-        actions: esPantallaGrande
-            ? [
-                // Botón FN Farmanorte
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.indigo[900],
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 0),
-                  ),
-                  onPressed: () => _abrirFormularioFN(context),
-                  child: const Text(
-                    'FN',
-                    style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 15,
-                        letterSpacing: 2),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xff3AF500),
-                    foregroundColor: Colors.black,
-                  ),
-                  onPressed: () => _abrirFormularioDespacho(context),
-                  icon: const Icon(Icons.add_box),
-                  label: const Text(
-                    'NUEVO SERVICIO',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                IconButton(
-                  icon: const Icon(Icons.share_rounded, color: Color(0xff25D366)),
-                  tooltip: 'Enviar link de pedido al cliente',
-                  onPressed: () => _enviarLinkInvitado(context),
-                ),
-                const SizedBox(width: 6),
-                BotonPanicoTrigger(
-                  segundos: 2,
-                  icono: Icons.campaign_rounded,
-                  colorAcento: Colors.orange,
-                  titulo: 'CONVOCATORIA GENERAL',
-                  descripcion:
-                      'Se notificará a TODO el personal en línea (móviles y central) que necesitas su atención urgente.',
-                  onActivado: _dispararPanico,
-                  onDetener: () => _detenerAlerta(tipo: 'global'),
-                ),
-                const SizedBox(width: 6),
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.grey[850],
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: () => _abrirPanelGestion(context),
-                  icon: const Icon(Icons.admin_panel_settings_rounded, size: 18),
-                  label: const Text(
-                    'GESTIÓN',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                IconButton(
-                  icon: const Icon(
-                    Icons.power_settings_new,
-                    color: Colors.redAccent,
-                  ),
-                  onPressed: _cerrarSesionSegura,
-                ),
-                const SizedBox(width: 8),
-              ]
-            : [
-                // Botón FN compacto
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: InkWell(
-                    onTap: () => _abrirFormularioFN(context),
-                    borderRadius: BorderRadius.circular(6),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.indigo[900],
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: const Text(
-                        'FN',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
-                            letterSpacing: 1.5),
-                      ),
-                    ),
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.add_box, color: Color(0xff3AF500)),
-                  onPressed: () => _abrirFormularioDespacho(context),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.share_rounded, color: Color(0xff25D366)),
-                  tooltip: 'Enviar link al cliente',
-                  onPressed: () => _enviarLinkInvitado(context),
-                ),
-                BotonPanicoTrigger(
-                  esCompacto: true,
-                  segundos: 2,
-                  icono: Icons.campaign_rounded,
-                  colorAcento: Colors.orange,
-                  titulo: 'CONVOCATORIA GENERAL',
-                  descripcion:
-                      'Se notificará a TODO el personal en línea (móviles y central) que necesitas su atención urgente.',
-                  onActivado: _dispararPanico,
-                  onDetener: () => _detenerAlerta(tipo: 'global'),
-                ),
-                IconButton(
-                  icon: const Icon(
-                    Icons.power_settings_new,
-                    color: Colors.redAccent,
-                  ),
-                  onPressed: _cerrarSesionSegura,
-                ),
-              ],
-      ),
-
-      // ---> BOTÓN FLOTANTE DE SOPORTE <---
-      floatingActionButton: StreamBuilder<List<Map<String, dynamic>>>(
-        stream: Supabase.instance.client
-            .from('usuarios')
-            .stream(primaryKey: ['id']).eq('alarma_soporte', true),
-        builder: (context, snap) {
-          final lista = snap.data ?? [];
-          if (lista.isEmpty) return const SizedBox.shrink();
-          return PulsingPanicoButton(
-            color: Colors.red,
-            child: FloatingActionButton(
-              backgroundColor: Colors.red,
-              onPressed: () => _abrirBuzonSoporte(context, lista),
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  const Icon(Icons.support_agent, color: Colors.white),
-                  Positioned(
-                    right: -6,
-                    top: -6,
-                    child: Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: const BoxDecoration(
-                        color: Colors.white,
-                        shape: BoxShape.circle,
-                      ),
-                      child: Text(
-                        '${lista.length}',
-                        style: const TextStyle(
-                          color: Colors.red,
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-
-      body: esPantallaGrande
-          ? Row(
-              children: [
-                SizedBox(width: 340, child: _construirPanelControl()),
-                Expanded(child: _construirPanelMapa()),
-                SizedBox(width: 340, child: _construirPanelMonitor()),
-              ],
-            )
-          : IndexedStack(
-              index: _panelActivoMobile,
-              children: [
-                RepaintBoundary(child: _construirPanelControl()),
-                RepaintBoundary(child: _construirPanelMapa()),
-                RepaintBoundary(child: _construirPanelMonitor()),
-              ],
-            ),
-
-      bottomNavigationBar: esPantallaGrande
-          ? null
-          : BottomNavigationBar(
-              backgroundColor: Colors.black,
-              selectedItemColor: const Color(0xff3AF500),
-              unselectedItemColor: Colors.white54,
-              type: BottomNavigationBarType.fixed,
-              currentIndex: _panelActivoMobile,
-              onTap: (index) {
-                if (index == 3) {
-                  _abrirPanelGestion(context);
-                } else {
-                  setState(() => _panelActivoMobile = index);
-                }
-              },
-              items: const [
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.people_alt),
-                  label: 'Flota',
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.radar),
-                  label: 'Radar',
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.monitor),
-                  label: 'Servicios',
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.admin_panel_settings_rounded),
-                  label: 'Gestión',
-                ),
-              ],
-            ),
-    );
-  }
-}
-
-// ============================================================
-// PANEL DE PRECIOS POR LOCAL — sectores + tarifas
-// ============================================================
+                          if (

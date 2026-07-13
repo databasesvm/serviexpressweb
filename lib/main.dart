@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'screens/login_screen.dart';
@@ -57,6 +58,20 @@ Future<void> main() async {
   runApp(const ServiexpressExpressApp());
 }
 
+/// Habilita drag con mouse + trackpad en todas las plataformas,
+/// mantiene la física nativa de cada SO (bounce en iOS, clamp en Android).
+class _AppScrollBehavior extends MaterialScrollBehavior {
+  const _AppScrollBehavior();
+
+  @override
+  Set<PointerDeviceKind> get dragDevices => {
+        PointerDeviceKind.touch,
+        PointerDeviceKind.mouse,
+        PointerDeviceKind.trackpad,
+        PointerDeviceKind.stylus,
+      };
+}
+
 class ServiexpressExpressApp extends StatefulWidget {
   const ServiexpressExpressApp({super.key});
 
@@ -93,16 +108,4 @@ class _ServiexpressExpressAppState extends State<ServiexpressExpressApp>
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Serviexpress Express',
-      debugShowCheckedModeBanner: false,
-      navigatorKey: navigatorKey,
-      theme: ThemeData(primaryColor: Colors.black),
-      // Web: si la URL contiene '/form' → GuestHomeScreen (invitados)
-      //      cualquier otra ruta      → LoginScreen (operadores)
-      // Móvil: siempre LoginScreen.
-      home: (kIsWeb && Uri.base.path.contains('/form'))
-          ? const GuestHomeScreen()
-          : const LoginScreen(),
-    );
-  }
-}
+  
