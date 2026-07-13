@@ -533,160 +533,110 @@ class _LocalScreenState extends State<LocalScreen>
                   return false;
                 }).length;
 
+                // Stats rápidos para el KPI bar del historial
+                final puedeVip = _puedeUsarPuntoAPunto();
+                final histFinalizados = historial.where((s) => s['estado'] == 'finalizado').length;
+                final histCancelados = historial.where((s) => s['estado'] == 'cancelado').length;
+                final histFacturacion = historial
+                    .where((s) => s['estado'] == 'finalizado')
+                    .fold<double>(0, (a, s) => a + ((s['tarifa'] as num?)?.toDouble() ?? 0));
+                final fmtPesoHist = NumberFormat('#,###', 'es_CO');
+
+                // Helper chip para KPI bar
+                Widget kpiBar(String val, String label, Color color) => Padding(
+                  padding: const EdgeInsets.only(right: 10),
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    Text(val, style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: color)),
+                    Text(label, style: const TextStyle(fontSize: 9, color: Colors.black45)),
+                  ]),
+                );
+
                 return TabBarView(
                   children: [
                     // --- PESTAÑA 1: ACTIVOS ---
                     Column(
                       children: [
+                        // ── PANEL DE ACCIONES 2×2 ─────────────────────────
                         Container(
                           width: double.infinity,
-                          padding: const EdgeInsets.all(16),
+                          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
                           color: Colors.white,
                           child: Column(
                             children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                    flex: 6,
-                                    child: ElevatedButton.icon(
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: const Color(
-                                          0xff3AF500,
-                                        ),
-                                        foregroundColor: Colors.black,
-                                        padding: const EdgeInsets.symmetric(
-                                          vertical: 14,
-                                        ),
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            8,
-                                          ),
-                                        ),
-                                      ),
-                                      onPressed: () => _abrirFormularioPedido(
-                                        context,
-                                        esCotizacion: false,
-                                        perfilEnVivo:
-                                            perfilEnVivo, // Pasamos el perfil
-                                      ),
-                                      icon: const Icon(
-                                        Icons.motorcycle,
-                                        size: 20,
-                                      ),
-                                      label: const Text(
-                                        'SOLICITAR MÓVIL',
-                                        style: TextStyle(
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
+                              // Fila 1: Solicitar + Cotizar
+                              Row(children: [
+                                Expanded(
+                                  child: ElevatedButton.icon(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: const Color(0xff3AF500),
+                                      foregroundColor: Colors.black,
+                                      padding: const EdgeInsets.symmetric(vertical: 11),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                     ),
+                                    onPressed: () => _abrirFormularioPedido(context,
+                                        esCotizacion: false, perfilEnVivo: perfilEnVivo),
+                                    icon: const Icon(Icons.motorcycle, size: 18),
+                                    label: const Text('SOLICITAR MÓVIL',
+                                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                                   ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    flex: 4,
-                                    child: OutlinedButton.icon(
-                                      style: OutlinedButton.styleFrom(
-                                        foregroundColor: Colors.orange[800],
-                                        side: BorderSide(
-                                          color: Colors.orange[800]!,
-                                        ),
-                                        padding: const EdgeInsets.symmetric(
-                                          vertical: 14,
-                                        ),
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            8,
-                                          ),
-                                        ),
-                                      ),
-                                      onPressed: () => _abrirFormularioPedido(
-                                        context,
-                                        esCotizacion: true,
-                                        perfilEnVivo: perfilEnVivo,
-                                      ),
-                                      icon: const Icon(
-                                        Icons.request_quote,
-                                        size: 20,
-                                      ),
-                                      label: const Text(
-                                        'COTIZAR',
-                                        style: TextStyle(
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: Colors.orange[800],
+                                      side: BorderSide(color: Colors.orange[800]!),
+                                      padding: const EdgeInsets.symmetric(vertical: 11),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                     ),
+                                    onPressed: () => _abrirFormularioPedido(context,
+                                        esCotizacion: true, perfilEnVivo: perfilEnVivo),
+                                    icon: const Icon(Icons.request_quote, size: 18),
+                                    label: const Text('COTIZAR',
+                                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                                   ),
-                                ],
-                              ),
-                              const SizedBox(height: 10),
-                              SizedBox(
-                                width: double.infinity,
-                                child: ElevatedButton.icon(
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: _puedeUsarPuntoAPunto()
-                                        ? Colors.purple[800]
-                                        : Colors.grey[300],
-                                    foregroundColor: _puedeUsarPuntoAPunto()
-                                        ? Colors.white
-                                        : Colors.grey[600],
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 12,
+                                ),
+                              ]),
+                              const SizedBox(height: 8),
+                              // Fila 2: Punto a Punto + VIP
+                              Row(children: [
+                                Expanded(
+                                  child: ElevatedButton.icon(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: puedeVip ? Colors.purple[800] : Colors.grey[300],
+                                      foregroundColor: puedeVip ? Colors.white : Colors.grey[600],
+                                      padding: const EdgeInsets.symmetric(vertical: 10),
+                                      elevation: puedeVip ? 2 : 0,
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                     ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    elevation: _puedeUsarPuntoAPunto() ? 2 : 0,
-                                  ),
-                                  onPressed: _puedeUsarPuntoAPunto()
-                                      ? () => _abrirFormularioPedido(
-                                          context,
-                                          esPuntoAPunto: true,
-                                          perfilEnVivo: perfilEnVivo,
-                                        )
-                                      : null,
-                                  icon: const Icon(Icons.flash_on, size: 20),
-                                  label: Text(
-                                    _puedeUsarPuntoAPunto()
-                                        ? 'PUNTO A PUNTO (1 GRATIS / DÍA)'
-                                        : 'PUNTO A PUNTO AGOTADO POR HOY',
-                                    style: const TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold,
+                                    onPressed: puedeVip
+                                        ? () => _abrirFormularioPedido(context,
+                                            esPuntoAPunto: true, perfilEnVivo: perfilEnVivo)
+                                        : null,
+                                    icon: const Icon(Icons.flash_on, size: 17),
+                                    label: Text(
+                                      puedeVip ? 'PUNTO A PUNTO' : 'P.A.P AGOTADO',
+                                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
                                     ),
                                   ),
                                 ),
-                              ),
-                              const SizedBox(height: 10),
-                              // ── BOTÓN VIP ─────────────────────────────────────
-                              SizedBox(
-                                width: double.infinity,
-                                child: OutlinedButton.icon(
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: const Color(0xFFB8860B),
-                                    side: const BorderSide(color: Color(0xFFB8860B)),
-                                    padding: const EdgeInsets.symmetric(vertical: 10),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(8),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: const Color(0xFFB8860B),
+                                      side: const BorderSide(color: Color(0xFFB8860B)),
+                                      padding: const EdgeInsets.symmetric(vertical: 10),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                     ),
-                                  ),
-                                  onPressed: () => _abrirFormularioPedido(
-                                    context,
-                                    esVip: true,
-                                    perfilEnVivo: perfilEnVivo,
-                                  ),
-                                  icon: const Text('👑', style: TextStyle(fontSize: 15)),
-                                  label: const Text(
-                                    'VIP  ·  +\$3.000',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold,
-                                      letterSpacing: 0.8,
-                                    ),
+                                    onPressed: () => _abrirFormularioPedido(context,
+                                        esVip: true, perfilEnVivo: perfilEnVivo),
+                                    icon: const Text('👑', style: TextStyle(fontSize: 14)),
+                                    label: const Text('VIP · +\$3.000',
+                                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
                                   ),
                                 ),
-                              ),
+                              ]),
                             ],
                           ),
                         ),
@@ -730,26 +680,51 @@ class _LocalScreenState extends State<LocalScreen>
                               ),
                             ),
                           )
-                        : ValueListenableBuilder<int>(
-                            valueListenable: _expansionTick,
-                            builder: (_, __, ___) => ListView.builder(
-                              padding: const EdgeInsets.all(12),
-                              itemCount: historial.length,
-                              itemBuilder: (c, i) => RepaintBoundary(
-                                child: FadeSlideIn(
-                                  key: ValueKey('hist_local_${historial[i]['id']}'),
-                                  child: _construirTarjetaServicio(
-                                    historial[i],
-                                    esHistorial: true,
-                                    onOcultar: () => setState(
-                                      () => _serviciosOcultosLocal.add(
-                                        historial[i]['id'],
+                        : Column(
+                            children: [
+                              // ── KPI BAR ─────────────────────────────
+                              Container(
+                                color: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                                child: Row(
+                                  children: [
+                                    kpiBar('${historial.length}', 'Total hoy', Colors.black87),
+                                    kpiBar('$histFinalizados', 'Entregados', Colors.green[700]!),
+                                    kpiBar('$histCancelados', 'Cancelados', Colors.red[700]!),
+                                    kpiBar(
+                                      '\$${fmtPesoHist.format(histFacturacion)}',
+                                      'Facturado',
+                                      Colors.indigo[700]!,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const Divider(height: 1, color: Colors.black12),
+                              // ── LISTA ────────────────────────────────
+                              Expanded(
+                                child: ValueListenableBuilder<int>(
+                                  valueListenable: _expansionTick,
+                                  builder: (_, __, ___) => ListView.builder(
+                                    padding: const EdgeInsets.all(12),
+                                    itemCount: historial.length,
+                                    itemBuilder: (c, i) => RepaintBoundary(
+                                      child: FadeSlideIn(
+                                        key: ValueKey('hist_local_${historial[i]['id']}'),
+                                        child: _construirTarjetaServicio(
+                                          historial[i],
+                                          esHistorial: true,
+                                          onOcultar: () => setState(
+                                            () => _serviciosOcultosLocal.add(
+                                              historial[i]['id'],
+                                            ),
+                                          ),
+                                        ),
                                       ),
                                     ),
                                   ),
                                 ),
                               ),
-                            ),
+                            ],
                           ),
 
                     // --- PESTAÑA 3: MI LOCAL (HUB) ---
@@ -1290,3 +1265,4 @@ class _LocalScreenState extends State<LocalScreen>
     );         // DefaultTabController
   }
 }
+                                                                                                                                                       
