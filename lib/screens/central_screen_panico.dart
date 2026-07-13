@@ -947,4 +947,9 @@ extension CentralScreenPanico on _CentralScreenState {
             ),
           ),
         ],
- 
+
+      ),
+    );
+  }
+
+}
