@@ -1,4 +1,4 @@
-// ignore_for_file: use_build_context_synchronously
+// ignore_for_file: use_build_context_synchronously, invalid_use_of_protected_member
 part of 'central_screen.dart';
 
 extension CentralScreenMonitor on _CentralScreenState {
@@ -201,6 +201,27 @@ extension CentralScreenMonitor on _CentralScreenState {
       return;
     }
 
+    // ── Variables de la ficha para usar sin conflicto de comillas ─────────
+    String fechaCreado = '';
+    if (servicio['created_at'] != null) {
+      try {
+        final dt = DateTime.parse(servicio['created_at'].toString()).toLocal();
+        final d = dt.day.toString().padLeft(2, '0');
+        final m = dt.month.toString().padLeft(2, '0');
+        final h = dt.hour.toString().padLeft(2, '0');
+        final min = dt.minute.toString().padLeft(2, '0');
+        fechaCreado = '$d/$m $h:$min';
+      } catch (_) {
+        fechaCreado = servicio['created_at'].toString();
+      }
+    }
+    final String? telReceptor = servicio['telefono_receptor']?.toString();
+    final String? numLocal    = servicio['numero_local']?.toString();
+    final String? numCliente  = servicio['numero_cliente']?.toString();
+    final String tarifaTexto  = tarifaActual == 0.0
+        ? 'Sin fijar'
+        : _formatearMonedaCentral(tarifaActual);
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -251,32 +272,27 @@ extension CentralScreenMonitor on _CentralScreenState {
                   const SizedBox(height: 8),
                   Text('📍 Origen: ${servicio['origen']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                   Text('🏁 Destino: ${servicio['destino']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                  if (servicio['created_at'] != null) ...[
+                  if (fechaCreado.isNotEmpty) ...[
                     const SizedBox(height: 4),
-                    Text('🕐 Creado: ${() {
-                        try {
-                          final dt = DateTime.parse(servicio['created_at'].toString()).toLocal();
-                          return '\${dt.day.toString().padLeft(2,'0')}/\${dt.month.toString().padLeft(2,'0')} \${dt.hour.toString().padLeft(2,'0')}:\${dt.minute.toString().padLeft(2,'0')}';
-                        } catch (_) { return servicio['created_at'].toString(); }
-                      }()}',
+                    Text('🕐 Creado: $fechaCreado',
                       style: const TextStyle(fontSize: 12, color: Colors.black54)),
                   ],
                   const SizedBox(height: 4),
-                  Text('💵 Tarifa: \${tarifaActual == 0.0 ? "Sin fijar" : _formatearMonedaCentral(tarifaActual)}',
+                  Text('💵 Tarifa: $tarifaTexto',
                     style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold,
                         color: tarifaActual == 0.0 ? Colors.orange[800] : Colors.green[800])),
-                  if (servicio['telefono_receptor'] != null) ...[
+                  if (telReceptor != null) ...[
                     const SizedBox(height: 4),
-                    Text('📞 Tel. Receptor: \${servicio['telefono_receptor']}',
+                    Text('📞 Tel. Receptor: $telReceptor',
                         style: const TextStyle(fontSize: 12, color: Colors.blue, fontWeight: FontWeight.bold)),
                   ],
-                  if (servicio['numero_local'] != null || servicio['numero_cliente'] != null) ...[
+                  if (numLocal != null || numCliente != null) ...[
                     const SizedBox(height: 4),
                     Row(children: [
-                      if (servicio['numero_local'] != null)
-                        Text('🏪 Local #\${servicio['numero_local']}  ', style: const TextStyle(fontSize: 12)),
-                      if (servicio['numero_cliente'] != null)
-                        Text('👤 Cliente #\${servicio['numero_cliente']}', style: const TextStyle(fontSize: 12)),
+                      if (numLocal != null)
+                        Text('🏪 Local #$numLocal  ', style: const TextStyle(fontSize: 12)),
+                      if (numCliente != null)
+                        Text('👤 Cliente #$numCliente', style: const TextStyle(fontSize: 12)),
                     ]),
                   ],
                   if (servicio['instrucciones_especiales'] != null &&
@@ -1118,7 +1134,7 @@ extension CentralScreenMonitor on _CentralScreenState {
                                   'accepted_at': DateTime.now().toUtc().toIso8601String(),
                                   'picked_up_at': null,
                                   'extension_minutes': 0,
-                                  'observacion': 'Asignado a \$nombreMoto por Central',
+                                  'observacion': 'Asignado a $nombreMoto por Central',
                                 })
                                 .eq('id', servicio['id']);
                             if (moto['ticket_prioridad'] == true) {
@@ -2233,22 +2249,4 @@ extension CentralScreenMonitor on _CentralScreenState {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('Radar limpio. Servicios purgados con éxito.'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Error al archivar: $e'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      }
-    }
-  }
-
-
-}
+              backgroundColor: Colors.gr 
