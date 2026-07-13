@@ -114,6 +114,9 @@ class _CentralScreenState extends State<CentralScreen>
   // para que _construirBloqueServicios pueda resolver movil_id → #numero real.
   List<Map<String, dynamic>> _movilesCache = [];
 
+  // Usuarios pendientes de activación (activo=false)
+  int _usuariosPendientes = 0;
+
   @override
   void initState() {
     super.initState();
@@ -290,6 +293,54 @@ class _CentralScreenState extends State<CentralScreen>
           },
         )
         .subscribe();
+    // --- CANAL USUARIOS PENDIENTES: detecta nuevos registros por activar ---
+    Supabase.instance.client
+        .channel('usuarios_pendientes_central')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'usuarios',
+          callback: (payload) async {
+            final doc = payload.newRecord;
+            if (doc.isEmpty || doc['activo'] == true) return;
+            final pendientes = await Supabase.instance.client
+                .from('usuarios')
+                .select('id')
+                .eq('activo', false)
+                .not('rol', 'in', '("cliente")');
+            if (mounted) {
+              setState(() => _usuariosPendientes = (pendientes as List).length);
+              final nombre = doc['nombre']?.toString() ?? 'Nuevo usuario';
+              final rol = doc['rol']?.toString() ?? '';
+              final rolLabel = rol == 'local' ? 'Local' : 'Móvil';
+              _sonidos.reproducir(Sonidos.centralRadar);
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text('👤 $rolLabel por activar: $nombre'),
+                backgroundColor: Colors.orange[800],
+                duration: const Duration(seconds: 6),
+                action: SnackBarAction(
+                  label: 'GESTIÓN',
+                  textColor: Colors.white,
+                  onPressed: () => _abrirPanelGestion(context),
+                ),
+              ));
+            }
+          },
+        )
+        .subscribe();
+
+    // Cargar conteo inicial de pendientes
+    Future.microtask(() async {
+      try {
+        final pendientes = await Supabase.instance.client
+            .from('usuarios')
+            .select('id')
+            .eq('activo', false)
+            .not('rol', 'in', '("cliente")');
+        if (mounted) setState(() => _usuariosPendientes = (pendientes as List).length);
+      } catch (_) {}
+    });
+
     // pg_cron en Supabase es ahora el responsable principal de caducar
     // servicios. Este timer es solo un respaldo por si el servidor falla
     // o pg_cron no está configurado (plan Free de Supabase).
@@ -3239,6 +3290,8 @@ class _CentralScreenState extends State<CentralScreen>
     final List<Map<String, dynamic>?> recogidasSel = [null];
     final destinoCtrl = TextEditingController();
     final tarifaCtrl = TextEditingController();
+    final instruccionesCtrl = TextEditingController();
+    bool vaConDatafono = false;
     bool procesando = false;
 
     // Helper: dropdown de sedes ordenadas
@@ -3460,6 +3513,66 @@ class _CentralScreenState extends State<CentralScreen>
                             horizontal: 12, vertical: 10),
                       ),
                     ),
+                    const SizedBox(height: 12),
+
+                    // ── Datafono toggle ──────────────────────────────────────
+                    Container(
+                      decoration: BoxDecoration(
+                        color: vaConDatafono ? Colors.blue[50] : Colors.grey[100],
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: vaConDatafono ? Colors.blue[300]! : Colors.grey[300]!,
+                        ),
+                      ),
+                      child: SwitchListTile(
+                        dense: true,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+                        secondary: Icon(
+                          Icons.credit_card,
+                          color: vaConDatafono ? Colors.blue[700] : Colors.grey[500],
+                          size: 20,
+                        ),
+                        title: Text(
+                          'Va con datafono',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: vaConDatafono ? Colors.blue[800] : Colors.black54,
+                          ),
+                        ),
+                        subtitle: Text(
+                          vaConDatafono ? 'Pago con tarjeta' : 'Pago en efectivo',
+                          style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                        ),
+                        value: vaConDatafono,
+                        activeColor: Colors.blue[700],
+                        onChanged: procesando
+                            ? null
+                            : (v) => setDialogState(() => vaConDatafono = v),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // ── Instrucciones especiales ─────────────────────────────
+                    const Text('Instrucciones especiales:',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black54,
+                            fontSize: 12)),
+                    const SizedBox(height: 4),
+                    TextField(
+                      controller: instruccionesCtrl,
+                      textCapitalization: TextCapitalization.sentences,
+                      maxLines: 3,
+                      decoration: InputDecoration(
+                        hintText: 'Indicaciones adicionales para el repartidor (opcional)…',
+                        hintStyle: const TextStyle(fontSize: 12, color: Colors.black38),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8)),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 10),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -3591,10 +3704,12 @@ class _CentralScreenState extends State<CentralScreen>
                                 'fn_sede_id': sede['id'],
                                 'recogidas': recogidasList,
                                 'fn_primera_ola': wave1Ids,
-                                'metodo_pago': 'Efectivo',
+                                'metodo_pago': vaConDatafono ? 'Datafono' : 'Efectivo',
                                 'archivado': false,
                                 if (sLat != null) 'origen_lat': sLat,
                                 if (sLng != null) 'origen_lng': sLng,
+                                if (instruccionesCtrl.text.trim().isNotEmpty)
+                                  'instrucciones_especiales': instruccionesCtrl.text.trim(),
                               })
                               .select('id')
                               .single();
@@ -4447,19 +4562,107 @@ class _CentralScreenState extends State<CentralScreen>
           'CONTROL DE ORDEN #$id',
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
-        content: Column(
+        content: SingleChildScrollView(
+          child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('📍 Origen: ${servicio['origen']}'),
-            Text('🏁 Destino: ${servicio['destino']}'),
-            Text(
-              '📱 Tel. Receptor: ${servicio['telefono_receptor'] ?? 'No registrado'}',
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                color: Colors.blue,
+            // ── FICHA COMPLETA DEL SERVICIO ──────────────────────────
+            Container(
+              padding: const EdgeInsets.all(10),
+              margin: const EdgeInsets.only(bottom: 10),
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey[300]!),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(4)),
+                      child: Text((servicio['tipo_servicio'] ?? 'domicilio').toString().toUpperCase(),
+                          style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                    ),
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(color: Colors.blueGrey[700], borderRadius: BorderRadius.circular(4)),
+                      child: Text(estado.toUpperCase().replaceAll('_', ' '),
+                          style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                    ),
+                    if (servicio['es_vip'] == true) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                        decoration: BoxDecoration(color: Colors.amber[700], borderRadius: BorderRadius.circular(4)),
+                        child: const Text('👑 VIP', style: TextStyle(color: Colors.black, fontSize: 10, fontWeight: FontWeight.bold)),
+                      ),
+                    ],
+                  ]),
+                  const SizedBox(height: 8),
+                  Text('📍 Origen: ${servicio['origen']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  Text('🏁 Destino: ${servicio['destino']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  if (servicio['created_at'] != null) ...[
+                    const SizedBox(height: 4),
+                    Text('🕐 Creado: ${() {
+                        try {
+                          final dt = DateTime.parse(servicio['created_at'].toString()).toLocal();
+                          return '\${dt.day.toString().padLeft(2,'0')}/\${dt.month.toString().padLeft(2,'0')} \${dt.hour.toString().padLeft(2,'0')}:\${dt.minute.toString().padLeft(2,'0')}';
+                        } catch (_) { return servicio['created_at'].toString(); }
+                      }()}',
+                      style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                  ],
+                  const SizedBox(height: 4),
+                  Text('💵 Tarifa: \${tarifaActual == 0.0 ? "Sin fijar" : _formatearMonedaCentral(tarifaActual)}',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold,
+                        color: tarifaActual == 0.0 ? Colors.orange[800] : Colors.green[800])),
+                  if (servicio['telefono_receptor'] != null) ...[
+                    const SizedBox(height: 4),
+                    Text('📞 Tel. Receptor: \${servicio['telefono_receptor']}',
+                        style: const TextStyle(fontSize: 12, color: Colors.blue, fontWeight: FontWeight.bold)),
+                  ],
+                  if (servicio['numero_local'] != null || servicio['numero_cliente'] != null) ...[
+                    const SizedBox(height: 4),
+                    Row(children: [
+                      if (servicio['numero_local'] != null)
+                        Text('🏪 Local #\${servicio['numero_local']}  ', style: const TextStyle(fontSize: 12)),
+                      if (servicio['numero_cliente'] != null)
+                        Text('👤 Cliente #\${servicio['numero_cliente']}', style: const TextStyle(fontSize: 12)),
+                    ]),
+                  ],
+                  if (servicio['instrucciones_especiales'] != null &&
+                      servicio['instrucciones_especiales'].toString().isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(color: Colors.amber[50], borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: Colors.amber[300]!)),
+                      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        const Text('📝 ', style: TextStyle(fontSize: 12)),
+                        Expanded(child: Text(servicio['instrucciones_especiales'].toString(),
+                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500))),
+                      ]),
+                    ),
+                  ],
+                  if (servicio['observacion'] != null && servicio['observacion'].toString().isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(6)),
+                      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        const Text('⚠️ ', style: TextStyle(fontSize: 12)),
+                        Expanded(child: Text(servicio['observacion'].toString(),
+                            style: const TextStyle(fontSize: 11, color: Colors.black87))),
+                      ]),
+                    ),
+                  ],
+                ],
               ),
             ),
+            // (tel. receptor ya aparece en la ficha superior)
             Row(
               children: [
                 Expanded(
@@ -4536,21 +4739,7 @@ class _CentralScreenState extends State<CentralScreen>
                 ),
               ],
             ),
-            if (servicio['observacion'] != null) ...[
-              const SizedBox(height: 10),
-              Container(
-                padding: const EdgeInsets.all(8),
-                color: Colors.grey[200],
-                child: Text(
-                  '📝 NOTA: ${servicio['observacion']}',
-                  style: const TextStyle(
-                    color: Colors.black87,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12,
-                  ),
-                ),
-              ),
-            ],
+            // (observación ya aparece en la ficha superior)
             const SizedBox(height: 15),
             const Text(
               'LÍNEAS DIRECTAS:',
@@ -4766,7 +4955,8 @@ class _CentralScreenState extends State<CentralScreen>
                 },
               ),
           ],
-        ),
+        ),  // Column
+        ),  // SingleChildScrollView
         actions: [
           Wrap(
             spacing: 6,
@@ -5273,13 +5463,30 @@ class _CentralScreenState extends State<CentralScreen>
                                   : Colors.grey[400]),
                           onTap: () async {
                             Navigator.pop(ctx);
+                            final nombreMoto = _formatearNombreCentral(moto);
                             await Supabase.instance.client
                                 .from('servicios')
                                 .update({
                                   'movil_id': moto['id'],
-                                  'estado': 'programado',
+                                  'estado': 'en_ruta_origen',
+                                  'accepted_at': DateTime.now().toUtc().toIso8601String(),
+                                  'picked_up_at': null,
+                                  'extension_minutes': 0,
+                                  'observacion': 'Asignado a \$nombreMoto por Central',
                                 })
                                 .eq('id', servicio['id']);
+                            if (moto['ticket_prioridad'] == true) {
+                              await Supabase.instance.client
+                                  .from('usuarios')
+                                  .update({'ticket_prioridad': false})
+                                  .eq('id', moto['id']);
+                            }
+                            await MotorNotificaciones.dispararMisil(
+                              idDestino: moto['id'].toString(),
+                              titulo: '🚨 NUEVO SERVICIO ASIGNADO',
+                              mensaje: 'La Central te ha asignado un servicio. Revisa tu radar.',
+                              sonido: Sonidos.alerta,
+                            );
                             _seleccionadoId.value = null;
                           },
                         );
@@ -10268,17 +10475,42 @@ class _CentralScreenState extends State<CentralScreen>
                   onDetener: () => _detenerAlerta(tipo: 'global'),
                 ),
                 const SizedBox(width: 6),
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.grey[850],
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: () => _abrirPanelGestion(context),
-                  icon: const Icon(Icons.admin_panel_settings_rounded, size: 18),
-                  label: const Text(
-                    'GESTIÓN',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.grey[850],
+                        foregroundColor: Colors.white,
+                      ),
+                      onPressed: () => _abrirPanelGestion(context),
+                      icon: const Icon(Icons.admin_panel_settings_rounded, size: 18),
+                      label: const Text(
+                        'GESTIÓN',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    if (_usuariosPendientes > 0)
+                      Positioned(
+                        top: -4,
+                        right: -4,
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: const BoxDecoration(
+                            color: Colors.orange,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Text(
+                            '$_usuariosPendientes',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 9,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
                 const SizedBox(width: 6),
                 IconButton(
