@@ -384,6 +384,28 @@ class _RegistroScreenState extends State<RegistroScreen> {
           );
           Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
         } else {
+          // Notificar a Central que hay un usuario pendiente de activación
+          try {
+            final centralUsers = await Supabase.instance.client
+                .from('usuarios')
+                .select('id')
+                .inFilter('rol', ['central', 'master'])
+                .eq('en_linea', true);
+            final centralIds = (centralUsers as List)
+                .map<String>((u) => u['id'].toString())
+                .toList();
+            if (centralIds.isNotEmpty) {
+              final rolLabel = _rolSeleccionado == 'local' ? 'Local' : 'Móvil';
+              await MotorNotificaciones.dispararRafa(
+                idsDestinos: centralIds,
+                titulo: '👤 NUEVO $rolLabel POR ACTIVAR',
+                mensaje: '${filaInsertada['nombre'] ?? 'Nuevo usuario'} está esperando activación. Ve a Gestión → Usuarios.',
+                urgente: true,
+                sonido: Sonidos.centralRadar,
+              );
+            }
+          } catch (_) {}
+
           showDialog(
             context: context,
             barrierDismissible: false,
