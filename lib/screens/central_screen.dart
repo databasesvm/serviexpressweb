@@ -64,6 +64,9 @@ class _CentralScreenState extends State<CentralScreen>
   // todas visibles (comportamiento de siempre). Las claves coinciden
   // con las usadas en _construirBloqueServicios.
   final Set<String> _seccionesOcultasMonitor = {};
+  // Notifier para que el monitor se actualice solo cuando cambia el filtro,
+  // sin reconstruir todo el Scaffold.
+  final ValueNotifier<int> _filtroVersion = ValueNotifier(0);
 
   /// Contadores de mensajes no leídos por sala (sala_id → cantidad).
   /// Se incrementa cuando llega un mensaje ajeno en el canal Realtime.
@@ -273,7 +276,7 @@ class _CentralScreenState extends State<CentralScreen>
     // servicios. Este timer es solo un respaldo por si el servidor falla
     // o pg_cron no está configurado (plan Free de Supabase).
     _reloj = Timer.periodic(const Duration(minutes: 5), (timer) {
-      if (mounted) setState(() {});
+      // Sin setState — limpieza y detección no necesitan reconstruir el árbol
       _ejecutarLimpiezaDeCaducados();
       _detectarDemorasYSonar(); // Suena si hay servicios activos con +30 min
     });
@@ -5260,27 +5263,24 @@ class _CentralScreenState extends State<CentralScreen>
                       },
                     ),
                   if (servicio['movil_id'] != null)
-                    FutureBuilder<List<Map<String, dynamic>>>(
-                      future: Supabase.instance.client
-                          .from('usuarios')
-                          .select('nombre, usuario, rol')
-                          .eq('id', servicio['movil_id']),
-                      builder: (context, userSnapshot) {
-                        final nombreReal =
-                            (userSnapshot.data != null &&
-                                userSnapshot.data!.isNotEmpty)
-                            ? _formatearNombreCentral(userSnapshot.data!.first)
-                            : '...';
-                        return Text(
-                          'Móvil: $nombreReal',
-                          style: TextStyle(
-                            color: Colors.blueGrey[700],
-                            fontWeight: FontWeight.bold,
-                            fontSize: 10,
-                          ),
-                        );
-                      },
-                    ),
+                    Builder(builder: (context) {
+                      // Usa _movilesCache (siempre actualizado) — sin query extra
+                      final mov = _movilesCache.firstWhere(
+                        (m) => m['id'] == servicio['movil_id'],
+                        orElse: () => {},
+                      );
+                      final nombreReal = mov.isNotEmpty
+                          ? _formatearNombreCentral(mov)
+                          : '—';
+                      return Text(
+                        'Móvil: $nombreReal',
+                        style: TextStyle(
+                          color: Colors.blueGrey[700],
+                          fontWeight: FontWeight.bold,
+                          fontSize: 10,
+                        ),
+                      );
+                    }),
                   if ([
                     'en_ruta_origen',
                     'en_origen',
@@ -5551,14 +5551,11 @@ class _CentralScreenState extends State<CentralScreen>
 
                 return StreamBuilder<List<Map<String, dynamic>>>(
                   stream: _streamUsuariosMoviles,
+                  // initialData evita parpadeo: siempre hay datos desde el inicio
+                  initialData: _movilesCache,
                   builder: (context, snapshot) {
-                    if (!snapshot.hasData) {
-                      return const Center(
-                        child: CircularProgressIndicator(color: Colors.black),
-                      );
-                    }
                     // Interceptor táctico para formatear la vista
-                    final moviles = (snapshot.data ?? []).map((m) {
+                    final moviles = (snapshot.data ?? _movilesCache).map((m) {
                       final map = Map<String, dynamic>.from(m);
                       map['nombre'] = _formatearNombreCentral(map);
                       return map;
@@ -6853,107 +6850,112 @@ class _CentralScreenState extends State<CentralScreen>
 
                 // Sonidos de estado manejados por radar_central_bg channel
 
-                return ListView(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  children: [
-                    _construirBloqueServicios(
-                      context,
-                      '⚠️ REPORTES DE PROBLEMA',
-                      problemas,
-                      Colors.red[700]!,
-                      Icons.warning_rounded,
-                      visible: !_seccionesOcultasMonitor.contains('problemas'),
-                    ),
-                    _construirBloqueServicios(
-                      context,
-                      '❓ COTIZACIONES PENDIENTES',
-                      cotizaciones,
-                      Colors.orange[700]!,
-                      Icons.calculate_outlined,
-                      visible: !_seccionesOcultasMonitor.contains('cotizaciones'),
-                    ),
-                    _construirBloqueServicios(
-                      context,
-                      '✉️ COTIZACIONES ENVIADAS',
-                      cotizadas,
-                      Colors.blue[600]!,
-                      Icons.hourglass_top,
-                      visible: !_seccionesOcultasMonitor.contains('cotizadas'),
-                    ),
-                    _construirBloqueServicios(
-                      context,
-                      '✅ COTIZACIONES APROBADAS · EN ESPERA',
-                      cotizacionesAprobadas,
-                      Colors.teal[700]!,
-                      Icons.check_circle_outline,
-                      visible: !_seccionesOcultasMonitor.contains('cotizaciones_aprobadas'),
-                    ),
-                    // ---> INYECCIÓN: BLOQUE DEL TEMPORIZADOR <---
-                    _construirBloqueServicios(
-                      context,
-                      '⏰ SERVICIOS PROGRAMADOS (EN ESPERA)',
-                      programados,
-                      Colors.teal[700]!,
-                      Icons.schedule,
-                      visible: !_seccionesOcultasMonitor.contains('programados'),
-                    ),
-                    _construirBloqueServicios(
-                      context,
-                      '♻️ SERVICIOS CADUCADOS',
-                      caducados,
-                      Colors.purple[800]!,
-                      Icons.hourglass_disabled,
-                      visible: !_seccionesOcultasMonitor.contains('caducados'),
-                    ),
-                    _construirBloqueServicios(
-                      context,
-                      '⏱️ SERVICIOS VENCIDOS / DEMORADOS',
-                      finalizadosDemora,
-                      Colors.deepPurple[700]!,
-                      Icons.timer_off,
-                      visible: !_seccionesOcultasMonitor.contains('demorados'),
-                    ),
-                    _construirBloqueServicios(
-                      context,
-                      '🟢 RADAR DE DISPONIBLES',
-                      libres,
-                      const Color(0xff3AF500),
-                      Icons.add_task,
-                      visible: !_seccionesOcultasMonitor.contains('libres'),
-                    ),
-                    _construirBloqueServicios(
-                      context,
-                      '🟡 SERVICIOS EN CURSO',
-                      enCurso,
-                      Colors.amber[600]!,
-                      Icons.motorcycle,
-                      visible: !_seccionesOcultasMonitor.contains('en_curso'),
-                    ),
-                    _construirBloqueServicios(
-                      context,
-                      '🔴 SERVICIOS FINALIZADOS CON PROBLEMA',
-                      finalizadosProblema,
-                      Colors.red[900]!,
-                      Icons.report_off,
-                      visible: !_seccionesOcultasMonitor.contains('finalizados_problema'),
-                    ),
-                    _construirBloqueServicios(
-                      context,
-                      '⚪ SERVICIOS FINALIZADOS',
-                      finalizados,
-                      Colors.grey[500]!,
-                      Icons.check_circle_outline,
-                      visible: !_seccionesOcultasMonitor.contains('finalizados'),
-                    ),
-                    _construirBloqueServicios(
-                      context,
-                      '⚫ SERVICIOS CANCELADOS',
-                      cancelados,
-                      Colors.black54,
-                      Icons.block,
-                      visible: !_seccionesOcultasMonitor.contains('cancelados'),
-                    ),
-                  ],
+                // ValueListenableBuilder reacciona al filtro sin reconstruir
+                // el StreamBuilder completo (evita parpadeo por setState).
+                return ValueListenableBuilder<int>(
+                  valueListenable: _filtroVersion,
+                  builder: (context, _, __) => ListView(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    children: [
+                      _construirBloqueServicios(
+                        context,
+                        '⚠️ REPORTES DE PROBLEMA',
+                        problemas,
+                        Colors.red[700]!,
+                        Icons.warning_rounded,
+                        visible: !_seccionesOcultasMonitor.contains('problemas'),
+                      ),
+                      _construirBloqueServicios(
+                        context,
+                        '❓ COTIZACIONES PENDIENTES',
+                        cotizaciones,
+                        Colors.orange[700]!,
+                        Icons.calculate_outlined,
+                        visible: !_seccionesOcultasMonitor.contains('cotizaciones'),
+                      ),
+                      _construirBloqueServicios(
+                        context,
+                        '✉️ COTIZACIONES ENVIADAS',
+                        cotizadas,
+                        Colors.blue[600]!,
+                        Icons.hourglass_top,
+                        visible: !_seccionesOcultasMonitor.contains('cotizadas'),
+                      ),
+                      _construirBloqueServicios(
+                        context,
+                        '✅ COTIZACIONES APROBADAS · EN ESPERA',
+                        cotizacionesAprobadas,
+                        Colors.teal[700]!,
+                        Icons.check_circle_outline,
+                        visible: !_seccionesOcultasMonitor.contains('cotizaciones_aprobadas'),
+                      ),
+                      // ---> INYECCIÓN: BLOQUE DEL TEMPORIZADOR <---
+                      _construirBloqueServicios(
+                        context,
+                        '⏰ SERVICIOS PROGRAMADOS (EN ESPERA)',
+                        programados,
+                        Colors.teal[700]!,
+                        Icons.schedule,
+                        visible: !_seccionesOcultasMonitor.contains('programados'),
+                      ),
+                      _construirBloqueServicios(
+                        context,
+                        '♻️ SERVICIOS CADUCADOS',
+                        caducados,
+                        Colors.purple[800]!,
+                        Icons.hourglass_disabled,
+                        visible: !_seccionesOcultasMonitor.contains('caducados'),
+                      ),
+                      _construirBloqueServicios(
+                        context,
+                        '⏱️ SERVICIOS VENCIDOS / DEMORADOS',
+                        finalizadosDemora,
+                        Colors.deepPurple[700]!,
+                        Icons.timer_off,
+                        visible: !_seccionesOcultasMonitor.contains('demorados'),
+                      ),
+                      _construirBloqueServicios(
+                        context,
+                        '🟢 RADAR DE DISPONIBLES',
+                        libres,
+                        const Color(0xff3AF500),
+                        Icons.add_task,
+                        visible: !_seccionesOcultasMonitor.contains('libres'),
+                      ),
+                      _construirBloqueServicios(
+                        context,
+                        '🟡 SERVICIOS EN CURSO',
+                        enCurso,
+                        Colors.amber[600]!,
+                        Icons.motorcycle,
+                        visible: !_seccionesOcultasMonitor.contains('en_curso'),
+                      ),
+                      _construirBloqueServicios(
+                        context,
+                        '🔴 SERVICIOS FINALIZADOS CON PROBLEMA',
+                        finalizadosProblema,
+                        Colors.red[900]!,
+                        Icons.report_off,
+                        visible: !_seccionesOcultasMonitor.contains('finalizados_problema'),
+                      ),
+                      _construirBloqueServicios(
+                        context,
+                        '⚪ SERVICIOS FINALIZADOS',
+                        finalizados,
+                        Colors.grey[500]!,
+                        Icons.check_circle_outline,
+                        visible: !_seccionesOcultasMonitor.contains('finalizados'),
+                      ),
+                      _construirBloqueServicios(
+                        context,
+                        '⚫ SERVICIOS CANCELADOS',
+                        cancelados,
+                        Colors.black54,
+                        Icons.block,
+                        visible: !_seccionesOcultasMonitor.contains('cancelados'),
+                      ),
+                    ],
+                  ),
                 );
               },
             ),
@@ -8107,7 +8109,8 @@ class _CentralScreenState extends State<CentralScreen>
                         _seccionesOcultasMonitor.add(e.key);
                       }
                     });
-                    setState(() {}); // refleja en el monitor real al instante
+                    // Notifica solo al monitor — sin reconstruir todo el Scaffold
+                    _filtroVersion.value++;
                   },
                 );
               }).toList(),
