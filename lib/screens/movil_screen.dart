@@ -2771,6 +2771,22 @@ class _MovilScreenState extends State<MovilScreen>
         );
       }
 
+      // ── FN completado: +0.1 a puntuación ─────────────────────────────
+      if (!tieneProblema && servicio['tipo_fn'] == true) {
+        try {
+          final md = await Supabase.instance.client
+              .from('usuarios')
+              .select('puntuacion')
+              .eq('id', widget.usuario['id'])
+              .single();
+          final double curr = (md['puntuacion'] as num?)?.toDouble() ?? 5.0;
+          await Supabase.instance.client
+              .from('usuarios')
+              .update({'puntuacion': double.parse((curr + 0.1).toStringAsFixed(2))})
+              .eq('id', widget.usuario['id']);
+        } catch (_) {}
+      }
+
       if (tieneProblema) {
         MotorNotificaciones.dispararACentral(
           titulo: '🚨 SERVICIO CON PROBLEMA',
@@ -5289,15 +5305,15 @@ class _MovilScreenState extends State<MovilScreen>
 
             if (mostrarBotonNavegar && !tieneProblema)
               Padding(
-                padding: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.only(bottom: 8),
                 child: SizedBox(
                   width: double.infinity,
-                  height: 55,
                   child: ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.indigo[600],
                       foregroundColor: Colors.white,
-                      elevation: 3,
+                      elevation: 2,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
                     ),
                     onPressed: _procesando
                         ? null
@@ -5305,13 +5321,10 @@ class _MovilScreenState extends State<MovilScreen>
                             servicio,
                             estado == 'en_ruta_origen',
                           ),
-                    icon: const Icon(Icons.explore, size: 24),
+                    icon: const Icon(Icons.explore, size: 18),
                     label: const Text(
-                      'NAVEGAR EN GOOGLE MAPS',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                      ),
+                      'Navegar en Google Maps',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                     ),
                   ),
                 ),
@@ -5557,7 +5570,7 @@ class _MovilScreenState extends State<MovilScreen>
               child: SizedBox(
                 key: ValueKey('btn_$estado${estaDemorado ? '_d' : ''}'),
                 width: double.infinity,
-                height: 70,
+                height: 56,
                 child: botonAccion,
               ),
             ),
@@ -5566,50 +5579,42 @@ class _MovilScreenState extends State<MovilScreen>
                 estado == 'en_ruta_destino' &&
                 efectivos >= (tiempoMeta * 0.7).floor())
               Padding(
-                padding: const EdgeInsets.only(top: 12),
+                padding: const EdgeInsets.only(top: 8),
                 child: SizedBox(
                   width: double.infinity,
-                  height: 55,
                   child: OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(
-                      side: BorderSide(color: Colors.blue[700]!, width: 2),
+                      side: BorderSide(color: Colors.blue[600]!, width: 1.5),
+                      padding: const EdgeInsets.symmetric(vertical: 8),
                     ),
                     onPressed: () => _abrirMenuProrroga(
                       context,
                       servicio['id'],
                       servicio['extension_minutes'] as int? ?? 0,
                     ),
-                    icon: Icon(Icons.timer, color: Colors.blue[700], size: 22),
+                    icon: Icon(Icons.timer, color: Colors.blue[600], size: 16),
                     label: const Text(
-                      'JUSTIFICAR (+15 MIN)',
-                      style: TextStyle(
-                        color: Colors.blue,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                      ),
+                      'Justificar (+15 min)',
+                      style: TextStyle(color: Colors.blue, fontWeight: FontWeight.w600, fontSize: 12),
                     ),
                   ),
                 ),
               ),
             if (!tieneProblema)
               Padding(
-                padding: const EdgeInsets.only(top: 12),
+                padding: const EdgeInsets.only(top: 6),
                 child: SizedBox(
                   width: double.infinity,
-                  height: 55,
                   child: OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(
-                      side: BorderSide(color: Colors.red[700]!, width: 2),
+                      side: BorderSide(color: Colors.red[400]!, width: 1),
+                      padding: const EdgeInsets.symmetric(vertical: 6),
                     ),
                     onPressed: () => _mostrarMenuProblema(context, servicio['id']),
-                    icon: Icon(Icons.warning, color: Colors.red[700], size: 22),
+                    icon: Icon(Icons.flag_outlined, color: Colors.red[500], size: 15),
                     label: Text(
-                      'REPORTAR PROBLEMA',
-                      style: TextStyle(
-                        color: Colors.red[700],
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                      ),
+                      'Reportar problema',
+                      style: TextStyle(color: Colors.red[500], fontWeight: FontWeight.w600, fontSize: 12),
                     ),
                   ),
                 ),
@@ -6176,43 +6181,37 @@ class _MovilScreenState extends State<MovilScreen>
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.indigo[900],
                   foregroundColor: Colors.white,
-                  padding:
-                      const EdgeInsets.symmetric(vertical: 13),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
                 ),
                 onPressed: () => launchUrl(
                   Uri.parse('https://databasesvm.github.io/appweb/'),
                   mode: LaunchMode.externalApplication,
                 ),
-                icon: const Icon(Icons.receipt_long, size: 20),
-                label: const Text('REPORTAR FACTURA',
-                    style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14)),
+                icon: const Icon(Icons.receipt_long, size: 17),
+                label: const Text('Reportar Factura',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
               ),
             ),
 
             // ── Navegar al destino (en ruta destino) ──────────────────────
             if (estado == 'en_ruta_destino' && !tieneProblema)
               Padding(
-                padding: const EdgeInsets.only(top: 10),
+                padding: const EdgeInsets.only(top: 8),
                 child: SizedBox(
                   width: double.infinity,
-                  height: 50,
                   child: ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.indigo[600],
                       foregroundColor: Colors.white,
                       elevation: 2,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
                     ),
                     onPressed: _procesando
                         ? null
-                        : () => _abrirNavegadorSatelital(
-                            servicio, false),
-                    icon: const Icon(Icons.explore, size: 22),
-                    label: const Text('NAVEGAR AL DESTINO',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13)),
+                        : () => _abrirNavegadorSatelital(servicio, false),
+                    icon: const Icon(Icons.explore, size: 18),
+                    label: const Text('Navegar al destino',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                   ),
                 ),
               ),
@@ -6304,7 +6303,7 @@ class _MovilScreenState extends State<MovilScreen>
                 key: ValueKey(
                     'fn_act_$estado${estaDemorado ? '_d' : ''}'),
                 width: double.infinity,
-                height: 70,
+                height: 56,
                 child: botonAccion,
               ),
             ),
@@ -6312,24 +6311,18 @@ class _MovilScreenState extends State<MovilScreen>
             // ── Reportar Problema ─────────────────────────────────────────
             if (!tieneProblema)
               Padding(
-                padding: const EdgeInsets.only(top: 12),
+                padding: const EdgeInsets.only(top: 6),
                 child: SizedBox(
                   width: double.infinity,
-                  height: 55,
                   child: OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(
-                      side: BorderSide(
-                          color: Colors.red[700]!, width: 2),
+                      side: BorderSide(color: Colors.red[400]!, width: 1),
+                      padding: const EdgeInsets.symmetric(vertical: 6),
                     ),
-                    onPressed: () => _mostrarMenuProblema(
-                        context, servicio['id']),
-                    icon: Icon(Icons.warning,
-                        color: Colors.red[700], size: 22),
-                    label: Text('REPORTAR PROBLEMA',
-                        style: TextStyle(
-                            color: Colors.red[700],
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14)),
+                    onPressed: () => _mostrarMenuProblema(context, servicio['id']),
+                    icon: Icon(Icons.flag_outlined, color: Colors.red[500], size: 15),
+                    label: Text('Reportar problema',
+                        style: TextStyle(color: Colors.red[500], fontWeight: FontWeight.w600, fontSize: 12)),
                   ),
                 ),
               ),
