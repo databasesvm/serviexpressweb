@@ -6100,32 +6100,17 @@ class _MovilScreenState extends State<MovilScreen>
 
             // ── Método de pago ────────────────────────────────────────────
             if (servicio['metodo_pago'] == 'Datafono') ...[
-              const SizedBox(height: 10),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  color: Colors.blue[50],
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.blue[300]!),
+              const SizedBox(height: 8),
+              Wrap(children: [
+                Chip(
+                  avatar: const Icon(Icons.credit_card, size: 14, color: Colors.white),
+                  label: const Text('DATÁFONO',
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 0.8)),
+                  backgroundColor: Colors.blue[700],
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
                 ),
-                child: Row(
-                  children: [
-                    Icon(Icons.credit_card, color: Colors.blue[700], size: 20),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Pago con DATÁFONO',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                        color: Colors.blue[800],
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Text('(no efectivo)',
-                        style: TextStyle(fontSize: 12, color: Colors.blue[600])),
-                  ],
-                ),
-              ),
+              ]),
             ],
 
             // ── Instrucciones especiales ───────────────────────────────────
