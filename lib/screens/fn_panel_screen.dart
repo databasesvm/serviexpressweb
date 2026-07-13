@@ -1221,8 +1221,18 @@ class _HistorialTabState extends State<_HistorialTab> {
     }
   }
 
+  static const _estadosConfirmado = {
+    'en_ruta_origen', 'en_origen', 'en_ruta_destino',
+  };
+
   List<Map<String, dynamic>> get _filtrados {
     if (_filtroEstado == 'todos') return _servicios;
+    if (_filtroEstado == 'confirmado') {
+      return _servicios.where((s) => _estadosConfirmado.contains(s['estado'])).toList();
+    }
+    if (_filtroEstado == 'completado') {
+      return _servicios.where((s) => s['estado'] == 'finalizado' || s['estado'] == 'finalizado_con_problema').toList();
+    }
     return _servicios.where((s) => s['estado'] == _filtroEstado).toList();
   }
 
