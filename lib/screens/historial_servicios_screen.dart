@@ -1,5 +1,8 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Pantalla de historial de servicios — accesible desde el menú de Gestión.
@@ -250,6 +253,11 @@ class _HistorialServiciosScreenState extends State<HistorialServiciosScreen> {
             ],
           ),
           IconButton(
+            icon: const Icon(Icons.download_rounded, color: Colors.white),
+            tooltip: 'Exportar CSV',
+            onPressed: _exportarCSV,
+          ),
+          IconButton(
             icon: const Icon(Icons.refresh, color: Colors.white),
             tooltip: 'Recargar',
             onPressed: _cargarHistorial,
@@ -324,7 +332,9 @@ class _HistorialServiciosScreenState extends State<HistorialServiciosScreen> {
     final movil = _nombreMovil(s['movil_id']);
     final esVip = s['es_vip'] == true;
 
-    return Card(
+    return GestureDetector(
+      onTap: () => _mostrarDetalle(context, s),
+      child: Card(
       margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       elevation: 0,
       shape: RoundedRectangleBorder(
@@ -395,31 +405,6 @@ class _HistorialServiciosScreenState extends State<HistorialServiciosScreen> {
             Text('🏢 ${s["creador"]}',
                 style: const TextStyle(fontSize: 9, color: Colors.black45)),
           ],
-        ]),
-      ),
-    );
-  }
-
-  Widget _chipResumen(String label, Color color) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: Text(label,
-            style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.bold,
-                color: color)),
-      );
-}
-
-enum _RangoFecha {
-  hoy('Hoy'),
-  ayer('Ayer'),
-  semana('7 días'),
-  mes('Este mes');
-
-  const _RangoFecha(this.label);
-  final String label;
-}
+          if (s['multi_ruta_id'] != null) ...[
+            const SizedBox(height: 2),
+            Text('🔗 Multi-ruta · Ord

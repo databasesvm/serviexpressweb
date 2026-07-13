@@ -2799,6 +2799,51 @@ class _MovilScreenState extends State<MovilScreen>
       }
 
       _ultimaActividadUtc = DateTime.now().toUtc();
+
+      // ── MULTI-RUTA: avisar si hay siguiente parada ─────────────────────
+      if (!tieneProblema && servicio['multi_ruta_id'] != null) {
+        final rutaId = servicio['multi_ruta_id'].toString();
+        final ordenActual = (servicio['multi_ruta_orden'] as int?) ?? 1;
+        try {
+          final siguientes = await Supabase.instance.client
+              .from('servicios')
+              .select('id, origen, destino, multi_ruta_orden')
+              .eq('multi_ruta_id', rutaId)
+              .eq('estado', 'programado')
+              .order('multi_ruta_orden', ascending: true)
+              .limit(1);
+          if (siguientes.isNotEmpty && mounted) {
+            final sig = siguientes.first;
+            final sigOrden = (sig['multi_ruta_orden'] as int?) ?? (ordenActual + 1);
+            showDialog(
+              context: context,
+              barrierDismissible: false,
+              builder: (dialogCtx) => AlertDialog(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                title: Row(children: [
+                  Icon(Icons.route_rounded, color: Colors.indigo[700]),
+                  const SizedBox(width: 8),
+                  const Text('Siguiente parada', style: TextStyle(fontSize: 16)),
+                ]),
+                content: Column(mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Parada #$sigOrden de tu ruta multi-pedido:',
+                      style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                  const SizedBox(height: 6),
+                  Text('${sig["origen"] ?? "?"} ➔ ${sig["destino"] ?? "?"}',
+                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                ]),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(dialogCtx),
+                    child: const Text('ENTENDIDO'),
+                  ),
+                ],
+              ),
+            );
+          }
+        } catch (_) {}
+      }
     } catch (e) {
       if (mounted) setState(() => _serviciosOcultosLocales.remove(servicioId));
     }
@@ -4884,6 +4929,28 @@ class _MovilScreenState extends State<MovilScreen>
                                   Text(
                                     'Ruta combinada',
                                     style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.blue[700]),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                          if (servicio['multi_ruta_id'] != null) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.indigo[50],
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: Colors.indigo[200]!),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.route_rounded, size: 10, color: Colors.indigo[700]),
+                                  const SizedBox(width: 2),
+                                  Text(
+                                    'Parada #${servicio["multi_ruta_orden"] ?? "?"}',
+                                    style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.indigo[700]),
                                   ),
                                 ],
                               ),
@@ -8582,83 +8649,4 @@ class _MovilScreenState extends State<MovilScreen>
                                       key: ValueKey('pendiente_${servicio['id']}'),
                                       child: _construirTarjetaPendiente(
                                         servicio,
-                                        esMaster: esMaster,
-                                      ),
-                                    ),
-                                  ),
-                              ] else if (_serviciosActivosData.isEmpty &&
-                                  !radarAbierto) ...[
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 10),
-                                  child: Container(
-                                    padding: const EdgeInsets.all(16),
-                                    decoration: BoxDecoration(
-                                      color: Colors.orange[50]!,
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(color: Colors.orange[200]!),
-                                    ),
-                                    child: Column(
-                                      children: [
-                                        Icon(
-                                          Icons.lock_clock_outlined,
-                                          color: Colors.orange[700],
-                                          size: 32,
-                                        ),
-                                        const SizedBox(height: 10),
-                                        Text(
-                                          mensajeBloqueo.isNotEmpty
-                                              ? mensajeBloqueo
-                                              : 'Regístrate en un paradero para recibir servicios.',
-                                          textAlign: TextAlign.center,
-                                          style: TextStyle(
-                                            fontSize: 13,
-                                            color: Colors.orange[900],
-                                            fontWeight: FontWeight.w500,
-                                            height: 1.4,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ],
-                          );
-                        },
-                      ),
-                ),
-              ),
-            ],
-          );
-        },
-          ),
-        _construirPerfilTab(),
-        ],
-        ), // IndexedStack
-      ), // ValueListenableBuilder
-    bottomNavigationBar: BottomNavigationBar(
-      currentIndex: _tabActual,
-      onTap: _cambiarTab,
-      selectedItemColor: const Color(0xff3AF500),
-      unselectedItemColor: Colors.white38,
-      backgroundColor: const Color(0xFF0D0D0D),
-      type: BottomNavigationBarType.fixed,
-      items: const [
-        BottomNavigationBarItem(
-          icon: Icon(Icons.radar),
-          label: 'Servicios',
-        ),
-        BottomNavigationBarItem(
-          icon: Icon(Icons.person_outline),
-          label: 'Perfil',
-        ),
-      ],
-    ),
-    ), // ← cierra Scaffold (child: Scaffold)
-    ); // ← cierra PopScope
-  }
-}
-
-// ===========================================================================
-// PAINTER: Overlay circular oscuro con hueco (tutorial de pantalla)
-// ===========================================================================
+                              

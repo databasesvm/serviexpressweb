@@ -72,6 +72,10 @@ class _CentralScreenState extends State<CentralScreen>
   // Card seleccionado en el monitor (muestra botones de acción)
   final ValueNotifier<int?> _seleccionadoId = ValueNotifier(null);
 
+  // Multi-pedido: modo de selección múltiple para asignar ruta a un móvil
+  bool _modoMulti = false;
+  Set<int> _multiSeleccion = {};
+
   // Búsqueda en tiempo real dentro del monitor
   final TextEditingController _busquedaCtrl = TextEditingController();
   String _busquedaTexto = '';
@@ -5045,6 +5049,118 @@ class _CentralScreenState extends State<CentralScreen>
     return btns;
   }
 
+  // ── Asignar multi-ruta: varios servicios → un solo móvil en secuencia ───────
+  Future<void> _asignarMultiRuta(BuildContext context) async {
+    if (_multiSeleccion.isEmpty) return;
+
+    final ahora = DateTime.now().toUtc();
+    final motos = _movilesCache
+        .where((m) => m['en_linea'] == true || (() {
+              if (m['ultimo_ping'] == null) return false;
+              final mins = ahora
+                  .difference(DateTime.parse(m['ultimo_ping'].toString()).toUtc())
+                  .inMinutes;
+              return mins < 10;
+            })())
+        .toList()
+      ..sort((a, b) {
+        int pingMin(Map<String, dynamic> m) {
+          if (m['ultimo_ping'] == null) return 9999;
+          return ahora
+              .difference(DateTime.parse(m['ultimo_ping'].toString()).toUtc())
+              .inMinutes;
+        }
+        return pingMin(a).compareTo(pingMin(b));
+      });
+
+    if (!mounted) return;
+
+    final motoElegida = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        ),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            width: 36, height: 4,
+            margin: const EdgeInsets.symmetric(vertical: 8),
+            decoration: BoxDecoration(
+                color: Colors.grey[300], borderRadius: BorderRadius.circular(2)),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+            child: Text(
+              'Asignar ${_multiSeleccion.length} servicios a un móvil',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+            ),
+          ),
+          const Divider(height: 1),
+          Flexible(
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: motos.length,
+              itemBuilder: (_, i) {
+                final m = motos[i];
+                final ping = _pingLabel(m);
+                final usr = m['usuario']?.toString() ?? '';
+                final num = RegExp(r'\d+').firstMatch(usr)?.group(0) ?? '?';
+                return ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: Colors.indigo[800],
+                    child: Text('#$num',
+                        style: const TextStyle(color: Colors.white, fontSize: 11)),
+                  ),
+                  title: Text(m['nombre']?.toString() ?? '#$num',
+                      style: const TextStyle(fontSize: 13)),
+                  subtitle: Text('$ping · ${m["rango_movil"] ?? "NOVATO"}',
+                      style: TextStyle(
+                          fontSize: 10,
+                          color: ping.startsWith('●') ? Colors.green[700] : Colors.grey)),
+                  onTap: () => Navigator.pop(ctx, m),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+
+    if (motoElegida == null || !mounted) return;
+
+    // Generar UUID simple para esta multi-ruta
+    final rutaId = DateTime.now().millisecondsSinceEpoch.toString();
+    final ids = _multiSeleccion.toList();
+
+    // Actualizar todos los servicios seleccionados en secuencia
+    for (int i = 0; i < ids.length; i++) {
+      await Supabase.instance.client.from('servicios').update({
+        'movil_id': motoElegida['id'],
+        'estado': 'programado',
+        'multi_ruta_id': rutaId,
+        'multi_ruta_orden': i + 1,
+      }).eq('id', ids[i]);
+    }
+
+    if (mounted) {
+      setState(() {
+        _modoMulti = false;
+        _multiSeleccion.clear();
+      });
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(
+          '${ids.length} servicios asignados a Móvil '
+          '${RegExp(r"\d+").firstMatch(motoElegida["usuario"]?.toString() ?? "")?.group(0) ?? "?"}',
+        ),
+        backgroundColor: Colors.indigo[800],
+        duration: const Duration(seconds: 3),
+      ));
+    }
+  }
+
   Future<void> _asignarMotoManual(
       BuildContext context, Map<String, dynamic> servicio) async {
     final ahora = DateTime.now().toUtc();
@@ -5886,8 +6002,18 @@ class _CentralScreenState extends State<CentralScreen>
               child: InkWell(
                 onTap: () {
                   final thisId = servicio['id'] as int;
-                  _seleccionadoId.value =
-                      _seleccionadoId.value == thisId ? null : thisId;
+                  if (_modoMulti) {
+                    setState(() {
+                      if (_multiSeleccion.contains(thisId)) {
+                        _multiSeleccion.remove(thisId);
+                      } else {
+                        _multiSeleccion.add(thisId);
+                      }
+                    });
+                  } else {
+                    _seleccionadoId.value =
+                        _seleccionadoId.value == thisId ? null : thisId;
+                  }
                 },
                 onLongPress: () => _abrirMenuGestion(context, servicio),
                 child: Padding(
@@ -5899,6 +6025,19 @@ class _CentralScreenState extends State<CentralScreen>
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
+                          if (_modoMulti)
+                            Padding(
+                              padding: const EdgeInsets.only(right: 4),
+                              child: Icon(
+                                _multiSeleccion.contains(servicio['id'])
+                                    ? Icons.check_circle
+                                    : Icons.radio_button_unchecked,
+                                size: 16,
+                                color: _multiSeleccion.contains(servicio['id'])
+                                    ? Colors.indigo[700]
+                                    : Colors.grey[400],
+                              ),
+                            ),
                           _chipEstadoMonitor(estado, colorBase),
                           const SizedBox(width: 5),
                           if (servicio['es_vip'] == true)
@@ -7442,6 +7581,17 @@ class _CentralScreenState extends State<CentralScreen>
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     IconButton(
+                      icon: Icon(Icons.route_rounded, size: 16,
+                          color: _modoMulti ? const Color(0xff3AF500) : Colors.white70),
+                      tooltip: _modoMulti ? 'Cancelar multi-ruta' : 'Asignar multi-ruta',
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                      onPressed: () => setState(() {
+                        _modoMulti = !_modoMulti;
+                        if (!_modoMulti) _multiSeleccion.clear();
+                      }),
+                    ),
+                    IconButton(
                       icon: const Icon(Icons.filter_list, size: 16, color: Colors.white70),
                       tooltip: 'Filtrar Monitor',
                       padding: EdgeInsets.zero,
@@ -7762,6 +7912,40 @@ class _CentralScreenState extends State<CentralScreen>
               },
             ),
           ),
+          // ── BARRA MULTI-RUTA ───────────────────────────────────────────────
+          if (_modoMulti)
+            Container(
+              color: Colors.indigo[800],
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(children: [
+                const Icon(Icons.route_rounded, color: Colors.white70, size: 14),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _multiSeleccion.isEmpty
+                        ? 'Toca servicios para seleccionar'
+                        : '${_multiSeleccion.length} servicio${_multiSeleccion.length == 1 ? "" : "s"} seleccionado${_multiSeleccion.length == 1 ? "" : "s"}',
+                    style: const TextStyle(color: Colors.white, fontSize: 11),
+                  ),
+                ),
+                if (_multiSeleccion.isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  ElevatedButton.icon(
+                    onPressed: () => _asignarMultiRuta(context),
+                    icon: const Icon(Icons.motorcycle, size: 13),
+                    label: const Text('ASIGNAR RUTA',
+                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xff3AF500),
+                      foregroundColor: Colors.black,
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                  ),
+                ],
+              ]),
+            ),
         ],
       ),
     );
@@ -9184,944 +9368,4 @@ class _CentralScreenState extends State<CentralScreen>
               final localesLibres = locales
                   .where(
                     (l) =>
-                        l['paradero_exclusivo'] != 'EXPUENTE' &&
-                        l['paradero_exclusivo'] != 'MEMOS',
-                  )
-                  .toList();
-
-              Widget construirListaLocales(
-                String titulo,
-                List<Map<String, dynamic>> lista,
-                Color color,
-                String paraderoEtiqueta,
-              ) {
-                return ExpansionTile(
-                  initiallyExpanded: true,
-                  collapsedBackgroundColor: color.withValues(alpha: 0.1),
-                  backgroundColor: color.withValues(alpha: 0.05),
-                  title: Text(
-                    '$titulo (${lista.length})',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: color,
-                      fontSize: 14,
-                    ),
-                  ),
-                  children: lista.isEmpty
-                      ? [
-                          const Padding(
-                            padding: EdgeInsets.all(12),
-                            child: Text(
-                              'Sin locales asignados',
-                              style: TextStyle(
-                                color: Colors.black45,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ),
-                        ]
-                      : lista
-                            .map(
-                              (local) => Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.business, color: color, size: 18),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Text(
-                                        local['nombre'].toString().toUpperCase(),
-                                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                    // CONFIGURACIÓN DE RECARGOS — nocturno especial + zona lluvia
-                                    IconButton(
-                                      icon: const Icon(Icons.tune, size: 18, color: Colors.orange),
-                                      tooltip: 'Configurar recargos',
-                                      padding: EdgeInsets.zero,
-                                      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                                      onPressed: () => _abrirConfigRecargosLocal(local),
-                                    ),
-                                    const SizedBox(width: 4),
-                                    SizedBox(
-                                      width: 120,
-                                      child: DropdownButtonFormField<String>(
-                                        initialValue: paraderoEtiqueta,
-                                        isDense: true,
-                                        isExpanded: true,
-                                        decoration: const InputDecoration(
-                                          contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-                                          border: OutlineInputBorder(),
-                                          isDense: true,
-                                        ),
-                                        style: const TextStyle(
-                                          fontSize: 10,
-                                          color: Colors.black,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                        items: const [
-                                          DropdownMenuItem(value: 'LIBRE', child: Text('LIBRE 🟢', style: TextStyle(fontSize: 11))),
-                                          DropdownMenuItem(value: 'EXPUENTE', child: Text('EXPUENTE 🔵', style: TextStyle(fontSize: 11))),
-                                          DropdownMenuItem(value: 'MEMOS', child: Text('MEMOS 🟣', style: TextStyle(fontSize: 11))),
-                                        ],
-                                        onChanged: (nuevoParadero) async {
-                                          if (nuevoParadero != null &&
-                                              nuevoParadero != paraderoEtiqueta) {
-                                            String? valorFinal =
-                                                nuevoParadero == 'LIBRE'
-                                                ? null
-                                                : nuevoParadero;
-                                            await Supabase.instance.client
-                                                .from('usuarios')
-                                                .update({
-                                                  'paradero_exclusivo': valorFinal,
-                                                })
-                                                .eq('id', local['id']);
-                                            if (ctx.mounted) {
-                                              Navigator.pop(ctx);
-                                              _abrirGestorParaderos();
-                                              ScaffoldMessenger.of(
-                                                context,
-                                              ).showSnackBar(
-                                                SnackBar(
-                                                  content: Text(
-                                                    'Local ${local['nombre']} reasignado a $nuevoParadero',
-                                                  ),
-                                                  backgroundColor: Colors.black,
-                                                ),
-                                              );
-                                            }
-                                          }
-                                        },
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            )
-                            .toList(),
-                );
-              }
-
-              return ListView(
-                children: [
-                  const Text(
-                    'Asigna de qué paradero saldrán los móviles para cada local. Si lo dejas libre, el radar buscará al más cercano.',
-                    style: TextStyle(fontSize: 12, color: Colors.black54),
-                  ),
-                  const SizedBox(height: 12),
-                  construirListaLocales(
-                    '📍 EXCLUSIVOS EXPUENTE',
-                    localesExpuente,
-                    Colors.blue[800]!,
-                    'EXPUENTE',
-                  ),
-                  const SizedBox(height: 8),
-                  construirListaLocales(
-                    '📍 EXCLUSIVOS MEMOS',
-                    localesMemos,
-                    Colors.purple[800]!,
-                    'MEMOS',
-                  ),
-                  const SizedBox(height: 8),
-                  construirListaLocales(
-                    '🟢 LOCALES LIBRES (Por Cercanía)',
-                    localesLibres,
-                    Colors.green[800]!,
-                    'LIBRE',
-                  ),
-                ],
-              );
-            },
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text(
-              'CERRAR',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: Colors.black,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ─────────────────────────────────────────────────────────────
-  // GESTOR DE SECTORES
-  // ─────────────────────────────────────────────────────────────
-  void _abrirGestorSectores() {
-    final nombreCtrl = TextEditingController();
-    String filtro = 'Cúcuta';
-    String municipioNuevo = 'Cúcuta';
-
-    Future<List<Map<String, dynamic>>> sectorsFuture =
-        Supabase.instance.client.from('sectores').select().order('municipio').order('nombre');
-
-    void recargar(StateSetter setSt) {
-      sectorsFuture = Supabase.instance.client.from('sectores').select().order('municipio').order('nombre');
-      setSt(() {});
-    }
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSt) {
-          return AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            title: const Row(children: [
-              Icon(Icons.grid_view_rounded, color: Colors.indigo),
-              SizedBox(width: 8),
-              Text('SECTORES / BARRIOS', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            ]),
-            content: SizedBox(
-              width: double.maxFinite,
-              height: MediaQuery.of(context).size.height * 0.65,
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                // ── Agregar ──────────────────────────────────────────────
-                Row(children: [
-                  Expanded(
-                    child: TextField(
-                      controller: nombreCtrl,
-                      textCapitalization: TextCapitalization.words,
-                      decoration: const InputDecoration(
-                        labelText: 'Nombre del sector / barrio',
-                        isDense: true,
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  DropdownButton<String>(
-                    value: municipioNuevo,
-                    isDense: true,
-                    items: ['Cúcuta', 'Los Patios', 'V. Rosario']
-                        .map((m) => DropdownMenuItem(value: m, child: Text(m, style: const TextStyle(fontSize: 12))))
-                        .toList(),
-                    onChanged: (v) => setSt(() => municipioNuevo = v ?? 'Cúcuta'),
-                  ),
-                  const SizedBox(width: 8),
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.black,
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                    ),
-                    onPressed: () async {
-                      final n = nombreCtrl.text.trim();
-                      if (n.isEmpty) return;
-                      try {
-                        await Supabase.instance.client.from('sectores')
-                            .insert({'nombre': n, 'municipio': municipioNuevo});
-                        nombreCtrl.clear();
-                        recargar(setSt);
-                      } catch (e) {
-                        if (ctx.mounted) {
-                          ScaffoldMessenger.of(ctx).showSnackBar(
-                            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red[800]));
-                        }
-                      }
-                    },
-                    child: const Icon(Icons.add, color: Color(0xff3AF500), size: 18),
-                  ),
-                ]),
-                const SizedBox(height: 12),
-                // ── Filtros por municipio ─────────────────────────────────
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(children: ['Cúcuta', 'Los Patios', 'V. Rosario'].map((m) {
-                    final sel = filtro == m;
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 6),
-                      child: ChoiceChip(
-                        label: Text(m, style: TextStyle(fontSize: 11, color: sel ? Colors.white : Colors.black87)),
-                        selected: sel,
-                        selectedColor: Colors.indigo,
-                        backgroundColor: Colors.grey[200],
-                        onSelected: (_) => setSt(() => filtro = m),
-                      ),
-                    );
-                  }).toList()),
-                ),
-                const SizedBox(height: 10),
-                // ── Lista ────────────────────────────────────────────────
-                Expanded(
-                  child: FutureBuilder<List<Map<String, dynamic>>>(
-                    future: sectorsFuture,
-                    builder: (_, snap) {
-                      if (snap.connectionState == ConnectionState.waiting) {
-                        return const Center(child: CircularProgressIndicator(color: Colors.indigo));
-                      }
-                      final lista = (snap.data ?? [])
-                          .where((s) => s['municipio'].toString() == filtro)
-                          .toList();
-                      if (lista.isEmpty) {
-                        return Center(child: Text('Sin sectores en $filtro.',
-                            style: const TextStyle(color: Colors.black54)));
-                      }
-                      return ListView.builder(
-                        itemCount: lista.length,
-                        itemBuilder: (_, i) {
-                          final s = lista[i];
-                          final activo = s['activo'] as bool? ?? true;
-                          return Card(
-                            margin: const EdgeInsets.only(bottom: 6),
-                            elevation: 0,
-                            color: Colors.grey[100],
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                            child: ListTile(
-                              dense: true,
-                              leading: Icon(Icons.location_city,
-                                  color: activo ? Colors.indigo : Colors.grey, size: 20),
-                              title: Text(s['nombre'].toString(),
-                                  style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: activo ? Colors.black : Colors.grey)),
-                              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                                GestureDetector(
-                                  onTap: () async {
-                                    await Supabase.instance.client
-                                        .from('sectores').update({'activo': !activo}).eq('id', s['id']);
-                                    recargar(setSt);
-                                  },
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                    decoration: BoxDecoration(
-                                      color: activo ? Colors.indigo : Colors.grey[200],
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    child: Text(activo ? 'ON' : 'OFF',
-                                        style: TextStyle(
-                                            fontSize: 11, fontWeight: FontWeight.bold,
-                                            color: activo ? Colors.white : Colors.grey)),
-                                  ),
-                                ),
-                                const SizedBox(width: 4),
-                                IconButton(
-                                  icon: const Icon(Icons.delete_outline, color: Colors.red, size: 18),
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                                  onPressed: () async {
-                                    await Supabase.instance.client
-                                        .from('sectores').delete().eq('id', s['id']);
-                                    recargar(setSt);
-                                  },
-                                ),
-                              ]),
-                            ),
-                          );
-                        },
-                      );
-                    },
-                  ),
-                ),
-              ]),
-            ),
-            actions: [TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('CERRAR', style: TextStyle(fontWeight: FontWeight.bold)),
-            )],
-          );
-        },
-      ),
-    );
-  }
-
-
-  // ─────────────────────────────────────────────────────────────
-  // GESTOR DE RED DE DIRECCIONES
-  // ─────────────────────────────────────────────────────────────
-  void _abrirRedDirecciones(BuildContext context) {
-    final nombreCtrl = TextEditingController();
-    String municipioSel = 'Cúcuta';
-    String filtroDir   = 'Cúcuta';
-    int? sectorSel;
-
-    // Futures estables — fuera del builder para no resetear en cada setSt
-    final sectoresFuture = Supabase.instance.client
-        .from('sectores').select().eq('activo', true).order('nombre');
-
-    Future<List<Map<String, dynamic>>> dirsFuture = Supabase.instance.client
-        .from('red_direcciones')
-        .select('id, nombre, municipio, activo, sector_id, sectores(nombre)')
-        .order('municipio').order('nombre');
-
-    void recargar(StateSetter setSt) {
-      dirsFuture = Supabase.instance.client
-          .from('red_direcciones')
-          .select('id, nombre, municipio, activo, sector_id, sectores(nombre)')
-          .order('municipio').order('nombre');
-      setSt(() {});
-    }
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSt) {
-          return AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            title: const Row(children: [
-              Icon(Icons.map_outlined, color: Colors.indigo),
-              SizedBox(width: 8),
-              Text('RED DE DIRECCIONES', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            ]),
-            content: SizedBox(
-              width: double.maxFinite,
-              height: MediaQuery.of(context).size.height * 0.70,
-              child: FutureBuilder<List<Map<String, dynamic>>>(
-                future: sectoresFuture,
-                builder: (_, snapS) {
-                  final sectores = snapS.data ?? [];
-                  return Column(children: [
-                    // ── Filtros por municipio ────────────────────────────
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(children: ['Cúcuta', 'Los Patios', 'V. Rosario'].map((m) {
-                        final sel = filtroDir == m;
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 6, bottom: 8),
-                          child: ChoiceChip(
-                            label: Text(m, style: TextStyle(fontSize: 11, color: sel ? Colors.white : Colors.black87)),
-                            selected: sel,
-                            selectedColor: Colors.indigo,
-                            backgroundColor: Colors.grey[200],
-                            onSelected: (_) => setSt(() => filtroDir = m),
-                          ),
-                        );
-                      }).toList()),
-                    ),
-                    // --- Agregar dirección ---
-                    Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Row(children: [
-                        Expanded(
-                          child: TextField(
-                            controller: nombreCtrl,
-                            textCapitalization: TextCapitalization.words,
-                            decoration: const InputDecoration(labelText: 'Nombre del lugar/dirección', isDense: true, border: OutlineInputBorder()),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        DropdownButton<String>(
-                          value: municipioSel,
-                          isDense: true,
-                          items: ['Cúcuta', 'Los Patios', 'V. Rosario']
-                              .map((m) => DropdownMenuItem(value: m, child: Text(m, style: const TextStyle(fontSize: 12))))
-                              .toList(),
-                          onChanged: (v) => setSt(() => municipioSel = v ?? 'Cúcuta'),
-                        ),
-                      ]),
-                      const SizedBox(height: 8),
-                      Row(children: [
-                        const Text('Sector: ', style: TextStyle(fontSize: 12, color: Colors.black54)),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: DropdownButton<int?>(
-                            value: sectorSel,
-                            isDense: true,
-                            isExpanded: true,
-                            hint: const Text('Sin sector', style: TextStyle(fontSize: 12)),
-                            items: [
-                              const DropdownMenuItem<int?>(value: null, child: Text('Sin sector', style: TextStyle(fontSize: 12))),
-                              ...sectores.map((s) => DropdownMenuItem<int?>(
-                                value: s['id'] as int,
-                                child: Text('${s['nombre']} (${s['municipio']})', style: const TextStyle(fontSize: 12)),
-                              )),
-                            ],
-                            onChanged: (v) => setSt(() => sectorSel = v),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        ElevatedButton(
-                          style: ElevatedButton.styleFrom(backgroundColor: Colors.black, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12)),
-                          onPressed: () async {
-                            final n = nombreCtrl.text.trim();
-                            if (n.isEmpty) return;
-                            try {
-                              await Supabase.instance.client.from('red_direcciones').insert({
-                                'nombre': n, 'municipio': municipioSel,
-                                'zona_lluvia': 'general', 'activo': true,
-                                if (sectorSel != null) 'sector_id': sectorSel,
-                              });
-                              nombreCtrl.clear();
-                              recargar(setSt);
-                            } catch (e) {
-                              if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text('Error al agregar: $e'), backgroundColor: Colors.red),
-                                );
-                              }
-                            }
-                          },
-                          child: const Icon(Icons.add, color: Color(0xff3AF500), size: 18),
-                        ),
-                      ]),
-                    ]),
-                    const Divider(height: 20),
-                    Expanded(
-                      child: FutureBuilder<List<Map<String, dynamic>>>(
-                        future: dirsFuture,
-                        builder: (_, snap) {
-                          if (snap.connectionState == ConnectionState.waiting) {
-                            return const Center(child: CircularProgressIndicator(color: Colors.black));
-                          }
-                          final todaDir = snap.data ?? [];
-                          final dirs = todaDir.where((d) => d['municipio'].toString() == filtroDir).toList();
-                          if (dirs.isEmpty) return Center(child: Text('Sin direcciones en $filtroDir.'));
-                          return ListView.builder(
-                            itemCount: dirs.length,
-                            itemBuilder: (_, i) {
-                              final d = dirs[i];
-                              final activo = d['activo'] as bool? ?? true;
-                              final sectorNombre = d['sectores'] != null ? (d['sectores'] as Map)['nombre'] : null;
-                              return ListTile(
-                                dense: true,
-                                leading: Icon(Icons.place, color: activo ? Colors.indigo : Colors.grey, size: 18),
-                                title: Text(d['nombre'].toString(), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: activo ? Colors.black : Colors.grey)),
-                                subtitle: Text(
-                                  '${d['municipio']}${sectorNombre != null ? ' · $sectorNombre' : ''}',
-                                  style: const TextStyle(fontSize: 11),
-                                ),
-                                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                                  GestureDetector(
-                                    onTap: () async {
-                                      try {
-                                        await Supabase.instance.client.from('red_direcciones').update({'activo': !activo}).eq('id', d['id']);
-                                        recargar(setSt);
-                                      } catch (_) {}
-                                    },
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                      decoration: BoxDecoration(
-                                        color: activo ? Colors.indigo : Colors.grey[200],
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                      child: Text(activo ? 'ON' : 'OFF',
-                                          style: TextStyle(
-                                              fontSize: 11, fontWeight: FontWeight.bold,
-                                              color: activo ? Colors.white : Colors.grey)),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  IconButton(
-                                    icon: const Icon(Icons.delete_outline, color: Colors.red, size: 18),
-                                    padding: EdgeInsets.zero,
-                                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                                    onPressed: () async {
-                                      try {
-                                        await Supabase.instance.client.from('red_direcciones').delete().eq('id', d['id']);
-                                        recargar(setSt);
-                                      } catch (_) {}
-                                    },
-                                  ),
-                                ]),
-                              );
-                            },
-                          );
-                        },
-                      ),
-                    ),
-                  ]);
-                },
-              ),
-            ),
-            actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('CERRAR', style: TextStyle(fontWeight: FontWeight.bold)))],
-          );
-        },
-      ),
-    );
-  }
-
-  // ─────────────────────────────────────────────────────────────
-  // GESTOR DE LISTAS DE PRECIOS (por local, por sector)
-  // ─────────────────────────────────────────────────────────────
-  void _abrirListasPrecios(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) {
-        String? localSelId;
-        String localSelNombre = '';
-        final localesFuture = Supabase.instance.client
-            .from('usuarios').select('id, nombre').eq('rol', 'local').order('nombre');
-        return StatefulBuilder(
-        builder: (ctx, setSt) {
-          return AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            title: const Row(children: [
-              Icon(Icons.price_change_outlined, color: Colors.orange),
-              SizedBox(width: 8),
-              Text('LISTAS DE PRECIOS', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            ]),
-            content: SizedBox(
-              width: double.maxFinite,
-              height: MediaQuery.of(context).size.height * 0.70,
-              child: FutureBuilder<List<Map<String, dynamic>>>(
-                future: localesFuture,
-                builder: (_, snapL) {
-                  final locales = snapL.data ?? [];
-                  if (locales.isEmpty) return const Center(child: Text('Sin locales registrados.'));
-                  if (localSelId == null) {
-                    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      const Text('Selecciona un local para ver o editar su lista de precios:', style: TextStyle(fontSize: 13, color: Colors.black54)),
-                      const SizedBox(height: 12),
-                      Expanded(
-                        child: ListView.builder(
-                          itemCount: locales.length,
-                          itemBuilder: (_, i) {
-                            final l = locales[i];
-                            return Card(
-                              margin: const EdgeInsets.only(bottom: 8),
-                              child: ListTile(
-                                leading: const Icon(Icons.store, color: Colors.orange),
-                                title: Text(l['nombre'].toString(), style: const TextStyle(fontWeight: FontWeight.bold)),
-                                trailing: const Icon(Icons.chevron_right),
-                                onTap: () => setSt(() { localSelId = l['id'].toString(); localSelNombre = l['nombre'].toString(); }),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                    ]);
-                  }
-                  return _PanelPreciosLocal(localId: localSelId!, localNombre: localSelNombre, onBack: () => setSt(() => localSelId = null));
-                },
-              ),
-            ),
-            actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('CERRAR', style: TextStyle(fontWeight: FontWeight.bold)))],
-          );
-        },
-      );
-      },
-    );
-  }
-
-  void _abrirBuzonSoporte(
-    BuildContext context,
-    List<Map<String, dynamic>> usuariosConAlarma,
-  ) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        title: const Text(
-          '🚨 BUZÓN DE SOPORTE GENERAL',
-          style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
-        ),
-        content: SizedBox(
-          width: 400,
-          height: 400,
-          child: ListView.builder(
-            itemCount: usuariosConAlarma.length,
-            itemBuilder: (context, index) {
-              final u = usuariosConAlarma[index];
-              return Card(
-                elevation: 2,
-                margin: const EdgeInsets.only(bottom: 8),
-                shape: RoundedRectangleBorder(
-                  side: const BorderSide(color: Colors.red, width: 1.5),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: ListTile(
-                  leading: const CircleAvatar(
-                    backgroundColor: Colors.red,
-                    child: Icon(Icons.warning, color: Colors.white, size: 20),
-                  ),
-                  title: Text(
-                    u['nombre'].toString().toUpperCase(),
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  subtitle: Text('Rol: ${u['rol'].toString().toUpperCase()}'),
-                  trailing: const Icon(Icons.chat, color: Colors.blue),
-                  onTap: () {
-                    setState(() => _noLeidos.remove('soporte_${u['id']}'));
-                    Supabase.instance.client
-                        .from('usuarios')
-                        .update({'alarma_soporte': false})
-                        .eq('id', u['id']);
-                    Navigator.pop(ctx);
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => ChatScreen(
-                          salaId: 'soporte_${u['id']}',
-                          miId: 0,
-                          miNombre: 'Central',
-                          titulo: 'Soporte ➔ ${u['nombre']}',
-                          usuarioId: u['id'],
-                          alarmaLocal: 'alarma_soporte',
-                          alarmaDestino: 'chat_central',
-                          destinatarioId: u['id'] as int?,
-                          tipoFaq: TipoFaqChat.central,
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              );
-            },
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text(
-              'CERRAR',
-              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final esPantallaGrande = MediaQuery.of(context).size.width > 850;
-
-    return Scaffold(
-      backgroundColor: Colors.grey[300],
-      appBar: AppBar(
-        title: Text(
-          esPantallaGrande
-              ? 'ServiExpress | Comando Central'
-              : 'Comando Central',
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-            fontSize: 16,
-          ),
-        ),
-        backgroundColor: Colors.black,
-        elevation: 0,
-        actions: esPantallaGrande
-            ? [
-                // Botón FN Farmanorte
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.indigo[900],
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 0),
-                  ),
-                  onPressed: () => _abrirFormularioFN(context),
-                  child: const Text(
-                    'FN',
-                    style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 15,
-                        letterSpacing: 2),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xff3AF500),
-                    foregroundColor: Colors.black,
-                  ),
-                  onPressed: () => _abrirFormularioDespacho(context),
-                  icon: const Icon(Icons.add_box),
-                  label: const Text(
-                    'NUEVO SERVICIO',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                IconButton(
-                  icon: const Icon(Icons.share_rounded, color: Color(0xff25D366)),
-                  tooltip: 'Enviar link de pedido al cliente',
-                  onPressed: () => _enviarLinkInvitado(context),
-                ),
-                const SizedBox(width: 6),
-                BotonPanicoTrigger(
-                  segundos: 2,
-                  icono: Icons.campaign_rounded,
-                  colorAcento: Colors.orange,
-                  titulo: 'CONVOCATORIA GENERAL',
-                  descripcion:
-                      'Se notificará a TODO el personal en línea (móviles y central) que necesitas su atención urgente.',
-                  onActivado: _dispararPanico,
-                  onDetener: () => _detenerAlerta(tipo: 'global'),
-                ),
-                const SizedBox(width: 6),
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.grey[850],
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: () => _abrirPanelGestion(context),
-                  icon: const Icon(Icons.admin_panel_settings_rounded, size: 18),
-                  label: const Text(
-                    'GESTIÓN',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                IconButton(
-                  icon: const Icon(
-                    Icons.power_settings_new,
-                    color: Colors.redAccent,
-                  ),
-                  onPressed: _cerrarSesionSegura,
-                ),
-                const SizedBox(width: 8),
-              ]
-            : [
-                // Botón FN compacto
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: InkWell(
-                    onTap: () => _abrirFormularioFN(context),
-                    borderRadius: BorderRadius.circular(6),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.indigo[900],
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: const Text(
-                        'FN',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
-                            letterSpacing: 1.5),
-                      ),
-                    ),
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.add_box, color: Color(0xff3AF500)),
-                  onPressed: () => _abrirFormularioDespacho(context),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.share_rounded, color: Color(0xff25D366)),
-                  tooltip: 'Enviar link al cliente',
-                  onPressed: () => _enviarLinkInvitado(context),
-                ),
-                BotonPanicoTrigger(
-                  esCompacto: true,
-                  segundos: 2,
-                  icono: Icons.campaign_rounded,
-                  colorAcento: Colors.orange,
-                  titulo: 'CONVOCATORIA GENERAL',
-                  descripcion:
-                      'Se notificará a TODO el personal en línea (móviles y central) que necesitas su atención urgente.',
-                  onActivado: _dispararPanico,
-                  onDetener: () => _detenerAlerta(tipo: 'global'),
-                ),
-                IconButton(
-                  icon: const Icon(
-                    Icons.power_settings_new,
-                    color: Colors.redAccent,
-                  ),
-                  onPressed: _cerrarSesionSegura,
-                ),
-              ],
-      ),
-
-      // ---> BOTÓN FLOTANTE DE SOPORTE <---
-      floatingActionButton: StreamBuilder<List<Map<String, dynamic>>>(
-        stream: Supabase.instance.client
-            .from('usuarios')
-            .stream(primaryKey: ['id']).eq('alarma_soporte', true),
-        builder: (context, snap) {
-          final lista = snap.data ?? [];
-          if (lista.isEmpty) return const SizedBox.shrink();
-          return PulsingPanicoButton(
-            color: Colors.red,
-            child: FloatingActionButton(
-              backgroundColor: Colors.red,
-              onPressed: () => _abrirBuzonSoporte(context, lista),
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  const Icon(Icons.support_agent, color: Colors.white),
-                  Positioned(
-                    right: -6,
-                    top: -6,
-                    child: Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: const BoxDecoration(
-                        color: Colors.white,
-                        shape: BoxShape.circle,
-                      ),
-                      child: Text(
-                        '${lista.length}',
-                        style: const TextStyle(
-                          color: Colors.red,
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-
-      body: esPantallaGrande
-          ? Row(
-              children: [
-                SizedBox(width: 340, child: _construirPanelControl()),
-                Expanded(child: _construirPanelMapa()),
-                SizedBox(width: 340, child: _construirPanelMonitor()),
-              ],
-            )
-          : IndexedStack(
-              index: _panelActivoMobile,
-              children: [
-                RepaintBoundary(child: _construirPanelControl()),
-                RepaintBoundary(child: _construirPanelMapa()),
-                RepaintBoundary(child: _construirPanelMonitor()),
-              ],
-            ),
-
-      bottomNavigationBar: esPantallaGrande
-          ? null
-          : BottomNavigationBar(
-              backgroundColor: Colors.black,
-              selectedItemColor: const Color(0xff3AF500),
-              unselectedItemColor: Colors.white54,
-              type: BottomNavigationBarType.fixed,
-              currentIndex: _panelActivoMobile,
-              onTap: (index) {
-                if (index == 3) {
-                  _abrirPanelGestion(context);
-                } else {
-                  setState(() => _panelActivoMobile = index);
-                }
-              },
-              items: const [
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.people_alt),
-                  label: 'Flota',
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.radar),
-                  label: 'Radar',
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.monitor),
-                  label: 'Servicios',
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.admin_panel_settings_rounded),
-                  label: 'Gestión',
-                ),
-              ],
-            ),
-    );
-  }
-}
-
-// ============================================================
-// PANEL DE PRECIOS POR LOCAL — sectores + tarifas
-// ============================================================
+                        l['paradero_exclusivo'] != 'EXPUENTE' 
