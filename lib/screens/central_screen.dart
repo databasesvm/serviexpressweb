@@ -20,6 +20,7 @@ import 'package:serviexpress_app/utils/panico_widgets.dart'; // Botón de pánic
 import 'package:serviexpress_app/utils/campo_tarifa_inteligente.dart'; // Motor de tarifas
 import 'package:serviexpress_app/services/ota_updater.dart'; // OTA updates
 import 'package:serviexpress_app/screens/fn_panel_screen.dart'; // Panel FN Farmanorte
+import 'package:serviexpress_app/screens/historial_servicios_screen.dart'; // Historial de servicios
 part 'central_panel_precios.dart';
 part 'central_corte_financiero.dart';
 part 'central_gestion_usuarios.dart';
@@ -5498,29 +5499,193 @@ class _CentralScreenState extends State<CentralScreen>
 
   // ── HELPERS MONITOR ────────────────────────────────────────────────────────
 
-  Widget _kpiChip(String label, int count, Color color) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(4),
-          border: Border.all(color: color.withValues(alpha: 0.4)),
+  Widget _kpiChip(String label, int count, Color color,
+      {VoidCallback? onTap}) {
+    final chip = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
+      ),
+      child: RichText(
+        text: TextSpan(children: [
+          TextSpan(
+            text: '$count ',
+            style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: color,
+                height: 1),
+          ),
+          TextSpan(
+            text: label,
+            style: TextStyle(fontSize: 8, color: color, height: 1),
+          ),
+        ]),
+      ),
+    );
+    if (onTap == null) return chip;
+    return GestureDetector(onTap: onTap, child: chip);
+  }
+
+  void _mostrarResumenDia(
+      BuildContext context, List<Map<String, dynamic>> todosHoy) {
+    final finalizados = todosHoy
+        .where((s) => ['finalizado', 'finalizado_con_problema',
+            'finalizado_por_demora'].contains(s['estado']))
+        .toList();
+    final cancelados =
+        todosHoy.where((s) => s['estado'] == 'cancelado').length;
+    final caducados =
+        todosHoy.where((s) => s['estado'] == 'caducado').length;
+    final enCurso = todosHoy
+        .where((s) => ['pendiente', 'cotizacion', 'cotizada',
+            'cotizacion_aprobada', 'programado', 'en_ruta_origen',
+            'en_origen', 'en_ruta_destino'].contains(s['estado']))
+        .length;
+    final facturacion = finalizados.fold<double>(
+        0, (a, s) => a + ((s['tarifa'] as num?)?.toDouble() ?? 0));
+
+    // Moto más activa
+    final conteoMovil = <String, int>{};
+    for (final s in finalizados) {
+      final id = s['movil_id']?.toString();
+      if (id != null) conteoMovil[id] = (conteoMovil[id] ?? 0) + 1;
+    }
+    String? motoMasActivaId =
+        conteoMovil.entries.isEmpty
+            ? null
+            : conteoMovil.entries
+                .reduce((a, b) => a.value >= b.value ? a : b)
+                .key;
+    String motoLabel = '—';
+    if (motoMasActivaId != null) {
+      final m = _movilesCache.firstWhere(
+          (m) => m['id'].toString() == motoMasActivaId,
+          orElse: () => {});
+      if (m.isNotEmpty) {
+        motoLabel =
+            '${_formatearNombreCentral(m)} · ${conteoMovil[motoMasActivaId]}';
+      }
+    }
+
+    // Hora pico (hora con más servicios creados)
+    final conteoHora = <int, int>{};
+    for (final s in todosHoy) {
+      if (s['created_at'] == null) continue;
+      final h = DateTime.parse(s['created_at']).toLocal().hour;
+      conteoHora[h] = (conteoHora[h] ?? 0) + 1;
+    }
+    String horaPico = '—';
+    if (conteoHora.isNotEmpty) {
+      final h =
+          conteoHora.entries.reduce((a, b) => a.value >= b.value ? a : b);
+      final ini = h.key.toString().padLeft(2, '0');
+      final fin = (h.key + 1).toString().padLeft(2, '0');
+      horaPico = '$ini:00–$fin:00 (${h.value} servicios)';
+    }
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
         ),
-        child: RichText(
-          text: TextSpan(children: [
-            TextSpan(
-              text: '$count ',
-              style: TextStyle(
-                  fontSize: 11,
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2)),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Row(children: [
+              const Icon(Icons.bar_chart_rounded, size: 18),
+              const SizedBox(width: 8),
+              Text(
+                'Resumen del día — ${DateTime.now().day}/${DateTime.now().month}/${DateTime.now().year}',
+                style: const TextStyle(
+                    fontWeight: FontWeight.bold, fontSize: 15),
+              ),
+            ]),
+            const SizedBox(height: 16),
+            // Stat grid
+            Row(children: [
+              _resumenStat('TOTAL', '${todosHoy.length}', Colors.blueGrey[700]!),
+              const SizedBox(width: 10),
+              _resumenStat('ENTREGADOS', '${finalizados.length}', Colors.green[700]!),
+              const SizedBox(width: 10),
+              _resumenStat('EN CURSO', '$enCurso', Colors.amber[700]!),
+            ]),
+            const SizedBox(height: 10),
+            Row(children: [
+              _resumenStat('CANCELADOS', '$cancelados', Colors.red[700]!),
+              const SizedBox(width: 10),
+              _resumenStat('CADUCADOS', '$caducados', Colors.grey[600]!),
+              const SizedBox(width: 10),
+              _resumenStat('FACTURADO',
+                  _formatearMonedaCentral(facturacion), Colors.black),
+            ]),
+            const Divider(height: 24),
+            _resumenFila('🏆 Moto más activa', motoLabel),
+            const SizedBox(height: 8),
+            _resumenFila('⏰ Hora pico', horaPico),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _resumenStat(String label, String value, Color color) => Expanded(
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.07),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: color.withValues(alpha: 0.3)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(value,
+                  style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: color)),
+              Text(label,
+                  style:
+                      const TextStyle(fontSize: 9, color: Colors.black45)),
+            ],
+          ),
+        ),
+      );
+
+  Widget _resumenFila(String label, String value) => Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label,
+              style: const TextStyle(
+                  fontSize: 12,
                   fontWeight: FontWeight.bold,
-                  color: color,
-                  height: 1),
-            ),
-            TextSpan(
-              text: label,
-              style: TextStyle(fontSize: 8, color: color, height: 1),
-            ),
-          ]),
-        ),
+                  color: Colors.black54)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(value,
+                style: const TextStyle(
+                    fontSize: 12, fontWeight: FontWeight.w600)),
+          ),
+        ],
       );
 
   String _tiempoRelativo(DateTime utc) {
@@ -6430,26 +6595,7 @@ class _CentralScreenState extends State<CentralScreen>
                                     fontSize: 12,
                                   ),
                                 ),
-                                subtitle: Row(
-                                  children: [
-                                    if (m['ticket_prioridad'] == true) ...[
-                                      const Icon(
-                                        Icons.local_activity,
-                                        color: Colors.amber,
-                                        size: 12,
-                                      ),
-                                      const SizedBox(width: 4),
-                                    ],
-                                    Text(
-                                      '${m['rango_movil'] ?? 'NOVATO'} | ${_formatCalificacion(m['puntuacion'])}',
-                                      style: const TextStyle(
-                                        fontSize: 10,
-                                        color: Colors.black54,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                                subtitle: _subtituloMovilFlota(m),
                                 trailing: _movilTrailing(m),
                                 onTap: () => _abrirMenuAccionesMovil(context, m),
                               ),
@@ -6543,26 +6689,7 @@ class _CentralScreenState extends State<CentralScreen>
                                     fontSize: 12,
                                   ),
                                 ),
-                                subtitle: Row(
-                                  children: [
-                                    if (m['ticket_prioridad'] == true) ...[
-                                      const Icon(
-                                        Icons.local_activity,
-                                        color: Colors.amber,
-                                        size: 12,
-                                      ),
-                                      const SizedBox(width: 4),
-                                    ],
-                                    Text(
-                                      '${m['rango_movil'] ?? 'NOVATO'} | ${_formatCalificacion(m['puntuacion'])}',
-                                      style: const TextStyle(
-                                        fontSize: 10,
-                                        color: Colors.black54,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                                subtitle: _subtituloMovilFlota(m),
                                 trailing: _movilTrailing(m),
                                 onTap: () => _abrirMenuAccionesMovil(context, m),
                               ),
@@ -6658,26 +6785,7 @@ class _CentralScreenState extends State<CentralScreen>
                                   fontSize: 12,
                                 ),
                               ),
-                              subtitle: Row(
-                                children: [
-                                  if (m['ticket_prioridad'] == true) ...[
-                                    const Icon(
-                                      Icons.local_activity,
-                                      color: Colors.amber,
-                                      size: 12,
-                                    ),
-                                    const SizedBox(width: 4),
-                                  ],
-                                  Text(
-                                    '${m['rango_movil'] ?? 'NOVATO'} | ${_formatCalificacion(m['puntuacion'])}',
-                                    style: const TextStyle(
-                                      fontSize: 10,
-                                      color: Colors.black54,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ],
-                              ),
+                              subtitle: _subtituloMovilFlota(m),
                               trailing: _movilTrailing(m),
                               onTap: () => _abrirMenuAccionesMovil(context, m),
                             ),  // ListTile
@@ -6744,10 +6852,17 @@ class _CentralScreenState extends State<CentralScreen>
                                               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
                                             ),
                                             const SizedBox(height: 1),
-                                            Text(
-                                              '${movil['rango_movil'] ?? 'NOVATO'} · ${_formatCalificacion(movil['puntuacion'])}',
-                                              style: const TextStyle(fontSize: 10, color: Colors.black45),
-                                            ),
+                                            Row(children: [
+                                              Text(
+                                                '${movil['rango_movil'] ?? 'NOVATO'} · ${_formatCalificacion(movil['puntuacion'])}',
+                                                style: const TextStyle(fontSize: 10, color: Colors.black45),
+                                              ),
+                                              const SizedBox(width: 6),
+                                              Builder(builder: (_) {
+                                                final p = _pingLabel(movil);
+                                                return Text(p, style: TextStyle(fontSize: 9, color: p.startsWith('●') ? Colors.green[700] : Colors.grey[400], fontWeight: FontWeight.w600));
+                                              }),
+                                            ]),
                                             const SizedBox(height: 4),
                                             // Servicios compactos: uno por fila
                                             ...svcsDelMovil.map((s) {
@@ -6859,13 +6974,7 @@ class _CentralScreenState extends State<CentralScreen>
                                       fontWeight: FontWeight.bold,
                                     ),
                                   ),
-                                  subtitle: Text(
-                                    '${m['rango_movil'] ?? 'NOVATO'} | ${_formatCalificacion(m['puntuacion'])}',
-                                    style: const TextStyle(
-                                      fontSize: 10,
-                                      color: Colors.black54,
-                                    ),
-                                  ),
+                                  subtitle: _subtituloMovilFlota(m),
                                   trailing: _movilTrailing(m),
                                   onTap: () =>
                                       _abrirMenuAccionesMovil(context, m),
@@ -6920,13 +7029,7 @@ class _CentralScreenState extends State<CentralScreen>
                                   color: Colors.red[800],
                                 ),
                               ),
-                              subtitle: Text(
-                                '${movil['rango_movil'] ?? 'NOVATO'} | ${_formatCalificacion(movil['puntuacion'])}',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  color: Colors.red[400],
-                                ),
-                              ),
+                              subtitle: _subtituloMovilFlota(movil),
                               trailing: _movilTrailing(movil),
                               onTap: () =>
                                   _abrirMenuAccionesMovil(context, movil),
@@ -7070,13 +7173,7 @@ class _CentralScreenState extends State<CentralScreen>
                                           ),
                                       ],
                                     ),
-                                    subtitle: Text(
-                                      '${movil['rango_movil'] ?? 'NOVATO'} | ${_formatCalificacion(movil['puntuacion'])}',
-                                      style: const TextStyle(
-                                        fontSize: 10,
-                                        color: Colors.black54,
-                                      ),
-                                    ),
+                                    subtitle: _subtituloMovilFlota(movil),
                                     trailing: _movilTrailing(movil),
                                     onTap: () => _abrirMenuAccionesMovil(
                                       context,
@@ -7524,7 +7621,8 @@ class _CentralScreenState extends State<CentralScreen>
                                 _kpiChip('PROB', kpiProblemas, Colors.red[700]!),
                                 const SizedBox(width: 5),
                               ],
-                              _kpiChip('HOY', kpiHoy, Colors.blueGrey[600]!),
+                              _kpiChip('HOY', kpiHoy, Colors.blueGrey[600]!,
+                                  onTap: () => _mostrarResumenDia(context, todosHoy)),
                               const Spacer(),
                               if (kpiFact > 0)
                                 Text(
@@ -8528,6 +8626,45 @@ class _CentralScreenState extends State<CentralScreen>
     );
   }
 
+  // ── Ping helper — estado de conexión real basado en ultimo_ping ────────────
+  String _pingLabel(Map<String, dynamic> m) {
+    if (m['ultimo_ping'] == null) return '○ sin ping';
+    final mins = DateTime.now()
+        .toUtc()
+        .difference(DateTime.parse(m['ultimo_ping'].toString()).toUtc())
+        .inMinutes;
+    if (mins < 2) return '● ahora';
+    if (mins < 5) return '● hace ${mins}min';
+    if (mins < 60) return '○ hace ${mins}min';
+    return '○ offline';
+  }
+
+  Widget _subtituloMovilFlota(Map<String, dynamic> m) {
+    final ping = _pingLabel(m);
+    final online = ping.startsWith('●');
+    return Row(
+      children: [
+        if (m['ticket_prioridad'] == true) ...[
+          const Icon(Icons.local_activity, color: Colors.amber, size: 12),
+          const SizedBox(width: 4),
+        ],
+        Text(
+          '${m['rango_movil'] ?? 'NOVATO'} | ${_formatCalificacion(m['puntuacion'])}',
+          style: const TextStyle(
+              fontSize: 10, color: Colors.black54, fontWeight: FontWeight.w500),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          ping,
+          style: TextStyle(
+              fontSize: 9,
+              fontWeight: FontWeight.w600,
+              color: online ? Colors.green[700] : Colors.grey[400]),
+        ),
+      ],
+    );
+  }
+
   // ── Trailing estándar — muestra badge FN pill + ícono de menú ────────────
   Widget _movilTrailing(Map<String, dynamic> m) {
     final esFn = m['tiene_fn'] == true;
@@ -8715,6 +8852,18 @@ class _CentralScreenState extends State<CentralScreen>
                         context,
                         MaterialPageRoute(
                           builder: (_) => const FnPanelScreen(),
+                        ),
+                      ),
+                    ),
+                    _tarjetaGestion(
+                      icono: Icons.history_rounded,
+                      color: Colors.indigo[600]!,
+                      titulo: 'Historial de Servicios',
+                      subtitulo: 'Búsqueda y consulta de servicios pasados',
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const HistorialServiciosScreen(),
                         ),
                       ),
                     ),
@@ -9195,95 +9344,4 @@ class _CentralScreenState extends State<CentralScreen>
           ),
         ],
       ),
-    );
-  }
-
-  // ─────────────────────────────────────────────────────────────
-  // GESTOR DE SECTORES
-  // ─────────────────────────────────────────────────────────────
-  void _abrirGestorSectores() {
-    final nombreCtrl = TextEditingController();
-    String filtro = 'Cúcuta';
-    String municipioNuevo = 'Cúcuta';
-
-    Future<List<Map<String, dynamic>>> sectorsFuture =
-        Supabase.instance.client.from('sectores').select().order('municipio').order('nombre');
-
-    void recargar(StateSetter setSt) {
-      sectorsFuture = Supabase.instance.client.from('sectores').select().order('municipio').order('nombre');
-      setSt(() {});
-    }
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSt) {
-          return AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            title: const Row(children: [
-              Icon(Icons.grid_view_rounded, color: Colors.indigo),
-              SizedBox(width: 8),
-              Text('SECTORES / BARRIOS', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            ]),
-            content: SizedBox(
-              width: double.maxFinite,
-              height: MediaQuery.of(context).size.height * 0.65,
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                // ── Agregar ──────────────────────────────────────────────
-                Row(children: [
-                  Expanded(
-                    child: TextField(
-                      controller: nombreCtrl,
-                      textCapitalization: TextCapitalization.words,
-                      decoration: const InputDecoration(
-                        labelText: 'Nombre del sector / barrio',
-                        isDense: true,
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  DropdownButton<String>(
-                    value: municipioNuevo,
-                    isDense: true,
-                    items: ['Cúcuta', 'Los Patios', 'V. Rosario']
-                        .map((m) => DropdownMenuItem(value: m, child: Text(m, style: const TextStyle(fontSize: 12))))
-                        .toList(),
-                    onChanged: (v) => setSt(() => municipioNuevo = v ?? 'Cúcuta'),
-                  ),
-                  const SizedBox(width: 8),
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.black,
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                    ),
-                    onPressed: () async {
-                      final n = nombreCtrl.text.trim();
-                      if (n.isEmpty) return;
-                      try {
-                        await Supabase.instance.client.from('sectores')
-                            .insert({'nombre': n, 'municipio': municipioNuevo});
-                        nombreCtrl.clear();
-                        recargar(setSt);
-                      } catch (e) {
-                        if (ctx.mounted) {
-                          ScaffoldMessenger.of(ctx).showSnackBar(
-                            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red[800]));
-                        }
-                      }
-                    },
-                    child: const Icon(Icons.add, color: Color(0xff3AF500), size: 18),
-                  ),
-                ]),
-                const SizedBox(height: 12),
-                // ── Filtros por municipio ─────────────────────────────────
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(children: ['Cúcuta', 'Los Patios', 'V. Rosario'].map((m) {
-                    final sel = filtro == m;
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 6),
-                      child: ChoiceChip(
-                        label: Text(m, style: TextStyle(fontSize: 11, color: sel ? Colors.white : Colors.black87)),
-                        selected: sel,
-                        selectedColor: Colors.indigo,
+   
