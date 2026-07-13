@@ -414,4 +414,12 @@ class _HistorialServiciosScreenState extends State<HistorialServiciosScreen> {
       );
 }
 
-enum _RangoFec
+enum _RangoFecha {
+  hoy('Hoy'),
+  ayer('Ayer'),
+  semana('7 días'),
+  mes('Este mes');
+
+  const _RangoFecha(this.label);
+  final String label;
+}
