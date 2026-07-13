@@ -68,6 +68,13 @@ class _CentralScreenState extends State<CentralScreen>
   // sin reconstruir todo el Scaffold.
   final ValueNotifier<int> _filtroVersion = ValueNotifier(0);
 
+  // Búsqueda en tiempo real dentro del monitor
+  final TextEditingController _busquedaCtrl = TextEditingController();
+  String _busquedaTexto = '';
+
+  // Timestamp de última actualización del stream de servicios
+  DateTime _ultimaActualizacion = DateTime.now();
+
   /// Contadores de mensajes no leídos por sala (sala_id → cantidad).
   /// Se incrementa cuando llega un mensaje ajeno en el canal Realtime.
   /// Se resetea al abrir el chat de esa sala.
@@ -336,6 +343,7 @@ class _CentralScreenState extends State<CentralScreen>
     );
     _subServiciosMonitor = crudoServicios.listen(
       (data) {
+        _ultimaActualizacion = DateTime.now();
         if (!_ctrlServiciosMonitor.isClosed) _ctrlServiciosMonitor.add(data);
       },
       onError: (e) {
@@ -381,6 +389,8 @@ class _CentralScreenState extends State<CentralScreen>
     _subServiciosMonitor?.cancel();
     _ctrlUsuariosMoviles.close();
     _ctrlServiciosMonitor.close();
+    _busquedaCtrl.dispose();
+    _filtroVersion.dispose();
     _sonidos.silenciar();
     super.dispose();
   }
@@ -4940,6 +4950,31 @@ class _CentralScreenState extends State<CentralScreen>
 
   // ── HELPERS MONITOR ────────────────────────────────────────────────────────
 
+  Widget _kpiChip(String label, int count, Color color) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: color.withValues(alpha: 0.4)),
+        ),
+        child: RichText(
+          text: TextSpan(children: [
+            TextSpan(
+              text: '$count ',
+              style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: color,
+                  height: 1),
+            ),
+            TextSpan(
+              text: label,
+              style: TextStyle(fontSize: 8, color: color, height: 1),
+            ),
+          ]),
+        ),
+      );
+
   String _tiempoRelativo(DateTime utc) {
     final diff = DateTime.now().toUtc().difference(utc);
     if (diff.inMinutes < 1) return 'ahora';
@@ -6802,11 +6837,52 @@ class _CentralScreenState extends State<CentralScreen>
               ],
             ),
           ),
+          // ── BARRA DE BÚSQUEDA ──────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 4, 8, 2),
+            child: TextField(
+              controller: _busquedaCtrl,
+              onChanged: (val) {
+                _busquedaTexto = val.toLowerCase().trim();
+                _filtroVersion.value++;
+              },
+              style: const TextStyle(fontSize: 12),
+              decoration: InputDecoration(
+                isDense: true,
+                hintText: 'Buscar por ruta, cliente, local, móvil...',
+                hintStyle: TextStyle(fontSize: 11, color: Colors.grey[400]),
+                prefixIcon: const Icon(Icons.search, size: 16),
+                suffixIcon: _busquedaTexto.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.close, size: 14),
+                        onPressed: () {
+                          _busquedaCtrl.clear();
+                          _busquedaTexto = '';
+                          _filtroVersion.value++;
+                        },
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      )
+                    : null,
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(6),
+                  borderSide: BorderSide(color: Colors.grey[300]!),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(6),
+                  borderSide: const BorderSide(color: Colors.black54),
+                ),
+              ),
+            ),
+          ),
           Expanded(
             child: StreamBuilder<List<Map<String, dynamic>>>(
               stream: _streamServiciosMonitor,
               builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
+                if (snapshot.connectionState == ConnectionState.waiting &&
+                    !snapshot.hasData) {
                   return const Center(
                     child: CircularProgressIndicator(color: Colors.black),
                   );
@@ -6859,112 +6935,197 @@ class _CentralScreenState extends State<CentralScreen>
 
                 // Sonidos de estado manejados por radar_central_bg channel
 
-                // ValueListenableBuilder reacciona al filtro sin reconstruir
-                // el StreamBuilder completo (evita parpadeo por setState).
+                // ValueListenableBuilder reacciona al filtro/búsqueda sin
+                // reconstruir el StreamBuilder completo (evita parpadeo).
                 return ValueListenableBuilder<int>(
                   valueListenable: _filtroVersion,
-                  builder: (context, _, __) => ListView(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    children: [
-                      _construirBloqueServicios(
-                        context,
-                        '⚠️ REPORTES DE PROBLEMA',
-                        problemas,
-                        Colors.red[700]!,
-                        Icons.warning_rounded,
-                        visible: !_seccionesOcultasMonitor.contains('problemas'),
-                      ),
-                      _construirBloqueServicios(
-                        context,
-                        '❓ COTIZACIONES PENDIENTES',
-                        cotizaciones,
-                        Colors.orange[700]!,
-                        Icons.calculate_outlined,
-                        visible: !_seccionesOcultasMonitor.contains('cotizaciones'),
-                      ),
-                      _construirBloqueServicios(
-                        context,
-                        '✉️ COTIZACIONES ENVIADAS',
-                        cotizadas,
-                        Colors.blue[600]!,
-                        Icons.hourglass_top,
-                        visible: !_seccionesOcultasMonitor.contains('cotizadas'),
-                      ),
-                      _construirBloqueServicios(
-                        context,
-                        '✅ COTIZACIONES APROBADAS · EN ESPERA',
-                        cotizacionesAprobadas,
-                        Colors.teal[700]!,
-                        Icons.check_circle_outline,
-                        visible: !_seccionesOcultasMonitor.contains('cotizaciones_aprobadas'),
-                      ),
-                      // ---> INYECCIÓN: BLOQUE DEL TEMPORIZADOR <---
-                      _construirBloqueServicios(
-                        context,
-                        '⏰ SERVICIOS PROGRAMADOS (EN ESPERA)',
-                        programados,
-                        Colors.teal[700]!,
-                        Icons.schedule,
-                        visible: !_seccionesOcultasMonitor.contains('programados'),
-                      ),
-                      _construirBloqueServicios(
-                        context,
-                        '♻️ SERVICIOS CADUCADOS',
-                        caducados,
-                        Colors.purple[800]!,
-                        Icons.hourglass_disabled,
-                        visible: !_seccionesOcultasMonitor.contains('caducados'),
-                      ),
-                      _construirBloqueServicios(
-                        context,
-                        '⏱️ SERVICIOS VENCIDOS / DEMORADOS',
-                        finalizadosDemora,
-                        Colors.deepPurple[700]!,
-                        Icons.timer_off,
-                        visible: !_seccionesOcultasMonitor.contains('demorados'),
-                      ),
-                      _construirBloqueServicios(
-                        context,
-                        '🟢 RADAR DE DISPONIBLES',
-                        libres,
-                        const Color(0xff3AF500),
-                        Icons.add_task,
-                        visible: !_seccionesOcultasMonitor.contains('libres'),
-                      ),
-                      _construirBloqueServicios(
-                        context,
-                        '🟡 SERVICIOS EN CURSO',
-                        enCurso,
-                        Colors.amber[600]!,
-                        Icons.motorcycle,
-                        visible: !_seccionesOcultasMonitor.contains('en_curso'),
-                      ),
-                      _construirBloqueServicios(
-                        context,
-                        '🔴 SERVICIOS FINALIZADOS CON PROBLEMA',
-                        finalizadosProblema,
-                        Colors.red[900]!,
-                        Icons.report_off,
-                        visible: !_seccionesOcultasMonitor.contains('finalizados_problema'),
-                      ),
-                      _construirBloqueServicios(
-                        context,
-                        '⚪ SERVICIOS FINALIZADOS',
-                        finalizados,
-                        Colors.grey[500]!,
-                        Icons.check_circle_outline,
-                        visible: !_seccionesOcultasMonitor.contains('finalizados'),
-                      ),
-                      _construirBloqueServicios(
-                        context,
-                        '⚫ SERVICIOS CANCELADOS',
-                        cancelados,
-                        Colors.black54,
-                        Icons.block,
-                        visible: !_seccionesOcultasMonitor.contains('cancelados'),
-                      ),
-                    ],
-                  ),
+                  builder: (context, _, __) {
+                    // ── FILTRO POR BÚSQUEDA ────────────────────────────────
+                    bool _matchBusqueda(Map<String, dynamic> s) {
+                      if (_busquedaTexto.isEmpty) return true;
+                      final q = _busquedaTexto;
+                      if ((s['origen'] ?? '').toString().toLowerCase().contains(q)) return true;
+                      if ((s['destino'] ?? '').toString().toLowerCase().contains(q)) return true;
+                      if ((s['numero_cliente'] ?? '').toString().contains(q)) return true;
+                      if ((s['numero_local'] ?? '').toString().contains(q)) return true;
+                      if ((s['numero_movil'] ?? '').toString().contains(q)) return true;
+                      if ((s['observacion'] ?? '').toString().toLowerCase().contains(q)) return true;
+                      // buscar por #moto (ej: "5" o "#5")
+                      final movEntry = _movilesCache.firstWhere(
+                        (m) => m['id'] == s['movil_id'], orElse: () => {});
+                      if (movEntry.isNotEmpty) {
+                        final usuario = movEntry['usuario']?.toString() ?? '';
+                        if (usuario.toLowerCase().contains(q)) return true;
+                      }
+                      return false;
+                    }
+
+                    // KPIs desde todos (sin filtro de búsqueda)
+                    final kpiPendientes = todos.where((s) => s['estado'] == 'pendiente').length;
+                    final kpiEnCurso = todos.where((s) => ['en_ruta_origen','en_origen','en_ruta_destino'].contains(s['estado'])).length;
+                    final kpiProblemas = todos.where((s) => s['estado'] == 'problema').length;
+                    final hoy = DateTime.now();
+                    final todosHoy = todos.where((s) {
+                      if (s['created_at'] == null) return false;
+                      final d = DateTime.parse(s['created_at']).toLocal();
+                      return d.year == hoy.year && d.month == hoy.month && d.day == hoy.day;
+                    }).toList();
+                    final kpiHoy = todosHoy.length;
+                    final kpiFact = todosHoy
+                        .where((s) => ['finalizado', 'finalizado_con_problema', 'finalizado_por_demora'].contains(s['estado']))
+                        .fold<double>(0, (acc, s) => acc + ((s['tarifa'] as num?)?.toDouble() ?? 0));
+                    final segsDesde = DateTime.now().difference(_ultimaActualizacion).inSeconds;
+                    final actLabel = segsDesde < 5 ? 'ahora' : 'hace ${segsDesde}s';
+
+                    // Listas filtradas por búsqueda
+                    List<Map<String, dynamic>> _filtrar(List<Map<String, dynamic>> lista) =>
+                        lista.where(_matchBusqueda).toList();
+
+                    return Column(
+                      children: [
+                        // ── KPIs ────────────────────────────────────────────
+                        Container(
+                          color: const Color(0xFFF5F5F5),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                          child: Row(
+                            children: [
+                              _kpiChip('LIBRE', kpiPendientes, const Color(0xff3AF500)),
+                              const SizedBox(width: 5),
+                              _kpiChip('CURSO', kpiEnCurso, Colors.amber[700]!),
+                              const SizedBox(width: 5),
+                              if (kpiProblemas > 0) ...[
+                                _kpiChip('PROB', kpiProblemas, Colors.red[700]!),
+                                const SizedBox(width: 5),
+                              ],
+                              _kpiChip('HOY', kpiHoy, Colors.blueGrey[600]!),
+                              const Spacer(),
+                              if (kpiFact > 0)
+                                Text(
+                                  _formatearMonedaCentral(kpiFact),
+                                  style: const TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.black54),
+                                ),
+                              const SizedBox(width: 6),
+                              Text(
+                                '● $actLabel',
+                                style: TextStyle(
+                                    fontSize: 8,
+                                    color: segsDesde < 10
+                                        ? Colors.green[600]
+                                        : Colors.orange[700]),
+                              ),
+                            ],
+                          ),
+                        ),
+                        // ── LISTA ────────────────────────────────────────────
+                        Expanded(
+                          child: ListView(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            children: [
+                              _construirBloqueServicios(
+                                context,
+                                '⚠️ REPORTES DE PROBLEMA',
+                                _filtrar(problemas),
+                                Colors.red[700]!,
+                                Icons.warning_rounded,
+                                visible: !_seccionesOcultasMonitor.contains('problemas'),
+                              ),
+                              _construirBloqueServicios(
+                                context,
+                                '❓ COTIZACIONES PENDIENTES',
+                                _filtrar(cotizaciones),
+                                Colors.orange[700]!,
+                                Icons.calculate_outlined,
+                                visible: !_seccionesOcultasMonitor.contains('cotizaciones'),
+                              ),
+                              _construirBloqueServicios(
+                                context,
+                                '✉️ COTIZACIONES ENVIADAS',
+                                _filtrar(cotizadas),
+                                Colors.blue[600]!,
+                                Icons.hourglass_top,
+                                visible: !_seccionesOcultasMonitor.contains('cotizadas'),
+                              ),
+                              _construirBloqueServicios(
+                                context,
+                                '✅ COTIZACIONES APROBADAS · EN ESPERA',
+                                _filtrar(cotizacionesAprobadas),
+                                Colors.teal[700]!,
+                                Icons.check_circle_outline,
+                                visible: !_seccionesOcultasMonitor.contains('cotizaciones_aprobadas'),
+                              ),
+                              _construirBloqueServicios(
+                                context,
+                                '⏰ SERVICIOS PROGRAMADOS (EN ESPERA)',
+                                _filtrar(programados),
+                                Colors.teal[700]!,
+                                Icons.schedule,
+                                visible: !_seccionesOcultasMonitor.contains('programados'),
+                              ),
+                              _construirBloqueServicios(
+                                context,
+                                '♻️ SERVICIOS CADUCADOS',
+                                _filtrar(caducados),
+                                Colors.purple[800]!,
+                                Icons.hourglass_disabled,
+                                visible: !_seccionesOcultasMonitor.contains('caducados'),
+                              ),
+                              _construirBloqueServicios(
+                                context,
+                                '⏱️ SERVICIOS VENCIDOS / DEMORADOS',
+                                _filtrar(finalizadosDemora),
+                                Colors.deepPurple[700]!,
+                                Icons.timer_off,
+                                visible: !_seccionesOcultasMonitor.contains('demorados'),
+                              ),
+                              _construirBloqueServicios(
+                                context,
+                                '🟢 RADAR DE DISPONIBLES',
+                                _filtrar(libres),
+                                const Color(0xff3AF500),
+                                Icons.add_task,
+                                visible: !_seccionesOcultasMonitor.contains('libres'),
+                              ),
+                              _construirBloqueServicios(
+                                context,
+                                '🟡 SERVICIOS EN CURSO',
+                                _filtrar(enCurso),
+                                Colors.amber[600]!,
+                                Icons.motorcycle,
+                                visible: !_seccionesOcultasMonitor.contains('en_curso'),
+                              ),
+                              _construirBloqueServicios(
+                                context,
+                                '🔴 SERVICIOS FINALIZADOS CON PROBLEMA',
+                                _filtrar(finalizadosProblema),
+                                Colors.red[900]!,
+                                Icons.report_off,
+                                visible: !_seccionesOcultasMonitor.contains('finalizados_problema'),
+                              ),
+                              _construirBloqueServicios(
+                                context,
+                                '⚪ SERVICIOS FINALIZADOS',
+                                _filtrar(finalizados),
+                                Colors.grey[500]!,
+                                Icons.check_circle_outline,
+                                visible: !_seccionesOcultasMonitor.contains('finalizados'),
+                              ),
+                              _construirBloqueServicios(
+                                context,
+                                '⚫ SERVICIOS CANCELADOS',
+                                _filtrar(cancelados),
+                                Colors.black54,
+                                Icons.block,
+                                visible: !_seccionesOcultasMonitor.contains('cancelados'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    );
+                  },
                 );
               },
             ),
