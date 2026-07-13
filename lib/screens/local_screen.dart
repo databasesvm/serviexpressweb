@@ -537,10 +537,6 @@ class _LocalScreenState extends State<LocalScreen>
                 final puedeVip = _puedeUsarPuntoAPunto();
                 final histFinalizados = historial.where((s) => s['estado'] == 'finalizado').length;
                 final histCancelados = historial.where((s) => s['estado'] == 'cancelado').length;
-                final histFacturacion = historial
-                    .where((s) => s['estado'] == 'finalizado')
-                    .fold<double>(0, (a, s) => a + ((s['tarifa'] as num?)?.toDouble() ?? 0));
-                final fmtPesoHist = NumberFormat('#,###', 'es_CO');
 
                 // Helper chip para KPI bar
                 Widget kpiBar(String val, String label, Color color) => Padding(
@@ -691,11 +687,6 @@ class _LocalScreenState extends State<LocalScreen>
                                     kpiBar('${historial.length}', 'Total hoy', Colors.black87),
                                     kpiBar('$histFinalizados', 'Entregados', Colors.green[700]!),
                                     kpiBar('$histCancelados', 'Cancelados', Colors.red[700]!),
-                                    kpiBar(
-                                      '\$${fmtPesoHist.format(histFacturacion)}',
-                                      'Facturado',
-                                      Colors.indigo[700]!,
-                                    ),
                                   ],
                                 ),
                               ),
@@ -1265,4 +1256,4 @@ class _LocalScreenState extends State<LocalScreen>
     );         // DefaultTabController
   }
 }
-                                                                                                                                                       
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      
