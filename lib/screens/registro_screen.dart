@@ -407,20 +407,63 @@ class _RegistroScreenState extends State<RegistroScreen> {
             }
           } catch (_) {}
 
+          final String usuarioMostrar = filaInsertada['usuario']?.toString() ?? usuarioText;
+          final String telefonoPwd   = filaInsertada['telefono']?.toString() ?? telefono;
           showDialog(
             context: context,
             barrierDismissible: false,
             builder: (ctx) => AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
               title: const Text(
-                '⚠️ PERFIL EN REVISIÓN',
-                style: TextStyle(fontWeight: FontWeight.bold, color: Colors.orange),
+                '✅ REGISTRO EXITOSO',
+                style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xff3AF500)),
               ),
-              content: const Text(
-                'Tu registro fue recibido, pero tu cuenta está en espera.\n\n'
-                'La Central Operativa de ServiExpress debe validar tus datos '
-                'antes de darte acceso al panel.',
-                style: TextStyle(fontSize: 14),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Tu cuenta está en revisión. La Central te activará pronto.',
+                    style: TextStyle(fontSize: 13, color: Colors.black87),
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.black,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xff3AF500), width: 2),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('TUS DATOS DE ACCESO',
+                            style: TextStyle(color: Color(0xff3AF500), fontSize: 10,
+                                fontWeight: FontWeight.bold, letterSpacing: 1.2)),
+                        const SizedBox(height: 10),
+                        Row(children: [
+                          const Text('USUARIO: ', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                          Text(usuarioMostrar,
+                              style: const TextStyle(color: Color(0xff3AF500), fontSize: 22,
+                                  fontWeight: FontWeight.bold, letterSpacing: 1)),
+                        ]),
+                        const SizedBox(height: 6),
+                        Row(children: [
+                          const Text('CLAVE:   ', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                          Text(telefonoPwd,
+                              style: const TextStyle(color: Colors.white, fontSize: 18,
+                                  fontWeight: FontWeight.bold)),
+                        ]),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    '⚠️ Guarda tu usuario y contraseña. No uses tu correo para ingresar.',
+                    style: TextStyle(fontSize: 12, color: Colors.red, fontWeight: FontWeight.w600),
+                  ),
+                ],
               ),
               actions: [
                 ElevatedButton(

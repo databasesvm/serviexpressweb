@@ -217,29 +217,10 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
             pinned: true,
             backgroundColor: const Color(0xFF0A0A0A),
             iconTheme: const IconThemeData(color: Colors.white),
-            expandedHeight: _cargando ? 60 : 132,
             title: const Text('Gestión de Usuarios',
                 style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
             centerTitle: false,
             actions: [IconButton(icon: const Icon(Icons.refresh_rounded, color: Colors.white60), onPressed: _cargar)],
-            flexibleSpace: FlexibleSpaceBar(
-              background: Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight,
-                    colors: [Color(0xFF0D1520), Color(0xFF0A0A0A)]),
-                ),
-                padding: const EdgeInsets.fromLTRB(16, 60, 16, 10),
-                child: _cargando ? const SizedBox() : Row(children: [
-                  _statBox('${_solicitudes.length}', 'Solicitudes', const Color(0xFFF59E0B), onTap: () => _tabCtrl.animateTo(0)),
-                  const SizedBox(width: 8),
-                  _statBox('${_activaciones.length}', 'Por activar', const Color(0xFF3B82F6), onTap: () => _tabCtrl.animateTo(1)),
-                  const SizedBox(width: 8),
-                  _statBox('${_moviles.length}', 'Móviles', const Color(0xff3AF500), onTap: () => _tabCtrl.animateTo(2)),
-                  const SizedBox(width: 8),
-                  _statBox('${_registros.length}', 'Recientes', const Color(0xFFA855F7), onTap: () => _tabCtrl.animateTo(3)),
-                ]),
-              ),
-            ),
             bottom: TabBar(
               controller: _tabCtrl,
               indicatorColor: const Color(0xff3AF500),
@@ -248,11 +229,11 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
               unselectedLabelColor: Colors.white38,
               labelStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700),
               unselectedLabelStyle: const TextStyle(fontSize: 10),
-              tabs: [
-                Tab(text: _solicitudes.isEmpty ? 'Solicitudes' : 'Solicitudes (${_solicitudes.length})'),
-                Tab(text: _activaciones.isEmpty ? 'Activar'     : 'Activar (${_activaciones.length})'),
-                const Tab(text: 'Ascensos'),
-                const Tab(text: 'Recientes'),
+              tabs: const [
+                Tab(text: 'Solicitudes'),
+                Tab(text: 'Activar'),
+                Tab(text: 'Ascensos'),
+                Tab(text: 'Recientes'),
               ],
             ),
           ),
@@ -260,6 +241,20 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
         body: _cargando
           ? const Center(child: CircularProgressIndicator(color: Color(0xff3AF500)))
           : Column(children: [
+              // ── Stat boxes ─────────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+                child: Row(children: [
+                  _statBox('\${_solicitudes.length}', 'Solicitudes', const Color(0xFFF59E0B), onTap: () => _tabCtrl.animateTo(0)),
+                  const SizedBox(width: 8),
+                  _statBox('\${_activaciones.length}', 'Por activar', const Color(0xFF3B82F6), onTap: () => _tabCtrl.animateTo(1)),
+                  const SizedBox(width: 8),
+                  _statBox('\${_moviles.length}', 'Móviles', const Color(0xff3AF500), onTap: () => _tabCtrl.animateTo(2)),
+                  const SizedBox(width: 8),
+                  _statBox('\${_registros.length}', 'Recientes', const Color(0xFFA855F7), onTap: () => _tabCtrl.animateTo(3)),
+                ]),
+              ),
+              // ── Búsqueda ───────────────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
                 child: TextField(
