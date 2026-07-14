@@ -461,21 +461,21 @@ class _SedeDialogState extends State<_SedeDialog> {
   }
 
   /// Extrae lat/lng de URL de Google Maps.
-  /// Soporta URLs completas y URLs cortas (maps.app.goo.gl / goo.gl)
-  /// siguiendo el redirect con una petición HTTP.
+  /// Soporta URLs completas, URLs cortas (maps.app.goo.gl / goo.gl)
+  /// y lugares registrados en Google Maps (negocios, farmacias, etc.).
   Future<void> _extraerCoordenadas() async {
     final raw = _ctrlMapsUrl.text.trim();
     if (raw.isEmpty) return;
 
-    setState(() => _guardando = true); // reutilizo el flag para deshabilitar el botón
+    setState(() => _guardando = true);
 
     String urlFinal = raw;
+    String? body;
 
-    // URLs cortas: goo.gl o maps.app.goo.gl
-    if (raw.contains('goo.gl')) {
+    final esCorta = raw.contains('goo.gl') || raw.contains('maps.app');
+
+    if (esCorta) {
       if (kIsWeb) {
-        // El navegador bloquea redirects cross-origin (CORS).
-        // En producción (Android) esto no ocurre.
         setState(() => _guardando = false);
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -490,20 +490,31 @@ class _SedeDialogState extends State<_SedeDialog> {
         );
         return;
       }
-      // Android/iOS: Dio sigue el redirect sin restricción CORS
+
+      // Android/iOS: seguimos el redirect Y leemos el body.
+      // Para lugares registrados (negocios) la URL final puede no tener
+      // @lat,lng en el path, pero el HTML siempre embebe las coords.
       try {
         final dio = Dio(BaseOptions(
-          headers: {'User-Agent': 'Mozilla/5.0'},
+          headers: {
+            'User-Agent':
+                'Mozilla/5.0 (Linux; Android 12; Mobile) AppleWebKit/537.36 '
+                '(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+          },
           followRedirects: true,
-          maxRedirects: 6,
-          connectTimeout: const Duration(seconds: 10),
-          receiveTimeout: const Duration(seconds: 10),
+          maxRedirects: 10,
+          connectTimeout: const Duration(seconds: 12),
+          receiveTimeout: const Duration(seconds: 12),
         ));
-        final resp = await dio.get<void>(
+        final resp = await dio.get<String>(
           raw,
-          options: Options(validateStatus: (_) => true),
+          options: Options(
+            validateStatus: (_) => true,
+            responseType: ResponseType.plain,
+          ),
         );
         urlFinal = resp.realUri.toString();
+        body = resp.data;
       } catch (_) {
         urlFinal = raw;
       }
@@ -511,40 +522,72 @@ class _SedeDialogState extends State<_SedeDialog> {
 
     setState(() => _guardando = false);
 
-    // Patrones de coordenadas en la URL expandida
-    final patterns = [
+    // ── Patrones para la URL expandida ──────────────────────────────────────
+    final urlPatterns = [
       RegExp(r'/@(-?\d+\.\d+),(-?\d+\.\d+)'),
       RegExp(r'[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)'),
       RegExp(r'[?&]ll=(-?\d+\.\d+),(-?\d+\.\d+)'),
       RegExp(r'maps\?q=(-?\d+\.\d+),(-?\d+\.\d+)'),
-      RegExp(r'!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)'),  // formato Places
-      RegExp(r'(-?\d{1,3}\.\d{4,}),(-?\d{1,3}\.\d{4,})'),
+      RegExp(r'!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)'),
+      RegExp(r'(-?\d{1,3}\.\d{5,}),(-?\d{1,3}\.\d{5,})'),
     ];
 
-    for (final p in patterns) {
+    for (final p in urlPatterns) {
       final m = p.firstMatch(urlFinal);
-      if (m != null) {
-        if (!mounted) return;
-        setState(() {
-          _ctrlLat.text = m.group(1)!;
-          _ctrlLng.text = m.group(2)!;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Coords: ${m.group(1)}, ${m.group(2)}'),
-            backgroundColor: Colors.green[700],
-            duration: const Duration(seconds: 2),
-          ),
-        );
-        return;
+      if (m != null) { _aplicarCoords(m.group(1)!, m.group(2)!); return; }
+    }
+
+    // ── Fallback: buscar coords en el HTML (para lugares registrados) ────────
+    // Google Maps embebe siempre las coords del lugar en el body como JSON.
+    if (body != null && body.isNotEmpty) {
+      // Solo buscamos en los primeros 80KB para no procesar páginas enormes.
+      final muestra = body.length > 80000 ? body.substring(0, 80000) : body;
+
+      final bodyPatterns = [
+        // JSON-LD / schema.org: "latitude":7.123,"longitude":-72.456
+        RegExp(r'"latitude"\s*:\s*(-?\d+\.\d+)\s*,\s*"longitude"\s*:\s*(-?\d+\.\d+)'),
+        // Variante con lat/lng
+        RegExp(r'"lat"\s*:\s*(-?\d+\.\d+)\s*,\s*"lng"\s*:\s*(-?\d+\.\d+)'),
+        // @lat,lng, en scripts JS embebidos
+        RegExp(r'@(-?\d+\.\d{4,}),(-?\d+\.\d{4,}),\d+'),
+        // !3d / !4d dentro de datos embebidos
+        RegExp(r'!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)'),
+        // Coordenadas URL-encoded: latlng%3D7.123%2C-72.456
+        RegExp(r'latlng%3D(-?\d+\.\d+)%2C(-?\d+\.\d+)'),
+        // Array JS [lat, lng] con suficientes decimales
+        RegExp(r'\[(-?\d{1,3}\.\d{5,}),(-?\d{1,3}\.\d{5,})\]'),
+      ];
+
+      for (final p in bodyPatterns) {
+        final m = p.firstMatch(muestra);
+        if (m != null) { _aplicarCoords(m.group(1)!, m.group(2)!); return; }
       }
     }
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('No se pudo extraer coords. Pega el enlace de "Compartir" de Google Maps.'),
+        content: Text(
+          'No se encontraron coordenadas. '
+          'Intenta con el enlace de "Compartir" → "Copiar enlace" desde Google Maps.',
+        ),
         backgroundColor: Colors.orange,
+        duration: Duration(seconds: 5),
+      ),
+    );
+  }
+
+  void _aplicarCoords(String lat, String lng) {
+    if (!mounted) return;
+    setState(() {
+      _ctrlLat.text = lat;
+      _ctrlLng.text = lng;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('✅ Coords: $lat, $lng'),
+        backgroundColor: Colors.green[700],
+        duration: const Duration(seconds: 2),
       ),
     );
   }
