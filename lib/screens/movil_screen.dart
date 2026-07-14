@@ -880,6 +880,65 @@ class _MovilScreenState extends State<MovilScreen>
     }
   }
 
+  // ── Auto-recuperación de StreamBuilders ───────────────────────────────────
+  // En producción, un error en el stream deja la pantalla negra sin aviso.
+  // Este widget lo evita: muestra un spinner con cuenta regresiva y reconecta
+  // automáticamente en 2 segundos sin que el usuario tenga que hacer nada.
+  bool _reconectandoStream = false;
+
+  Widget _pantallaErrorStream(String canal, Object? error) {
+    // Dispara la reconexión automática en el siguiente frame para no
+    // llamar setState() dentro de build().
+    if (!_reconectandoStream) {
+      _reconectandoStream = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        await Future.delayed(const Duration(seconds: 2));
+        if (mounted) {
+          _construirStreams();
+          _reconectandoStream = false;
+          setState(() {});
+        }
+      });
+    }
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(
+              width: 36,
+              height: 36,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.5,
+                color: Color(0xff3AF500),
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Reconectando...',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+            ),
+            const SizedBox(height: 6),
+            // Botón manual por si la auto-reconexión no alcanza
+            TextButton.icon(
+              icon: const Icon(Icons.refresh_rounded, size: 16),
+              label: const Text('Reintentar ya', style: TextStyle(fontSize: 12)),
+              onPressed: () {
+                if (mounted) {
+                  _reconectandoStream = false;
+                  _construirStreams();
+                  setState(() {});
+                }
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildTarjetaDomicilio() {
     final p = _pedidoDomicilioActivo;
     if (p == null) return const SizedBox.shrink();
@@ -8372,6 +8431,8 @@ class _MovilScreenState extends State<MovilScreen>
         stream: _streamUsuarios,
         initialData: _cacheUsuarios, // evita el spinner al volver de Perfil
         builder: (context, snapUsuarios) {
+          if (snapUsuarios.hasError)
+            return _pantallaErrorStream('usuarios', snapUsuarios.error);
           if (!snapUsuarios.hasData)
             return const Center(
               child: CircularProgressIndicator(color: Colors.black),
@@ -8600,6 +8661,8 @@ class _MovilScreenState extends State<MovilScreen>
                         stream: _streamServicios,
                         initialData: _cacheServicios, // evita spinner al conectarse
                         builder: (context, snapshot) {
+                          if (snapshot.hasError)
+                            return _pantallaErrorStream('servicios', snapshot.error);
                           if (!snapshot.hasData)
                             return const Center(
                               child: CircularProgressIndicator(
