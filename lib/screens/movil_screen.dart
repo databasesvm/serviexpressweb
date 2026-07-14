@@ -58,7 +58,8 @@ class _MovilScreenState extends State<MovilScreen>
   bool _alertaInactividadMostrada = false;
 
   // --- VARIABLES DE ESTADO TÁCTICAS ---
-  final Set<int> _serviciosExpandidos = {};
+  final Set<int> _serviciosExpandidos = {}; // cuáles están abiertos ahora
+  final Set<int> _serviciosVistos = {};     // todos los que ya aparecieron (evita re-expandir los colapsados por el usuario)
   // REDISEÑO PANEL: 0 = Radar (operativo), 1 = Perfil (cuenta, datos,
   // historial). Antes todo vivía amontonado en un solo Scaffold con 4
   // íconos en el AppBar — ahora Perfil tiene su propia pestaña.
@@ -4992,7 +4993,10 @@ class _MovilScreenState extends State<MovilScreen>
           ),
         ),
         child: InkWell(
-          onTap: () => setState(() => _serviciosExpandidos.add(servicio['id'] as int)),
+          onTap: () => setState(() {
+            _serviciosExpandidos.clear(); // acordeón: colapsa las demás
+            _serviciosExpandidos.add(servicio['id'] as int);
+          }),
           child: Padding(
             padding: const EdgeInsets.all(12),
             child: Row(
@@ -6098,8 +6102,10 @@ class _MovilScreenState extends State<MovilScreen>
             ),
           ),
           child: InkWell(
-            onTap: () => setState(
-                () => _serviciosExpandidos.add(servicio['id'] as int)),
+            onTap: () => setState(() {
+              _serviciosExpandidos.clear(); // acordeón: colapsa las demás
+              _serviciosExpandidos.add(servicio['id'] as int);
+            }),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               child: Row(
@@ -8850,15 +8856,26 @@ class _MovilScreenState extends State<MovilScreen>
                           }
                           // --------------------------------------------------------
 
-                          // --- AUTO-EXPANSIÓN INDEPENDIENTE ---
-                          // Cada tarjeta nueva se expande automáticamente.
-                          // Las ya abiertas no se cierran. El usuario puede
-                          // plegar/desplegar cada una por separado.
-                          for (final s in _serviciosActivosData) {
-                            _serviciosExpandidos.add(s['id'] as int);
+                          // --- AUTO-EXPANSIÓN ACORDEÓN ---
+                          // Cuando llega un servicio nuevo (no visto aún),
+                          // colapsa todos los demás y expande solo el nuevo.
+                          // Los colapsados manualmente por el usuario no
+                          // se re-expanden (están en _serviciosVistos pero
+                          // no en _serviciosExpandidos).
+                          final nuevosIds = _serviciosActivosData
+                              .map((s) => s['id'] as int)
+                              .where((id) => !_serviciosVistos.contains(id))
+                              .toList();
+                          if (nuevosIds.isNotEmpty) {
+                            _serviciosExpandidos.clear();
+                            _serviciosExpandidos.add(nuevosIds.last);
+                            _serviciosVistos.addAll(nuevosIds);
                           }
                           // Limpiar IDs de servicios que ya no existen.
                           _serviciosExpandidos.removeWhere(
+                            (id) => !_serviciosActivosData.any((s) => s['id'] == id),
+                          );
+                          _serviciosVistos.removeWhere(
                             (id) => !_serviciosActivosData.any((s) => s['id'] == id),
                           );
 
