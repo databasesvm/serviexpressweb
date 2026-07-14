@@ -1008,7 +1008,7 @@ class _LoginScreenState extends State<LoginScreen>
                               TextField(
                                 controller: _telefonoController,
                                 decoration: InputDecoration(
-                                  labelText: 'Teléfono o usuario',
+                                  labelText: 'Usuario',
                                   filled: true,
                                   fillColor: Colors.grey[50],
                                   border: OutlineInputBorder(
