@@ -581,6 +581,42 @@ class _LoginScreenState extends State<LoginScreen>
   // RECUPERAR CONTRASEÑA
   // =========================================================================
   Future<void> _mostrarRecuperarContrasena() async {
+    // ── Próximamente ─────────────────────────────────────────────────────────
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: const Text('🔒 Recuperar contraseña',
+            style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.construction_rounded, color: Color(0xFFF59E0B), size: 48),
+            SizedBox(height: 14),
+            Text(
+              'Esta función estará disponible próximamente.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white70, fontSize: 14),
+            ),
+            SizedBox(height: 10),
+            Text(
+              'Por ahora, contacta a la Central Operativa para restablecer tu acceso.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white38, fontSize: 12),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: Navigator.of(ctx).pop,
+            child: const Text('ENTENDIDO', style: TextStyle(color: Color(0xff3AF500), fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+    return;
+    // ignore: dead_code
     final correoCtrl = TextEditingController();
     final codigoCtrl = TextEditingController();
     final nuevaClaveCtrl = TextEditingController();
