@@ -126,6 +126,8 @@ class _MovilScreenState extends State<MovilScreen>
 
   // =====================================================================
   bool _gpsEnProceso = false;
+  // Permisos críticos — banner persistente si alguno de los 3 falta
+  bool _permisosCriticosFaltantes = false;
 
   // ARQUITECTURA ANTI-PARPADEO: el StreamBuilder consume estos
   // controllers, que NUNCA cambian de identidad durante toda la vida
@@ -204,6 +206,9 @@ class _MovilScreenState extends State<MovilScreen>
           ),
         );
       }
+      // Después de que el usuario actúe (o no) en la pantalla de permisos,
+      // chequeamos silenciosamente los 3 críticos para el banner.
+      if (mounted) await _chequearPermisosCriticos();
       // OTA: verificar actualización (solo Android/iOS, no aplica en web)
       if (!kIsWeb && mounted) await OtaUpdater.verificar(context);
     });
@@ -1252,7 +1257,26 @@ class _MovilScreenState extends State<MovilScreen>
       // perdido el INSERT de pánico que llegó mientras estaba suspendida.
       // Verificamos en DB si hay alertas recientes sin atender.
       _verificarPanicoPendiente();
+      // Re-chequear permisos al volver — el usuario pudo haberlos activado
+      // desde Ajustes del sistema mientras la app estaba en segundo plano.
+      _chequearPermisosCriticos();
     }
+  }
+
+  // Chequeo SILENCIOSO de los 3 permisos críticos (notif, GPS, batería).
+  // Se llama al iniciar y al volver de background. Actualiza el banner.
+  Future<void> _chequearPermisosCriticos() async {
+    if (kIsWeb) return;
+    try {
+      final falta = await PermisosCriticosScreen.hayPermisosPendientes(
+        permisosRequeridos: {
+          TipoPermiso.notificaciones,
+          TipoPermiso.ubicacionSiempre,
+          TipoPermiso.bateria,
+        },
+      );
+      if (mounted) setState(() => _permisosCriticosFaltantes = falta);
+    } catch (_) {}
   }
 
   // Busca eventos de pánico de los últimos 2 minutos dirigidos a este móvil
@@ -7876,9 +7900,46 @@ class _MovilScreenState extends State<MovilScreen>
       // (no AppBar/FAB/BottomNav) cuando _radarTick incrementa cada 5s.
       body: ValueListenableBuilder<int>(
         valueListenable: _radarTick,
-        builder: (context, _, __) => IndexedStack(
-          index: _tabActual,
+        builder: (context, _, __) => Column(
           children: [
+            // ── Banner de permisos faltantes ──────────────────────────
+            if (_permisosCriticosFaltantes && !kIsWeb)
+              Material(
+                color: const Color(0xFFF59E0B),
+                child: InkWell(
+                  onTap: () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const PermisosCriticosScreen(
+                          permisosOpcionales: kPermisosOpcionalesMovil,
+                        ),
+                        fullscreenDialog: true,
+                      ),
+                    );
+                    _chequearPermisosCriticos();
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    child: Row(children: [
+                      const Icon(Icons.warning_amber_rounded, color: Colors.black, size: 18),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Text(
+                          '⚠️ Faltan permisos críticos — toca para activarlos',
+                          style: TextStyle(color: Colors.black, fontSize: 12, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      const Icon(Icons.arrow_forward_ios, color: Colors.black, size: 12),
+                    ]),
+                  ),
+                ),
+              ),
+            // ─────────────────────────────────────────────────────────
+            Expanded(
+              child: IndexedStack(
+                index: _tabActual,
+                children: [
           StreamBuilder<List<Map<String, dynamic>>>(
         stream: _streamUsuarios,
         initialData: _cacheUsuarios, // evita el spinner al volver de Perfil
@@ -8750,7 +8811,10 @@ class _MovilScreenState extends State<MovilScreen>
         _construirPerfilTab(),
         ],
         ), // IndexedStack
-      ), // ValueListenableBuilder
+              ),  // Expanded
+            ],
+          ), // Column
+        ), // ValueListenableBuilder
     bottomNavigationBar: BottomNavigationBar(
       currentIndex: _tabActual,
       onTap: _cambiarTab,
