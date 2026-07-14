@@ -571,6 +571,28 @@ class _CentralScreenState extends State<CentralScreen>
     return '?';
   }
 
+  /// Estado textual de un movil FN para mostrar en el grupo FARMANORTE.
+  /// Prioridad: suspendido > desconectado > en servicio > paradero > libre.
+  String _estadoMovilFn(Map<String, dynamic> m, Set<dynamic> enServicioIds) {
+    final rango = m['rango_movil'] ?? 'NOVATO';
+    final ignorados = m['fn_ignorados_hoy'] ?? 0;
+    final sufijo = '$rango · $ignorados ign. hoy';
+    if (m['suspendido'] == true) return '⛔ SUSPENDIDO · $sufijo';
+    if (m['en_linea'] != true) return '🔴 DESCONECTADO · $sufijo';
+    if (enServicioIds.contains(m['id'])) return '🚴 EN SERVICIO · $sufijo';
+    final paradero = m['paradero_actual'];
+    if (paradero != null) return '📍 FILA $paradero · $sufijo';
+    return '🟢 LIBRE · $sufijo';
+  }
+
+  Color _colorEstadoMovilFn(Map<String, dynamic> m, Set<dynamic> enServicioIds) {
+    if (m['suspendido'] == true) return Colors.red[700]!;
+    if (m['en_linea'] != true) return Colors.grey[500]!;
+    if (enServicioIds.contains(m['id'])) return Colors.orange[800]!;
+    if (m['paradero_actual'] != null) return Colors.blue[700]!;
+    return Colors.green[700]!;
+  }
+
   // Formatea la calificación 1-5 para mostrar en UI
   String _formatCalificacion(dynamic val) {
     if (val == null) return 'Sin calificar';

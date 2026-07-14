@@ -144,13 +144,10 @@ extension CentralScreenPanelControl on _CentralScreenState {
                         .toList();
 
                     // ── MOTOS FN FARMANORTE ─────────────────────────────────
+                    // Siempre se muestran TODOS los moviles FN activos,
+                    // independientemente de en_linea/suspendido/paradero.
                     final motosFn = moviles
-                        .where(
-                          (m) =>
-                              m['tiene_fn'] == true &&
-                              m['en_linea'] == true &&
-                              m['suspendido'] != true,
-                        )
+                        .where((m) => m['tiene_fn'] == true && m['activo'] == true)
                         .toList();
 
                     return ListView(
@@ -177,7 +174,7 @@ extension CentralScreenPanelControl on _CentralScreenState {
                                 const SizedBox(width: 6),
                                 const Expanded(
                                   child: Text(
-                                    'CONTROL OPERATIVO FARMANORTE',
+                                    'FARMANORTE',
                                     style: TextStyle(
                                       fontWeight: FontWeight.bold,
                                       color: Colors.white,
@@ -219,7 +216,7 @@ extension CentralScreenPanelControl on _CentralScreenState {
                             const Padding(
                               padding: EdgeInsets.all(8),
                               child: Text(
-                                'Sin motos FN en línea',
+                                'Sin motos FN registradas',
                                 style: TextStyle(color: Colors.grey, fontSize: 11),
                               ),
                             )
@@ -272,9 +269,11 @@ extension CentralScreenPanelControl on _CentralScreenState {
                                       ),
                                     ),
                                     subtitle: Text(
-                                      '${m['rango_movil'] ?? 'NOVATO'} · ${m['fn_ignorados_hoy'] ?? 0} ign. hoy',
-                                      style: const TextStyle(
-                                          fontSize: 10, color: Colors.black54),
+                                      _estadoMovilFn(m, movilesEnServicioIds),
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        color: _colorEstadoMovilFn(m, movilesEnServicioIds),
+                                      ),
                                     ),
                                     onTap: () =>
                                         _abrirMenuAccionesMovil(context, m),
@@ -285,85 +284,57 @@ extension CentralScreenPanelControl on _CentralScreenState {
                         const Divider(height: 4, color: Colors.transparent),
                         // ── FIN SECCIÓN FN ──────────────────────────────────
 
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          color: Colors.blue[50],
-                          child: Row(
-                            children: [
-                              const Expanded(
-                                child: Text(
-                                  '📍 PARADERO 1 (Expuente)',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.blue,
-                                    fontSize: 11,
-                                  ),
-                                ),
-                              ),
-                              AnimatedSwitcher(
-                                duration: const Duration(milliseconds: 220),
-                                child: Container(
-                                  key: ValueKey('exp_cnt_${filaExpuente.length}'),
-                                  margin: const EdgeInsets.only(right: 6),
-                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: filaExpuente.isNotEmpty ? Colors.blue[800] : Colors.blue[200],
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
+                        GestureDetector(
+                          onTap: () => setState(() {
+                            if (_seccionesOcultasFlota.contains('expuente')) {
+                              _seccionesOcultasFlota.remove('expuente');
+                            } else {
+                              _seccionesOcultasFlota.add('expuente');
+                            }
+                          }),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            color: Colors.blue[50],
+                            child: Row(
+                              children: [
+                                const Expanded(
                                   child: Text(
-                                    '${filaExpuente.length}',
-                                    style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                                    '📍 PARADERO 1 (Expuente)',
+                                    style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue, fontSize: 11),
                                   ),
                                 ),
-                              ),
-                              if (filaExpuente.isNotEmpty)
-                                TextButton.icon(
-                                  onPressed: () => _vaciarParadero(
-                                    'Expuente',
-                                    filaExpuente,
+                                AnimatedSwitcher(
+                                  duration: const Duration(milliseconds: 220),
+                                  child: Container(
+                                    key: ValueKey('exp_cnt_${filaExpuente.length}'),
+                                    margin: const EdgeInsets.only(right: 6),
+                                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: filaExpuente.isNotEmpty ? Colors.blue[800] : Colors.blue[200],
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: Text('${filaExpuente.length}',
+                                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
                                   ),
-                                  icon: const Icon(
-                                    Icons.delete_sweep,
-                                    size: 14,
-                                    color: Colors.red,
-                                  ),
-                                  label: const Text(
-                                    'Vaciar',
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      color: Colors.red,
+                                ),
+                                if (filaExpuente.isNotEmpty)
+                                  TextButton.icon(
+                                    onPressed: () => _vaciarParadero('Expuente', filaExpuente),
+                                    icon: const Icon(Icons.delete_sweep, size: 14, color: Colors.red),
+                                    label: const Text('Vaciar', style: TextStyle(fontSize: 10, color: Colors.red)),
+                                    style: TextButton.styleFrom(
+                                      padding: EdgeInsets.zero,
+                                      minimumSize: Size.zero,
+                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                                     ),
                                   ),
-                                  style: TextButton.styleFrom(
-                                    padding: EdgeInsets.zero,
-                                    minimumSize: const Size(40, 24),
-                                    tapTargetSize:
-                                        MaterialTapTargetSize.shrinkWrap,
-                                  ),
-                                ),
-                              IconButton(
-                                onPressed: () => setState(() {
-                                  if (_seccionesOcultasFlota.contains('expuente')) {
-                                    _seccionesOcultasFlota.remove('expuente');
-                                  } else {
-                                    _seccionesOcultasFlota.add('expuente');
-                                  }
-                                }),
-                                icon: Icon(
-                                  _seccionesOcultasFlota.contains('expuente')
-                                      ? Icons.expand_more
-                                      : Icons.expand_less,
+                                Icon(
+                                  _seccionesOcultasFlota.contains('expuente') ? Icons.expand_more : Icons.expand_less,
                                   size: 16,
                                   color: Colors.blue[400],
                                 ),
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(),
-                                visualDensity: VisualDensity.compact,
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
                         if (!_seccionesOcultasFlota.contains('expuente')) ...[
@@ -402,83 +373,57 @@ extension CentralScreenPanelControl on _CentralScreenState {
                             }),
                         ],
 
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          color: Colors.purple[50],
-                          child: Row(
-                            children: [
-                              const Expanded(
-                                child: Text(
-                                  '📍 PARADERO 2 (Memos)',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.purple,
-                                    fontSize: 11,
-                                  ),
-                                ),
-                              ),
-                              AnimatedSwitcher(
-                                duration: const Duration(milliseconds: 220),
-                                child: Container(
-                                  key: ValueKey('mem_cnt_${filaMemos.length}'),
-                                  margin: const EdgeInsets.only(right: 6),
-                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: filaMemos.isNotEmpty ? Colors.purple[800] : Colors.purple[200],
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
+                        GestureDetector(
+                          onTap: () => setState(() {
+                            if (_seccionesOcultasFlota.contains('memos')) {
+                              _seccionesOcultasFlota.remove('memos');
+                            } else {
+                              _seccionesOcultasFlota.add('memos');
+                            }
+                          }),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            color: Colors.purple[50],
+                            child: Row(
+                              children: [
+                                const Expanded(
                                   child: Text(
-                                    '${filaMemos.length}',
-                                    style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                                    '📍 PARADERO 2 (Memos)',
+                                    style: TextStyle(fontWeight: FontWeight.bold, color: Colors.purple, fontSize: 11),
                                   ),
                                 ),
-                              ),
-                              if (filaMemos.isNotEmpty)
-                                TextButton.icon(
-                                  onPressed: () =>
-                                      _vaciarParadero('Memos', filaMemos),
-                                  icon: const Icon(
-                                    Icons.delete_sweep,
-                                    size: 14,
-                                    color: Colors.red,
+                                AnimatedSwitcher(
+                                  duration: const Duration(milliseconds: 220),
+                                  child: Container(
+                                    key: ValueKey('mem_cnt_${filaMemos.length}'),
+                                    margin: const EdgeInsets.only(right: 6),
+                                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: filaMemos.isNotEmpty ? Colors.purple[800] : Colors.purple[200],
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: Text('${filaMemos.length}',
+                                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
                                   ),
-                                  label: const Text(
-                                    'Vaciar',
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      color: Colors.red,
+                                ),
+                                if (filaMemos.isNotEmpty)
+                                  TextButton.icon(
+                                    onPressed: () => _vaciarParadero('Memos', filaMemos),
+                                    icon: const Icon(Icons.delete_sweep, size: 14, color: Colors.red),
+                                    label: const Text('Vaciar', style: TextStyle(fontSize: 10, color: Colors.red)),
+                                    style: TextButton.styleFrom(
+                                      padding: EdgeInsets.zero,
+                                      minimumSize: Size.zero,
+                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                                     ),
                                   ),
-                                  style: TextButton.styleFrom(
-                                    padding: EdgeInsets.zero,
-                                    minimumSize: const Size(40, 24),
-                                    tapTargetSize:
-                                        MaterialTapTargetSize.shrinkWrap,
-                                  ),
-                                ),
-                              IconButton(
-                                onPressed: () => setState(() {
-                                  if (_seccionesOcultasFlota.contains('memos')) {
-                                    _seccionesOcultasFlota.remove('memos');
-                                  } else {
-                                    _seccionesOcultasFlota.add('memos');
-                                  }
-                                }),
-                                icon: Icon(
-                                  _seccionesOcultasFlota.contains('memos')
-                                      ? Icons.expand_more
-                                      : Icons.expand_less,
+                                Icon(
+                                  _seccionesOcultasFlota.contains('memos') ? Icons.expand_more : Icons.expand_less,
                                   size: 16,
                                   color: Colors.purple[300],
                                 ),
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(),
-                                visualDensity: VisualDensity.compact,
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
                         if (!_seccionesOcultasFlota.contains('memos')) ...[
@@ -517,85 +462,57 @@ extension CentralScreenPanelControl on _CentralScreenState {
                             }),
                         ],
 
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          color: Colors.indigo[900],
-                          child: Row(
-                            children: [
-                              const Expanded(
-                                child: Text(
-                                  '🌙 PARADERO NOCTURNO',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                    fontSize: 11,
-                                  ),
-                                ),
-                              ),
-                              AnimatedSwitcher(
-                                duration: const Duration(milliseconds: 220),
-                                child: Container(
-                                  key: ValueKey('noc_cnt_${filaNocturno.length}'),
-                                  margin: const EdgeInsets.only(right: 6),
-                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: filaNocturno.isNotEmpty ? Colors.indigo[300] : Colors.indigo[700],
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
+                        GestureDetector(
+                          onTap: () => setState(() {
+                            if (_seccionesOcultasFlota.contains('nocturno')) {
+                              _seccionesOcultasFlota.remove('nocturno');
+                            } else {
+                              _seccionesOcultasFlota.add('nocturno');
+                            }
+                          }),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            color: Colors.indigo[900],
+                            child: Row(
+                              children: [
+                                const Expanded(
                                   child: Text(
-                                    '${filaNocturno.length}',
-                                    style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                                    '🌙 PARADERO NOCTURNO',
+                                    style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 11),
                                   ),
                                 ),
-                              ),
-                              if (filaNocturno.isNotEmpty)
-                                TextButton.icon(
-                                  onPressed: () => _vaciarParadero(
-                                    'Nocturno',
-                                    filaNocturno,
+                                AnimatedSwitcher(
+                                  duration: const Duration(milliseconds: 220),
+                                  child: Container(
+                                    key: ValueKey('noc_cnt_${filaNocturno.length}'),
+                                    margin: const EdgeInsets.only(right: 6),
+                                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: filaNocturno.isNotEmpty ? Colors.indigo[300] : Colors.indigo[700],
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: Text('${filaNocturno.length}',
+                                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
                                   ),
-                                  icon: const Icon(
-                                    Icons.delete_sweep,
-                                    size: 14,
-                                    color: Colors.orangeAccent,
-                                  ),
-                                  label: const Text(
-                                    'Vaciar',
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      color: Colors.orangeAccent,
+                                ),
+                                if (filaNocturno.isNotEmpty)
+                                  TextButton.icon(
+                                    onPressed: () => _vaciarParadero('Nocturno', filaNocturno),
+                                    icon: const Icon(Icons.delete_sweep, size: 14, color: Colors.orangeAccent),
+                                    label: const Text('Vaciar', style: TextStyle(fontSize: 10, color: Colors.orangeAccent)),
+                                    style: TextButton.styleFrom(
+                                      padding: EdgeInsets.zero,
+                                      minimumSize: Size.zero,
+                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                                     ),
                                   ),
-                                  style: TextButton.styleFrom(
-                                    padding: EdgeInsets.zero,
-                                    minimumSize: const Size(40, 24),
-                                    tapTargetSize:
-                                        MaterialTapTargetSize.shrinkWrap,
-                                  ),
-                                ),
-                              IconButton(
-                                onPressed: () => setState(() {
-                                  if (_seccionesOcultasFlota.contains('nocturno')) {
-                                    _seccionesOcultasFlota.remove('nocturno');
-                                  } else {
-                                    _seccionesOcultasFlota.add('nocturno');
-                                  }
-                                }),
-                                icon: Icon(
-                                  _seccionesOcultasFlota.contains('nocturno')
-                                      ? Icons.expand_more
-                                      : Icons.expand_less,
+                                Icon(
+                                  _seccionesOcultasFlota.contains('nocturno') ? Icons.expand_more : Icons.expand_less,
                                   size: 16,
                                   color: Colors.indigo[200],
                                 ),
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(),
-                                visualDensity: VisualDensity.compact,
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
                         if (!_seccionesOcultasFlota.contains('nocturno')) ...[
@@ -637,42 +554,32 @@ extension CentralScreenPanelControl on _CentralScreenState {
                         // =====================================================
                         // SECCIÓN: EN SERVICIO
                         // =====================================================
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                          color: Colors.orange[800],
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  '🚴 EN SERVICIO  (${movilesEnServicio.length})',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                    fontSize: 11,
-                                    letterSpacing: 0.5,
+                        GestureDetector(
+                          onTap: () => setState(() {
+                            if (_seccionesOcultasFlota.contains('servicio')) {
+                              _seccionesOcultasFlota.remove('servicio');
+                            } else {
+                              _seccionesOcultasFlota.add('servicio');
+                            }
+                          }),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            color: Colors.orange[800],
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    '🚴 EN SERVICIO  (${movilesEnServicio.length})',
+                                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 11, letterSpacing: 0.5),
                                   ),
                                 ),
-                              ),
-                              IconButton(
-                                onPressed: () => setState(() {
-                                  if (_seccionesOcultasFlota.contains('servicio')) {
-                                    _seccionesOcultasFlota.remove('servicio');
-                                  } else {
-                                    _seccionesOcultasFlota.add('servicio');
-                                  }
-                                }),
-                                icon: Icon(
-                                  _seccionesOcultasFlota.contains('servicio')
-                                      ? Icons.expand_more
-                                      : Icons.expand_less,
+                                Icon(
+                                  _seccionesOcultasFlota.contains('servicio') ? Icons.expand_more : Icons.expand_less,
                                   size: 16,
                                   color: Colors.orange[200],
                                 ),
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(),
-                                visualDensity: VisualDensity.compact,
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
                         if (!_seccionesOcultasFlota.contains('servicio')) ...[
@@ -786,56 +693,46 @@ extension CentralScreenPanelControl on _CentralScreenState {
                           }),
                         ],  // if !servicio oculto
 
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                          color: Colors.green[700],
-                          child: Row(
-                            children: [
-                              const Expanded(
-                                child: Text(
-                                  '🏍️ LIBRE / SIN PARADERO',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                    fontSize: 11,
-                                  ),
-                                ),
-                              ),
-                              AnimatedSwitcher(
-                                duration: const Duration(milliseconds: 220),
-                                child: Container(
-                                  key: ValueKey('libre_cnt_${sinFila.length}'),
-                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: sinFila.isNotEmpty ? Colors.green[900] : Colors.green[600],
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
+                        GestureDetector(
+                          onTap: () => setState(() {
+                            if (_seccionesOcultasFlota.contains('libre')) {
+                              _seccionesOcultasFlota.remove('libre');
+                            } else {
+                              _seccionesOcultasFlota.add('libre');
+                            }
+                          }),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            color: Colors.green[700],
+                            child: Row(
+                              children: [
+                                const Expanded(
                                   child: Text(
-                                    '${sinFila.length}',
-                                    style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                                    '🏍️ LIBRE / SIN PARADERO',
+                                    style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 11),
                                   ),
                                 ),
-                              ),
-                              IconButton(
-                                onPressed: () => setState(() {
-                                  if (_seccionesOcultasFlota.contains('libre')) {
-                                    _seccionesOcultasFlota.remove('libre');
-                                  } else {
-                                    _seccionesOcultasFlota.add('libre');
-                                  }
-                                }),
-                                icon: Icon(
-                                  _seccionesOcultasFlota.contains('libre')
-                                      ? Icons.expand_more
-                                      : Icons.expand_less,
+                                AnimatedSwitcher(
+                                  duration: const Duration(milliseconds: 220),
+                                  child: Container(
+                                    key: ValueKey('libre_cnt_${sinFila.length}'),
+                                    margin: const EdgeInsets.only(right: 6),
+                                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: sinFila.isNotEmpty ? Colors.green[900] : Colors.green[600],
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: Text('${sinFila.length}',
+                                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                                  ),
+                                ),
+                                Icon(
+                                  _seccionesOcultasFlota.contains('libre') ? Icons.expand_more : Icons.expand_less,
                                   size: 16,
                                   color: Colors.green[200],
                                 ),
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(),
-                                visualDensity: VisualDensity.compact,
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
                         if (!_seccionesOcultasFlota.contains('libre')) ...[
@@ -874,7 +771,7 @@ extension CentralScreenPanelControl on _CentralScreenState {
                         // =====================================================
                         if (suspendidos.isNotEmpty)
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                             color: Colors.red[900],
                             child: Row(
                               children: [
@@ -932,7 +829,7 @@ extension CentralScreenPanelControl on _CentralScreenState {
                             () => _desconectadosExpandidos = !_desconectadosExpandidos,
                           ),
                           child: Container(
-                            padding: const EdgeInsets.all(8),
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                             color: Colors.grey[200],
                             child: Row(
                               children: [

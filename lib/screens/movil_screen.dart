@@ -231,8 +231,12 @@ class _MovilScreenState extends State<MovilScreen>
         // Suprimimos el banner del sistema (el radar ya muestra el servicio),
         // pero disparamos el sonido de alerta para que el piloto se entere
         // aunque tenga la pantalla encendida y la app abierta.
+        // Solo si está conectado y no suspendido — desconectados/suspendidos
+        // no deben escuchar el sonido ni ver headsup de FN.
         event.preventDefault();
-        if (mounted) _sonidos.reproducir(Sonidos.alerta);
+        if (mounted && _estaEnLinea && !_estabaSuspendido) {
+          _sonidos.reproducir(Sonidos.alerta);
+        }
       };
       OneSignal.Notifications.addForegroundWillDisplayListener(_onForegroundNotif!);
       // --------------------------------------------------
@@ -6242,10 +6246,10 @@ class _MovilScreenState extends State<MovilScreen>
             );
     }
 
-    // ── Card expandida ────────────────────────────────────────────────────────
+    // ── Card compacta FN ─────────────────────────────────────────────────────
     return Card(
       elevation: 4,
-      margin: const EdgeInsets.only(bottom: 16),
+      margin: const EdgeInsets.only(bottom: 12),
       color: Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
@@ -6255,240 +6259,196 @@ class _MovilScreenState extends State<MovilScreen>
         ),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
 
-            // ── Encabezado ────────────────────────────────────────────────
+            // ── Encabezado + timer inline ─────────────────────────────────
             Row(
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                   decoration: BoxDecoration(
                     color: Colors.indigo[900],
-                    borderRadius: BorderRadius.circular(6),
+                    borderRadius: BorderRadius.circular(5),
                   ),
                   child: const Text('FN',
                       style: TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.bold,
-                          fontSize: 12,
+                          fontSize: 11,
                           letterSpacing: 1.5)),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
                 Expanded(
                   child: Text(
                     tieneProblema
                         ? '⚠️ NOVEDAD (#${servicio['numero_movil'] ?? servicio['id']})'
-                        : 'SERVICIO ACTIVO (#${servicio['numero_movil'] ?? servicio['id']})',
+                        : 'ACTIVO (#${servicio['numero_movil'] ?? servicio['id']})',
                     style: TextStyle(
-                        fontSize: 15,
+                        fontSize: 13,
                         fontWeight: FontWeight.bold,
-                        color: tieneProblema
-                            ? Colors.red[800]
-                            : Colors.black),
+                        color: tieneProblema ? Colors.red[800] : Colors.black),
                   ),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.expand_less,
-                      color: Colors.black54),
-                  onPressed: () => setState(() =>
-                      _serviciosExpandidos
-                          .remove(servicio['id'] as int)),
+                if (mostrarReloj)
+                  Container(
+                    margin: const EdgeInsets.only(right: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: estaDemorado ? Colors.red[100] : Colors.indigo[50],
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(
+                          color: estaDemorado ? Colors.red[400]! : Colors.indigo[200]!),
+                    ),
+                    child: Text(
+                      '$efectivos/$tiempoMeta min',
+                      style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: estaDemorado ? Colors.red[800] : Colors.indigo[800]),
+                    ),
+                  ),
+                GestureDetector(
+                  onTap: () => setState(
+                      () => _serviciosExpandidos.remove(servicio['id'] as int)),
+                  child: const Icon(Icons.expand_less, color: Colors.black38, size: 20),
                 ),
               ],
             ),
 
-            // ── Tiempo ───────────────────────────────────────────────────
-            if (mostrarReloj) ...[
-              const SizedBox(height: 6),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(
-                  color: estaDemorado
-                      ? Colors.red[50]
-                      : Colors.indigo[50],
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  estado == 'en_ruta_origen'
-                      ? 'Tiempo hacia la sede: $efectivos / $tiempoMeta min'
-                      : 'Tiempo de entrega: $efectivos / $tiempoMeta min',
-                  style: TextStyle(
-                      color: estaDemorado
-                          ? Colors.red[800]
-                          : Colors.indigo[800],
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13),
-                ),
-              ),
-            ],
+            const SizedBox(height: 8),
 
-            const SizedBox(height: 12),
-
-            // ── Bloque de ruta FN ─────────────────────────────────────────
+            // ── Bloque de ruta compacto ───────────────────────────────────
             Container(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
               decoration: BoxDecoration(
                 color: Colors.indigo[50],
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.indigo[200]!),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.indigo[100]!),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Zona
+                  // Zona (una línea pequeña)
                   if (servicio['zona_fn'] != null)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Text(
-                        _fnZonaLabel(
-                            servicio['zona_fn'] as String),
-                        style: TextStyle(
-                            color: Colors.indigo[700],
-                            fontWeight: FontWeight.w600,
-                            fontSize: 13),
-                      ),
-                    ),
-
-                  // Sede solicitante
-                  Text('📦 Recoge en:',
+                    Text(
+                      _fnZonaLabel(servicio['zona_fn'] as String),
                       style: TextStyle(
-                          color: Colors.indigo[800],
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 3),
-                  Text(servicio['origen'] ?? '—',
-                      style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600)),
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          side: BorderSide(
-                              color: Colors.indigo[400]!),
-                          padding: const EdgeInsets.symmetric(
-                              vertical: 8),
-                          foregroundColor: Colors.indigo[700],
-                        ),
-                        onPressed: () async {
+                          color: Colors.indigo[600],
+                          fontWeight: FontWeight.w500,
+                          fontSize: 11),
+                    ),
+                  if (servicio['zona_fn'] != null) const SizedBox(height: 6),
+
+                  // Sede → GPS en la misma fila
+                  Row(
+                    children: [
+                      const Text('📦 ', style: TextStyle(fontSize: 13)),
+                      Expanded(
+                        child: Text(servicio['origen'] ?? '—',
+                            style: const TextStyle(
+                                fontSize: 13, fontWeight: FontWeight.w600)),
+                      ),
+                      GestureDetector(
+                        onTap: () async {
                           final lat = (servicio['origen_lat'] as num?)?.toDouble();
                           final lng = (servicio['origen_lng'] as num?)?.toDouble();
                           if (lat != null && lng != null) {
-                            _abrirMapsHaciaCoords(lat, lng,
-                                servicio['origen'] ?? 'Sede solicitante');
+                            _abrirMapsHaciaCoords(
+                                lat, lng, servicio['origen'] ?? 'Sede');
                           } else {
-                            final nombre = Uri.encodeComponent(
-                                servicio['origen'] ?? 'Sede solicitante');
+                            final q = Uri.encodeComponent(
+                                servicio['origen'] ?? 'Sede');
                             await launchUrl(
                               Uri.parse(
-                                  'https://www.google.com/maps/search/?api=1&query=$nombre'),
+                                  'https://www.google.com/maps/search/?api=1&query=$q'),
                               mode: LaunchMode.externalApplication,
                             );
                           }
                         },
-                        icon: const Icon(Icons.directions,
-                            size: 18),
-                        label: const Text(
-                            'Navegar a sede solicitante',
-                            style: TextStyle(fontSize: 13)),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.indigo[700],
+                            borderRadius: BorderRadius.circular(5),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.navigation, size: 12, color: Colors.white),
+                              SizedBox(width: 3),
+                              Text('GPS',
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold)),
+                            ],
+                          ),
+                        ),
                       ),
-                    ),
+                    ],
                   ),
 
-                  // Recogidas adicionales
+                  // Recogidas adicionales (compactas)
                   if (recogidas.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    Text('Paradas adicionales:',
-                        style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.indigo[800],
-                            fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 5),
                     ...recogidas.map((r) {
                       final rMap = r as Map<String, dynamic>;
-                      final tipo =
-                          rMap['tipo'] as String? ?? '';
-                      final nombre =
-                          rMap['nombre'] as String? ?? '';
+                      final tipo = rMap['tipo'] as String? ?? '';
+                      final nombre = rMap['nombre'] as String? ?? '';
                       final numero = rMap['numero'];
-                      final lat =
-                          (rMap['lat'] as num?)?.toDouble();
-                      final lng =
-                          (rMap['lng'] as num?)?.toDouble();
-                      final label =
-                          tipo == 'FN' && numero != null
-                              ? 'FN #$numero – $nombre'
-                              : '$tipo – $nombre';
+                      final lat = (rMap['lat'] as num?)?.toDouble();
+                      final lng = (rMap['lng'] as num?)?.toDouble();
+                      final label = tipo == 'FN' && numero != null
+                          ? 'FN #$numero – $nombre'
+                          : '$tipo – $nombre';
                       return Padding(
-                        padding:
-                            const EdgeInsets.only(bottom: 6),
+                        padding: const EdgeInsets.only(top: 4),
                         child: Row(
                           children: [
-                            Icon(
-                                Icons
-                                    .subdirectory_arrow_right,
-                                size: 14,
-                                color: Colors.indigo[400]),
-                            const SizedBox(width: 4),
+                            Icon(Icons.subdirectory_arrow_right,
+                                size: 13, color: Colors.indigo[400]),
+                            const SizedBox(width: 3),
                             Expanded(
                               child: Text(label,
-                                  style: const TextStyle(
-                                      fontSize: 13)),
+                                  style: const TextStyle(fontSize: 12)),
                             ),
-                            SizedBox(
-                              height: 30,
-                              child: ElevatedButton.icon(
-                                style: ElevatedButton
-                                    .styleFrom(
-                                  backgroundColor:
-                                      Colors.indigo[700],
-                                  foregroundColor:
-                                      Colors.white,
-                                  padding:
-                                      const EdgeInsets
-                                          .symmetric(
-                                              horizontal:
-                                                  10),
-                                  shape: RoundedRectangleBorder(
-                                      borderRadius:
-                                          BorderRadius
-                                              .circular(
-                                                  6)),
-                                  elevation: 0,
+                            GestureDetector(
+                              onTap: () async {
+                                if (lat != null && lng != null) {
+                                  _abrirMapsHaciaCoords(lat, lng, label);
+                                } else {
+                                  final q = Uri.encodeComponent(label);
+                                  await launchUrl(
+                                    Uri.parse(
+                                        'https://www.google.com/maps/search/?api=1&query=$q'),
+                                    mode: LaunchMode.externalApplication,
+                                  );
+                                }
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 7, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: Colors.indigo[600],
+                                  borderRadius: BorderRadius.circular(4),
                                 ),
-                                onPressed: () async {
-                                  if (lat != null &&
-                                      lng != null) {
-                                    _abrirMapsHaciaCoords(
-                                        lat, lng, label);
-                                  } else {
-                                    final q =
-                                        Uri.encodeComponent(
-                                            label);
-                                    await launchUrl(
-                                      Uri.parse(
-                                          'https://www.google.com/maps/search/?api=1&query=$q'),
-                                      mode: LaunchMode
-                                          .externalApplication,
-                                    );
-                                  }
-                                },
-                                icon: const Icon(
-                                    Icons.navigation,
-                                    size: 14),
-                                label: const Text('GPS',
-                                    style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight:
-                                            FontWeight
-                                                .bold)),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.navigation,
+                                        size: 11, color: Colors.white),
+                                    SizedBox(width: 2),
+                                    Text('GPS',
+                                        style: TextStyle(
+                                            fontSize: 10,
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.bold)),
+                                  ],
+                                ),
                               ),
                             ),
                           ],
@@ -6498,69 +6458,84 @@ class _MovilScreenState extends State<MovilScreen>
                   ],
 
                   // Destino
-                  const SizedBox(height: 10),
-                  Text('🏁 Entrega:',
-                      style: TextStyle(
-                          color: Colors.indigo[800],
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 2),
-                  Text(servicio['destino'] ?? '—',
-                      style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      const Text('🏁 ', style: TextStyle(fontSize: 13)),
+                      Expanded(
+                        child: Text(servicio['destino'] ?? '—',
+                            style: const TextStyle(
+                                fontSize: 13, fontWeight: FontWeight.bold)),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
 
-            // ── Método de pago ────────────────────────────────────────────
-            if (servicio['metodo_pago'] == 'Datafono') ...[
-              const SizedBox(height: 8),
-              Wrap(children: [
-                Chip(
-                  avatar: const Icon(Icons.credit_card, size: 14, color: Colors.white),
-                  label: const Text('DATÁFONO',
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 0.8)),
-                  backgroundColor: Colors.blue[700],
-                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                ),
-              ]),
-            ],
+            const SizedBox(height: 8),
 
-            // ── Instrucciones especiales ───────────────────────────────────
+            // ── Fila: info (datáfono + cobrar + instrucciones) ────────────
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                if (servicio['metodo_pago'] == 'Datafono') ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.blue[700],
+                      borderRadius: BorderRadius.circular(5),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.credit_card, size: 12, color: Colors.white),
+                        SizedBox(width: 4),
+                        Text('DATÁFONO',
+                            style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                                letterSpacing: 0.6)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                Text(
+                  textoTarifa == 'SIN TARIFA' ? 'SIN TARIFA' : 'Cobrar: $textoTarifa',
+                  style: TextStyle(
+                    color: textoTarifa == 'SIN TARIFA'
+                        ? Colors.orange[800]
+                        : Colors.green[800],
+                    fontWeight: FontWeight.bold,
+                    fontSize: 18,
+                  ),
+                ),
+              ],
+            ),
+
+            // Instrucciones especiales (compactas)
             if (servicio['instrucciones_especiales'] != null &&
                 (servicio['instrucciones_especiales'] as String).trim().isNotEmpty) ...[
-              const SizedBox(height: 10),
+              const SizedBox(height: 6),
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.all(10),
+                padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
                 decoration: BoxDecoration(
                   color: Colors.amber[50],
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.amber[400]!),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: Colors.amber[300]!),
                 ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.info_outline, color: Colors.amber[800], size: 18),
-                    const SizedBox(width: 8),
+                    Icon(Icons.info_outline, color: Colors.amber[800], size: 15),
+                    const SizedBox(width: 6),
                     Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Instrucciones:',
-                              style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.amber[900])),
-                          const SizedBox(height: 3),
-                          Text(
-                            servicio['instrucciones_especiales'].toString(),
-                            style: const TextStyle(
-                                fontSize: 13, fontWeight: FontWeight.w500),
-                          ),
-                        ],
+                      child: Text(
+                        servicio['instrucciones_especiales'].toString(),
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
                       ),
                     ),
                   ],
@@ -6568,149 +6543,162 @@ class _MovilScreenState extends State<MovilScreen>
               ),
             ],
 
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
 
-            // ── Cobrar ────────────────────────────────────────────────────
-            Text(
-              'Cobrar: \$textoTarifa',
-              style: TextStyle(
-                color: textoTarifa == 'SIN TARIFA'
-                    ? Colors.orange[800]
-                    : Colors.green,
-                fontWeight: FontWeight.bold,
-                fontSize: 22,
-              ),
-            ),
-
-            const SizedBox(height: 14),
-
-            // ── Reportar Factura ──────────────────────────────────────────
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.indigo[900],
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                ),
-                onPressed: () => _mostrarFormularioFactura(servicio),
-                icon: const Icon(Icons.receipt_long, size: 17),
-                label: const Text('Reportar Factura',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-              ),
-            ),
-
-            // ── Navegar al destino (en ruta destino) ──────────────────────
-            if (estado == 'en_ruta_destino' && !tieneProblema)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.indigo[600],
-                      foregroundColor: Colors.white,
-                      elevation: 2,
-                      padding: const EdgeInsets.symmetric(vertical: 10),
+            // ── Fila botones secundarios ──────────────────────────────────
+            Row(
+              children: [
+                // Reportar Factura
+                Expanded(
+                  child: SizedBox(
+                    height: 36,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.indigo[900],
+                        foregroundColor: Colors.white,
+                        padding: EdgeInsets.zero,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(7)),
+                      ),
+                      onPressed: () => _mostrarFormularioFactura(servicio),
+                      icon: const Icon(Icons.receipt_long, size: 14),
+                      label: const Text('Factura',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                     ),
-                    onPressed: _procesando
-                        ? null
-                        : () => _abrirNavegadorSatelital(servicio, false),
-                    icon: const Icon(Icons.explore, size: 18),
-                    label: const Text('Navegar al destino',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                   ),
                 ),
-              ),
 
-            // ── Liberar (solo Master en ruta origen) ─────────────────────
-            if (esMaster &&
-                estado == 'en_ruta_origen' &&
-                !tieneProblema)
-              Padding(
-                padding: const EdgeInsets.only(top: 10),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFFE040FB),
-                      side: const BorderSide(
-                          color: Color(0xFFE040FB)),
-                      padding: const EdgeInsets.symmetric(
-                          vertical: 12),
-                    ),
-                    onPressed: _procesando
-                        ? null
-                        : () => _liberarServicio(servicio),
-                    icon: const Icon(Icons.replay, size: 18),
-                    label: const Text('LIBERAR',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12)),
-                  ),
-                ),
-              ),
-
-            // ── Chat Central ──────────────────────────────────────────────
-            if (!tieneProblema)
-              Padding(
-                padding: const EdgeInsets.only(top: 10, bottom: 4),
-                child: Builder(builder: (context) {
-                  final tieneMsg =
-                      servicio['chat_central_movil'] == true;
-                  if (tieneMsg) {
-                    WidgetsBinding.instance
-                        .addPostFrameCallback((_) => _sonidos
-                            .reproducir(Sonidos.movilChatCentral));
-                  }
-                  return BotonTacticoAccion(
-                    icono: Icons.support_agent,
-                    texto: 'Central',
-                    colorBase: Colors.red[800]!,
-                    colorFondo: Colors.red[50]!,
-                    tieneAlarma: tieneMsg,
-                    onTap: () {
-                      Supabase.instance.client
-                          .from('servicios')
-                          .update({'chat_central_movil': false})
-                          .eq('id', servicio['id']);
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => ChatScreen(
-                            salaId:
-                                'soporte_movil_${servicio['id']}',
-                            miId: widget.usuario['id'],
-                            miNombre: widget.usuario['nombre'],
-                            titulo: 'Soporte Central',
-                            servicioId: servicio['id'],
-                            alarmaLocal: 'chat_central_movil',
-                            alarmaDestino: 'chat_movil_central',
-                            tipoFaq: TipoFaqChat.movil,
-                          ),
+                // Navegar destino (solo en_ruta_destino)
+                if (estado == 'en_ruta_destino' && !tieneProblema) ...[
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: SizedBox(
+                      height: 36,
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.indigo[600],
+                          foregroundColor: Colors.white,
+                          padding: EdgeInsets.zero,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(7)),
                         ),
-                      );
-                    },
-                  );
-                }),
-              ),
+                        onPressed: _procesando
+                            ? null
+                            : () => _abrirNavegadorSatelital(servicio, false),
+                        icon: const Icon(Icons.explore, size: 14),
+                        label: const Text('Destino',
+                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                      ),
+                    ),
+                  ),
+                ],
+
+                // Chat Central
+                if (!tieneProblema) ...[
+                  const SizedBox(width: 6),
+                  Builder(builder: (context) {
+                    final tieneMsg = servicio['chat_central_movil'] == true;
+                    if (tieneMsg) {
+                      WidgetsBinding.instance.addPostFrameCallback(
+                          (_) => _sonidos.reproducir(Sonidos.movilChatCentral));
+                    }
+                    return SizedBox(
+                      height: 36,
+                      width: 80,
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          SizedBox(
+                            width: 80,
+                            height: 36,
+                            child: ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.red[800],
+                                foregroundColor: Colors.white,
+                                padding: EdgeInsets.zero,
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(7)),
+                              ),
+                              onPressed: () {
+                                Supabase.instance.client
+                                    .from('servicios')
+                                    .update({'chat_central_movil': false})
+                                    .eq('id', servicio['id']);
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => ChatScreen(
+                                      salaId: 'soporte_movil_${servicio['id']}',
+                                      miId: widget.usuario['id'],
+                                      miNombre: widget.usuario['nombre'],
+                                      titulo: 'Soporte Central',
+                                      servicioId: servicio['id'],
+                                      alarmaLocal: 'chat_central_movil',
+                                      alarmaDestino: 'chat_movil_central',
+                                      tipoFaq: TipoFaqChat.movil,
+                                    ),
+                                  ),
+                                );
+                              },
+                              child: const Icon(Icons.support_agent, size: 18),
+                            ),
+                          ),
+                          if (tieneMsg)
+                            Positioned(
+                              top: -4,
+                              right: -4,
+                              child: Container(
+                                width: 12,
+                                height: 12,
+                                decoration: const BoxDecoration(
+                                  color: Colors.yellow,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    );
+                  }),
+                ],
+
+                // Liberar (solo Master en_ruta_origen)
+                if (esMaster && estado == 'en_ruta_origen' && !tieneProblema) ...[
+                  const SizedBox(width: 6),
+                  SizedBox(
+                    height: 36,
+                    child: OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFFE040FB),
+                        side: const BorderSide(color: Color(0xFFE040FB)),
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(7)),
+                      ),
+                      onPressed: _procesando ? null : () => _liberarServicio(servicio),
+                      child: const Text('LIBERAR',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+
+            const SizedBox(height: 8),
 
             // ── Botón de acción principal ─────────────────────────────────
-            const SizedBox(height: 8),
             AnimatedSwitcher(
               duration: const Duration(milliseconds: 280),
               transitionBuilder: (child, anim) => FadeTransition(
                 opacity: anim,
                 child: ScaleTransition(
-                    scale: Tween(begin: 0.92, end: 1.0)
-                        .animate(anim),
+                    scale: Tween(begin: 0.92, end: 1.0).animate(anim),
                     child: child),
               ),
               child: SizedBox(
-                key: ValueKey(
-                    'fn_act_$estado${estaDemorado ? '_d' : ''}'),
+                key: ValueKey('fn_act_$estado${estaDemorado ? '_d' : ''}'),
                 width: double.infinity,
-                height: 56,
+                height: 48,
                 child: botonAccion,
               ),
             ),
@@ -6718,18 +6706,21 @@ class _MovilScreenState extends State<MovilScreen>
             // ── Reportar Problema ─────────────────────────────────────────
             if (!tieneProblema)
               Padding(
-                padding: const EdgeInsets.only(top: 6),
+                padding: const EdgeInsets.only(top: 4),
                 child: SizedBox(
                   width: double.infinity,
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      side: BorderSide(color: Colors.red[400]!, width: 1),
-                      padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: TextButton.icon(
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      minimumSize: Size.zero,
                     ),
                     onPressed: () => _mostrarMenuProblema(context, servicio['id']),
-                    icon: Icon(Icons.flag_outlined, color: Colors.red[500], size: 15),
+                    icon: Icon(Icons.flag_outlined, color: Colors.red[400], size: 13),
                     label: Text('Reportar problema',
-                        style: TextStyle(color: Colors.red[500], fontWeight: FontWeight.w600, fontSize: 12)),
+                        style: TextStyle(
+                            color: Colors.red[400],
+                            fontWeight: FontWeight.w500,
+                            fontSize: 11)),
                   ),
                 ),
               ),
