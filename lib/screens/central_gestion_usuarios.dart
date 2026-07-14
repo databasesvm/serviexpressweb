@@ -221,21 +221,6 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                 style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
             centerTitle: false,
             actions: [IconButton(icon: const Icon(Icons.refresh_rounded, color: Colors.white60), onPressed: _cargar)],
-            bottom: TabBar(
-              controller: _tabCtrl,
-              indicatorColor: const Color(0xff3AF500),
-              indicatorWeight: 2,
-              labelColor: const Color(0xff3AF500),
-              unselectedLabelColor: Colors.white38,
-              labelStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700),
-              unselectedLabelStyle: const TextStyle(fontSize: 10),
-              tabs: const [
-                Tab(text: 'Solicitudes'),
-                Tab(text: 'Activar'),
-                Tab(text: 'Ascensos'),
-                Tab(text: 'Recientes'),
-              ],
-            ),
           ),
         ],
         body: _cargando

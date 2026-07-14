@@ -5728,7 +5728,7 @@ class _MovilScreenState extends State<MovilScreen>
     final facturaCtrl = TextEditingController();
     XFile? fotoFile;
 
-    // ── Recogidas: "FN293 Trapiches Paradero" (número + nombre + zona) ──────
+    // ── Recogidas: solo código "FN293" ──────────────────────────────────────
     final recogidasRaw = servicio['recogidas'];
     final List<dynamic> recogidasList =
         recogidasRaw is List ? recogidasRaw : [];
@@ -5737,13 +5737,10 @@ class _MovilScreenState extends State<MovilScreen>
         : recogidasList.map((r) {
             final rMap = r as Map<String, dynamic>;
             final tipo = rMap['tipo'] as String? ?? '';
-            final nombre = rMap['nombre'] as String? ?? '';
             final numero = rMap['numero'];
-            final zona = rMap['zona'] as String? ?? '';
-            if (tipo == 'FN' && numero != null) {
-              return zona.isNotEmpty ? 'FN$numero $nombre $zona' : 'FN$numero $nombre';
-            }
-            return zona.isNotEmpty ? '$tipo $nombre $zona' : '$tipo $nombre';
+            if (tipo == 'FN' && numero != null) return 'FN$numero';
+            // Para otros tipos, solo código sin descripción
+            return numero != null ? '$tipo$numero' : tipo;
           }).join(', ');
 
     await showModalBottomSheet(
