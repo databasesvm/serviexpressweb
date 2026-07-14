@@ -825,19 +825,22 @@ class _MotosTabState extends State<_MotosTab> {
     }
   }
 
+  int _numUsuario(Map<String, dynamic> m) {
+    final match = RegExp(r'\d+').firstMatch(m['usuario']?.toString() ?? '');
+    return int.tryParse(match?.group(0) ?? '') ?? 0;
+  }
+
   void _filtrar() {
     final q = _busqueda.text.trim().toLowerCase();
-    setState(() {
-      _filtradas = q.isEmpty
-          ? List.from(_motos)
-          : _motos
-              .where((m) =>
-                  (m['nombre'] as String? ?? '')
-                      .toLowerCase()
-                      .contains(q) ||
-                  (m['telefono'] as String? ?? '').contains(q))
-              .toList();
-    });
+    List<Map<String, dynamic>> lista = q.isEmpty
+        ? List.from(_motos)
+        : _motos
+            .where((m) =>
+                (m['nombre'] as String? ?? '').toLowerCase().contains(q) ||
+                (m['telefono'] as String? ?? '').contains(q))
+            .toList();
+    lista.sort((a, b) => _numUsuario(a).compareTo(_numUsuario(b)));
+    setState(() => _filtradas = lista);
   }
 
   Future<void> _toggleFn(Map<String, dynamic> moto) async {
