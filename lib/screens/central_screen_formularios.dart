@@ -1480,6 +1480,9 @@ extension CentralScreenFormularios on _CentralScreenState {
                                 'archivado': false,
                                 if (sLat != null) 'origen_lat': sLat,
                                 if (sLng != null) 'origen_lng': sLng,
+                                if (sede['telefono_whatsapp'] != null &&
+                                    (sede['telefono_whatsapp'] as String).isNotEmpty)
+                                  'fn_whatsapp': sede['telefono_whatsapp'] as String,
                                 if (instruccionesCtrl.text.trim().isNotEmpty)
                                   'instrucciones_especiales': instruccionesCtrl.text.trim(),
                               })

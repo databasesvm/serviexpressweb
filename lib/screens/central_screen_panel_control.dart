@@ -144,10 +144,14 @@ extension CentralScreenPanelControl on _CentralScreenState {
                         .toList();
 
                     // ── MOTOS FN FARMANORTE ─────────────────────────────────
-                    // Siempre se muestran TODOS los moviles FN activos,
-                    // independientemente de en_linea/suspendido/paradero.
+                    // Solo aparecen si están conectados y no suspendidos.
+                    // Desconectados/suspendidos se ven en sus grupos normales.
                     final motosFn = moviles
-                        .where((m) => m['tiene_fn'] == true && m['activo'] == true)
+                        .where((m) =>
+                            m['tiene_fn'] == true &&
+                            m['activo'] == true &&
+                            m['en_linea'] == true &&
+                            m['suspendido'] != true)
                         .toList();
 
                     return ListView(

@@ -354,6 +354,19 @@ class _SedeCard extends StatelessWidget {
                       style: const TextStyle(
                           color: Colors.white38, fontSize: 11),
                     ),
+                  if (sede['telefono_whatsapp'] != null &&
+                      (sede['telefono_whatsapp'] as String).isNotEmpty)
+                    Row(
+                      children: [
+                        const Text('📱', style: TextStyle(fontSize: 11)),
+                        const SizedBox(width: 3),
+                        Text(
+                          sede['telefono_whatsapp'] as String,
+                          style: const TextStyle(
+                              color: Color(0xFF25D366), fontSize: 11),
+                        ),
+                      ],
+                    ),
                 ],
               ),
             ),
@@ -416,6 +429,7 @@ class _SedeDialogState extends State<_SedeDialog> {
   final _ctrlMapsUrl = TextEditingController();
   final _ctrlLat = TextEditingController();
   final _ctrlLng = TextEditingController();
+  final _ctrlTelWA = TextEditingController();
 
   bool _guardando = false;
 
@@ -431,6 +445,7 @@ class _SedeDialogState extends State<_SedeDialog> {
       _ctrlNombre.text = s['nombre'] ?? '';
       if (s['lat'] != null) _ctrlLat.text = s['lat'].toString();
       if (s['lng'] != null) _ctrlLng.text = s['lng'].toString();
+      _ctrlTelWA.text = s['telefono_whatsapp'] as String? ?? '';
     }
   }
 
@@ -441,6 +456,7 @@ class _SedeDialogState extends State<_SedeDialog> {
     _ctrlMapsUrl.dispose();
     _ctrlLat.dispose();
     _ctrlLng.dispose();
+    _ctrlTelWA.dispose();
     super.dispose();
   }
 
@@ -550,6 +566,9 @@ class _SedeDialogState extends State<_SedeDialog> {
           : null,
       'lng': _ctrlLng.text.isNotEmpty
           ? double.tryParse(_ctrlLng.text.trim())
+          : null,
+      'telefono_whatsapp': _ctrlTelWA.text.trim().isNotEmpty
+          ? _ctrlTelWA.text.trim()
           : null,
     };
 
@@ -710,6 +729,16 @@ class _SedeDialogState extends State<_SedeDialog> {
                       ),
                     ),
                   ],
+                ),
+                const SizedBox(height: 12),
+
+                // WhatsApp
+                _label('WhatsApp de la sede (opcional)'),
+                TextFormField(
+                  controller: _ctrlTelWA,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: _inputDeco('Ej: 3001234567'),
+                  keyboardType: TextInputType.phone,
                 ),
                 const SizedBox(height: 14),
 

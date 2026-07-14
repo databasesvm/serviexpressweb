@@ -5724,7 +5724,7 @@ class _MovilScreenState extends State<MovilScreen>
     final facturaCtrl = TextEditingController();
     XFile? fotoFile;
 
-    // Formatear recogidas como texto legible
+    // ── Recogidas: "FN293 Trapiches Paradero" (número + nombre + zona) ──────
     final recogidasRaw = servicio['recogidas'];
     final List<dynamic> recogidasList =
         recogidasRaw is List ? recogidasRaw : [];
@@ -5735,9 +5735,11 @@ class _MovilScreenState extends State<MovilScreen>
             final tipo = rMap['tipo'] as String? ?? '';
             final nombre = rMap['nombre'] as String? ?? '';
             final numero = rMap['numero'];
-            return tipo == 'FN' && numero != null
-                ? 'FN #$numero $nombre'
-                : '$tipo $nombre';
+            final zona = rMap['zona'] as String? ?? '';
+            if (tipo == 'FN' && numero != null) {
+              return zona.isNotEmpty ? 'FN$numero $nombre $zona' : 'FN$numero $nombre';
+            }
+            return zona.isNotEmpty ? '$tipo $nombre $zona' : '$tipo $nombre';
           }).join(', ');
 
     await showModalBottomSheet(
@@ -5996,13 +5998,24 @@ class _MovilScreenState extends State<MovilScreen>
     Overlay.of(context).insert(overlayEntry);
 
     try {
+      // Móvil: campo 'usuario' = "movil12"
+      final String movilCodigo =
+          widget.usuario['usuario']?.toString() ?? widget.usuario['nombre']?.toString() ?? '';
+
+      // Sede: extraer "FN293" del origen "FN #293 – Trapiches"
+      final String origenStr = servicio['origen']?.toString() ?? '';
+      final mSede = RegExp(r'FN #?(\d+)').firstMatch(origenStr);
+      final String sedeCodigo = mSede != null
+          ? 'FN${mSede.group(1)}'
+          : (servicio['zona_fn']?.toString() ?? origenStr);
+
       final bytes = await fotoFile.readAsBytes();
       final base64Img =
           'data:image/jpeg;base64,${base64Encode(bytes)}';
 
       final payload = jsonEncode({
-        'movil': widget.usuario['nombre']?.toString() ?? '',
-        'sede': servicio['zona_fn']?.toString() ?? '',
+        'movil': movilCodigo,
+        'sede': sedeCodigo,
         'recogidas': recogidasStr,
         'factura': "'$factura", // comilla preserva ceros a la izq. en Sheets
         'valor': (servicio['tarifa'] as num?)?.toInt().toString() ?? '0',
@@ -6342,7 +6355,7 @@ class _MovilScreenState extends State<MovilScreen>
                     ),
                   if (servicio['zona_fn'] != null) const SizedBox(height: 6),
 
-                  // Sede → GPS en la misma fila
+                  // Sede → GPS + WhatsApp en la misma fila
                   Row(
                     children: [
                       const Text('📦 ', style: TextStyle(fontSize: 13)),
@@ -6351,6 +6364,7 @@ class _MovilScreenState extends State<MovilScreen>
                             style: const TextStyle(
                                 fontSize: 13, fontWeight: FontWeight.w600)),
                       ),
+                      // Botón GPS
                       GestureDetector(
                         onTap: () async {
                           final lat = (servicio['origen_lat'] as num?)?.toDouble();
@@ -6389,6 +6403,42 @@ class _MovilScreenState extends State<MovilScreen>
                           ),
                         ),
                       ),
+                      // Botón WhatsApp (solo si la sede tiene número)
+                      if (servicio['fn_whatsapp'] != null &&
+                          (servicio['fn_whatsapp'] as String).isNotEmpty) ...[
+                        const SizedBox(width: 6),
+                        GestureDetector(
+                          onTap: () async {
+                            String num = (servicio['fn_whatsapp'] as String)
+                                .replaceAll(RegExp(r'[^0-9]'), '');
+                            if (num.length == 10) num = '57$num';
+                            await launchUrl(
+                              Uri.parse('https://wa.me/$num'),
+                              mode: LaunchMode.externalApplication,
+                            );
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF25D366),
+                              borderRadius: BorderRadius.circular(5),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text('📱', style: TextStyle(fontSize: 11)),
+                                SizedBox(width: 2),
+                                Text('WA',
+                                    style: TextStyle(
+                                        fontSize: 11,
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold)),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
 

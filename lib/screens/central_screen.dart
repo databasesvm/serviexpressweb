@@ -315,11 +315,31 @@ class _CentralScreenState extends State<CentralScreen>
                 .select('id')
                 .eq('activo', false)
                 .not('rol', 'in', '("cliente")');
+            final nombre = doc['nombre']?.toString() ?? 'Nuevo usuario';
+            final rol = doc['rol']?.toString() ?? '';
+            final rolLabel = rol == 'local' ? 'Local' : 'Móvil';
+
+            // ── Push a todos los centrales (incluye segundo plano) ────────
+            try {
+              final centrales = await Supabase.instance.client
+                  .from('usuarios')
+                  .select('id')
+                  .eq('rol', 'central');
+              final ids = (centrales as List)
+                  .map((u) => u['id'].toString())
+                  .toList();
+              if (ids.isNotEmpty) {
+                await MotorNotificaciones.dispararRafa(
+                  idsDestinos: ids,
+                  titulo: '👤 Nuevo registro por activar',
+                  mensaje: '$rolLabel: $nombre — ve a Gestión → Activaciones',
+                  urgente: false,
+                );
+              }
+            } catch (_) {}
+
             if (mounted) {
               setState(() => _usuariosPendientes = (pendientes as List).length);
-              final nombre = doc['nombre']?.toString() ?? 'Nuevo usuario';
-              final rol = doc['rol']?.toString() ?? '';
-              final rolLabel = rol == 'local' ? 'Local' : 'Móvil';
               _sonidos.reproducir(Sonidos.centralRadar);
               ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                 content: Text('👤 $rolLabel por activar: $nombre'),
