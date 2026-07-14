@@ -5783,6 +5783,8 @@ class _MovilScreenState extends State<MovilScreen>
 
   Future<void> _mostrarFormularioFactura(Map<String, dynamic> servicio) async {
     final facturaCtrl = TextEditingController();
+    // El móvil escribe la dirección real de entrega — no se toma de la central
+    final direccionCtrl = TextEditingController();
     XFile? fotoFile;
 
     // ── Recogidas: solo código "FN293" ──────────────────────────────────────
@@ -5875,6 +5877,34 @@ class _MovilScreenState extends State<MovilScreen>
                 decoration: InputDecoration(
                   hintText: 'Ej: 123456',
                   counterText: '',
+                  filled: true,
+                  fillColor: const Color(0xFFF0F2F5),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide.none,
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(
+                        color: Colors.indigo[900]!, width: 1.5),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // DIRECCIÓN DE ENTREGA
+              const Text('DIRECCIÓN DE ENTREGA',
+                  style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.black54,
+                      letterSpacing: 0.5)),
+              const SizedBox(height: 6),
+              TextField(
+                controller: direccionCtrl,
+                textCapitalization: TextCapitalization.characters,
+                decoration: InputDecoration(
+                  hintText: 'Barrio, dirección o referencia',
                   filled: true,
                   fillColor: const Color(0xFFF0F2F5),
                   border: OutlineInputBorder(
@@ -5988,6 +6018,16 @@ class _MovilScreenState extends State<MovilScreen>
                         );
                         return;
                       }
+                      final direccion = direccionCtrl.text.trim();
+                      if (direccion.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Ingresa la dirección de entrega'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
                       if (fotoFile == null) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
@@ -6005,6 +6045,7 @@ class _MovilScreenState extends State<MovilScreen>
                         servicio: servicio,
                         factura: factura,
                         recogidasStr: recogidasStr,
+                        direccion: direccion,
                         fotoFile: fotoFile!,
                       );
                     },
@@ -6022,12 +6063,14 @@ class _MovilScreenState extends State<MovilScreen>
       ),
     );
     facturaCtrl.dispose();
+    direccionCtrl.dispose();
   }
 
   Future<void> _enviarReporteFN({
     required Map<String, dynamic> servicio,
     required String factura,
     required String recogidasStr,
+    required String direccion,
     required XFile fotoFile,
   }) async {
     // Mostrar loading
@@ -6076,7 +6119,7 @@ class _MovilScreenState extends State<MovilScreen>
         'recogidas': recogidasStr,
         'factura': "'$factura", // comilla preserva ceros a la izq. en Sheets
         'valor': (servicio['tarifa'] as num?)?.toInt().toString() ?? '0',
-        'direccion': servicio['destino']?.toString() ?? '',
+        'direccion': direccion,
         'imagen': base64Img,
       });
 
