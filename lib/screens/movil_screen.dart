@@ -5215,10 +5215,8 @@ class _MovilScreenState extends State<MovilScreen>
               : '🏁 MANTÉN PRESIONADO PARA ENTREGAR',
           colorBase: Colors.black,
           colorTexto: const Color(0xff3AF500),
-          onCompletado: () {
-            _sonidos.reproducirSuave(Sonidos.movilFinalizar);
-            _finalizarServicio(servicio, tieneProblema);
-          },
+          onInicio: () => _sonidos.reproducirSuave(Sonidos.movilFinalizar),
+          onCompletado: () => _finalizarServicio(servicio, tieneProblema),
         );
       }
     }
@@ -5814,7 +5812,7 @@ class _MovilScreenState extends State<MovilScreen>
                 inputFormatters: [
                   FilteringTextInputFormatter.digitsOnly,
                 ],
-                maxLength: 8,
+                maxLength: 6,
                 decoration: InputDecoration(
                   hintText: 'Ej: 123456',
                   counterText: '',
@@ -6255,10 +6253,8 @@ class _MovilScreenState extends State<MovilScreen>
               texto: '🏁 MANTÉN PRESIONADO PARA ENTREGAR',
               colorBase: Colors.indigo[900]!,
               colorTexto: Colors.white,
-              onCompletado: () {
-                _sonidos.reproducirSuave(Sonidos.movilFinalizar);
-                _finalizarServicio(servicio, tieneProblema);
-              },
+              onInicio: () => _sonidos.reproducirSuave(Sonidos.movilFinalizar),
+              onCompletado: () => _finalizarServicio(servicio, tieneProblema),
             );
     }
 

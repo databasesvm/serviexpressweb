@@ -26,6 +26,7 @@ class BotonPresionSostenida extends StatefulWidget {
   final Color colorBase;
   final Color colorTexto;
   final VoidCallback onCompletado;
+  final VoidCallback? onInicio; // se llama al iniciar la presión
 
   const BotonPresionSostenida({
     super.key,
@@ -33,6 +34,7 @@ class BotonPresionSostenida extends StatefulWidget {
     required this.colorBase,
     required this.colorTexto,
     required this.onCompletado,
+    this.onInicio,
   });
 
   @override
@@ -67,6 +69,7 @@ class _BotonPresionSostenidaState extends State<BotonPresionSostenida>
   Widget build(BuildContext context) {
     return GestureDetector(
       onLongPressStart: (_) {
+        widget.onInicio?.call(); // sonido al inicio de la presión
         setState(() => _presionado = true);
         _ctrl.forward(from: 0);
       },

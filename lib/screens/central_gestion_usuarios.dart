@@ -230,13 +230,13 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
               Padding(
                 padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
                 child: Row(children: [
-                  _statBox('\${_solicitudes.length}', 'Solicitudes', const Color(0xFFF59E0B), onTap: () => _tabCtrl.animateTo(0)),
+                  _statBox('${_solicitudes.length}', 'Solicitudes', const Color(0xFFF59E0B), onTap: () => _tabCtrl.animateTo(0)),
                   const SizedBox(width: 8),
-                  _statBox('\${_activaciones.length}', 'Por activar', const Color(0xFF3B82F6), onTap: () => _tabCtrl.animateTo(1)),
+                  _statBox('${_activaciones.length}', 'Por activar', const Color(0xFF3B82F6), onTap: () => _tabCtrl.animateTo(1)),
                   const SizedBox(width: 8),
-                  _statBox('\${_moviles.length}', 'Móviles', const Color(0xff3AF500), onTap: () => _tabCtrl.animateTo(2)),
+                  _statBox('${_moviles.length}', 'Móviles', const Color(0xff3AF500), onTap: () => _tabCtrl.animateTo(2)),
                   const SizedBox(width: 8),
-                  _statBox('\${_registros.length}', 'Recientes', const Color(0xFFA855F7), onTap: () => _tabCtrl.animateTo(3)),
+                  _statBox('${_registros.length}', 'Recientes', const Color(0xFFA855F7), onTap: () => _tabCtrl.animateTo(3)),
                 ]),
               ),
               // ── Búsqueda ───────────────────────────────────────────────
