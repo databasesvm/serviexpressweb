@@ -19,10 +19,14 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:latlong2/latlong.dart' hide Path; // <--- MOTOR DE DISTANCIAS (hide Path evita conflicto con ui.Path)
 import 'package:image_picker/image_picker.dart';
+import 'dart:convert';
+import 'dart:io';
+import 'package:http/http.dart' as http;
 import 'package:serviexpress_app/utils/auth_helper.dart'; // hashContrasena — cambio de contraseña
 import 'package:serviexpress_app/utils/widgets_compartidos.dart'; // PulsingPanicoButton y otros widgets compartidos
 import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart' show FilteringTextInputFormatter;
 
 part 'movil_widgets.dart';
 
@@ -5708,6 +5712,329 @@ class _MovilScreenState extends State<MovilScreen>
     );
   }
 
+  // ── Reporte de Factura FN — bottom sheet inline ─────────────────────────────
+  static const String _kFnWebAppUrl =
+      'https://script.google.com/macros/s/AKfycbx0X01UtWvlZnIZaMltkSoeOovj4m_Fi_HfLlM-K1oMEbZ9DIe-kInUZ73dxPQfNxe88w/exec';
+
+  Future<void> _mostrarFormularioFactura(Map<String, dynamic> servicio) async {
+    final facturaCtrl = TextEditingController();
+    XFile? fotoFile;
+
+    // Formatear recogidas como texto legible
+    final recogidasRaw = servicio['recogidas'];
+    final List<dynamic> recogidasList =
+        recogidasRaw is List ? recogidasRaw : [];
+    final String recogidasStr = recogidasList.isEmpty
+        ? 'Sin recogidas'
+        : recogidasList.map((r) {
+            final rMap = r as Map<String, dynamic>;
+            final tipo = rMap['tipo'] as String? ?? '';
+            final nombre = rMap['nombre'] as String? ?? '';
+            final numero = rMap['numero'];
+            return tipo == 'FN' && numero != null
+                ? 'FN #$numero $nombre'
+                : '$tipo $nombre';
+          }).join(', ');
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => Padding(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 20,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 28,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Handle
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Título
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.indigo[900],
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Text('FN',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 11,
+                            letterSpacing: 1.2)),
+                  ),
+                  const SizedBox(width: 8),
+                  const Text('Reportar Factura',
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 16)),
+                ],
+              ),
+              const SizedBox(height: 20),
+
+              // NRO. FACTURA
+              const Text('NRO. FACTURA',
+                  style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.black54,
+                      letterSpacing: 0.5)),
+              const SizedBox(height: 6),
+              TextField(
+                controller: facturaCtrl,
+                keyboardType: TextInputType.number,
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                ],
+                maxLength: 8,
+                decoration: InputDecoration(
+                  hintText: 'Ej: 123456',
+                  counterText: '',
+                  filled: true,
+                  fillColor: const Color(0xFFF0F2F5),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide.none,
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(
+                        color: Colors.indigo[900]!, width: 1.5),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // FOTO DEL SOPORTE
+              const Text('FOTO DEL SOPORTE',
+                  style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.black54,
+                      letterSpacing: 0.5)),
+              const SizedBox(height: 8),
+
+              if (fotoFile == null)
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      side: BorderSide(color: Colors.indigo[300]!),
+                      foregroundColor: Colors.indigo[700],
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                    ),
+                    onPressed: () async {
+                      final picked = await ImagePicker().pickImage(
+                        source: ImageSource.camera,
+                        maxWidth: 1000,
+                        imageQuality: 70,
+                      );
+                      if (picked != null)
+                        setSheet(() => fotoFile = picked);
+                    },
+                    icon: const Icon(Icons.camera_alt_outlined, size: 20),
+                    label: const Text('Tomar foto',
+                        style: TextStyle(fontWeight: FontWeight.w600)),
+                  ),
+                )
+              else
+                GestureDetector(
+                  onTap: () async {
+                    final picked = await ImagePicker().pickImage(
+                      source: ImageSource.camera,
+                      maxWidth: 1000,
+                      imageQuality: 70,
+                    );
+                    if (picked != null)
+                      setSheet(() => fotoFile = picked);
+                  },
+                  child: Stack(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: Image.file(
+                          File(fotoFile!.path),
+                          height: 140,
+                          width: double.infinity,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                      Positioned(
+                        top: 8,
+                        right: 8,
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: Colors.black54,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: const Icon(Icons.camera_alt,
+                              color: Colors.white, size: 16),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+              const SizedBox(height: 24),
+
+              // ENVIAR REPORTE
+              SizedBox(
+                width: double.infinity,
+                child: StatefulBuilder(
+                  builder: (ctx2, setBtn) => ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF00a650),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      elevation: 3,
+                    ),
+                    onPressed: () async {
+                      final factura = facturaCtrl.text.trim();
+                      if (factura.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Ingresa el número de factura'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
+                      if (fotoFile == null) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content:
+                                Text('Toma la foto del soporte físico'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
+                      // Mostrar spinner
+                      setBtn(() {});
+                      Navigator.of(ctx).pop();
+                      await _enviarReporteFN(
+                        servicio: servicio,
+                        factura: factura,
+                        recogidasStr: recogidasStr,
+                        fotoFile: fotoFile!,
+                      );
+                    },
+                    child: const Text('ENVIAR REPORTE',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 15,
+                            letterSpacing: 0.5)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    facturaCtrl.dispose();
+  }
+
+  Future<void> _enviarReporteFN({
+    required Map<String, dynamic> servicio,
+    required String factura,
+    required String recogidasStr,
+    required XFile fotoFile,
+  }) async {
+    // Mostrar loading
+    if (!mounted) return;
+    final overlayEntry = OverlayEntry(
+      builder: (_) => const ColoredBox(
+        color: Color(0xCCFFFFFF),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(color: Color(0xFF3AF500)),
+              SizedBox(height: 14),
+              Text('Enviando reporte...',
+                  style: TextStyle(
+                      color: Colors.black87,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                      decoration: TextDecoration.none)),
+            ],
+          ),
+        ),
+      ),
+    );
+    Overlay.of(context).insert(overlayEntry);
+
+    try {
+      final bytes = await fotoFile.readAsBytes();
+      final base64Img =
+          'data:image/jpeg;base64,${base64Encode(bytes)}';
+
+      final payload = jsonEncode({
+        'movil': widget.usuario['nombre']?.toString() ?? '',
+        'sede': servicio['zona_fn']?.toString() ?? '',
+        'recogidas': recogidasStr,
+        'factura': "'$factura", // comilla preserva ceros a la izq. en Sheets
+        'valor': (servicio['tarifa'] as num?)?.toInt().toString() ?? '0',
+        'direccion': servicio['destino']?.toString() ?? '',
+        'imagen': base64Img,
+      });
+
+      await http.post(
+        Uri.parse(_kFnWebAppUrl),
+        headers: {'Content-Type': 'text/plain;charset=utf-8'},
+        body: payload,
+      );
+
+      overlayEntry.remove();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Reporte enviado correctamente'),
+            backgroundColor: Color(0xFF00a650),
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      overlayEntry.remove();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al enviar reporte: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   // ── Etiqueta legible de zona FN ─────────────────────────────────────────────
   String _fnZonaLabel(String z) {
     switch (z) {
@@ -6266,10 +6593,7 @@ class _MovilScreenState extends State<MovilScreen>
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 10),
                 ),
-                onPressed: () => launchUrl(
-                  Uri.parse('https://databasesvm.github.io/appweb/'),
-                  mode: LaunchMode.externalApplication,
-                ),
+                onPressed: () => _mostrarFormularioFactura(servicio),
                 icon: const Icon(Icons.receipt_long, size: 17),
                 label: const Text('Reportar Factura',
                     style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
