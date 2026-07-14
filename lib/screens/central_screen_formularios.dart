@@ -1247,7 +1247,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                     const SizedBox(height: 8),
 
                     // ── Destino ─────────────────────────────────────────────
-                    const Text('Destino:',
+                    const Text('Destino (opcional):',
                         style: TextStyle(
                             fontWeight: FontWeight.bold,
                             color: Colors.black54,
@@ -1277,7 +1277,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                       controller: tarifaCtrl,
                       keyboardType: TextInputType.number,
                       decoration: InputDecoration(
-                        hintText: '\$0',
+                        hintText: 'Mínimo \$4.000',
                         prefixIcon: const Icon(Icons.attach_money),
                         border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8)),
@@ -1366,16 +1366,18 @@ extension CentralScreenFormularios on _CentralScreenState {
                           );
                           return;
                         }
-                        if (destinoCtrl.text.trim().isEmpty) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                                content: Text('Ingresa el destino')),
-                          );
-                          return;
-                        }
                         final tarifa = double.tryParse(
                                 tarifaCtrl.text.replaceAll(',', '.')) ??
                             0;
+                        if (tarifa < 4000) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('La tarifa mínima es \$4.000'),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                          return;
+                        }
 
                         setDialogState(() => procesando = true);
 

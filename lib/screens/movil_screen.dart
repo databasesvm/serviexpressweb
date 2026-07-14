@@ -5882,9 +5882,8 @@ class _MovilScreenState extends State<MovilScreen>
                         borderRadius: BorderRadius.circular(10),
                         child: Image.file(
                           File(fotoFile!.path),
-                          height: 140,
                           width: double.infinity,
-                          fit: BoxFit.cover,
+                          fit: BoxFit.contain, // muestra la foto completa sin recortar
                         ),
                       ),
                       Positioned(
