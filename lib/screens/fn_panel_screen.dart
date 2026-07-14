@@ -476,47 +476,50 @@ class _SedeDialogState extends State<_SedeDialog> {
 
     if (esCorta) {
       if (kIsWeb) {
-        setState(() => _guardando = false);
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'En Web: abre el enlace en el navegador, '
-              'copia la URL completa de la barra de direcciones y pégala aquí.',
+        // En web hay CORS — usamos allorigins.win como proxy servidor.
+        // Hace la petición server-side, sigue los redirects y devuelve el HTML.
+        try {
+          final proxyUrl =
+              'https://api.allorigins.win/get?url=${Uri.encodeComponent(raw)}';
+          final dio = Dio(BaseOptions(
+            connectTimeout: const Duration(seconds: 15),
+            receiveTimeout: const Duration(seconds: 15),
+          ));
+          final resp = await dio.get<Map<String, dynamic>>(proxyUrl);
+          final data = resp.data;
+          urlFinal = (data?['status']?['url'] as String?) ?? raw;
+          body = data?['contents'] as String?;
+        } catch (_) {
+          urlFinal = raw;
+        }
+      } else {
+        // Android/iOS: seguimos el redirect directamente Y leemos el body.
+        // Para lugares registrados la URL final puede no tener @lat,lng
+        // en el path, pero el HTML siempre embebe las coords del lugar.
+        try {
+          final dio = Dio(BaseOptions(
+            headers: {
+              'User-Agent':
+                  'Mozilla/5.0 (Linux; Android 12; Mobile) AppleWebKit/537.36 '
+                  '(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+            },
+            followRedirects: true,
+            maxRedirects: 10,
+            connectTimeout: const Duration(seconds: 12),
+            receiveTimeout: const Duration(seconds: 12),
+          ));
+          final resp = await dio.get<String>(
+            raw,
+            options: Options(
+              validateStatus: (_) => true,
+              responseType: ResponseType.plain,
             ),
-            backgroundColor: Colors.orange,
-            duration: Duration(seconds: 6),
-          ),
-        );
-        return;
-      }
-
-      // Android/iOS: seguimos el redirect Y leemos el body.
-      // Para lugares registrados (negocios) la URL final puede no tener
-      // @lat,lng en el path, pero el HTML siempre embebe las coords.
-      try {
-        final dio = Dio(BaseOptions(
-          headers: {
-            'User-Agent':
-                'Mozilla/5.0 (Linux; Android 12; Mobile) AppleWebKit/537.36 '
-                '(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
-          },
-          followRedirects: true,
-          maxRedirects: 10,
-          connectTimeout: const Duration(seconds: 12),
-          receiveTimeout: const Duration(seconds: 12),
-        ));
-        final resp = await dio.get<String>(
-          raw,
-          options: Options(
-            validateStatus: (_) => true,
-            responseType: ResponseType.plain,
-          ),
-        );
-        urlFinal = resp.realUri.toString();
-        body = resp.data;
-      } catch (_) {
-        urlFinal = raw;
+          );
+          urlFinal = resp.realUri.toString();
+          body = resp.data;
+        } catch (_) {
+          urlFinal = raw;
+        }
       }
     }
 
