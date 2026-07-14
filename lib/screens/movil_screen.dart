@@ -188,6 +188,8 @@ class _MovilScreenState extends State<MovilScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Receptor de mensajes del foreground service (aviso de desconexión)
+    if (!kIsWeb) addBgDataCallback(_onBgServiceData);
 
     // PERMISOS CRÍTICOS — chequeo SILENCIOSO primero, sin mostrar nada.
     // Antes esta pantalla aparecía SIEMPRE al abrir la app, incluso con
@@ -1048,6 +1050,7 @@ class _MovilScreenState extends State<MovilScreen>
     // silenciar() en lugar de dispose(): SonidoManager es singleton —
     // dispose() destruiría los AudioPlayers para todas las pantallas activas.
     _sonidos.silenciar();
+    if (!kIsWeb) removeBgDataCallback(_onBgServiceData);
     super.dispose();
   }
 
@@ -1247,19 +1250,31 @@ class _MovilScreenState extends State<MovilScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Cuando la app vuelve de segundo plano es el momento de MÁS
-    // riesgo de que el canal haya muerto (el sistema operativo suele
-    // suspender la red al minimizar). Reconstruimos de inmediato en
-    // vez de esperar hasta el próximo tick de los 30s.
-    if (state == AppLifecycleState.resumed && mounted) {
-      _construirStreams();
-      // Cuando la app vuelve del background, el canal Realtime pudo haber
-      // perdido el INSERT de pánico que llegó mientras estaba suspendida.
-      // Verificamos en DB si hay alertas recientes sin atender.
-      _verificarPanicoPendiente();
-      // Re-chequear permisos al volver — el usuario pudo haberlos activado
-      // desde Ajustes del sistema mientras la app estaba en segundo plano.
-      _chequearPermisosCriticos();
+    switch (state) {
+      case AppLifecycleState.resumed:
+        // App vuelve al frente — reconstruir streams y reiniciar heartbeat.
+        // También reseteamos el timer de inactividad del foreground service
+        // para que las 2h cuenten desde que el moto está activo en la app.
+        if (mounted) {
+          _construirStreams();
+          _verificarPanicoPendiente();
+          _chequearPermisosCriticos();
+          if (_estaEnLinea) {
+            _iniciarHeartbeat();
+            if (!kIsWeb) resetBgInactivityTimer();
+          }
+        }
+        break;
+
+      case AppLifecycleState.paused:
+        // App va a segundo plano. Enviar ping inmediato y ceder el control
+        // al foreground service para que siga pinguando cada 60s.
+        if (_estaEnLinea) _enviarPing();
+        _detenerHeartbeat();
+        break;
+
+      default:
+        break;
     }
   }
 
@@ -2336,6 +2351,50 @@ class _MovilScreenState extends State<MovilScreen>
     _heartbeatTimer?.cancel();
     _heartbeatTimer = null;
   }
+
+  // Receptor de mensajes del foreground service.
+  // Se llama cuando el servicio envía sendDataToMain() — p.ej. aviso de desconexión.
+  void _onBgServiceData(Object data) {
+    if (!mounted) return;
+    if (data is! Map) return;
+    final tipo = data['tipo'];
+    if (tipo == 'aviso_desconexion') {
+      final minutos = data['minutos'] as int? ?? 5;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          backgroundColor: const Color(0xFF1A1A1A),
+          title: const Text(
+            '⏱️ Inactividad detectada',
+            style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 16),
+          ),
+          content: Text(
+            'Llevas 2 horas conectado sin recibir servicios.\n\n'
+            'Serás desconectado automáticamente en $minutos minutos.\n'
+            'Abre la app o sigue activo para continuar recibiendo servicios.',
+            style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
+          ),
+          actions: [
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xff3AF500),
+                foregroundColor: Colors.black,
+              ),
+              onPressed: () {
+                Navigator.pop(ctx);
+                // Resetear el timer — el moto quiere seguir conectado
+                if (!kIsWeb) resetBgInactivityTimer();
+              },
+              child: const Text('SEGUIR CONECTADO', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
 
   Future<void> _enviarPing() async {
     try {

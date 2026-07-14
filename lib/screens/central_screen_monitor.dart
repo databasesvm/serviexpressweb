@@ -29,7 +29,7 @@ extension CentralScreenMonitor on _CentralScreenState {
 
       if (!mounted) return;
       showDialog(
-        context: context, // ignore: use_build_context_synchronously
+        context: context,
         builder: (context) => AlertDialog(
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
