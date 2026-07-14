@@ -165,7 +165,7 @@ class _ServiMotoTaskHandler extends TaskHandler {
         .inHours;
     if (horas < _kMaxHorasConectado) return;
 
-    // ── 4. Comprobar si tiene servicio activo en DB ─────────────────────────
+    // ── 4. Comprobar si tiene servicio activo o está en fila de paradero ───
     try {
       final activos = await Supabase.instance.client
           .from('servicios')
@@ -181,6 +181,19 @@ class _ServiMotoTaskHandler extends TaskHandler {
 
       if ((activos as List).isNotEmpty) {
         // Tiene servicio activo → reiniciar contador silenciosamente
+        await prefs.setInt(kBgStartTime, ahora.millisecondsSinceEpoch);
+        return;
+      }
+
+      // Verificar si está en fila de un paradero
+      final usuario = await Supabase.instance.client
+          .from('usuarios')
+          .select('paradero_actual')
+          .eq('id', userId)
+          .maybeSingle();
+
+      if (usuario != null && usuario['paradero_actual'] != null) {
+        // Está en fila esperando → reiniciar contador silenciosamente
         await prefs.setInt(kBgStartTime, ahora.millisecondsSinceEpoch);
         return;
       }

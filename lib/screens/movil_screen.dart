@@ -7955,51 +7955,57 @@ class _MovilScreenState extends State<MovilScreen>
       // IndexedStack mantiene ambas pestañas vivas en el árbol de widgets,
       // así el radar sigue recibiendo datos del stream mientras el móvil
       // está en Perfil — sin spinner al volver.
-      // OPTIMIZACIÓN: ValueListenableBuilder reconstruye solo el body
-      // (no AppBar/FAB/BottomNav) cuando _radarTick incrementa cada 5s.
-      body: ValueListenableBuilder<int>(
-        valueListenable: _radarTick,
-        builder: (context, _, __) => Column(
-          children: [
-            // ── Banner de permisos faltantes ──────────────────────────
-            if (_permisosCriticosFaltantes && !kIsWeb)
-              Material(
-                color: const Color(0xFFF59E0B),
-                child: InkWell(
-                  onTap: () async {
-                    await Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const PermisosCriticosScreen(
-                          permisosOpcionales: kPermisosOpcionalesMovil,
-                        ),
-                        fullscreenDialog: true,
+      // OPTIMIZACIÓN: Column y banner FUERA del ValueListenableBuilder para que
+      // el banner no se reconstruya cada 5s. Solo el IndexedStack hace rebuild.
+      body: Column(
+        children: [
+          // ── Banner de permisos — solo reacciona a setState, no al radarTick ──
+          if (_permisosCriticosFaltantes && !kIsWeb)
+            Material(
+              color: const Color(0xFFF59E0B),
+              child: InkWell(
+                onTap: () async {
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const PermisosCriticosScreen(
+                        permisosOpcionales: kPermisosOpcionalesMovil,
                       ),
-                    );
-                    _chequearPermisosCriticos();
-                  },
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                    child: Row(children: [
-                      const Icon(Icons.warning_amber_rounded, color: Colors.black, size: 18),
-                      const SizedBox(width: 8),
-                      const Expanded(
-                        child: Text(
-                          '⚠️ Faltan permisos críticos — toca para activarlos',
-                          style: TextStyle(color: Colors.black, fontSize: 12, fontWeight: FontWeight.bold),
-                        ),
+                      fullscreenDialog: true,
+                    ),
+                  );
+                  _chequearPermisosCriticos();
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  child: Row(children: [
+                    const Icon(Icons.warning_amber_rounded, color: Colors.black, size: 18),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        '⚠️ Faltan permisos críticos — toca para activarlos',
+                        style: TextStyle(color: Colors.black, fontSize: 12, fontWeight: FontWeight.bold),
                       ),
-                      const Icon(Icons.arrow_forward_ios, color: Colors.black, size: 12),
-                    ]),
-                  ),
+                    ),
+                    const Icon(Icons.arrow_forward_ios, color: Colors.black, size: 12),
+                  ]),
                 ),
               ),
-            // ─────────────────────────────────────────────────────────
-            Expanded(
-              child: IndexedStack(
+            ),
+          // ── Contenido principal ──────────────────────────────────────────
+          Expanded(
+            child: ValueListenableBuilder<int>(
+              valueListenable: _radarTick,
+              builder: (context, _, __) => IndexedStack(
                 index: _tabActual,
                 children: [
-          StreamBuilder<List<Map<String, dynamic>>>(
+                  // Pestaña servicios — RepaintBoundary propio para que la GPU
+                  // no re-rasterice esta pestaña cuando cambia la de perfil.
+                  // TickerMode desactiva sus animaciones cuando está oculta.
+                  RepaintBoundary(
+                    child: TickerMode(
+                      enabled: _tabActual == 0,
+                      child: StreamBuilder<List<Map<String, dynamic>>>(
         stream: _streamUsuarios,
         initialData: _cacheUsuarios, // evita el spinner al volver de Perfil
         builder: (context, snapUsuarios) {
@@ -8867,13 +8873,22 @@ class _MovilScreenState extends State<MovilScreen>
           );
         },
           ),
-        _construirPerfilTab(),
+                    ), // TickerMode servicios
+                  ), // RepaintBoundary servicios
+                  // Pestaña perfil — RepaintBoundary + TickerMode
+                  // (animaciones desactivadas cuando no está visible)
+                  RepaintBoundary(
+                    child: TickerMode(
+                      enabled: _tabActual == 1,
+                      child: _construirPerfilTab(),
+                    ),
+                  ),
+                ],
+              ), // IndexedStack
+          ), // ValueListenableBuilder
+        ),  // Expanded
         ],
-        ), // IndexedStack
-              ),  // Expanded
-            ],
-          ), // Column
-        ), // ValueListenableBuilder
+      ), // Column
     bottomNavigationBar: BottomNavigationBar(
       currentIndex: _tabActual,
       onTap: _cambiarTab,
