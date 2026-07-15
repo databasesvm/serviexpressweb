@@ -2222,20 +2222,22 @@ class _MovilScreenState extends State<MovilScreen>
       // El ban check se movió al timer de 30s para no hacer 12 queries/min.
       if (mounted) _radarTick.value++;
 
-      // 3. Control de Inactividad (80 min desconecta, 60 min avisa)
-      if (_estaEnLinea && _serviciosActivosData.isEmpty) {
+      // 3. Control de Inactividad (120 min desconecta, 100 min avisa)
+      // Solo aplica si no tiene servicios activos Y no está en paradero.
+      final enParadero = _miParaderoCache != null;
+      if (_estaEnLinea && _serviciosActivosData.isEmpty && !enParadero) {
         final inactividad = DateTime.now()
             .toUtc()
             .difference(_ultimaActividadUtc)
             .inMinutes;
-        if (inactividad >= 80) {
+        if (inactividad >= 120) {
           _autoDesconectarPorInactividad();
           return;
-        } else if (inactividad >= 60 && !_alertaInactividadMostrada) {
+        } else if (inactividad >= 100 && !_alertaInactividadMostrada) {
           _alertaInactividadMostrada = true;
           _mostrarAlertaSigoActivo();
         }
-      } else if (_estaEnLinea && _serviciosActivosData.isNotEmpty) {
+      } else if (_estaEnLinea && (_serviciosActivosData.isNotEmpty || enParadero)) {
         _ultimaActividadUtc = DateTime.now().toUtc();
         _alertaInactividadMostrada = false;
       }
@@ -5918,75 +5920,9 @@ class _MovilScreenState extends State<MovilScreen>
                   ),
                 ),
               ),
-              const SizedBox(height: 24),
-
-              // ENVIAR REPORTE — siempre visible, encima de la foto
-              SizedBox(
-                width: double.infinity,
-                child: StatefulBuilder(
-                  builder: (ctx2, setBtn) => ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF00a650),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
-                      elevation: 3,
-                    ),
-                    onPressed: () async {
-                      final factura = facturaCtrl.text.trim();
-                      if (factura.isEmpty) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Ingresa el número de factura'),
-                            backgroundColor: Colors.red,
-                          ),
-                        );
-                        return;
-                      }
-                      final direccion = direccionCtrl.text.trim();
-                      if (direccion.isEmpty) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Ingresa la dirección de entrega'),
-                            backgroundColor: Colors.red,
-                          ),
-                        );
-                        return;
-                      }
-                      if (fotoFile == null) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content:
-                                Text('Toma la foto del soporte físico'),
-                            backgroundColor: Colors.red,
-                          ),
-                        );
-                        return;
-                      }
-                      // Mostrar spinner
-                      setBtn(() {});
-                      Navigator.of(ctx).pop();
-                      await _enviarReporteFN(
-                        servicio: servicio,
-                        factura: factura,
-                        recogidasStr: recogidasStr,
-                        direccion: direccion,
-                        fotoFile: fotoFile!,
-                      );
-                    },
-                    child: const Text('ENVIAR REPORTE',
-                        style: TextStyle(
-                            fontWeight: FontWeight.w800,
-                            fontSize: 15,
-                            letterSpacing: 0.5)),
-                  ),
-                ),
-              ),
-
               const SizedBox(height: 16),
 
-              // FOTO DEL SOPORTE — debajo del botón para que no lo tape
+              // FOTO DEL SOPORTE
               const Text('FOTO DEL SOPORTE',
                   style: TextStyle(
                       fontSize: 11,
@@ -6060,6 +5996,70 @@ class _MovilScreenState extends State<MovilScreen>
                     ],
                   ),
                 ),
+
+              const SizedBox(height: 24),
+
+              // ENVIAR REPORTE
+              SizedBox(
+                width: double.infinity,
+                child: StatefulBuilder(
+                  builder: (ctx2, setBtn) => ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF00a650),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      elevation: 3,
+                    ),
+                    onPressed: () async {
+                      final factura = facturaCtrl.text.trim();
+                      if (factura.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Ingresa el número de factura'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
+                      final direccion = direccionCtrl.text.trim();
+                      if (direccion.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Ingresa la dirección de entrega'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
+                      if (fotoFile == null) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Toma la foto del soporte físico'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
+                      setBtn(() {});
+                      Navigator.of(ctx).pop();
+                      await _enviarReporteFN(
+                        servicio: servicio,
+                        factura: factura,
+                        recogidasStr: recogidasStr,
+                        direccion: direccion,
+                        fotoFile: fotoFile!,
+                      );
+                    },
+                    child: const Text('ENVIAR REPORTE',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 15,
+                            letterSpacing: 0.5)),
+                  ),
+                ),
+              ),
             ],
           ),
         ),

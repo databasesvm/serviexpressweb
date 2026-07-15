@@ -31,8 +31,10 @@ Future<void> initBackgroundService() async {
       channelName: 'ServiExpress activo',
       channelDescription:
           'Mantiene la app activa mientras el moto está conectado',
-      channelImportance: NotificationChannelImportance.LOW,
-      priority: NotificationPriority.LOW,
+      // NORMAL evita que fabricantes agresivos (Xiaomi, Samsung, etc.)
+      // maten el servicio cuando la app está en segundo plano.
+      channelImportance: NotificationChannelImportance.DEFAULT,
+      priority: NotificationPriority.DEFAULT,
     ),
     iosNotificationOptions: const IOSNotificationOptions(
       showNotification: false,
@@ -41,7 +43,7 @@ Future<void> initBackgroundService() async {
     foregroundTaskOptions: ForegroundTaskOptions(
       eventAction: ForegroundTaskEventAction.repeat(60000),
       autoRunOnBoot: false,
-      autoRunOnMyPackageReplaced: false,
+      autoRunOnMyPackageReplaced: true, // reinicia tras actualización de la app
       allowWakeLock: true,
     ),
   );
@@ -116,16 +118,19 @@ class _ServiMotoTaskHandler extends TaskHandler {
 
   @override
   Future<void> onDestroy(DateTime timestamp) async {
-    // El servicio fue detenido — marcar movil offline como último recurso.
+    // NO desconectamos aquí: onDestroy se dispara cuando Android mata el
+    // servicio en segundo plano (sin intención del usuario). Poner en_linea=false
+    // aquí causa las desconexiones arbitrarias al minimizar la app.
+    //
+    // La desconexión real solo ocurre en dos casos:
+    //   1. El usuario pulsa "Desconectarse" en la app (movil_screen lo hace).
+    //   2. El cron de Supabase "limpiar_motos_zombis" detecta que ultimo_ping
+    //      lleva más de 3 min sin actualizar (app cerrada a la fuerza).
+    //
+    // Solo limpiamos las preferencias locales para que el próximo inicio
+    // arranque el servicio limpio.
     try {
       final prefs = await SharedPreferences.getInstance();
-      final userId = prefs.getString(kBgUserId);
-      if (userId == null) return;
-      await Supabase.instance.client.from('usuarios').update({
-        'en_linea': false,
-        'paradero_actual': null,
-        'ingreso_fila': null,
-      }).eq('id', userId);
       await prefs.remove(kBgUserId);
       await prefs.remove(kBgStartTime);
       await prefs.remove(kBgProrroga);
