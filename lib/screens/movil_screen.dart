@@ -5918,83 +5918,9 @@ class _MovilScreenState extends State<MovilScreen>
                   ),
                 ),
               ),
-              const SizedBox(height: 16),
-
-              // FOTO DEL SOPORTE
-              const Text('FOTO DEL SOPORTE',
-                  style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.black54,
-                      letterSpacing: 0.5)),
-              const SizedBox(height: 8),
-
-              if (fotoFile == null)
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      side: BorderSide(color: Colors.indigo[300]!),
-                      foregroundColor: Colors.indigo[700],
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10)),
-                    ),
-                    onPressed: () async {
-                      final picked = await ImagePicker().pickImage(
-                        source: ImageSource.camera,
-                        maxWidth: 1000,
-                        imageQuality: 70,
-                      );
-                      if (picked != null)
-                        setSheet(() => fotoFile = picked);
-                    },
-                    icon: const Icon(Icons.camera_alt_outlined, size: 20),
-                    label: const Text('Tomar foto',
-                        style: TextStyle(fontWeight: FontWeight.w600)),
-                  ),
-                )
-              else
-                GestureDetector(
-                  onTap: () async {
-                    final picked = await ImagePicker().pickImage(
-                      source: ImageSource.camera,
-                      maxWidth: 1000,
-                      imageQuality: 70,
-                    );
-                    if (picked != null)
-                      setSheet(() => fotoFile = picked);
-                  },
-                  child: Stack(
-                    children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: Image.file(
-                          File(fotoFile!.path),
-                          width: double.infinity,
-                          fit: BoxFit.contain, // muestra la foto completa sin recortar
-                        ),
-                      ),
-                      Positioned(
-                        top: 8,
-                        right: 8,
-                        child: Container(
-                          padding: const EdgeInsets.all(6),
-                          decoration: BoxDecoration(
-                            color: Colors.black54,
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: const Icon(Icons.camera_alt,
-                              color: Colors.white, size: 16),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
               const SizedBox(height: 24),
 
-              // ENVIAR REPORTE
+              // ENVIAR REPORTE — siempre visible, encima de la foto
               SizedBox(
                 width: double.infinity,
                 child: StatefulBuilder(
@@ -6057,6 +5983,83 @@ class _MovilScreenState extends State<MovilScreen>
                   ),
                 ),
               ),
+
+              const SizedBox(height: 16),
+
+              // FOTO DEL SOPORTE — debajo del botón para que no lo tape
+              const Text('FOTO DEL SOPORTE',
+                  style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.black54,
+                      letterSpacing: 0.5)),
+              const SizedBox(height: 8),
+
+              if (fotoFile == null)
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      side: BorderSide(color: Colors.indigo[300]!),
+                      foregroundColor: Colors.indigo[700],
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                    ),
+                    onPressed: () async {
+                      final picked = await ImagePicker().pickImage(
+                        source: ImageSource.camera,
+                        maxWidth: 1000,
+                        imageQuality: 70,
+                      );
+                      if (picked != null)
+                        setSheet(() => fotoFile = picked);
+                    },
+                    icon: const Icon(Icons.camera_alt_outlined, size: 20),
+                    label: const Text('Tomar foto',
+                        style: TextStyle(fontWeight: FontWeight.w600)),
+                  ),
+                )
+              else
+                GestureDetector(
+                  onTap: () async {
+                    final picked = await ImagePicker().pickImage(
+                      source: ImageSource.camera,
+                      maxWidth: 1000,
+                      imageQuality: 70,
+                    );
+                    if (picked != null)
+                      setSheet(() => fotoFile = picked);
+                  },
+                  child: Stack(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxHeight: 200),
+                          child: Image.file(
+                            File(fotoFile!.path),
+                            width: double.infinity,
+                            fit: BoxFit.contain,
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        top: 8,
+                        right: 8,
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: Colors.black54,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: const Icon(Icons.camera_alt,
+                              color: Colors.white, size: 16),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
             ],
           ),
         ),
