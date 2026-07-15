@@ -1308,7 +1308,11 @@ class _MovilScreenState extends State<MovilScreen>
             _notificarSuspensionLevantada();
             _estabaSuspendido = false;
           } else if (myUser['en_linea'] == false && _estaEnLinea) {
-            setState(() => _estaEnLinea = false);
+            // El cron "limpiar_motos_zombis" nos desconectó mientras el
+            // foreground service estaba muerto (Android lo mató). Como el
+            // usuario SÍ quiere seguir en línea, reafirmamos la conexión
+            // en lugar de aceptar el desconecte involuntario.
+            _reafirmarEnLinea();
           }
           _estabaSuspendido = suspendidoAhora;
         } catch (e) {}
@@ -1335,10 +1339,11 @@ class _MovilScreenState extends State<MovilScreen>
         break;
 
       case AppLifecycleState.paused:
-        // App va a segundo plano. Enviar ping inmediato y ceder el control
-        // al foreground service para que siga pinguando cada 60s.
+        // App va a segundo plano. Enviar ping inmediato.
+        // NO cancelamos el heartbeat: el isolate de Dart sigue vivo en background
+        // y el Timer.periodic sigue disparando cada 60s → pings continuos aunque
+        // el foreground service sea matado por Android.
         if (_estaEnLinea) _enviarPing();
-        _detenerHeartbeat();
         break;
 
       default:
@@ -2420,6 +2425,19 @@ class _MovilScreenState extends State<MovilScreen>
   void _detenerHeartbeat() {
     _heartbeatTimer?.cancel();
     _heartbeatTimer = null;
+  }
+
+  /// El cron "limpiar_motos_zombis" puede marcarnos offline cuando el foreground
+  /// service muere temporalmente. Esta función reafirma la conexión en Supabase
+  /// sin cambiar el estado local — el usuario sigue viendo que está en línea.
+  Future<void> _reafirmarEnLinea() async {
+    if (!_estaEnLinea || kIsWeb) return;
+    try {
+      await Supabase.instance.client.from('usuarios').update({
+        'en_linea': true,
+        'ultimo_ping': DateTime.now().toUtc().toIso8601String(),
+      }).eq('id', widget.usuario['id']);
+    } catch (_) {}
   }
 
   // Receptor de mensajes del foreground service.
