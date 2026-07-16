@@ -20,6 +20,7 @@ import 'package:serviexpress_app/utils/panico_widgets.dart'; // Botón de pánic
 import 'package:serviexpress_app/utils/campo_tarifa_inteligente.dart'; // Motor de tarifas
 import 'package:serviexpress_app/services/ota_updater.dart'; // OTA updates
 import 'package:serviexpress_app/screens/fn_panel_screen.dart'; // Panel FN Farmanorte
+import 'package:serviexpress_app/utils/auth_helper.dart'; // hashContrasena
 import 'package:serviexpress_app/screens/historial_servicios_screen.dart'; // Historial de servicios
 part 'central_panel_precios.dart';
 part 'central_corte_financiero.dart';

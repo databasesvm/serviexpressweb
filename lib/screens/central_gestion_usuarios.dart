@@ -191,6 +191,126 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
     _cargar();
   }
 
+  // ── Cambiar contraseña ────────────────────────────────────────────────────
+  Future<void> _cambiarContrasenaDialog(Map<String, dynamic> usuario) async {
+    final passCtrl = TextEditingController();
+    final confirmCtrl = TextEditingController();
+    bool verPass = false;
+    bool guardando = false;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSt) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A1A),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(children: [
+            const Icon(Icons.lock_reset_rounded, color: Colors.amber, size: 18),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Cambiar contraseña',
+                style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ]),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text(
+              '${usuario['nombre'] ?? '—'}  •  @${usuario['usuario'] ?? ''}',
+              style: const TextStyle(color: Colors.white54, fontSize: 12),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: passCtrl,
+              obscureText: !verPass,
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+              decoration: InputDecoration(
+                labelText: 'Nueva contraseña',
+                labelStyle: const TextStyle(color: Colors.white38, fontSize: 12),
+                filled: true,
+                fillColor: Colors.white.withValues(alpha: 0.06),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                prefixIcon: const Icon(Icons.lock_outline, color: Colors.white38, size: 16),
+                suffixIcon: IconButton(
+                  icon: Icon(verPass ? Icons.visibility_off : Icons.visibility,
+                      color: Colors.white30, size: 16),
+                  onPressed: () => setSt(() => verPass = !verPass),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: confirmCtrl,
+              obscureText: !verPass,
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+              decoration: InputDecoration(
+                labelText: 'Confirmar contraseña',
+                labelStyle: const TextStyle(color: Colors.white38, fontSize: 12),
+                filled: true,
+                fillColor: Colors.white.withValues(alpha: 0.06),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                prefixIcon: const Icon(Icons.lock_outline, color: Colors.white38, size: 16),
+              ),
+            ),
+          ]),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar', style: TextStyle(color: Colors.white54)),
+            ),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.amber[800],
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              onPressed: guardando ? null : () async {
+                final pass = passCtrl.text.trim();
+                final confirm = confirmCtrl.text.trim();
+                if (pass.isEmpty) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    const SnackBar(content: Text('Ingresa la nueva contraseña')));
+                  return;
+                }
+                if (pass != confirm) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    const SnackBar(content: Text('Las contraseñas no coinciden'), backgroundColor: Colors.red));
+                  return;
+                }
+                setSt(() => guardando = true);
+                try {
+                  await _db.from('usuarios')
+                      .update({'contrasena': hashContrasena(pass)})
+                      .eq('id', usuario['id']);
+                  if (ctx.mounted) {
+                    Navigator.pop(ctx);
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text('✓ Contraseña de ${usuario['nombre']} actualizada'),
+                      backgroundColor: Colors.green[700],
+                    ));
+                  }
+                } catch (e) {
+                  setSt(() => guardando = false);
+                  if (ctx.mounted) {
+                    ScaffoldMessenger.of(ctx).showSnackBar(
+                      SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red[800]));
+                  }
+                }
+              },
+              icon: guardando
+                  ? const SizedBox(width: 14, height: 14,
+                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                  : const Icon(Icons.save_rounded, size: 15),
+              label: const Text('Guardar', style: TextStyle(fontSize: 12)),
+            ),
+          ],
+        ),
+      ),
+    );
+    passCtrl.dispose();
+    confirmCtrl.dispose();
+  }
+
   Future<void> _cambiarRango(Map<String, dynamic> u, String rango) async {
     try {
       await _db.from('usuarios').update({'rango_movil': rango}).eq('id', u['id']);
@@ -438,17 +558,27 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                 Text('@${u['usuario']}', style: const TextStyle(color: Colors.white54, fontSize: 11)),
               _chip(rol.toUpperCase(), color),
             ]),
-            trailing: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green[700],
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+            trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+              IconButton(
+                tooltip: 'Cambiar contraseña',
+                icon: const Icon(Icons.lock_reset_rounded, color: Colors.amber, size: 18),
+                onPressed: () => _cambiarContrasenaDialog(u),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
               ),
-              onPressed: () => _activarUsuario(u),
-              child: const Text('ACTIVAR'),
-            ),
+              const SizedBox(width: 4),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green[700],
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+                onPressed: () => _activarUsuario(u),
+                child: const Text('ACTIVAR'),
+              ),
+            ]),
           ),
         );
       },
@@ -492,6 +622,13 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                   Text(u['nombre'] ?? '—', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
                   Text('@${u['usuario'] ?? ''}', style: const TextStyle(color: Colors.white38, fontSize: 11)),
                 ])),
+                IconButton(
+                  tooltip: 'Cambiar contraseña',
+                  icon: const Icon(Icons.lock_reset_rounded, color: Colors.amber, size: 16),
+                  onPressed: () => _cambiarContrasenaDialog(u),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                ),
                 if (rangoActual != null && rangoActual.isNotEmpty)
                   _chip(rangoActual, rc),
               ]),
@@ -592,6 +729,11 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                     _chip(estado, estadoColor),
                   ]),
                 ]),
+                trailing: IconButton(
+                  tooltip: 'Cambiar contraseña',
+                  icon: const Icon(Icons.lock_reset_rounded, color: Colors.amber, size: 18),
+                  onPressed: () => _cambiarContrasenaDialog(u),
+                ),
               ),
             );
           },

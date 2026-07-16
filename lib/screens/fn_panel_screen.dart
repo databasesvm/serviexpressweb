@@ -505,7 +505,29 @@ class _SedeCard extends StatelessWidget {
             // ── Acceso de la sede ──────────────────────────────────────────
             const SizedBox(height: 8),
             const Divider(height: 1, color: Colors.white12),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
+            Row(children: [
+              const Icon(Icons.key_outlined, size: 12, color: Colors.white38),
+              const SizedBox(width: 4),
+              const Text('Acceso sede',
+                  style: TextStyle(color: Colors.white38, fontSize: 10, fontWeight: FontWeight.w600)),
+              const Spacer(),
+              if (usuarioSede == null)
+                GestureDetector(
+                  onTap: onGestionarUsuario,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: Colors.indigo.withValues(alpha: 0.25),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: Colors.indigo.withValues(alpha: 0.5)),
+                    ),
+                    child: const Text('+ Crear usuario',
+                        style: TextStyle(color: Colors.indigo, fontSize: 11, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+            ]),
+            const SizedBox(height: 6),
             _UsuarioTile(
               usuario: usuarioSede,
               onEditar: onGestionarUsuario,
@@ -761,12 +783,14 @@ class _UsuarioSedeDialogState extends State<_UsuarioSedeDialog> {
               // Nombre de usuario para login
               TextFormField(
                 controller: _usuarioCtrl,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Usuario (para login)',
-                  border: OutlineInputBorder(),
+                  border: const OutlineInputBorder(),
                   isDense: true,
-                  prefixIcon: Icon(Icons.alternate_email, size: 18),
-                  helperText: 'Ej: fn293, supervisor1',
+                  prefixIcon: const Icon(Icons.alternate_email, size: 18),
+                  helperText: _esSupervisor
+                      ? 'Ej: supervisor1, supervisor_fn'
+                      : 'Ej: FN1, FN2, FN3  (FN + número de sede)',
                 ),
                 validator: (v) =>
                     v == null || v.trim().isEmpty ? 'Requerido' : null,
