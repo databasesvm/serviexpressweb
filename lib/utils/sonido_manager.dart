@@ -29,6 +29,7 @@
 // │ Sonidos.movilChatCentral    │ Sonidos.movilChatCliente     │
 // │ Sonidos.alerta              │ Sonidos.movilParadero        │
 // │ Sonidos.panico              │ Sonidos.movilCarga           │
+// │ Sonidos.fnCotizacion        │                              │
 // └─────────────────────────────┴──────────────────────────────┘
 
 import 'package:audioplayers/audioplayers.dart';
@@ -66,6 +67,11 @@ class Sonidos {
   static const String localCotizacion = 'local_cotizacion';
   static const String localRespuesta = 'local_respuesta';
   static const String localChat = 'local_chat';
+
+  // FARMANORTE (sede FN ↔ central)
+  /// Suena en la central cuando llega solicitud de cotización desde una sede FN.
+  /// Suena en la sede FN cuando la central responde la cotización.
+  static const String fnCotizacion = 'fn_cotizacion';
 
   // COMPARTIDO
   static const String panico = 'panico';

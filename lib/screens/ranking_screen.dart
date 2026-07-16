@@ -156,10 +156,15 @@ class _RankingScreenState extends State<RankingScreen> {
         }
       }
 
+      // Ordenar por número de MOVIL## ascendente
       listaTemporal.sort((a, b) {
-        int compPromedio = b['promedio'].compareTo(a['promedio']);
-        if (compPromedio != 0) return compPromedio;
-        return b['viajes'].compareTo(a['viajes']);
+        final numA = int.tryParse(
+                (a['usuario'] ?? '').toString().replaceAll(RegExp(r'[^0-9]'), '')) ??
+            9999;
+        final numB = int.tryParse(
+                (b['usuario'] ?? '').toString().replaceAll(RegExp(r'[^0-9]'), '')) ??
+            9999;
+        return numA.compareTo(numB);
       });
 
       setState(() {

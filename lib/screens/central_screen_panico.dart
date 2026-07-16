@@ -4,32 +4,19 @@ part of 'central_screen.dart';
 extension CentralScreenPanico on _CentralScreenState {
 
   Future<void> _ejecutarLimpiezaDeCaducados() async {
-    // FIX #8: antes hacía SELECT de todos los pendientes + 1 UPDATE por cada uno
-    // (potencialmente 50+ queries cada 30 seg). Ahora son exactamente 2 UPDATEs
-    // con filtro server-side — Supabase hace el trabajo, no el dispositivo.
+    // POLÍTICA: los servicios en estado 'pendiente' NUNCA se caducan
+    // automáticamente por falta de móviles. Permanecen activos hasta que
+    // la central decida cancelarlos manualmente.
+    //
+    // Solo se caduca automáticamente una cotización que el cliente no
+    // respondió en 30 minutos.
     try {
-      final corte60min = DateTime.now()
-          .toUtc()
-          .subtract(const Duration(minutes: 60))
-          .toIso8601String();
-
       final corte30min = DateTime.now()
           .toUtc()
           .subtract(const Duration(minutes: 30))
           .toIso8601String();
 
-      // 1 query: caducar TODOS los pendientes con más de 60 min de vida
-      await Supabase.instance.client
-          .from('servicios')
-          .update({
-            'estado': 'caducado',
-            'observacion':
-                'SISTEMA: Caducado por 60 min sin atención en el radar.',
-          })
-          .eq('estado', 'pendiente')
-          .lt('created_at', corte60min);
-
-      // 1 query: caducar TODAS las cotizaciones sin respuesta en 30 min
+      // Caducar SOLO cotizaciones sin respuesta del cliente en 30 min
       await Supabase.instance.client
           .from('servicios')
           .update({

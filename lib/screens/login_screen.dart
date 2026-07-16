@@ -35,6 +35,8 @@ import 'package:serviexpress_app/screens/guest_tracking_screen.dart';
 import 'package:serviexpress_app/services/ota_updater.dart';
 import 'package:serviexpress_app/utils/deeplink_service.dart';
 import 'package:serviexpress_app/screens/pedidos_cliente_screen.dart';
+import 'package:serviexpress_app/screens/sede_fn_screen.dart';
+import 'package:serviexpress_app/screens/supervisor_fn_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -407,6 +409,20 @@ class _LoginScreenState extends State<LoginScreen>
         context,
         MaterialPageRoute(
           builder: (context) => ClienteScreen(usuario: usuario),
+        ),
+      );
+    } else if (rol == 'sede_fn') {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => SedeFnScreen(usuario: usuario),
+        ),
+      );
+    } else if (rol == 'supervisor_fn') {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => SupervisorFnScreen(usuario: usuario),
         ),
       );
     } else {

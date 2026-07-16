@@ -20,6 +20,13 @@ extension CentralScreenMonitor on _CentralScreenState {
 
     final bool esVip = servicio['es_vip'] == true;
 
+    // FN sede: cotización/renegociación usa diálogo especializado
+    if (servicio['fn_origen']?.toString() == 'sede' &&
+        (estado == 'cotizacion' || estado == 'fn_renegociando')) {
+      await _mostrarDialogoCotizacionFn(servicio);
+      return;
+    }
+
     if (estado == 'cotizacion') {
       // FAST-PATH: si el motor tiene alta confianza, ofrecemos resolución en 1 tap.
       // Si el usuario elige "Revisar manualmente" (null), caemos al diálogo completo.
@@ -61,7 +68,8 @@ extension CentralScreenMonitor on _CentralScreenState {
                     color: Colors.orange,
                   ),
                 ),
-          content: Column(
+          content: SingleChildScrollView(
+            child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -70,6 +78,41 @@ extension CentralScreenMonitor on _CentralScreenState {
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
               Text('🏁 Va para: ${servicio['destino']}'),
+              // ── Detalles del servicio ─────────────────────────────────
+              if ((servicio['observacion'] ?? '').toString().trim().isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF8E1),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: const Color(0xFFFFE082)),
+                  ),
+                  child: Text(
+                    servicio['observacion'].toString().trim(),
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+              ],
+              if (servicio['recogidas'] != null &&
+                  (servicio['recogidas'] as List).isNotEmpty) ...[
+                const SizedBox(height: 4),
+                ...((servicio['recogidas'] as List).map((r) => Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    '🔵 Recogida: ${r['nombre'] ?? r['zona'] ?? ''}',
+                    style: const TextStyle(fontSize: 12, color: Colors.blue),
+                  ),
+                ))),
+              ],
+              if ((servicio['instrucciones_especiales'] ?? '').toString().trim().isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  '📝 ${servicio['instrucciones_especiales']}',
+                  style: const TextStyle(fontSize: 12, color: Colors.black54),
+                ),
+              ],
               const SizedBox(height: 16),
               // Motor de tarifas: sugiere precio basado en historial
               // usando el origen/destino de la cotización
@@ -87,7 +130,7 @@ extension CentralScreenMonitor on _CentralScreenState {
                 onDetalleChanged: (d) => detalleCotizacion = d,
               ),
             ],
-          ),
+          )),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
@@ -319,6 +362,32 @@ extension CentralScreenMonitor on _CentralScreenState {
                         Expanded(child: Text(servicio['observacion'].toString(),
                             style: const TextStyle(fontSize: 11, color: Colors.black87))),
                       ]),
+                    ),
+                  ],
+                  // ── Recogidas adicionales ──────────────────────────────
+                  if (servicio['recogidas'] != null &&
+                      (servicio['recogidas'] as List).isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: Colors.blue[50],
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: Colors.blue[200]!),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('🔵 Recogidas:',
+                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.blue)),
+                          const SizedBox(height: 2),
+                          ...((servicio['recogidas'] as List).map((r) => Text(
+                            '• ${r['nombre'] ?? r['zona'] ?? ''}',
+                            style: const TextStyle(fontSize: 11, color: Colors.blue),
+                          ))),
+                        ],
+                      ),
                     ),
                   ],
                 ],
@@ -859,8 +928,11 @@ extension CentralScreenMonitor on _CentralScreenState {
 
     // 💰 PRECIO (solo cotizacion — el tap normal ya lo hace pero aquí queda explícito)
     if (estado == 'cotizacion') {
+      final esFnSede = servicio['fn_origen']?.toString() == 'sede';
       btns.add(_botonCard('PRECIO', Icons.attach_money, Colors.orange[700]!,
-          () => _cotizarRapido(context, servicio)));
+          esFnSede
+              ? () => _mostrarDialogoCotizacionFn(servicio)
+              : () => _cotizarRapido(context, servicio)));
     }
 
     // 🏍 ASIGNAR
@@ -1740,55 +1812,74 @@ extension CentralScreenMonitor on _CentralScreenState {
     // Ocultar bloque completo si está filtrado fuera o no hay servicios de este tipo
     if (!visible || count == 0) return const SizedBox.shrink();
 
+    // Clave de colapso: primera palabra del título en minúsculas
+    final collapseKey = titulo.split(' ').first.toLowerCase();
+    final colapsado = _categoriasColapsadas.contains(collapseKey);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          margin: const EdgeInsets.only(top: 10, bottom: 4, left: 6, right: 6),
-          decoration: BoxDecoration(
-            color: colorBase.withValues(alpha: 0.12),
-            border: Border(
-              left: BorderSide(color: colorBase, width: 4),
-            ),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  titulo,
-                  style: const TextStyle(
-                    color: Colors.black87,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 11,
-                    letterSpacing: 1,
-                  ),
-                ),
+        GestureDetector(
+          onTap: () => setState(() {
+            if (colapsado) {
+              _categoriasColapsadas.remove(collapseKey);
+            } else {
+              _categoriasColapsadas.add(collapseKey);
+            }
+          }),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            margin: const EdgeInsets.only(top: 10, bottom: 4, left: 6, right: 6),
+            decoration: BoxDecoration(
+              color: colorBase.withValues(alpha: 0.12),
+              border: Border(
+                left: BorderSide(color: colorBase, width: 4),
               ),
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 220),
-                child: Container(
-                  key: ValueKey(count),
-                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: colorBase,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
                   child: Text(
-                    '$count',
+                    titulo,
                     style: const TextStyle(
-                      color: Colors.white,
+                      color: Colors.black87,
                       fontWeight: FontWeight.bold,
                       fontSize: 11,
+                      letterSpacing: 1,
                     ),
                   ),
                 ),
-              ),
-            ],
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 220),
+                  child: Container(
+                    key: ValueKey(count),
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: colorBase,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      '$count',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Icon(
+                  colapsado ? Icons.expand_more : Icons.expand_less,
+                  size: 16,
+                  color: colorBase,
+                ),
+              ],
+            ),
           ),
         ),
-        ...lista.map((servicio) {
+        if (!colapsado) ...lista.map((servicio) {
           // Resolver el número real del moto a partir de su campo 'usuario'
           // (ej: movil05 → #5). numero_movil es un contador acumulativo de
           // servicios, no el identificador del moto.
@@ -1827,7 +1918,7 @@ extension CentralScreenMonitor on _CentralScreenState {
                 .difference(startTime)
                 .inMinutes;
             final extension = servicio['extension_minutes'] as int? ?? 0;
-            if ((elapsed - extension) >= 30) alertaRetraso = true;
+            if ((elapsed - extension) >= 60) alertaRetraso = true;
           }
 
           // Pintamos la tarjeta de rojo si el centinela se activa
@@ -1943,8 +2034,11 @@ extension CentralScreenMonitor on _CentralScreenState {
                           const SizedBox(width: 2),
                           GestureDetector(
                             onTap: () => _abrirMenuGestion(context, servicio),
-                            child: const Icon(Icons.more_vert,
-                                size: 16, color: Colors.black38),
+                            child: const Padding(
+                              padding: EdgeInsets.all(4),
+                              child: Icon(Icons.more_vert,
+                                  size: 22, color: Colors.black54),
+                            ),
                           ),
                         ],
                       ),
@@ -2041,11 +2135,11 @@ extension CentralScreenMonitor on _CentralScreenState {
                                     .inMinutes -
                                 (servicio['extension_minutes'] as int? ?? 0);
                             return Text(
-                              efectivos >= 30
+                              efectivos >= 60
                                   ? '⏳ Retrasado en entrega: ${efectivos}min'
                                   : '🛵 En entrega: ${efectivos}min',
                               style: TextStyle(
-                                color: efectivos >= 30
+                                color: efectivos >= 60
                                     ? Colors.orange[900]
                                     : Colors.black54,
                                 fontSize: 9,

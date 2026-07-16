@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:dio/dio.dart';
+import 'package:serviexpress_app/utils/auth_helper.dart'; // hashContrasena
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Panel FN – tres pestañas:
@@ -83,6 +84,8 @@ class _SedesTab extends StatefulWidget {
 class _SedesTabState extends State<_SedesTab> {
   final _db = Supabase.instance.client;
   List<Map<String, dynamic>> _sedes = [];
+  // Usuarios vinculados a sedes: rol sede_fn (por fn_sede_id) y supervisor_fn
+  List<Map<String, dynamic>> _usuariosFn = [];
   bool _cargando = true;
 
   @override
@@ -94,10 +97,14 @@ class _SedesTabState extends State<_SedesTab> {
   Future<void> _cargar() async {
     setState(() => _cargando = true);
     try {
-      final data = await _db
-          .from('fn_sedes')
-          .select();
-      final lista = List<Map<String, dynamic>>.from(data);
+      final results = await Future.wait([
+        _db.from('fn_sedes').select(),
+        _db.from('usuarios')
+            .select('id, nombre, usuario, rol, fn_sede_id, activo')
+            .inFilter('rol', ['sede_fn', 'supervisor_fn']),
+      ]);
+
+      final lista = List<Map<String, dynamic>>.from(results[0] as List);
       lista.sort((a, b) {
         final na = int.tryParse(a['numero']?.toString() ?? '') ?? 999999;
         final nb = int.tryParse(b['numero']?.toString() ?? '') ?? 999999;
@@ -105,13 +112,32 @@ class _SedesTabState extends State<_SedesTab> {
         if (cmp != 0) return cmp;
         return (a['nombre'] ?? '').toString().compareTo((b['nombre'] ?? '').toString());
       });
-      setState(() => _sedes = lista);
+
+      setState(() {
+        _sedes = lista;
+        _usuariosFn = List<Map<String, dynamic>>.from(results[1] as List);
+      });
     } catch (e) {
       _snack('Error cargando sedes: $e');
     } finally {
       setState(() => _cargando = false);
     }
   }
+
+  // Devuelve el usuario sede_fn vinculado a una sede específica (o null)
+  Map<String, dynamic>? _usuarioDeSede(int sedeId) {
+    try {
+      return _usuariosFn.firstWhere(
+        (u) => u['rol'] == 'sede_fn' && u['fn_sede_id'] == sedeId,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // Lista de supervisores FN (sin sede específica)
+  List<Map<String, dynamic>> get _supervisores =>
+      _usuariosFn.where((u) => u['rol'] == 'supervisor_fn').toList();
 
   void _snack(String msg) {
     if (!mounted) return;
@@ -173,22 +199,109 @@ class _SedesTabState extends State<_SedesTab> {
             ? const Center(
                 child: Text('Sin sedes registradas',
                     style: TextStyle(color: Colors.white38)))
-            : ListView.builder(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                itemCount: _sedes.length,
-                itemBuilder: (_, i) => _SedeCard(
-                  sede: _sedes[i],
-                  onToggle: () => _toggleActivo(_sedes[i]),
-                  onEdit: () async {
-                    await showDialog(
-                      context: context,
-                      builder: (_) => _SedeDialog(sede: _sedes[i]),
+            : ListView(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                children: [
+                  ..._sedes.map((sede) {
+                    final sedeId = sede['id'] as int;
+                    final usuarioSede = _usuarioDeSede(sedeId);
+                    return _SedeCard(
+                      sede: sede,
+                      usuarioSede: usuarioSede,
+                      onToggle: () => _toggleActivo(sede),
+                      onEdit: () async {
+                        await showDialog(
+                          context: context,
+                          builder: (_) => _SedeDialog(sede: sede),
+                        );
+                        _cargar();
+                      },
+                      onDelete: () => _eliminar(sede),
+                      onGestionarUsuario: () async {
+                        await showDialog(
+                          context: context,
+                          builder: (_) => _UsuarioSedeDialog(
+                            sedeId: sedeId,
+                            sedeNombre: sede['tipo'] == 'FN' && sede['numero'] != null
+                                ? 'FN${sede['numero']} — ${sede['nombre']}'
+                                : sede['nombre'] as String,
+                            usuarioExistente: usuarioSede,
+                          ),
+                        );
+                        _cargar();
+                      },
                     );
-                    _cargar();
-                  },
-                  onDelete: () => _eliminar(_sedes[i]),
-                ),
+                  }),
+
+                  // ── Sección supervisores FN ──────────────────────────────
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.indigo[900]!.withValues(alpha: 0.3),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.indigo[700]!.withValues(alpha: 0.5)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.supervisor_account, color: Colors.indigo, size: 15),
+                            const SizedBox(width: 6),
+                            const Expanded(
+                              child: Text('Supervisores FN',
+                                  style: TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold)),
+                            ),
+                            TextButton.icon(
+                              onPressed: () async {
+                                await showDialog(
+                                  context: context,
+                                  builder: (_) => const _UsuarioSedeDialog(
+                                    sedeId: null,
+                                    sedeNombre: 'Supervisor FN',
+                                    usuarioExistente: null,
+                                  ),
+                                );
+                                _cargar();
+                              },
+                              icon: const Icon(Icons.add, size: 14),
+                              label: const Text('Agregar', style: TextStyle(fontSize: 12)),
+                              style: TextButton.styleFrom(
+                                  foregroundColor: Colors.indigo[300],
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4)),
+                            ),
+                          ],
+                        ),
+                        if (_supervisores.isEmpty)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 4),
+                            child: Text('Sin supervisores registrados',
+                                style: TextStyle(color: Colors.white24, fontSize: 11)),
+                          )
+                        else
+                          ..._supervisores.map((u) => _UsuarioTile(
+                                usuario: u,
+                                onEditar: () async {
+                                  await showDialog(
+                                    context: context,
+                                    builder: (_) => _UsuarioSedeDialog(
+                                      sedeId: null,
+                                      sedeNombre: 'Supervisor FN',
+                                      usuarioExistente: u,
+                                    ),
+                                  );
+                                  _cargar();
+                                },
+                              )),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 80), // espacio para el FAB
+                ],
               ),
 
         // FAB
@@ -218,15 +331,19 @@ class _SedesTabState extends State<_SedesTab> {
 
 class _SedeCard extends StatelessWidget {
   final Map<String, dynamic> sede;
+  final Map<String, dynamic>? usuarioSede;
   final VoidCallback onToggle;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
+  final VoidCallback onGestionarUsuario;
 
   const _SedeCard({
     required this.sede,
+    required this.usuarioSede,
     required this.onToggle,
     required this.onEdit,
     required this.onDelete,
+    required this.onGestionarUsuario,
   });
 
   Color _colorTipo(String tipo) {
@@ -283,124 +400,452 @@ class _SedeCard extends StatelessWidget {
 
     return Card(
       color: const Color(0xFF1A1A1A),
-      shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       margin: const EdgeInsets.only(bottom: 10),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Icono tipo
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: colorT.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(_iconoTipo(tipo), color: colorT, size: 22),
-            ),
-            const SizedBox(width: 12),
-
-            // Info
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 7, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: colorT,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        tipo == 'FN' && numero != null
-                            ? 'FN #$numero'
-                            : tipo,
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 7, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF2A2A2A),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        _labelZona(zona),
-                        style: const TextStyle(
-                            color: Colors.white54, fontSize: 10),
-                      ),
-                    ),
-                  ]),
-                  const SizedBox(height: 4),
-                  Text(
-                    nombre,
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600),
+            // ── Fila principal ─────────────────────────────────────────────
+            Row(
+              children: [
+                // Icono tipo
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: colorT.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
                   ),
-                  if (tieneCoords)
-                    Text(
-                      '${(lat as double).toStringAsFixed(5)}, ${(lng as double).toStringAsFixed(5)}',
-                      style: const TextStyle(
-                          color: Colors.white38, fontSize: 11),
-                    ),
-                  if (sede['telefono_whatsapp'] != null &&
-                      (sede['telefono_whatsapp'] as String).isNotEmpty)
-                    Row(
-                      children: [
-                        const Text('📱', style: TextStyle(fontSize: 11)),
-                        const SizedBox(width: 3),
-                        Text(
-                          sede['telefono_whatsapp'] as String,
+                  child: Icon(_iconoTipo(tipo), color: colorT, size: 22),
+                ),
+                const SizedBox(width: 12),
+
+                // Info
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: colorT,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            tipo == 'FN' && numero != null ? 'FN #$numero' : tipo,
+                            style: const TextStyle(
+                                color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF2A2A2A),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(_labelZona(zona),
+                              style: const TextStyle(color: Colors.white54, fontSize: 10)),
+                        ),
+                      ]),
+                      const SizedBox(height: 4),
+                      Text(nombre,
                           style: const TextStyle(
-                              color: Color(0xFF25D366), fontSize: 11),
+                              color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+                      if (tieneCoords)
+                        Text(
+                          '${(lat as double).toStringAsFixed(5)}, ${(lng as double).toStringAsFixed(5)}',
+                          style: const TextStyle(color: Colors.white38, fontSize: 11),
+                        ),
+                      if (sede['telefono_whatsapp'] != null &&
+                          (sede['telefono_whatsapp'] as String).isNotEmpty)
+                        Row(
+                          children: [
+                            const Text('📱', style: TextStyle(fontSize: 11)),
+                            const SizedBox(width: 3),
+                            Text(sede['telefono_whatsapp'] as String,
+                                style: const TextStyle(color: Color(0xFF25D366), fontSize: 11)),
+                          ],
+                        ),
+                    ],
+                  ),
+                ),
+
+                // Controles
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Switch(
+                      value: activo,
+                      activeColor: Colors.green[400],
+                      onChanged: (_) => onToggle(),
+                    ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        GestureDetector(
+                          onTap: onEdit,
+                          child: const Icon(Icons.edit_outlined, color: Colors.white38, size: 20),
+                        ),
+                        const SizedBox(width: 12),
+                        GestureDetector(
+                          onTap: onDelete,
+                          child: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
                         ),
                       ],
                     ),
-                ],
-              ),
+                  ],
+                ),
+              ],
             ),
 
-            // Controles
-            Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Switch(
-                  value: activo,
-                  activeColor: Colors.green[400],
-                  onChanged: (_) => onToggle(),
-                ),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    GestureDetector(
-                      onTap: onEdit,
-                      child: const Icon(Icons.edit_outlined,
-                          color: Colors.white38, size: 20),
-                    ),
-                    const SizedBox(width: 12),
-                    GestureDetector(
-                      onTap: onDelete,
-                      child: const Icon(Icons.delete_outline,
-                          color: Colors.red, size: 20),
-                    ),
-                  ],
-                )
-              ],
+            // ── Acceso de la sede ──────────────────────────────────────────
+            const SizedBox(height: 8),
+            const Divider(height: 1, color: Colors.white12),
+            const SizedBox(height: 8),
+            _UsuarioTile(
+              usuario: usuarioSede,
+              onEditar: onGestionarUsuario,
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+// ─── Tile de usuario vinculado a una sede ─────────────────────────────────────
+
+class _UsuarioTile extends StatelessWidget {
+  final Map<String, dynamic>? usuario; // null = sin usuario creado
+  final VoidCallback onEditar;
+
+  const _UsuarioTile({required this.usuario, required this.onEditar});
+
+  @override
+  Widget build(BuildContext context) {
+    if (usuario == null) {
+      // Sin usuario — invitar a crear
+      return GestureDetector(
+        onTap: onEditar,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.04),
+            borderRadius: BorderRadius.circular(7),
+            border: Border.all(
+                color: Colors.white.withValues(alpha: 0.08), style: BorderStyle.solid),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.person_add_outlined, color: Colors.indigo[300], size: 16),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  'Sin usuario de acceso — toca para crear',
+                  style: TextStyle(
+                      color: Colors.white38,
+                      fontSize: 12,
+                      fontStyle: FontStyle.italic),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final activo = usuario!['activo'] == true;
+    return GestureDetector(
+      onTap: onEditar,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        decoration: BoxDecoration(
+          color: Colors.indigo.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(7),
+          border: Border.all(color: Colors.indigo.withValues(alpha: 0.2)),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.person_outline,
+                color: activo ? Colors.indigo[300] : Colors.white24, size: 15),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    usuario!['nombre']?.toString() ?? '—',
+                    style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
+                  Text(
+                    '@${usuario!['usuario'] ?? '—'}',
+                    style: const TextStyle(color: Colors.white38, fontSize: 11),
+                  ),
+                ],
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: activo
+                    ? Colors.green.withValues(alpha: 0.15)
+                    : Colors.red.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                activo ? 'Activo' : 'Inactivo',
+                style: TextStyle(
+                    color: activo ? Colors.green : Colors.red,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold),
+              ),
+            ),
+            const SizedBox(width: 6),
+            const Icon(Icons.edit_outlined, color: Colors.white24, size: 14),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Diálogo crear/editar usuario sede_fn o supervisor_fn ────────────────────
+
+class _UsuarioSedeDialog extends StatefulWidget {
+  final int? sedeId;        // null = supervisor_fn (sin sede)
+  final String sedeNombre;  // para el título
+  final Map<String, dynamic>? usuarioExistente;
+
+  const _UsuarioSedeDialog({
+    required this.sedeId,
+    required this.sedeNombre,
+    required this.usuarioExistente,
+  });
+
+  @override
+  State<_UsuarioSedeDialog> createState() => _UsuarioSedeDialogState();
+}
+
+class _UsuarioSedeDialogState extends State<_UsuarioSedeDialog> {
+  final _db = Supabase.instance.client;
+  final _formKey = GlobalKey<FormState>();
+
+  late final TextEditingController _nombreCtrl;
+  late final TextEditingController _usuarioCtrl;
+  final _passCtrl = TextEditingController();
+  bool _activo = true;
+  bool _guardando = false;
+  bool _verPass = false;
+
+  bool get _esEdicion => widget.usuarioExistente != null;
+  bool get _esSupervisor => widget.sedeId == null;
+
+  @override
+  void initState() {
+    super.initState();
+    final u = widget.usuarioExistente;
+    _nombreCtrl = TextEditingController(text: u?['nombre']?.toString() ?? '');
+    _usuarioCtrl = TextEditingController(text: u?['usuario']?.toString() ?? '');
+    _activo = u?['activo'] != false;
+  }
+
+  @override
+  void dispose() {
+    _nombreCtrl.dispose();
+    _usuarioCtrl.dispose();
+    _passCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _guardar() async {
+    if (!_formKey.currentState!.validate()) return;
+    if (!_esEdicion && _passCtrl.text.trim().isEmpty) {
+      _snack('La contraseña es obligatoria para un usuario nuevo.');
+      return;
+    }
+
+    setState(() => _guardando = true);
+    try {
+      // Hash SHA-256 — mismo algoritmo que usa login_screen / registro_screen
+      String? hash;
+      if (_passCtrl.text.trim().isNotEmpty) {
+        hash = hashContrasena(_passCtrl.text.trim());
+      }
+
+      if (_esEdicion) {
+        // Editar usuario existente
+        final update = <String, dynamic>{
+          'nombre': _nombreCtrl.text.trim(),
+          'usuario': _usuarioCtrl.text.trim(),
+          'activo': _activo,
+          if (hash != null) 'contrasena': hash,
+        };
+        await _db
+            .from('usuarios')
+            .update(update)
+            .eq('id', widget.usuarioExistente!['id']);
+      } else {
+        // Crear usuario nuevo
+        await _db.from('usuarios').insert({
+          'nombre': _nombreCtrl.text.trim(),
+          'usuario': _usuarioCtrl.text.trim(),
+          'contrasena': hash ?? _passCtrl.text.trim(),
+          'rol': _esSupervisor ? 'supervisor_fn' : 'sede_fn',
+          if (!_esSupervisor) 'fn_sede_id': widget.sedeId,
+          'activo': _activo,
+          'tiene_fn': true,
+        });
+      }
+
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      _snack('Error: $e');
+    } finally {
+      if (mounted) setState(() => _guardando = false);
+    }
+  }
+
+  void _snack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final titulo = _esEdicion
+        ? 'Editar acceso — ${widget.sedeNombre}'
+        : _esSupervisor
+            ? 'Nuevo supervisor FN'
+            : 'Acceso para ${widget.sedeNombre}';
+
+    return AlertDialog(
+      title: Row(
+        children: [
+          Icon(
+            _esSupervisor ? Icons.supervisor_account : Icons.person_outline,
+            color: Colors.indigo,
+            size: 18,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(titulo,
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: 320,
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Nombre visible
+              TextFormField(
+                controller: _nombreCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Nombre completo',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                  prefixIcon: Icon(Icons.badge_outlined, size: 18),
+                ),
+                validator: (v) =>
+                    v == null || v.trim().isEmpty ? 'Requerido' : null,
+              ),
+              const SizedBox(height: 12),
+
+              // Nombre de usuario para login
+              TextFormField(
+                controller: _usuarioCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Usuario (para login)',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                  prefixIcon: Icon(Icons.alternate_email, size: 18),
+                  helperText: 'Ej: fn293, supervisor1',
+                ),
+                validator: (v) =>
+                    v == null || v.trim().isEmpty ? 'Requerido' : null,
+              ),
+              const SizedBox(height: 12),
+
+              // Contraseña
+              TextFormField(
+                controller: _passCtrl,
+                obscureText: !_verPass,
+                decoration: InputDecoration(
+                  labelText: _esEdicion
+                      ? 'Nueva contraseña (dejar vacío = sin cambio)'
+                      : 'Contraseña',
+                  border: const OutlineInputBorder(),
+                  isDense: true,
+                  prefixIcon: const Icon(Icons.lock_outline, size: 18),
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                        _verPass ? Icons.visibility_off : Icons.visibility,
+                        size: 18),
+                    onPressed: () => setState(() => _verPass = !_verPass),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              // Activo
+              SwitchListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Usuario activo', style: TextStyle(fontSize: 13)),
+                value: _activo,
+                onChanged: (v) => setState(() => _activo = v),
+                activeColor: Colors.green,
+              ),
+
+              // Rol mostrado (informativo)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.indigo.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.info_outline, size: 14, color: Colors.indigo),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Rol: ${_esSupervisor ? 'supervisor_fn' : 'sede_fn'}',
+                      style: const TextStyle(color: Colors.indigo, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        ElevatedButton.icon(
+          style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.indigo[800],
+              foregroundColor: Colors.white),
+          onPressed: _guardando ? null : _guardar,
+          icon: _guardando
+              ? const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                      color: Colors.white, strokeWidth: 2))
+              : const Icon(Icons.save_outlined, size: 16),
+          label: Text(_esEdicion ? 'Guardar cambios' : 'Crear usuario'),
+        ),
+      ],
     );
   }
 }
@@ -1098,7 +1543,6 @@ class _MotoFnCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tieneFn = moto['tiene_fn'] as bool? ?? false;
-    final ignorados = moto['fn_ignorados_hoy'] as int? ?? 0;
     final nombre = moto['nombre'] as String? ?? '—';
     final telefono = moto['telefono'] as String? ?? '';
     final usuario = moto['usuario']?.toString() ?? '';
@@ -1161,39 +1605,6 @@ class _MotoFnCard extends StatelessWidget {
               ),
             ),
 
-            // Ignorados hoy
-            if (ignorados > 0)
-              GestureDetector(
-                onTap: onResetIgnorados,
-                child: Container(
-                  margin: const EdgeInsets.only(right: 10),
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: ignorados >= 5
-                        ? Colors.red[900]
-                        : Colors.orange[900],
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        '$ignorados',
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 15),
-                      ),
-                      const Text(
-                        'ign.',
-                        style: TextStyle(
-                            color: Colors.white54, fontSize: 9),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
 
             // Toggle FN
             Column(

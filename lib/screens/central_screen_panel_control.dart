@@ -285,6 +285,10 @@ extension CentralScreenPanelControl on _CentralScreenState {
                                 )),
                         ],
 
+                        // Toggle alta demanda FN
+                        if (!_seccionesOcultasFlota.contains('fn'))
+                          _buildToggleAltaDemandaFn(),
+
                         const Divider(height: 4, color: Colors.transparent),
                         // ── FIN SECCIÓN FN ──────────────────────────────────
 

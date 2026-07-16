@@ -48,7 +48,7 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
             .eq('activo', false).neq('suspendido', true).order('created_at'),
         _db.from('usuarios')
             .select('id, nombre, usuario, rango_movil, puntuacion, activo')
-            .eq('rol', 'movil').order('nombre'),
+            .eq('rol', 'movil').order('usuario', ascending: true),
         _db.from('usuarios')
             .select('id, nombre, usuario, rol, estado_local, activo, suspendido, created_at')
             .gte('created_at', hace30).order('created_at', ascending: false),
@@ -182,7 +182,12 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
   Future<void> _activarUsuario(Map<String, dynamic> u) async {
     await _db.from('usuarios').update({'activo': true}).eq('id', u['id']);
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${u['nombre']} activado'), backgroundColor: Colors.green[700]));
+    final usuarioField = u['usuario']?.toString() ?? '';
+    final numStr = usuarioField.replaceAll(RegExp(r'[^0-9]'), '');
+    final identificador = numStr.isNotEmpty ? 'MOVIL$numStr' : usuarioField.toUpperCase();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('✅ $identificador activado'), backgroundColor: Colors.green[700]),
+    );
     _cargar();
   }
 

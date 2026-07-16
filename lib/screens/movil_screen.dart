@@ -6173,6 +6173,21 @@ class _MovilScreenState extends State<MovilScreen>
     }
   }
 
+  // ── Chip compacto para datos FN en la tarjeta del móvil ────────────────────
+  Widget _chipFnMovil(String label, Color color) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.20),
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: color.withValues(alpha: 0.5)),
+        ),
+        child: Text(label,
+            style: TextStyle(
+                color: color,
+                fontSize: 10,
+                fontWeight: FontWeight.bold)),
+      );
+
   // ── Etiqueta legible de zona FN ─────────────────────────────────────────────
   String _fnZonaLabel(String z) {
     switch (z) {
@@ -6505,19 +6520,19 @@ class _MovilScreenState extends State<MovilScreen>
                         },
                         child: Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 4),
+                              horizontal: 12, vertical: 8),
                           decoration: BoxDecoration(
                             color: Colors.indigo[700],
-                            borderRadius: BorderRadius.circular(5),
+                            borderRadius: BorderRadius.circular(6),
                           ),
                           child: const Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.navigation, size: 12, color: Colors.white),
-                              SizedBox(width: 3),
+                              Icon(Icons.navigation, size: 16, color: Colors.white),
+                              SizedBox(width: 4),
                               Text('GPS',
                                   style: TextStyle(
-                                      fontSize: 11,
+                                      fontSize: 14,
                                       color: Colors.white,
                                       fontWeight: FontWeight.bold)),
                             ],
@@ -6527,7 +6542,7 @@ class _MovilScreenState extends State<MovilScreen>
                       // Botón WhatsApp (solo si la sede tiene número)
                       if (servicio['fn_whatsapp'] != null &&
                           (servicio['fn_whatsapp'] as String).isNotEmpty) ...[
-                        const SizedBox(width: 6),
+                        const SizedBox(width: 8),
                         GestureDetector(
                           onTap: () async {
                             String num = (servicio['fn_whatsapp'] as String)
@@ -6540,19 +6555,19 @@ class _MovilScreenState extends State<MovilScreen>
                           },
                           child: Container(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 4),
+                                horizontal: 12, vertical: 8),
                             decoration: BoxDecoration(
                               color: const Color(0xFF25D366),
-                              borderRadius: BorderRadius.circular(5),
+                              borderRadius: BorderRadius.circular(6),
                             ),
                             child: const Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Text('📱', style: TextStyle(fontSize: 11)),
-                                SizedBox(width: 2),
+                                Text('📱', style: TextStyle(fontSize: 14)),
+                                SizedBox(width: 3),
                                 Text('WA',
                                     style: TextStyle(
-                                        fontSize: 11,
+                                        fontSize: 14,
                                         color: Colors.white,
                                         fontWeight: FontWeight.bold)),
                               ],
@@ -6563,7 +6578,7 @@ class _MovilScreenState extends State<MovilScreen>
                     ],
                   ),
 
-                  // Recogidas adicionales (compactas)
+                  // Recogidas
                   if (recogidas.isNotEmpty) ...[
                     const SizedBox(height: 5),
                     ...recogidas.map((r) {
@@ -6577,15 +6592,15 @@ class _MovilScreenState extends State<MovilScreen>
                           ? 'FN #$numero – $nombre'
                           : '$tipo – $nombre';
                       return Padding(
-                        padding: const EdgeInsets.only(top: 4),
+                        padding: const EdgeInsets.only(top: 5),
                         child: Row(
                           children: [
                             Icon(Icons.subdirectory_arrow_right,
-                                size: 13, color: Colors.indigo[400]),
-                            const SizedBox(width: 3),
+                                size: 14, color: Colors.indigo[400]),
+                            const SizedBox(width: 4),
                             Expanded(
                               child: Text(label,
-                                  style: const TextStyle(fontSize: 12)),
+                                  style: const TextStyle(fontSize: 13)),
                             ),
                             GestureDetector(
                               onTap: () async {
@@ -6602,20 +6617,20 @@ class _MovilScreenState extends State<MovilScreen>
                               },
                               child: Container(
                                 padding: const EdgeInsets.symmetric(
-                                    horizontal: 7, vertical: 3),
+                                    horizontal: 10, vertical: 6),
                                 decoration: BoxDecoration(
                                   color: Colors.indigo[600],
-                                  borderRadius: BorderRadius.circular(4),
+                                  borderRadius: BorderRadius.circular(5),
                                 ),
                                 child: const Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     Icon(Icons.navigation,
-                                        size: 11, color: Colors.white),
-                                    SizedBox(width: 2),
+                                        size: 14, color: Colors.white),
+                                    SizedBox(width: 3),
                                     Text('GPS',
                                         style: TextStyle(
-                                            fontSize: 10,
+                                            fontSize: 12,
                                             color: Colors.white,
                                             fontWeight: FontWeight.bold)),
                                   ],
@@ -6628,18 +6643,36 @@ class _MovilScreenState extends State<MovilScreen>
                     }),
                   ],
 
-                  // Destino
+                  // Destino — bloqueado hasta confirmar llegada a la sede
                   const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      const Text('🏁 ', style: TextStyle(fontSize: 13)),
-                      Expanded(
-                        child: Text(servicio['destino'] ?? '—',
-                            style: const TextStyle(
-                                fontSize: 13, fontWeight: FontWeight.bold)),
-                      ),
-                    ],
-                  ),
+                  if (estado == 'pendiente' || estado == 'en_ruta_origen') ...[
+                    Row(
+                      children: [
+                        const Icon(Icons.lock_outline, size: 13, color: Colors.white38),
+                        const SizedBox(width: 5),
+                        const Expanded(
+                          child: Text(
+                            'Dirección se revela al llegar a la sede',
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.white38,
+                                fontStyle: FontStyle.italic),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ] else ...[
+                    Row(
+                      children: [
+                        const Text('🏁 ', style: TextStyle(fontSize: 13)),
+                        Expanded(
+                          child: Text(servicio['destino'] ?? '—',
+                              style: const TextStyle(
+                                  fontSize: 13, fontWeight: FontWeight.bold)),
+                        ),
+                      ],
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -6711,6 +6744,27 @@ class _MovilScreenState extends State<MovilScreen>
                     ),
                   ],
                 ),
+              ),
+            ],
+
+            // ── Datos de factura FN (solo cuando es servicio desde sede) ──────
+            if (servicio['fn_origen']?.toString() == 'sede') ...[
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                children: [
+                  if (servicio['fn_consecutivo'] != null)
+                    _chipFnMovil('📋 ${servicio['fn_consecutivo']}', Colors.indigo[700]!),
+                  if (servicio['fn_factura_numero'] != null)
+                    _chipFnMovil('Fac. ${servicio['fn_factura_numero']}', Colors.blueGrey[700]!),
+                  if (servicio['fn_factura_valor'] != null)
+                    _chipFnMovil('\$${_formatearMoneda(servicio['fn_factura_valor'])}', Colors.blueGrey[700]!),
+                  if (servicio['fn_pagar_producto'] == true)
+                    _chipFnMovil('⚠ PAGAR PRODUCTO', Colors.red[700]!),
+                  if (servicio['fn_factura_auto'] == true)
+                    _chipFnMovil('✓ Factura cargada automáticamente', Colors.green[700]!),
+                ],
               ),
             ],
 
@@ -7770,10 +7824,55 @@ class _MovilScreenState extends State<MovilScreen>
     setState(() => _procesando = true);
     try {
       _sonidos.reproducirSuave(Sonidos.movilConfirmar); // Llegué al local
+
+      // Si es un servicio FN desde sede → activar factura automática
+      final esFnSede = servicio['fn_origen']?.toString() == 'sede';
+      final Map<String, dynamic> updateData = {'estado': 'en_origen'};
+      if (esFnSede) {
+        updateData['fn_factura_auto'] = true;
+        updateData['fn_movil_asignado_at'] = DateTime.now().toUtc().toIso8601String();
+      }
+
       await Supabase.instance.client
           .from('servicios')
-          .update({'estado': 'en_origen'})
+          .update(updateData)
           .eq('id', servicio['id']);
+
+      // Banner de factura automática para el móvil
+      if (esFnSede && mounted) {
+        final consec = servicio['fn_consecutivo']?.toString() ?? '';
+        final sedeLabel = (() {
+          final recog = servicio['recogidas'];
+          if (recog is List && recog.isNotEmpty) {
+            final r = recog.first as Map<String, dynamic>;
+            final tipo = r['tipo']?.toString() ?? '';
+            final num = r['numero']?.toString() ?? '';
+            return tipo == 'FN' && num.isNotEmpty ? 'FN$num' : (r['nombre'] ?? 'FN');
+          }
+          return 'FN';
+        })();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: Colors.indigo[900],
+            duration: const Duration(seconds: 4),
+            content: Row(
+              children: [
+                const Icon(Icons.receipt_long, color: Colors.white, size: 18),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    '✓ Factura${consec.isNotEmpty ? ' $consec' : ''} cargada automáticamente por $sedeLabel',
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
 
       // --- INYECCIÓN: DISPARO AL LOCAL ---
       _notificarAlCreador(

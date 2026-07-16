@@ -31,6 +31,7 @@ part 'central_screen_formularios.dart';
 part 'central_screen_monitor.dart';
 part 'central_screen_panel_control.dart';
 part 'central_screen_gestion.dart';
+part 'central_screen_fn.dart';
 
 class CentralScreen extends StatefulWidget {
   final Map<String, dynamic>? usuario;
@@ -51,6 +52,14 @@ class _CentralScreenState extends State<CentralScreen>
   RealtimeChannel? _canalRadarCentral;
   RealtimeChannel? _canalChatCentral;
   RealtimeChannel? _canalPanico;
+  RealtimeChannel? _canalActivaciones;
+  RealtimeChannel? _canalFn; // Solicitudes FN desde sedes
+
+  // Mapa userId → androidNotificationId para poder eliminar del tray
+  // la notificación de "por activar" cuando el usuario es activado.
+  final Map<String, int> _activacionNotifIds = {};
+  // Listener de OneSignal guardado para poder removerlo en dispose().
+  void Function(OSNotificationWillDisplayEvent)? _listenerActivacion;
 
   // Timers de expiración automática para alertas de pánico (2 min)
   Timer? _timerExpiracionGlobal;
@@ -75,6 +84,8 @@ class _CentralScreenState extends State<CentralScreen>
   // Secciones colapsadas en el panel de flota (Control Operativo).
   // Claves: 'fn', 'expuente', 'memos', 'nocturno', 'servicio', 'libre'
   final Set<String> _seccionesOcultasFlota = {};
+  // Categorías colapsadas en el monitor de servicios (tap en el header).
+  final Set<String> _categoriasColapsadas = {};
   // Notifier para que el monitor se actualice solo cuando cambia el filtro,
   // sin reconstruir todo el Scaffold.
   final ValueNotifier<int> _filtroVersion = ValueNotifier(0);
@@ -150,6 +161,23 @@ class _CentralScreenState extends State<CentralScreen>
         // sin depender de segmentos configurados en el dashboard de OneSignal.
         OneSignal.User.addTagWithKey('rol', 'central');
         await OneSignal.Notifications.requestPermission(true);
+
+        // Listener para capturar el androidNotificationId de las notif de
+        // activación mientras la app está en primer plano, y poder eliminarlas
+        // del tray cuando el usuario sea activado.
+        _listenerActivacion = (OSNotificationWillDisplayEvent event) {
+          final extra = event.notification.additionalData;
+          if (extra != null && extra['tipo'] == 'activacion_pendiente') {
+            final uid = extra['usuario_id']?.toString();
+            final nid = event.notification.androidNotificationId;
+            if (uid != null && nid != null) {
+              _activacionNotifIds[uid] = nid;
+            }
+          }
+          event.notification.display();
+        };
+        OneSignal.Notifications.addForegroundWillDisplayListener(
+            _listenerActivacion!);
       });
     }
 
@@ -165,6 +193,7 @@ class _CentralScreenState extends State<CentralScreen>
     _preCargarDatosIniciales(); // Carga REST inmediata — paradero visible sin esperar WebSocket
     _construirStreams();
     _iniciarVigilanteDeConexion();
+    _construirCanalFn(); // Canal Realtime para solicitudes FN desde sedes
 
     // OTA: cubre sesión persistente (solo Android/iOS, no web)
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -315,9 +344,14 @@ class _CentralScreenState extends State<CentralScreen>
                 .select('id')
                 .eq('activo', false)
                 .not('rol', 'in', '("cliente")');
-            final nombre = doc['nombre']?.toString() ?? 'Nuevo usuario';
             final rol = doc['rol']?.toString() ?? '';
-            final rolLabel = rol == 'local' ? 'Local' : 'Móvil';
+            final userId = doc['id']?.toString() ?? '';
+            // Identificador visible: MOVIL##, nunca el nombre real
+            final usuarioField = doc['usuario']?.toString() ?? '';
+            final numStr = usuarioField.replaceAll(RegExp(r'[^0-9]'), '');
+            final identificador = numStr.isNotEmpty
+                ? 'MOVIL$numStr'
+                : (rol == 'local' ? 'LOCAL' : 'MOVIL');
 
             // ── Push a todos los centrales (incluye segundo plano) ────────
             try {
@@ -332,8 +366,10 @@ class _CentralScreenState extends State<CentralScreen>
                 await MotorNotificaciones.dispararRafa(
                   idsDestinos: ids,
                   titulo: '👤 Nuevo registro por activar',
-                  mensaje: '$rolLabel: $nombre — ve a Gestión → Activaciones',
+                  mensaje: '$identificador — ve a Gestión → Activaciones',
                   urgente: false,
+                  collapseId: 'activacion_$userId',
+                  data: {'tipo': 'activacion_pendiente', 'usuario_id': userId},
                 );
               }
             } catch (_) {}
@@ -342,7 +378,7 @@ class _CentralScreenState extends State<CentralScreen>
               setState(() => _usuariosPendientes = (pendientes as List).length);
               _sonidos.reproducir(Sonidos.centralRadar);
               ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                content: Text('👤 $rolLabel por activar: $nombre'),
+                content: Text('👤 $identificador por activar'),
                 backgroundColor: Colors.orange[800],
                 duration: const Duration(seconds: 6),
                 action: SnackBarAction(
@@ -351,6 +387,35 @@ class _CentralScreenState extends State<CentralScreen>
                   onPressed: () => _abrirPanelGestion(context),
                 ),
               ));
+            }
+          },
+        )
+        .subscribe();
+
+    // --- CANAL ACTIVACIONES: detecta cuando un usuario pasa a activo=true ---
+    // Decrementa el contador Y elimina la notificación del tray (si se tiene
+    // el androidNotificationId guardado por el foreground listener).
+    _canalActivaciones = Supabase.instance.client
+        .channel('activaciones_completadas_central')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'usuarios',
+          callback: (payload) {
+            final oldDoc = payload.oldRecord;
+            final newDoc = payload.newRecord;
+            // Solo nos interesa la transición false → true
+            if (oldDoc['activo'] != false || newDoc['activo'] != true) return;
+            final userId = newDoc['id']?.toString();
+            if (userId != null && !kIsWeb) {
+              final nid = _activacionNotifIds.remove(userId);
+              if (nid != null) {
+                OneSignal.Notifications.removeNotification(nid);
+              }
+            }
+            if (mounted) {
+              setState(() =>
+                  _usuariosPendientes = (_usuariosPendientes - 1).clamp(0, 9999));
             }
           },
         )
@@ -470,6 +535,12 @@ class _CentralScreenState extends State<CentralScreen>
     _canalRadarCentral?.unsubscribe();
     _canalChatCentral?.unsubscribe();
     _canalPanico?.unsubscribe();
+    _canalActivaciones?.unsubscribe();
+    _canalFn?.unsubscribe();
+    if (_listenerActivacion != null && !kIsWeb) {
+      OneSignal.Notifications.removeForegroundWillDisplayListener(
+          _listenerActivacion!);
+    }
     _reloj?.cancel();
     _reconexionTimer?.cancel();
     _timerExpiracionGlobal?.cancel();
@@ -595,8 +666,7 @@ class _CentralScreenState extends State<CentralScreen>
   /// Prioridad: suspendido > desconectado > en servicio > paradero > libre.
   String _estadoMovilFn(Map<String, dynamic> m, Set<dynamic> enServicioIds) {
     final rango = m['rango_movil'] ?? 'NOVATO';
-    final ignorados = m['fn_ignorados_hoy'] ?? 0;
-    final sufijo = '$rango · $ignorados ign. hoy';
+    final sufijo = rango;
     if (m['suspendido'] == true) return '⛔ SUSPENDIDO · $sufijo';
     if (m['en_linea'] != true) return '🔴 DESCONECTADO · $sufijo';
     if (enServicioIds.contains(m['id'])) return '🚴 EN SERVICIO · $sufijo';

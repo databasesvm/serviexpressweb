@@ -306,11 +306,12 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
                   : () async {
                       setDialogState(() => procesando = true);
                       try {
+                        final movilId = servicio['movil_id'];
                         await Supabase.instance.client
                             .from('calificaciones')
                             .upsert({
                               'servicio_id': servicio['id'],
-                              'movil_id': servicio['movil_id'].toString(),
+                              if (movilId != null) 'movil_id': movilId.toString(),
                               'calificador_tipo': 'invitado',
                               'calificador_id': null,
                               'calificador_nombre': nombreInvitado,
@@ -321,11 +322,13 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
                                   : comentarioCtrl.text.trim(),
                             }, onConflict: 'servicio_id, calificador_tipo');
 
-                        // Actualizar puntuación del móvil
-                        await Supabase.instance.client.rpc(
-                          'recalcular_puntuacion_movil',
-                          params: {'p_movil_id': servicio['movil_id'].toString()},
-                        );
+                        // Actualizar puntuación del móvil (solo si está asignado)
+                        if (movilId != null) {
+                          await Supabase.instance.client.rpc(
+                            'recalcular_puntuacion_movil',
+                            params: {'p_movil_id': movilId.toString()},
+                          );
+                        }
 
                         if (ctx.mounted) {
                           Navigator.pop(ctx);

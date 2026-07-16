@@ -55,6 +55,11 @@ class MotorNotificaciones {
     /// Override del canal Android. Por defecto usa _canalAlarmaId.
     /// Usar _canalPanicoId para alertas de pánico.
     String? canalAndroidId,
+    /// collapse_id de OneSignal: si hay una notif previa con el mismo ID,
+    /// la reemplaza en lugar de apilar otra. Útil para activaciones.
+    String? collapseId,
+    /// data extra que llega a la app (additional_data en el payload).
+    Map<String, dynamic>? data,
   }) async {
     if (idsDestinos.isEmpty) return;
     await _enviarPush(
@@ -67,6 +72,8 @@ class MotorNotificaciones {
         'android_sound': sonido,
         'ios_sound': '$sonido.mp3',
         if (urgente) 'existing_android_channel_id': canalAndroidId ?? _canalAlarmaId,
+        if (collapseId != null) 'collapse_id': collapseId,
+        if (data != null) 'data': data,
       },
     );
   }
