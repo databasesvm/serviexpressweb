@@ -322,10 +322,15 @@ class _FormularioTabState extends State<_FormularioTab> {
       final data = await _db
           .from('fn_sedes')
           .select('id, tipo, numero, nombre, zona, lat, lng, cobertura, activo')
-          .eq('activo', true)
-          .order('numero');
+          .eq('activo', true);
+      final lista = List<Map<String, dynamic>>.from(data);
+      lista.sort((a, b) {
+        final na = int.tryParse(a['numero']?.toString() ?? '') ?? 999;
+        final nb = int.tryParse(b['numero']?.toString() ?? '') ?? 999;
+        return na.compareTo(nb);
+      });
       setState(() {
-        _sedesDisponibles = List<Map<String, dynamic>>.from(data);
+        _sedesDisponibles = lista;
         _cargandoSedes = false;
       });
     } catch (_) {

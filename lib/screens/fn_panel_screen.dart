@@ -56,9 +56,9 @@ class _FnPanelScreenState extends State<FnPanelScreen>
           labelColor: Colors.white,
           unselectedLabelColor: Colors.white38,
           tabs: const [
-            Tab(icon: Icon(Icons.local_pharmacy_outlined), text: 'Sedes'),
-            Tab(icon: Icon(Icons.two_wheeler_outlined), text: 'Motos FN'),
-            Tab(icon: Icon(Icons.history_outlined), text: 'Historial'),
+            Tab(icon: Icon(Icons.local_pharmacy), text: 'Sedes'),
+            Tab(icon: Icon(Icons.two_wheeler), text: 'Motos FN'),
+            Tab(icon: Icon(Icons.history), text: 'Historial'),
           ],
         ),
       ),
@@ -432,13 +432,13 @@ class _SedeCard extends StatelessWidget {
   IconData _iconoTipo(String tipo) {
     switch (tipo) {
       case 'FN':
-        return Icons.local_pharmacy_outlined;
+        return Icons.local_pharmacy;
       case 'FARMACIA':
-        return Icons.medication_outlined;
+        return Icons.medication;
       case 'DEPOSITO':
-        return Icons.inventory_2_outlined;
+        return Icons.inventory_2;
       default:
-        return Icons.storefront_outlined;
+        return Icons.storefront;
     }
   }
 
@@ -558,12 +558,12 @@ class _SedeCard extends StatelessWidget {
                       children: [
                         GestureDetector(
                           onTap: onEdit,
-                          child: const Icon(Icons.edit_outlined, color: Colors.white38, size: 20),
+                          child: const Icon(Icons.edit, color: Colors.white38, size: 20),
                         ),
                         const SizedBox(width: 12),
                         GestureDetector(
                           onTap: onDelete,
-                          child: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
+                          child: const Icon(Icons.delete, color: Colors.red, size: 20),
                         ),
                       ],
                     ),
@@ -577,7 +577,7 @@ class _SedeCard extends StatelessWidget {
             const Divider(height: 1, color: Colors.white12),
             const SizedBox(height: 6),
             Row(children: [
-              const Icon(Icons.key_outlined, size: 12, color: Colors.white38),
+              const Icon(Icons.key, size: 12, color: Colors.white38),
               const SizedBox(width: 4),
               const Text('Acceso sede',
                   style: TextStyle(color: Colors.white38, fontSize: 10, fontWeight: FontWeight.w600)),
@@ -633,7 +633,7 @@ class _UsuarioTile extends StatelessWidget {
           ),
           child: Row(
             children: [
-              Icon(Icons.person_add_outlined, color: Colors.indigo[300], size: 16),
+              Icon(Icons.person_add, color: Colors.indigo[300], size: 16),
               const SizedBox(width: 8),
               const Expanded(
                 child: Text(
@@ -662,7 +662,7 @@ class _UsuarioTile extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Icon(Icons.person_outline,
+            Icon(Icons.person,
                 color: activo ? Colors.indigo[300] : Colors.white24, size: 15),
             const SizedBox(width: 8),
             Expanded(
@@ -697,7 +697,7 @@ class _UsuarioTile extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 6),
-            const Icon(Icons.edit_outlined, color: Colors.white24, size: 14),
+            const Icon(Icons.edit, color: Colors.white24, size: 14),
           ],
         ),
       ),
@@ -814,18 +814,41 @@ class _UsuarioSedeDialogState extends State<_UsuarioSedeDialog> {
             ? 'Nuevo supervisor FN'
             : 'Acceso para ${widget.sedeNombre}';
 
+    final inputDeco = InputDecoration(
+      labelStyle: const TextStyle(color: Colors.white54, fontSize: 12),
+      filled: true,
+      fillColor: Colors.white.withValues(alpha: 0.07),
+      border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.15))),
+      enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.15))),
+      focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: Colors.indigo)),
+      isDense: true,
+      iconColor: Colors.white38,
+      prefixIconColor: Colors.white38,
+    );
+
     return AlertDialog(
+      backgroundColor: const Color(0xFF1A1A1A),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       title: Row(
         children: [
           Icon(
-            _esSupervisor ? Icons.supervisor_account : Icons.person_outline,
-            color: Colors.indigo,
+            _esSupervisor ? Icons.supervisor_account : Icons.person,
+            color: Colors.indigo[300],
             size: 18,
           ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(titulo,
-                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -839,28 +862,27 @@ class _UsuarioSedeDialogState extends State<_UsuarioSedeDialog> {
               // Nombre visible
               TextFormField(
                 controller: _nombreCtrl,
-                decoration: const InputDecoration(
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+                decoration: inputDeco.copyWith(
                   labelText: 'Nombre completo',
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                  prefixIcon: Icon(Icons.badge_outlined, size: 18),
+                  prefixIcon: const Icon(Icons.badge, size: 18),
                 ),
                 validator: (v) =>
                     v == null || v.trim().isEmpty ? 'Requerido' : null,
               ),
               const SizedBox(height: 12),
 
-              // Nombre de usuario para login
+              // Usuario para login
               TextFormField(
                 controller: _usuarioCtrl,
-                decoration: InputDecoration(
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+                decoration: inputDeco.copyWith(
                   labelText: 'Usuario (para login)',
-                  border: const OutlineInputBorder(),
-                  isDense: true,
                   prefixIcon: const Icon(Icons.alternate_email, size: 18),
                   helperText: _esSupervisor
                       ? 'Ej: supervisor1, supervisor_fn'
                       : 'Ej: FN1, FN2, FN3  (FN + número de sede)',
+                  helperStyle: const TextStyle(color: Colors.white38, fontSize: 11),
                 ),
                 validator: (v) =>
                     v == null || v.trim().isEmpty ? 'Requerido' : null,
@@ -871,50 +893,50 @@ class _UsuarioSedeDialogState extends State<_UsuarioSedeDialog> {
               TextFormField(
                 controller: _passCtrl,
                 obscureText: !_verPass,
-                decoration: InputDecoration(
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+                decoration: inputDeco.copyWith(
                   labelText: _esEdicion
-                      ? 'Nueva contraseña (dejar vacío = sin cambio)'
+                      ? 'Nueva contraseña (vacío = sin cambio)'
                       : 'Contraseña',
-                  border: const OutlineInputBorder(),
-                  isDense: true,
-                  prefixIcon: const Icon(Icons.lock_outline, size: 18),
+                  prefixIcon: const Icon(Icons.lock, size: 18),
                   suffixIcon: IconButton(
                     icon: Icon(
                         _verPass ? Icons.visibility_off : Icons.visibility,
+                        color: Colors.white38,
                         size: 18),
                     onPressed: () => setState(() => _verPass = !_verPass),
                   ),
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
 
               // Activo
               SwitchListTile(
                 dense: true,
                 contentPadding: EdgeInsets.zero,
-                title: const Text('Usuario activo', style: TextStyle(fontSize: 13)),
+                title: const Text('Usuario activo',
+                    style: TextStyle(color: Colors.white70, fontSize: 13)),
                 value: _activo,
                 onChanged: (v) => setState(() => _activo = v),
                 activeColor: Colors.green,
               ),
 
-              // Rol mostrado (informativo)
+              // Rol (informativo)
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
-                  color: Colors.indigo.withValues(alpha: 0.1),
+                  color: Colors.indigo.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: Colors.indigo.withValues(alpha: 0.3)),
                 ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.info_outline, size: 14, color: Colors.indigo),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Rol: ${_esSupervisor ? 'supervisor_fn' : 'sede_fn'}',
-                      style: const TextStyle(color: Colors.indigo, fontSize: 12),
-                    ),
-                  ],
-                ),
+                child: Row(children: [
+                  const Icon(Icons.info, size: 14, color: Colors.indigo),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Rol: ${_esSupervisor ? 'supervisor_fn' : 'sede_fn'}',
+                    style: TextStyle(color: Colors.indigo[200], fontSize: 12),
+                  ),
+                ]),
               ),
             ],
           ),
@@ -923,7 +945,7 @@ class _UsuarioSedeDialogState extends State<_UsuarioSedeDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('Cancelar'),
+          child: const Text('Cancelar', style: TextStyle(color: Colors.white54)),
         ),
         ElevatedButton.icon(
           style: ElevatedButton.styleFrom(
@@ -936,7 +958,7 @@ class _UsuarioSedeDialogState extends State<_UsuarioSedeDialog> {
                   height: 14,
                   child: CircularProgressIndicator(
                       color: Colors.white, strokeWidth: 2))
-              : const Icon(Icons.save_outlined, size: 16),
+              : const Icon(Icons.save, size: 16),
           label: Text(_esEdicion ? 'Guardar cambios' : 'Crear usuario'),
         ),
       ],
@@ -1207,10 +1229,8 @@ class _SedeDialogState extends State<_SedeDialog> {
                   decoration: _inputDeco('Tipo de sede'),
                   items: const [
                     DropdownMenuItem(value: 'FN', child: Text('FN (Farmanorte)')),
-                    DropdownMenuItem(
-                        value: 'FARMACIA', child: Text('Farmacia externa')),
-                    DropdownMenuItem(
-                        value: 'DEPOSITO', child: Text('Depósito')),
+                    DropdownMenuItem(value: 'FARMACIA', child: Text('Farmacia externa')),
+                    DropdownMenuItem(value: 'DEPOSITO', child: Text('Depósito')),
                   ],
                   onChanged: (v) => setState(() => _tipo = v!),
                 ),

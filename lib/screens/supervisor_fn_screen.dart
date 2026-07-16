@@ -311,9 +311,14 @@ class _TabHistorialState extends State<_TabHistorial> {
     try {
       final data = await widget.db
           .from('fn_sedes')
-          .select('id, tipo, numero, nombre')
-          .order('numero');
-      setState(() => _sedes = List<Map<String, dynamic>>.from(data));
+          .select('id, tipo, numero, nombre');
+      final lista = List<Map<String, dynamic>>.from(data);
+      lista.sort((a, b) {
+        final na = int.tryParse(a['numero']?.toString() ?? '') ?? 999;
+        final nb = int.tryParse(b['numero']?.toString() ?? '') ?? 999;
+        return na.compareTo(nb);
+      });
+      setState(() => _sedes = lista);
     } catch (_) {}
   }
 
