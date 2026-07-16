@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:serviexpress_app/utils/sonido_manager.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart';
+import 'package:serviexpress_app/screens/login_screen.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Panel sede FN — rol: sede_fn
@@ -194,15 +195,50 @@ class _SedeFnScreenState extends State<SedeFnScreen>
             ),
           ],
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout, color: Colors.white70),
+            tooltip: 'Cerrar sesión',
+            onPressed: () async {
+              final confirmar = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  backgroundColor: const Color(0xFF1A1A1A),
+                  title: const Text('¿Cerrar sesión?',
+                      style: TextStyle(color: Colors.white, fontSize: 16)),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      child: const Text('Cancelar',
+                          style: TextStyle(color: Colors.white54)),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, true),
+                      child: const Text('Cerrar sesión',
+                          style: TextStyle(color: Colors.redAccent)),
+                    ),
+                  ],
+                ),
+              );
+              if (confirmar == true && mounted) {
+                Navigator.pushAndRemoveUntil(
+                  context,
+                  MaterialPageRoute(builder: (_) => const LoginScreen()),
+                  (_) => false,
+                );
+              }
+            },
+          ),
+        ],
         bottom: TabBar(
           controller: _tab,
           indicatorColor: Colors.indigo[200],
           labelColor: Colors.white,
           unselectedLabelColor: Colors.white54,
           tabs: const [
-            Tab(icon: Icon(Icons.add_box_outlined), text: 'Nuevo'),
-            Tab(icon: Icon(Icons.local_shipping_outlined), text: 'Activos'),
-            Tab(icon: Icon(Icons.history_rounded), text: 'Historial'),
+            Tab(icon: Icon(Icons.add_box), text: 'Nuevo'),
+            Tab(icon: Icon(Icons.two_wheeler), text: 'Activos'),
+            Tab(icon: Icon(Icons.history), text: 'Historial'),
           ],
         ),
       ),
@@ -527,11 +563,13 @@ class _FormularioTabState extends State<_FormularioTab> {
                           'Recogida ${i + 1}',
                           hint: 'Seleccionar sede FN',
                         ),
+                        dropdownColor: const Color(0xFF1E1E1E),
+                        style: const TextStyle(color: Colors.white, fontSize: 13),
                         isExpanded: true,
                         items: _sedesDisponibles.map((s) => DropdownMenuItem(
                           value: s,
                           child: Text(_labelSede(s),
-                              style: const TextStyle(fontSize: 13)),
+                              style: const TextStyle(color: Colors.white, fontSize: 13)),
                         )).toList(),
                         onChanged: (v) =>
                             setState(() => _recogidasSel[i] = v),
@@ -542,7 +580,7 @@ class _FormularioTabState extends State<_FormularioTab> {
                     if (_recogidasSel.length > 1) ...[
                       const SizedBox(width: 6),
                       IconButton(
-                        icon: const Icon(Icons.remove_circle_outline,
+                        icon: const Icon(Icons.remove_circle,
                             color: Colors.red),
                         onPressed: () =>
                             setState(() => _recogidasSel.removeAt(i)),
@@ -570,6 +608,7 @@ class _FormularioTabState extends State<_FormularioTab> {
             TextFormField(
               controller: _destinoCtrl,
               textCapitalization: TextCapitalization.characters,
+              style: const TextStyle(color: Colors.white),
               decoration: _inputDeco('Dirección de entrega'),
               validator: (v) =>
                   (v == null || v.trim().isEmpty) ? 'Requerido' : null,
@@ -601,6 +640,7 @@ class _FormularioTabState extends State<_FormularioTab> {
                 Expanded(
                   child: TextFormField(
                     controller: _facturaNumCtrl,
+                    style: const TextStyle(color: Colors.white),
                     decoration: _inputDeco('N° factura'),
                     keyboardType: TextInputType.text,
                   ),
@@ -609,6 +649,7 @@ class _FormularioTabState extends State<_FormularioTab> {
                 Expanded(
                   child: TextFormField(
                     controller: _facturaValCtrl,
+                    style: const TextStyle(color: Colors.white),
                     decoration: _inputDeco('Valor (\$)'),
                     keyboardType: TextInputType.number,
                     inputFormatters: [FilteringTextInputFormatter.digitsOnly],
@@ -625,6 +666,7 @@ class _FormularioTabState extends State<_FormularioTab> {
             TextFormField(
               controller: _instruccionesCtrl,
               maxLines: 3,
+              style: const TextStyle(color: Colors.white),
               decoration: _inputDeco(
                   'Ej: Tocar timbre, dejar con el portero, etc.'),
             ),
@@ -974,7 +1016,7 @@ class _ActivosTabState extends State<_ActivosTab> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.check_circle_outline, color: Colors.white24, size: 48),
+                Icon(Icons.check_circle, color: Colors.white24, size: 48),
                 SizedBox(height: 12),
                 Text('Sin servicios activos',
                     style: TextStyle(color: Colors.white38, fontSize: 14)),
@@ -1154,7 +1196,7 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
               padding: const EdgeInsets.only(bottom: 3),
               child: Row(
                 children: [
-                  Icon(Icons.local_pharmacy_outlined,
+                  Icon(Icons.local_pharmacy,
                       size: 13, color: Colors.indigo[300]),
                   const SizedBox(width: 5),
                   Text(
@@ -1176,7 +1218,7 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
               padding: const EdgeInsets.only(top: 3),
               child: Row(
                 children: [
-                  const Icon(Icons.place_outlined,
+                  const Icon(Icons.place,
                       size: 13, color: Colors.white38),
                   const SizedBox(width: 5),
                   Expanded(
@@ -1222,7 +1264,7 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
                           fontWeight: FontWeight.bold)),
                   if (_etaSegundos > 0 && estado == 'en_ruta_origen') ...[
                     const SizedBox(width: 12),
-                    const Icon(Icons.timer_outlined,
+                    const Icon(Icons.timer,
                         size: 12, color: Colors.orange),
                     const SizedBox(width: 4),
                     Text(

@@ -263,116 +263,123 @@ class _SedesTabState extends State<_SedesTab> {
       return const Center(child: CircularProgressIndicator(color: Colors.indigo));
     }
 
+    // Sección supervisores — siempre visible
+    final seccionSupervisores = Container(
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.indigo[900]!.withValues(alpha: 0.3),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.indigo[700]!.withValues(alpha: 0.5)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            const Icon(Icons.supervisor_account, color: Colors.indigo, size: 15),
+            const SizedBox(width: 6),
+            const Expanded(
+              child: Text('Supervisores FN',
+                  style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold)),
+            ),
+            TextButton.icon(
+              onPressed: () async {
+                await showDialog(
+                  context: context,
+                  builder: (_) => const _UsuarioSedeDialog(
+                    sedeId: null,
+                    sedeNombre: 'Supervisor FN',
+                    usuarioExistente: null,
+                  ),
+                );
+                _cargar();
+              },
+              icon: const Icon(Icons.add, size: 14),
+              label: const Text('Agregar', style: TextStyle(fontSize: 12)),
+              style: TextButton.styleFrom(
+                  foregroundColor: Colors.indigo[300],
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4)),
+            ),
+          ]),
+          if (_supervisores.isEmpty)
+            const Padding(
+              padding: EdgeInsets.only(top: 4),
+              child: Text('Sin supervisores registrados',
+                  style: TextStyle(color: Colors.white24, fontSize: 11)),
+            )
+          else
+            ..._supervisores.map((u) => _UsuarioTile(
+                  usuario: u,
+                  onEditar: () async {
+                    await showDialog(
+                      context: context,
+                      builder: (_) => _UsuarioSedeDialog(
+                        sedeId: null,
+                        sedeNombre: 'Supervisor FN',
+                        usuarioExistente: u,
+                      ),
+                    );
+                    _cargar();
+                  },
+                )),
+        ],
+      ),
+    );
+
     return Stack(
       children: [
-        _sedes.isEmpty
-            ? const Center(
-                child: Text('Sin sedes registradas',
-                    style: TextStyle(color: Colors.white38)))
-            : ListView(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                children: [
-                  ..._sedes.map((sede) {
-                    final sedeId = sede['id'] as int;
-                    final usuarioSede = _usuarioDeSede(sedeId);
-                    return _SedeCard(
-                      sede: sede,
-                      usuarioSede: usuarioSede,
-                      onToggle: () => _toggleActivo(sede),
-                      onEdit: () async {
-                        await showDialog(
-                          context: context,
-                          builder: (_) => _SedeDialog(sede: sede),
-                        );
-                        _cargar();
-                      },
-                      onDelete: () => _eliminar(sede),
-                      onGestionarUsuario: () async {
-                        await showDialog(
-                          context: context,
-                          builder: (_) => _UsuarioSedeDialog(
-                            sedeId: sedeId,
-                            sedeNombre: sede['tipo'] == 'FN' && sede['numero'] != null
-                                ? 'FN${sede['numero']} — ${sede['nombre']}'
-                                : sede['nombre'] as String,
-                            usuarioExistente: usuarioSede,
-                          ),
-                        );
-                        _cargar();
-                      },
-                    );
-                  }),
-
-                  // ── Sección supervisores FN ──────────────────────────────
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: Colors.indigo[900]!.withValues(alpha: 0.3),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.indigo[700]!.withValues(alpha: 0.5)),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            const Icon(Icons.supervisor_account, color: Colors.indigo, size: 15),
-                            const SizedBox(width: 6),
-                            const Expanded(
-                              child: Text('Supervisores FN',
-                                  style: TextStyle(
-                                      color: Colors.white70,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold)),
-                            ),
-                            TextButton.icon(
-                              onPressed: () async {
-                                await showDialog(
-                                  context: context,
-                                  builder: (_) => const _UsuarioSedeDialog(
-                                    sedeId: null,
-                                    sedeNombre: 'Supervisor FN',
-                                    usuarioExistente: null,
-                                  ),
-                                );
-                                _cargar();
-                              },
-                              icon: const Icon(Icons.add, size: 14),
-                              label: const Text('Agregar', style: TextStyle(fontSize: 12)),
-                              style: TextButton.styleFrom(
-                                  foregroundColor: Colors.indigo[300],
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4)),
-                            ),
-                          ],
+        ListView(
+          padding: const EdgeInsets.only(top: 10, bottom: 90),
+          children: [
+            if (_sedes.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 24),
+                child: Center(
+                  child: Text('Sin sedes registradas',
+                      style: TextStyle(color: Colors.white38)),
+                ),
+              )
+            else
+              ..._sedes.map((sede) {
+                final sedeId = sede['id'] as int;
+                final usuarioSede = _usuarioDeSede(sedeId);
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: _SedeCard(
+                    sede: sede,
+                    usuarioSede: usuarioSede,
+                    onToggle: () => _toggleActivo(sede),
+                    onEdit: () async {
+                      await showDialog(
+                        context: context,
+                        builder: (_) => _SedeDialog(sede: sede),
+                      );
+                      _cargar();
+                    },
+                    onDelete: () => _eliminar(sede),
+                    onGestionarUsuario: () async {
+                      await showDialog(
+                        context: context,
+                        builder: (_) => _UsuarioSedeDialog(
+                          sedeId: sedeId,
+                          sedeNombre: sede['tipo'] == 'FN' && sede['numero'] != null
+                              ? 'FN${sede['numero']} — ${sede['nombre']}'
+                              : sede['nombre'] as String,
+                          usuarioExistente: usuarioSede,
                         ),
-                        if (_supervisores.isEmpty)
-                          const Padding(
-                            padding: EdgeInsets.only(top: 4),
-                            child: Text('Sin supervisores registrados',
-                                style: TextStyle(color: Colors.white24, fontSize: 11)),
-                          )
-                        else
-                          ..._supervisores.map((u) => _UsuarioTile(
-                                usuario: u,
-                                onEditar: () async {
-                                  await showDialog(
-                                    context: context,
-                                    builder: (_) => _UsuarioSedeDialog(
-                                      sedeId: null,
-                                      sedeNombre: 'Supervisor FN',
-                                      usuarioExistente: u,
-                                    ),
-                                  );
-                                  _cargar();
-                                },
-                              )),
-                      ],
-                    ),
+                      );
+                      _cargar();
+                    },
                   ),
-                  const SizedBox(height: 80), // espacio para el FAB
-                ],
-              ),
+                );
+              }),
+            seccionSupervisores,
+            const SizedBox(height: 8),
+          ],
+        ),
 
         // FAB
         Positioned(
@@ -485,10 +492,10 @@ class _SedeCard extends StatelessWidget {
                   width: 44,
                   height: 44,
                   decoration: BoxDecoration(
-                    color: colorT.withValues(alpha: 0.15),
+                    color: colorT,
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: Icon(_iconoTipo(tipo), color: colorT, size: 22),
+                  child: Icon(_iconoTipo(tipo), color: Colors.white, size: 22),
                 ),
                 const SizedBox(width: 12),
 

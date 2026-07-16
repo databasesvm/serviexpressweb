@@ -1013,6 +1013,7 @@ extension CentralScreenPanelControl on _CentralScreenState {
                   ),
                 ),
                 Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
                       _radarActivo ? 'ON' : 'OFF',
@@ -1024,19 +1025,23 @@ extension CentralScreenPanelControl on _CentralScreenState {
                         fontSize: 11,
                       ),
                     ),
-                    Switch(
-                      value: _radarActivo,
-                      onChanged: (val) => setState(() => _radarActivo = val),
-                      activeThumbColor: const Color(0xff3AF500),
-                      activeTrackColor: Colors.green[900],
-                      inactiveThumbColor: Colors.redAccent,
-                      inactiveTrackColor: Colors.red[900],
+                    Transform.scale(
+                      scale: 0.8,
+                      child: Switch(
+                        value: _radarActivo,
+                        onChanged: (val) => setState(() => _radarActivo = val),
+                        activeThumbColor: const Color(0xff3AF500),
+                        activeTrackColor: Colors.green[900],
+                        inactiveThumbColor: Colors.redAccent,
+                        inactiveTrackColor: Colors.red[900],
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
                     ),
                     IconButton(
                       icon: const Icon(Icons.refresh_rounded, color: Colors.white70, size: 18),
                       tooltip: 'Actualizar radar',
                       padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                      constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                       onPressed: () async {
                         await _preCargarDatosIniciales();
                         _construirStreams();

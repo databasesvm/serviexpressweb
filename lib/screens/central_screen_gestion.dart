@@ -1039,14 +1039,14 @@ extension CentralScreenGestion on _CentralScreenState {
                       onTap: () => _abrirGestorSectores(),
                     ),
                     _tarjetaGestion(
-                      icono: Icons.map_outlined,
+                      icono: Icons.map,
                       color: Colors.indigo[700]!,
                       titulo: 'Red de Direcciones',
                       subtitulo: 'Direcciones compartidas con locales',
                       onTap: () => _abrirRedDirecciones(context),
                     ),
                     _tarjetaGestion(
-                      icono: Icons.price_change_outlined,
+                      icono: Icons.price_change,
                       color: Colors.orange[800]!,
                       titulo: 'Listas de Precios',
                       subtitulo: 'Ver y editar tarifas de cada local por sector',
@@ -1719,7 +1719,7 @@ extension CentralScreenGestion on _CentralScreenState {
                                 ),
                                 const SizedBox(width: 4),
                                 IconButton(
-                                  icon: const Icon(Icons.delete_outline, color: Colors.red, size: 18),
+                                  icon: const Icon(Icons.delete, color: Colors.red, size: 18),
                                   padding: EdgeInsets.zero,
                                   constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                                   onPressed: () async {
@@ -1782,7 +1782,7 @@ extension CentralScreenGestion on _CentralScreenState {
           return AlertDialog(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             title: const Row(children: [
-              Icon(Icons.map_outlined, color: Colors.indigo),
+              Icon(Icons.map, color: Colors.indigo),
               SizedBox(width: 8),
               Text('RED DE DIRECCIONES', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             ]),
@@ -1924,7 +1924,7 @@ extension CentralScreenGestion on _CentralScreenState {
                                   ),
                                   const SizedBox(width: 4),
                                   IconButton(
-                                    icon: const Icon(Icons.delete_outline, color: Colors.red, size: 18),
+                                    icon: const Icon(Icons.delete, color: Colors.red, size: 18),
                                     padding: EdgeInsets.zero,
                                     constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                                     onPressed: () async {
@@ -1968,7 +1968,7 @@ extension CentralScreenGestion on _CentralScreenState {
           return AlertDialog(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             title: const Row(children: [
-              Icon(Icons.price_change_outlined, color: Colors.orange),
+              Icon(Icons.price_change, color: Colors.orange),
               SizedBox(width: 8),
               Text('LISTAS DE PRECIOS', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             ]),
