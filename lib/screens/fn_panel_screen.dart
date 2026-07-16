@@ -46,6 +46,10 @@ class _FnPanelScreenState extends State<FnPanelScreen>
           style: TextStyle(
               color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
         ),
+        actions: const [
+          _AltaDemandaFnToggle(),
+          SizedBox(width: 8),
+        ],
         bottom: TabBar(
           controller: _tab,
           indicatorColor: Colors.indigo[300],
@@ -53,8 +57,8 @@ class _FnPanelScreenState extends State<FnPanelScreen>
           unselectedLabelColor: Colors.white38,
           tabs: const [
             Tab(icon: Icon(Icons.local_pharmacy_outlined), text: 'Sedes'),
-            Tab(icon: Icon(Icons.two_wheeler), text: 'Motos FN'),
-            Tab(icon: Icon(Icons.history_rounded), text: 'Historial'),
+            Tab(icon: Icon(Icons.two_wheeler_outlined), text: 'Motos FN'),
+            Tab(icon: Icon(Icons.history_outlined), text: 'Historial'),
           ],
         ),
       ),
@@ -66,6 +70,72 @@ class _FnPanelScreenState extends State<FnPanelScreen>
           _HistorialTab(),
         ],
       ),
+    );
+  }
+}
+
+// ── Toggle alta demanda FN — compacto para AppBar ────────────────────────────
+class _AltaDemandaFnToggle extends StatefulWidget {
+  const _AltaDemandaFnToggle();
+  @override
+  State<_AltaDemandaFnToggle> createState() => _AltaDemandaFnToggleState();
+}
+
+class _AltaDemandaFnToggleState extends State<_AltaDemandaFnToggle> {
+  bool? _valor;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargar();
+  }
+
+  Future<void> _cargar() async {
+    try {
+      final row = await Supabase.instance.client
+          .from('config_sistema')
+          .select('alta_demanda_fn')
+          .eq('id', 1)
+          .maybeSingle();
+      if (mounted) setState(() => _valor = row?['alta_demanda_fn'] == true);
+    } catch (_) {
+      if (mounted) setState(() => _valor = false);
+    }
+  }
+
+  Future<void> _toggle(bool v) async {
+    setState(() => _valor = v);
+    try {
+      await Supabase.instance.client
+          .from('config_sistema')
+          .update({'alta_demanda_fn': v})
+          .eq('id', 1);
+    } catch (_) {
+      if (mounted) setState(() => _valor = !v);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final activo = _valor ?? false;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          '⚠ Alta',
+          style: TextStyle(
+            color: activo ? Colors.orange[400] : Colors.white38,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        Switch(
+          value: activo,
+          onChanged: _valor == null ? null : _toggle,
+          activeColor: Colors.orange[600],
+          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
+      ],
     );
   }
 }
@@ -362,13 +432,13 @@ class _SedeCard extends StatelessWidget {
   IconData _iconoTipo(String tipo) {
     switch (tipo) {
       case 'FN':
-        return Icons.local_pharmacy;
+        return Icons.local_pharmacy_outlined;
       case 'FARMACIA':
         return Icons.medication_outlined;
       case 'DEPOSITO':
-        return Icons.warehouse_outlined;
+        return Icons.inventory_2_outlined;
       default:
-        return Icons.store;
+        return Icons.storefront_outlined;
     }
   }
 

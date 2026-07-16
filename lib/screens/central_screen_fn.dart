@@ -306,16 +306,7 @@ extension CentralScreenFn on _CentralScreenState {
     }
   }
 
-  // ── Toggle alta demanda FN desde panel de control ───────────────────────
-  Future<void> _toggleAltaDemandaFn(bool valor) async {
-    try {
-      await Supabase.instance.client
-          .from('config_sistema')
-          .update({'alta_demanda_fn': valor}).eq('id', 1);
-    } catch (e) {
-      debugPrint('Error toggling alta_demanda_fn: $e');
-    }
-  }
+
 
   // ── Helpers ─────────────────────────────────────────────────────────────
   String _labelSedeFn(Map<String, dynamic> r) {
@@ -349,66 +340,4 @@ extension CentralScreenFn on _CentralScreenState {
                 fontWeight: FontWeight.bold)),
       );
 
-  // Devuelve el widget; la lógica real está en _AltaDemandaFnToggle abajo
-  Widget _buildToggleAltaDemandaFn() => const _AltaDemandaFnToggle();
-}
-
-// ── Widget independiente para el toggle de alta demanda FN ───────────────────
-// Maneja su propio estado para evitar re-fetch en cada setState del padre.
-class _AltaDemandaFnToggle extends StatefulWidget {
-  const _AltaDemandaFnToggle();
-  @override
-  State<_AltaDemandaFnToggle> createState() => _AltaDemandaFnToggleState();
-}
-
-class _AltaDemandaFnToggleState extends State<_AltaDemandaFnToggle> {
-  bool? _valor; // null = cargando
-
-  @override
-  void initState() {
-    super.initState();
-    _cargar();
-  }
-
-  Future<void> _cargar() async {
-    try {
-      final row = await Supabase.instance.client
-          .from('config_sistema')
-          .select('alta_demanda_fn')
-          .eq('id', 1)
-          .maybeSingle();
-      if (mounted) setState(() => _valor = row?['alta_demanda_fn'] == true);
-    } catch (_) {
-      if (mounted) setState(() => _valor = false);
-    }
-  }
-
-  Future<void> _toggle(bool v) async {
-    setState(() => _valor = v); // optimista — respuesta inmediata
-    try {
-      await Supabase.instance.client
-          .from('config_sistema')
-          .update({'alta_demanda_fn': v})
-          .eq('id', 1);
-    } catch (_) {
-      if (mounted) setState(() => _valor = !v); // revertir si falla
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return SwitchListTile(
-      dense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
-      title: const Text('⚠ Alta demanda FN',
-          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-      subtitle: const Text(
-        'Avisa a todas las sedes de demora en el servicio',
-        style: TextStyle(fontSize: 11),
-      ),
-      value: _valor ?? false,
-      onChanged: _valor == null ? null : _toggle,
-      activeColor: Colors.orange[700],
-    );
-  }
 }
