@@ -7,6 +7,7 @@ import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:serviexpress_app/utils/sonido_manager.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart';
 import 'package:serviexpress_app/screens/login_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Panel sede FN — rol: sede_fn
@@ -221,11 +222,16 @@ class _SedeFnScreenState extends State<SedeFnScreen>
                 ),
               );
               if (confirmar == true && mounted) {
-                Navigator.pushAndRemoveUntil(
-                  context,
-                  MaterialPageRoute(builder: (_) => const LoginScreen()),
-                  (_) => false,
-                );
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.remove('sesion_usuario_json');
+                await prefs.setBool('auto_login', false);
+                if (mounted) {
+                  Navigator.pushAndRemoveUntil(
+                    context,
+                    MaterialPageRoute(builder: (_) => const LoginScreen()),
+                    (_) => false,
+                  );
+                }
               }
             },
           ),
