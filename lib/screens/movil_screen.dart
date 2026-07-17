@@ -59,6 +59,7 @@ class _MovilScreenState extends State<MovilScreen>
   final Set<int> _serviciosOcultosLocales = {};
   DateTime _ultimaActividadUtc = DateTime.now().toUtc();
   bool _alertaInactividadMostrada = false;
+  bool _alerta4hMostrada = false;
 
   // --- VARIABLES DE ESTADO TÁCTICAS ---
   final Set<int> _serviciosExpandidos = {}; // cuáles están abiertos ahora
@@ -2256,7 +2257,7 @@ class _MovilScreenState extends State<MovilScreen>
       // El ban check se movió al timer de 30s para no hacer 12 queries/min.
       if (mounted) _radarTick.value++;
 
-      // 3. Control de Inactividad (120 min desconecta, 100 min avisa)
+      // 3. Control de Inactividad (360 min desconecta, avisos a 120 y 240 min)
       // Solo aplica si no tiene servicios activos Y no está en paradero.
       final enParadero = _miParaderoCache != null;
       if (_estaEnLinea && _serviciosActivosData.isEmpty && !enParadero) {
@@ -2264,16 +2265,20 @@ class _MovilScreenState extends State<MovilScreen>
             .toUtc()
             .difference(_ultimaActividadUtc)
             .inMinutes;
-        if (inactividad >= 120) {
+        if (inactividad >= 360) {
           _autoDesconectarPorInactividad();
           return;
-        } else if (inactividad >= 100 && !_alertaInactividadMostrada) {
+        } else if (inactividad >= 240 && !_alerta4hMostrada) {
+          _alerta4hMostrada = true;
+          _mostrarAlertaSigoActivo('4 horas');
+        } else if (inactividad >= 120 && !_alertaInactividadMostrada) {
           _alertaInactividadMostrada = true;
-          _mostrarAlertaSigoActivo();
+          _mostrarAlertaSigoActivo('2 horas');
         }
       } else if (_estaEnLinea && (_serviciosActivosData.isNotEmpty || enParadero)) {
         _ultimaActividadUtc = DateTime.now().toUtc();
         _alertaInactividadMostrada = false;
+        _alerta4hMostrada = false;
       }
 
       // 4. Supervisión estricta de demoras en pedidos activos
@@ -2398,7 +2403,7 @@ class _MovilScreenState extends State<MovilScreen>
     );
   }
 
-  void _mostrarAlertaSigoActivo() {
+  void _mostrarAlertaSigoActivo([String horas = '2 horas']) {
     if (!mounted) return;
     showDialog(
       context: context,
@@ -2415,8 +2420,8 @@ class _MovilScreenState extends State<MovilScreen>
             color: Colors.orange[800],
           ),
         ),
-        content: const Text(
-          'Llevas 60 minutos sin tomar servicios. ¿Sigues disponible?',
+        content: Text(
+          'Llevas $horas sin tomar servicios. ¿Sigues disponible?',
         ),
         actions: [
           TextButton(
@@ -2435,6 +2440,7 @@ class _MovilScreenState extends State<MovilScreen>
               setState(() {
                 _ultimaActividadUtc = DateTime.now().toUtc();
                 _alertaInactividadMostrada = false;
+                _alerta4hMostrada = false;
               });
               Navigator.pop(context);
             },
@@ -2622,6 +2628,11 @@ class _MovilScreenState extends State<MovilScreen>
     if (!mounted) return;
     if (data is! Map) return;
     final tipo = data['tipo'];
+    if (tipo == 'aviso_inactividad') {
+      final horas = data['horas'] as int? ?? 2;
+      _mostrarAlertaSigoActivo('$horas horas');
+      return;
+    }
     if (tipo == 'aviso_desconexion') {
       final minutos = data['minutos'] as int? ?? 5;
       showDialog(
@@ -2671,6 +2682,7 @@ class _MovilScreenState extends State<MovilScreen>
 
   Future<void> _autoDesconectarPorInactividad() async {
     _alertaInactividadMostrada = false;
+    _alerta4hMostrada = false;
     try {
       await Supabase.instance.client
           .from('usuarios')
@@ -2700,7 +2712,7 @@ class _MovilScreenState extends State<MovilScreen>
               style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
             ),
             content: const Text(
-              'El sistema te ha desconectado tras 80 minutos de inactividad total.',
+              'El sistema te ha desconectado tras 6 horas de inactividad total.',
             ),
             actions: [
               ElevatedButton(
@@ -2833,6 +2845,7 @@ class _MovilScreenState extends State<MovilScreen>
         if (nuevoEstado) {
           _ultimaActividadUtc = DateTime.now().toUtc();
           _alertaInactividadMostrada = false;
+          _alerta4hMostrada = false;
           _iniciarRastreoGps();
           _iniciarHeartbeat(); // ← Opción A
           _iniciarHeartbeatUbicacion(); // Fallback GPS

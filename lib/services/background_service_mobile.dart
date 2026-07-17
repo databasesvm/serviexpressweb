@@ -5,7 +5,9 @@
 // mediante conditional export (dart.library.io).
 //
 // TIMEOUT DE INACTIVIDAD:
-//   - A las 2 h sin servicio activo → aviso en notificación + mensaje a la app
+//   - A las 2 h sin servicio activo → aviso suave (in-app) sin prorroga
+//   - A las 4 h sin servicio activo → segundo aviso suave (in-app)
+//   - A las 6 h sin servicio activo → aviso en notificación + prorroga 5 min
 //   - 5 min después (prorroga) → desconexión forzada sin contemplación
 //   - Si el moto tiene servicio activo, nunca se auto-desconecta por tiempo
 //   - Si el moto abre la app → el timer se reinicia
@@ -19,9 +21,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 const String kBgUserId    = 'bg_user_id';
 const String kBgStartTime = 'bg_start_time';    // epoch ms — inicio de sesión
 const String kBgProrroga  = 'bg_prorroga_time'; // epoch ms — cuando se envió el aviso
+const String kBgAviso2h   = 'bg_aviso_2h';      // bool — ya se envió aviso 2h
+const String kBgAviso4h   = 'bg_aviso_4h';      // bool — ya se envió aviso 4h
 
-const int _kMaxHorasConectado = 2; // horas sin servicio → aviso
-const int _kProrrogaMinutos   = 5; // minutos de gracia tras el aviso
+const int _kMaxHorasConectado = 6; // horas sin servicio → aviso final + prorroga
+const int _kProrrogaMinutos   = 5; // minutos de gracia tras el aviso final
 
 Future<void> initBackgroundService() async {
   FlutterForegroundTask.initCommunicationPort();
@@ -55,6 +59,8 @@ Future<void> startForegroundService(String userId) async {
   await prefs.setString(kBgUserId, userId);
   await prefs.setInt(kBgStartTime, DateTime.now().millisecondsSinceEpoch);
   await prefs.remove(kBgProrroga);
+  await prefs.remove(kBgAviso2h);
+  await prefs.remove(kBgAviso4h);
   await FlutterForegroundTask.startService(
     notificationTitle: 'ServiExpress activo',
     notificationText: 'Conectado · recibiendo servicios',
@@ -68,6 +74,8 @@ Future<void> stopForegroundService() async {
   await prefs.remove(kBgUserId);
   await prefs.remove(kBgStartTime);
   await prefs.remove(kBgProrroga);
+  await prefs.remove(kBgAviso2h);
+  await prefs.remove(kBgAviso4h);
 }
 
 Future<void> updateForegroundNotification(String texto) async {
@@ -82,13 +90,15 @@ void removeBgDataCallback(void Function(Object) cb) {
   FlutterForegroundTask.removeTaskDataCallback(cb);
 }
 
-/// Llamado desde movil_screen cuando el moto vuelve a la app.
-/// Reinicia el contador de inactividad para que las 2h cuenten desde ahora.
+/// Llamado desde movil_screen cuando el moto pulsa "SIGO ACTIVO" o vuelve a la app.
+/// Reinicia el contador de inactividad para que las 6h cuenten desde ahora.
 Future<void> resetBgInactivityTimer() async {
   final prefs = await SharedPreferences.getInstance();
   if (prefs.getString(kBgUserId) == null) return;
   await prefs.setInt(kBgStartTime, DateTime.now().millisecondsSinceEpoch);
   await prefs.remove(kBgProrroga);
+  await prefs.remove(kBgAviso2h);
+  await prefs.remove(kBgAviso4h);
   await FlutterForegroundTask.updateService(
     notificationTitle: 'ServiExpress activo',
     notificationText: 'Conectado · recibiendo servicios',
@@ -134,6 +144,8 @@ class _ServiMotoTaskHandler extends TaskHandler {
       await prefs.remove(kBgUserId);
       await prefs.remove(kBgStartTime);
       await prefs.remove(kBgProrroga);
+      await prefs.remove(kBgAviso2h);
+      await prefs.remove(kBgAviso4h);
     } catch (_) {}
   }
 
@@ -162,13 +174,15 @@ class _ServiMotoTaskHandler extends TaskHandler {
       return; // no evaluar timeout mientras la prorroga está activa
     }
 
-    // ── 3. Verificar si superó las 2 horas ─────────────────────────────────
+    // ── 3. Verificar tiempo transcurrido ────────────────────────────────────
     final startMs = prefs.getInt(kBgStartTime);
     if (startMs == null) return;
-    final horas = ahora
+    final minutos = ahora
         .difference(DateTime.fromMillisecondsSinceEpoch(startMs))
-        .inHours;
-    if (horas < _kMaxHorasConectado) return;
+        .inMinutes;
+
+    // Solo actuamos a partir de 2h (120 min)
+    if (minutos < 120) return;
 
     // ── 4. Comprobar si tiene servicio activo o está en fila de paradero ───
     try {
@@ -187,6 +201,8 @@ class _ServiMotoTaskHandler extends TaskHandler {
       if ((activos as List).isNotEmpty) {
         // Tiene servicio activo → reiniciar contador silenciosamente
         await prefs.setInt(kBgStartTime, ahora.millisecondsSinceEpoch);
+        await prefs.remove(kBgAviso2h);
+        await prefs.remove(kBgAviso4h);
         return;
       }
 
@@ -200,22 +216,46 @@ class _ServiMotoTaskHandler extends TaskHandler {
       if (usuario != null && usuario['paradero_actual'] != null) {
         // Está en fila esperando → reiniciar contador silenciosamente
         await prefs.setInt(kBgStartTime, ahora.millisecondsSinceEpoch);
+        await prefs.remove(kBgAviso2h);
+        await prefs.remove(kBgAviso4h);
         return;
       }
 
-      // ── 5. Sin servicio → avisar y arrancar prorroga ────────────────────
-      await prefs.setInt(kBgProrroga, ahora.millisecondsSinceEpoch);
+      // ── 5. Sin servicio — evaluar umbrales ──────────────────────────────
 
-      await FlutterForegroundTask.updateService(
-        notificationTitle: '⚠️ ServiExpress — Inactividad',
-        notificationText:
-            'Serás desconectado en $_kProrrogaMinutos min. Abre la app para continuar.',
-      );
+      // 6 h (360 min) → avisar y arrancar prorroga
+      if (minutos >= _kMaxHorasConectado * 60) {
+        await prefs.setInt(kBgProrroga, ahora.millisecondsSinceEpoch);
+        await FlutterForegroundTask.updateService(
+          notificationTitle: '⚠️ ServiExpress — Inactividad',
+          notificationText:
+              'Serás desconectado en $_kProrrogaMinutos min. Abre la app para continuar.',
+        );
+        FlutterForegroundTask.sendDataToMain({
+          'tipo': 'aviso_desconexion',
+          'minutos': _kProrrogaMinutos,
+        });
+        return;
+      }
 
-      FlutterForegroundTask.sendDataToMain({
-        'tipo': 'aviso_desconexion',
-        'minutos': _kProrrogaMinutos,
-      });
+      // 4 h (240 min) → aviso suave, solo una vez
+      if (minutos >= 240 && prefs.getBool(kBgAviso4h) != true) {
+        await prefs.setBool(kBgAviso4h, true);
+        FlutterForegroundTask.sendDataToMain({
+          'tipo': 'aviso_inactividad',
+          'horas': 4,
+        });
+        return;
+      }
+
+      // 2 h (120 min) → aviso suave, solo una vez
+      if (minutos >= 120 && prefs.getBool(kBgAviso2h) != true) {
+        await prefs.setBool(kBgAviso2h, true);
+        FlutterForegroundTask.sendDataToMain({
+          'tipo': 'aviso_inactividad',
+          'horas': 2,
+        });
+      }
     } catch (_) {}
   }
 
