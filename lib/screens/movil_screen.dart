@@ -51,6 +51,9 @@ class _MovilScreenState extends State<MovilScreen>
   Timer? _supervisionTimer;
   StreamSubscription<Position>? _gpsTimer;
   Timer? _heartbeatTimer; // Opción A: ping cada 60s → cron Supabase limpia zombis
+  Timer? _ubicacionHeartbeatTimer; // Fallback: envía ubicación cada 20s aunque GPS stream esté silencioso
+  bool _enviandoUbicacion = false; // Mutex: evita writes de ubicación simultáneos
+  DateTime? _ultimoEnvioUbicacion; // Para el heartbeat: evita doble-write si GPS ya emitió
 
   List<Map<String, dynamic>> _serviciosActivosData = [];
   final Set<int> _serviciosOcultosLocales = {};
@@ -128,6 +131,7 @@ class _MovilScreenState extends State<MovilScreen>
   int _serviciosFnHoy = 0;
   int _serviciosFnTotal = 0;
   double _producidoFnHoy = 0;
+  double _producidoFnTotal = 0;
 
   // =====================================================================
   bool _gpsEnProceso = false;
@@ -1106,6 +1110,7 @@ class _MovilScreenState extends State<MovilScreen>
     _reconexionTimer?.cancel();
     _gpsTimer?.cancel();
     _heartbeatTimer?.cancel(); // ← Opción A
+    _ubicacionHeartbeatTimer?.cancel(); // Fallback GPS
     _subUsuarios?.cancel();
     _subServicios?.cancel();
     _radarTick.dispose();
@@ -1661,6 +1666,7 @@ class _MovilScreenState extends State<MovilScreen>
             .eq('id', widget.usuario['id']);
       }
       _gpsTimer?.cancel();
+      _detenerHeartbeatUbicacion(); // Fallback GPS
       _supervisionTimer?.cancel();
       _detenerHeartbeat(); // ← Opción A
       if (!kIsWeb) stopForegroundService().catchError((_) {}); // ← Opción B
@@ -1755,6 +1761,7 @@ class _MovilScreenState extends State<MovilScreen>
       if (_estaEnLinea || compartiendoPanico) {
         _ultimaActividadUtc = DateTime.now().toUtc();
         _iniciarRastreoGps();
+        if (_estaEnLinea) _iniciarHeartbeatUbicacion();
       }
     }
   }
@@ -1820,12 +1827,11 @@ class _MovilScreenState extends State<MovilScreen>
     if (defaultTargetPlatform == TargetPlatform.android) {
       locationSettings = AndroidSettings(
         accuracy: LocationAccuracy.high,
-        distanceFilter: 10,
-        // NOTA: forceLocationManager: true estaba activado antes.
-        // Eso desactiva FusedLocationProvider de Google y usa el GPS
-        // nativo puro → primera lectura tardaba hasta 60s en frío.
-        // Sin el flag, FusedLocationProvider da fix inmediato via red/celda
-        // y refina después con GPS. Mucho más rápido al conectarse.
+        // distanceFilter: 0 → emite en CUALQUIER cambio de posición.
+        // Antes era 10m: un móvil parado esperando servicio nunca actualizaba.
+        // Con 0 el stream emite cada ~1-3s cuando hay señal — el mutex
+        // _enviandoUbicacion evita que los writes se acumulen.
+        distanceFilter: 0,
         foregroundNotificationConfig: const ForegroundNotificationConfig(
           notificationText: "ServiExpress está ejecutándose en segundo plano.",
           notificationTitle: "Radar ServiExpress Activo",
@@ -1833,10 +1839,10 @@ class _MovilScreenState extends State<MovilScreen>
         ),
       );
     } else {
-      // iOS y Web: LocationSettings genérico (AppleSettings fue removido por incompatibilidad web)
+      // iOS y Web: LocationSettings genérico
       locationSettings = const LocationSettings(
         accuracy: LocationAccuracy.high,
-        distanceFilter: 10,
+        distanceFilter: 0,
       );
     }
 
@@ -1844,12 +1850,19 @@ class _MovilScreenState extends State<MovilScreen>
         .listen((Position? pos) async {
           if (pos != null && _estaEnLinea) {
             _ultimaPosicionConocida = pos; // <-- RADAR ACTUALIZADO
+            // Mutex: si ya hay un write en curso, saltamos este tick
+            if (_enviandoUbicacion) return;
+            _enviandoUbicacion = true;
             try {
               await Supabase.instance.client
                   .from('usuarios')
                   .update({'latitud': pos.latitude, 'longitud': pos.longitude})
                   .eq('id', widget.usuario['id']);
-            } catch (e) {}
+              _ultimoEnvioUbicacion = DateTime.now();
+            } catch (e) {
+            } finally {
+              _enviandoUbicacion = false;
+            }
 
             // --- EXPULSIÓN AUTOMÁTICA POR GEOCERCA ---
             // Si estoy registrado en un paradero y me alejo de su zona,
@@ -2248,34 +2261,48 @@ class _MovilScreenState extends State<MovilScreen>
       }
 
       // 4. Supervisión estricta de demoras en pedidos activos
+      // Umbral: 30 min desde picked_up_at para en_ruta_destino
+      //         20 min desde accepted_at  para en_ruta_origen
       if (_serviciosActivosData.isNotEmpty) {
         for (var servicio in _serviciosActivosData) {
-          if (servicio['estado'] != 'en_ruta_destino' || servicio['picked_up_at'] == null)
-            continue;
-
+          final String est = servicio['estado']?.toString() ?? '';
           final int id = servicio['id'];
-          final pickedUpUtc = DateTime.parse(servicio['picked_up_at']).toUtc();
-          final elapsed = DateTime.now()
-              .toUtc()
-              .difference(pickedUpUtc)
-              .inMinutes;
-          final extension = servicio['extension_minutes'] as int? ?? 0;
-          final efectivos = elapsed - extension;
-          final tiempoMeta = servicio['tiempo_estimado_minutos'] ?? 15;
 
-          if (efectivos >= tiempoMeta - 2 &&
-              efectivos < tiempoMeta &&
-              !(_alertasPrecaucion[id] ?? false)) {
-            _alertasPrecaucion[id] = true;
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(
-                    '⚠️ Tiempo de entrega casi expirado para Orden #${servicio['numero_movil'] ?? id}.',
-                  ),
+          if (est == 'en_ruta_destino' && servicio['picked_up_at'] != null) {
+            const int metaDestino = 30;
+            final pickedUpUtc = DateTime.parse(servicio['picked_up_at']).toUtc();
+            final elapsed = DateTime.now().toUtc().difference(pickedUpUtc).inMinutes;
+            final extension = servicio['extension_minutes'] as int? ?? 0;
+            final efectivos = elapsed - extension;
+
+            // Aviso 2 min antes del límite
+            if (efectivos >= metaDestino - 2 &&
+                efectivos < metaDestino &&
+                !(_alertasPrecaucion[id] ?? false)) {
+              _alertasPrecaucion[id] = true;
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: Text('⚠️ Tiempo de entrega casi expirado — Orden #${servicio['numero_movil'] ?? id}.'),
                   backgroundColor: Colors.orange[800],
-                ),
-              );
+                ));
+              }
+            }
+          } else if (est == 'en_ruta_origen' && servicio['accepted_at'] != null) {
+            const int metaOrigen = 20;
+            final acceptedUtc = DateTime.parse(servicio['accepted_at']).toUtc();
+            final elapsed = DateTime.now().toUtc().difference(acceptedUtc).inMinutes;
+
+            // Aviso 2 min antes del límite
+            if (elapsed >= metaOrigen - 2 &&
+                elapsed < metaOrigen &&
+                !(_alertasPrecaucion[id] ?? false)) {
+              _alertasPrecaucion[id] = true;
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: Text('⚠️ Casi en retraso — aún no llegaste a la sede. Orden #${servicio['numero_movil'] ?? id}.'),
+                  backgroundColor: Colors.orange[800],
+                ));
+              }
             }
           }
         }
@@ -2285,6 +2312,7 @@ class _MovilScreenState extends State<MovilScreen>
 
   void _ejecutarSuspensionInmediata() {
     _gpsTimer?.cancel();
+    _detenerHeartbeatUbicacion();
     setState(() {
       _estaEnLinea = false;
     });
@@ -2425,6 +2453,66 @@ class _MovilScreenState extends State<MovilScreen>
   void _detenerHeartbeat() {
     _heartbeatTimer?.cancel();
     _heartbeatTimer = null;
+  }
+
+  // =========================================================================
+  // HEARTBEAT DE UBICACIÓN — fallback si el GPS stream se silencia
+  // =========================================================================
+  // El GPS stream con distanceFilter:0 emite continuamente cuando el móvil
+  // se mueve, pero si Android suspende el proceso o el móvil queda estático
+  // con GPS bloqueado, el stream puede dejar de emitir sin error visible.
+  // Este timer fuerza un getCurrentPosition() + update cada 20s como red de
+  // seguridad, pero SOLO si el stream no emitió en los últimos 15s — así
+  // no hacemos double-write cuando el GPS stream está funcionando bien.
+  // =========================================================================
+  // HEARTBEAT DE UBICACIÓN — GPS nunca se silencia mientras esté conectado
+  // =========================================================================
+  // Diseño: cada 15s, si el GPS stream no emitió en los últimos 10s,
+  // forzamos un getCurrentPosition() y lo escribimos en la BD.
+  // Esto cubre: moto estática, Android suspendiendo el stream GPS,
+  // foreground service caído, o cualquier otra causa de silencio.
+  // Si el GPS stream está funcionando bien (emitió hace <10s), no hace
+  // nada — sin double-write, sin gasto extra.
+  //
+  // Resultado: la ubicación en la BD nunca puede quedar desactualizada
+  // más de ~15s mientras el móvil esté en línea.
+  void _iniciarHeartbeatUbicacion() {
+    _ubicacionHeartbeatTimer?.cancel();
+    _ubicacionHeartbeatTimer =
+        Timer.periodic(const Duration(seconds: 15), (_) async {
+      if (!mounted || !_estaEnLinea || kIsWeb) return;
+      // Si el GPS stream emitió hace menos de 10s, ya está actualizado
+      if (_ultimoEnvioUbicacion != null &&
+          DateTime.now().difference(_ultimoEnvioUbicacion!).inSeconds < 10) {
+        return;
+      }
+      if (_enviandoUbicacion) return;
+      _enviandoUbicacion = true;
+      try {
+        final pos = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
+            timeLimit: Duration(seconds: 8),
+          ),
+        );
+        if (!mounted || !_estaEnLinea) return;
+        _ultimaPosicionConocida = pos;
+        await Supabase.instance.client
+            .from('usuarios')
+            .update({'latitud': pos.latitude, 'longitud': pos.longitude})
+            .eq('id', widget.usuario['id']);
+        _ultimoEnvioUbicacion = DateTime.now();
+      } catch (_) {
+        // Si falla (sin red), el próximo tick lo reintenta
+      } finally {
+        _enviandoUbicacion = false;
+      }
+    });
+  }
+
+  void _detenerHeartbeatUbicacion() {
+    _ubicacionHeartbeatTimer?.cancel();
+    _ubicacionHeartbeatTimer = null;
   }
 
   /// El cron "limpiar_motos_zombis" puede marcarnos offline cuando el foreground
@@ -2650,8 +2738,10 @@ class _MovilScreenState extends State<MovilScreen>
           _alertaInactividadMostrada = false;
           _iniciarRastreoGps();
           _iniciarHeartbeat(); // ← Opción A
+          _iniciarHeartbeatUbicacion(); // Fallback GPS
         } else {
           _detenerHeartbeat(); // ← Opción A
+          _detenerHeartbeatUbicacion(); // Fallback GPS
           // PÁNICO 24H: si hay una alerta activa dentro de su ventana de
           // 24h, el GPS sigue corriendo aunque el móvil se marque offline.
           // La ubicación de emergencia no se detiene por un toggle de turno.
@@ -2662,6 +2752,7 @@ class _MovilScreenState extends State<MovilScreen>
 
           if (!compartiendoPanico) {
             _gpsTimer?.cancel();
+            _detenerHeartbeatUbicacion();
           }
         }
       });
@@ -2913,10 +3004,56 @@ class _MovilScreenState extends State<MovilScreen>
     }
   }
 
+  // Devuelve los segundos que faltan para poder finalizar (0 = ya puede).
+  // Referencia: llegada_sede_at (cuando presionó "LLEGUÉ A LA SEDE").
+  int _segundosParaFinalizar(Map<String, dynamic> servicio) {
+    final raw = servicio['llegada_sede_at']?.toString();
+    if (raw == null) return 0; // servicio sin timestamp → no bloquear
+    try {
+      final llegada = DateTime.parse(raw).toUtc();
+      const minMinutos = 10;
+      final habilitadoEn = llegada.add(const Duration(minutes: minMinutos));
+      final faltan = habilitadoEn.difference(DateTime.now().toUtc()).inSeconds;
+      return faltan > 0 ? faltan : 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
   Future<void> _finalizarServicio(
     Map<String, dynamic> servicio,
     bool tieneProblema,
   ) async {
+    // Guardia: no se puede finalizar antes de 10 min desde llegada a sede
+    if (_segundosParaFinalizar(servicio) > 0) {
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            title: const Row(children: [
+              Icon(Icons.timer_outlined, color: Colors.orange),
+              SizedBox(width: 8),
+              Text('Aún no puedes finalizar', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+            ]),
+            content: const Text(
+              'Estás dentro del límite de tiempo de entrega.\n\n'
+              'Debes esperar al menos 10 minutos desde tu llegada a la sede antes de finalizar el servicio.',
+              style: TextStyle(fontSize: 13, height: 1.5),
+            ),
+            actions: [
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.black),
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('ENTENDIDO', style: TextStyle(color: Color(0xff3AF500), fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        );
+      }
+      return;
+    }
+
     final int servicioId = servicio['id'];
     _alertasPrecaucion.remove(servicioId);
     setState(() => _serviciosOcultosLocales.add(servicioId));
@@ -3477,6 +3614,11 @@ class _MovilScreenState extends State<MovilScreen>
                               '$_serviciosFnTotal',
                               style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1A237E)),
                             ),
+                            const Spacer(),
+                            Text(
+                              _formatearMoneda(_producidoFnTotal, mostrarCero: true),
+                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF1565C0)),
+                            ),
                           ],
                         ),
                       ),
@@ -4028,10 +4170,10 @@ class _MovilScreenState extends State<MovilScreen>
           .eq('estado', 'finalizado')
           .gte('created_at', inicioHoy);
 
-      // Producción FN (tipo_fn = true)
+      // Producción FN (tipo_fn = true) — selecciona tarifa para sumar valor
       final fnTotal = await Supabase.instance.client
           .from('servicios')
-          .select('id')
+          .select('id, tarifa')
           .eq('movil_id', miId)
           .eq('estado', 'finalizado')
           .eq('tipo_fn', true);
@@ -4049,18 +4191,24 @@ class _MovilScreenState extends State<MovilScreen>
         for (final s in hoyList) {
           producido += (s['tarifa'] as num? ?? 0).toDouble();
         }
+        final fnTotalList = fnTotal as List;
+        double producidoFnTotal = 0;
+        for (final s in fnTotalList) {
+          producidoFnTotal += (s['tarifa'] as num? ?? 0).toDouble();
+        }
         final fnHoyList = fnHoyData as List;
-        double producidoFn = 0;
+        double producidoFnHoy = 0;
         for (final s in fnHoyList) {
-          producidoFn += (s['tarifa'] as num? ?? 0).toDouble();
+          producidoFnHoy += (s['tarifa'] as num? ?? 0).toDouble();
         }
         setState(() {
           _serviciosTotal = (total as List).length;
           _serviciosHoy = hoyList.length;
           _producidoHoy = producido;
-          _serviciosFnTotal = (fnTotal as List).length;
+          _serviciosFnTotal = fnTotalList.length;
+          _producidoFnTotal = producidoFnTotal;
           _serviciosFnHoy = fnHoyList.length;
-          _producidoFnHoy = producidoFn;
+          _producidoFnHoy = producidoFnHoy;
         });
       }
     } catch (_) {}
@@ -5183,12 +5331,19 @@ class _MovilScreenState extends State<MovilScreen>
     bool mostrarReloj = false;
 
     // --- CÁLCULO DE TIEMPOS BIFURCADO ---
+    // Umbrales fijos independientes del tiempo estimado de ruta:
+    //   en_ruta_origen  → RETRASO a los 20 min desde accepted_at
+    //   en_ruta_destino → RETRASO a los 30 min desde picked_up_at
+    const int _limiteOrigenMin = 20;
+    const int _limiteDestinoMin = 30;
+
     if (estado == 'en_ruta_origen' && servicio['accepted_at'] != null) {
       final elapsed = DateTime.now()
           .toUtc()
           .difference(DateTime.parse(servicio['accepted_at']).toUtc())
           .inMinutes;
       efectivos = elapsed;
+      tiempoMeta = _limiteOrigenMin;
       mostrarReloj = true;
     } else if (estado == 'en_ruta_destino' && servicio['picked_up_at'] != null) {
       final elapsed = DateTime.now()
@@ -5197,6 +5352,7 @@ class _MovilScreenState extends State<MovilScreen>
           .inMinutes;
       efectivos = elapsed - (servicio['extension_minutes'] as int? ?? 0);
       if (efectivos < 0) efectivos = 0;
+      tiempoMeta = _limiteDestinoMin;
       mostrarReloj = true;
     }
 
@@ -6294,25 +6450,37 @@ class _MovilScreenState extends State<MovilScreen>
 
     // ── Variables ────────────────────────────────────────────────────────────
     int efectivos = 0;
-    int tiempoMeta = servicio['tiempo_estimado_minutos'] ?? 20;
+    // tiempoDisplay: lo que ve el móvil en pantalla.
+    //   en_ruta_origen  → usa el GPS-ETA calculado al aceptar (tiempo_estimado_minutos).
+    //   en_ruta_destino → usa el umbral fijo (30 min).
+    int tiempoDisplay = servicio['tiempo_estimado_minutos'] ?? 20;
+    // tiempoMeta: umbral fijo que dispara la alerta de RETRASO (no cambia con GPS).
+    int tiempoMeta = 20;
     bool mostrarReloj = false;
+
+    // Umbrales fijos de RETRASO (independientes del GPS-ETA):
+    //   en_ruta_origen  → RETRASO a los 20 min desde accepted_at
+    //   en_ruta_destino → RETRASO a los 30 min desde picked_up_at
+    const int _limiteOrigenMinFn = 20;
+    const int _limiteDestinoMinFn = 30;
 
     if (estado == 'en_ruta_origen' && servicio['accepted_at'] != null) {
       efectivos = DateTime.now()
           .toUtc()
-          .difference(
-              DateTime.parse(servicio['accepted_at']).toUtc())
+          .difference(DateTime.parse(servicio['accepted_at']).toUtc())
           .inMinutes;
+      tiempoMeta = _limiteOrigenMinFn;
+      // tiempoDisplay ya tiene el GPS-ETA desde tiempo_estimado_minutos
       mostrarReloj = true;
-    } else if (estado == 'en_ruta_destino' &&
-        servicio['picked_up_at'] != null) {
+    } else if (estado == 'en_ruta_destino' && servicio['picked_up_at'] != null) {
       efectivos = DateTime.now()
               .toUtc()
-              .difference(
-                  DateTime.parse(servicio['picked_up_at']).toUtc())
+              .difference(DateTime.parse(servicio['picked_up_at']).toUtc())
               .inMinutes -
           (servicio['extension_minutes'] as int? ?? 0);
       if (efectivos < 0) efectivos = 0;
+      tiempoMeta = _limiteDestinoMinFn;
+      tiempoDisplay = _limiteDestinoMinFn; // sin GPS pre-calc en ruta de entrega
       mostrarReloj = true;
     }
 
@@ -6452,7 +6620,7 @@ class _MovilScreenState extends State<MovilScreen>
                           color: estaDemorado ? Colors.red[400]! : Colors.indigo[200]!),
                     ),
                     child: Text(
-                      '$efectivos/$tiempoMeta min',
+                      '$efectivos/$tiempoDisplay min',
                       style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.bold,
@@ -6964,6 +7132,158 @@ class _MovilScreenState extends State<MovilScreen>
     if (esFn) {
       final String zonaFn = servicio['zona_fn'] as String? ?? '';
       final String zonaLabel = _fnZonaLabel(zonaFn);
+
+      // MASTER: tarjeta expandida con detalles completos
+      if (esMaster) {
+        final String destino = (servicio['destino'] ?? '').toString();
+        final String consecutivo = servicio['fn_consecutivo']?.toString() ?? '';
+        final String facturaN = servicio['fn_factura_numero']?.toString() ?? '';
+        final dynamic facturaV = servicio['fn_factura_valor'];
+        final bool pagarProducto = servicio['fn_pagar_producto'] == true;
+        final bool conDatafono = (servicio['metodo_pago']?.toString() ?? '') == 'Datafono';
+        final String instrucciones = servicio['instrucciones_especiales']?.toString() ?? '';
+        final dynamic recogidas = servicio['recogidas'];
+        final List recogidasList = recogidas is List ? recogidas : [];
+
+        return Card(
+          elevation: 4,
+          margin: const EdgeInsets.only(bottom: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: Colors.indigo[800]!, width: 2),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Cabecera
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.indigo[900]!.withValues(alpha: 0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(Icons.local_pharmacy, color: Colors.indigo[800], size: 22),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(children: [
+                            Text('TURNO FARMANORTE',
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.indigo[900])),
+                            const SizedBox(width: 6),
+                            if (consecutivo.isNotEmpty)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(color: Colors.indigo[800], borderRadius: BorderRadius.circular(6)),
+                                child: Text(consecutivo, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                              ),
+                          ]),
+                          if (zonaLabel.isNotEmpty)
+                            Text(zonaLabel, style: TextStyle(color: Colors.indigo[600], fontSize: 12, fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                      decoration: BoxDecoration(color: Colors.amber[700], borderRadius: BorderRadius.circular(6)),
+                      child: const Text('MASTER', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                const Divider(height: 1),
+                const SizedBox(height: 10),
+
+                // Recogidas
+                if (recogidasList.isNotEmpty) ...[
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.store, size: 13, color: Colors.indigo[400]),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          recogidasList.map((r) {
+                            final tipo = r['tipo']?.toString() ?? '';
+                            final num = r['numero']?.toString() ?? '';
+                            final nombre = r['nombre']?.toString() ?? '';
+                            return tipo == 'FN' && num.isNotEmpty ? 'FN$num — $nombre' : nombre;
+                          }).join(' · '),
+                          style: TextStyle(color: Colors.indigo[700], fontSize: 12, fontWeight: FontWeight.w500),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                ],
+
+                // Destino
+                if (destino.isNotEmpty)
+                  Row(
+                    children: [
+                      Icon(Icons.place, size: 13, color: Colors.red[400]),
+                      const SizedBox(width: 6),
+                      Expanded(child: Text(destino, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
+                    ],
+                  ),
+
+                const SizedBox(height: 8),
+
+                // Chips de pago / factura
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
+                    if (facturaN.isNotEmpty)
+                      _chipFnMovil('Fac. $facturaN', Colors.blueGrey[700]!),
+                    if (facturaV != null)
+                      _chipFnMovil('💰 \$${(facturaV as num).toStringAsFixed(0)}', Colors.green[700]!),
+                    if (pagarProducto)
+                      _chipFnMovil('💳 Pagar producto', Colors.orange[700]!),
+                    if (conDatafono)
+                      _chipFnMovil('📟 Datafono', Colors.teal[700]!),
+                  ],
+                ),
+
+                // Instrucciones
+                if (instrucciones.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Icon(Icons.info, size: 13, color: Colors.grey[600]),
+                      const SizedBox(width: 6),
+                      Expanded(child: Text(instrucciones, style: TextStyle(fontSize: 11, color: Colors.grey[700], fontStyle: FontStyle.italic))),
+                    ],
+                  ),
+                ],
+
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  height: 42,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.indigo[900],
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    onPressed: () => _aceptarServicioConCandado(context, servicio),
+                    icon: const Icon(Icons.check_circle, color: Colors.white, size: 16),
+                    label: const Text('ACEPTAR SERVICIO', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+
+      // NO MASTER: tarjeta simplificada — solo zona y botón aceptar
       return Card(
         elevation: 3,
         margin: const EdgeInsets.only(bottom: 12),
@@ -6981,8 +7301,7 @@ class _MovilScreenState extends State<MovilScreen>
                   color: Colors.indigo[900]!.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
-                child: Icon(Icons.local_pharmacy,
-                    color: Colors.indigo[800], size: 28),
+                child: Icon(Icons.local_pharmacy, color: Colors.indigo[800], size: 28),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -6991,20 +7310,11 @@ class _MovilScreenState extends State<MovilScreen>
                   children: [
                     const Text(
                       'TURNO FARMANORTE',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                        color: Colors.black87,
-                      ),
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black87),
                     ),
                     if (zonaLabel.isNotEmpty)
-                      Text(
-                        zonaLabel,
-                        style: TextStyle(
-                            color: Colors.indigo[700],
-                            fontWeight: FontWeight.w600,
-                            fontSize: 13),
-                      ),
+                      Text(zonaLabel,
+                          style: TextStyle(color: Colors.indigo[700], fontWeight: FontWeight.w600, fontSize: 13)),
                   ],
                 ),
               ),
@@ -7014,19 +7324,10 @@ class _MovilScreenState extends State<MovilScreen>
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.indigo[900],
                     padding: const EdgeInsets.symmetric(horizontal: 20),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
                   onPressed: () => _aceptarServicioConCandado(context, servicio),
-                  child: const Text(
-                    'ACEPTAR',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                    ),
-                  ),
+                  child: const Text('ACEPTAR', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
                 ),
               ),
             ],
@@ -7365,7 +7666,10 @@ class _MovilScreenState extends State<MovilScreen>
     setState(() => _procesando = true);
 
     // --- MOTOR TÁCTICO: CALCULAR ETA AL ORIGEN ---
-    int tiempoAlOrigen = 10;
+    // Fallback si GPS/OSRM no responde: FN usa 20 min (umbral oficial de sede),
+    // servicios normales usan 10 min.
+    final bool esFnParaEta = servicio['tipo_fn'] == true;
+    int tiempoAlOrigen = esFnParaEta ? 20 : 10;
     try {
       Position? pos = await _obtenerPosicionSegura();
       if (pos != null &&
@@ -7479,12 +7783,27 @@ class _MovilScreenState extends State<MovilScreen>
                     _detenerMiAlertaPanico(silencioso: true);
                   }
 
-                  if (servicio['onesignal_30s'] != null)
-                    _abortarMisilOneSignal(servicio['onesignal_30s'].toString());
-                  if (servicio['onesignal_2m'] != null)
-                    _abortarMisilOneSignal(servicio['onesignal_2m'].toString());
-                  if (servicio['onesignal_5m'] != null)
-                    _abortarMisilOneSignal(servicio['onesignal_5m'].toString());
+                  // Cancelar misiles pendientes según tipo de servicio
+                  if (servicio['tipo_fn'] == true) {
+                    // FN: cancelar cascada de fases FN (NO tocar onesignal_*)
+                    if (servicio['fn_notif_fase2'] != null)
+                      _abortarMisilOneSignal(
+                          servicio['fn_notif_fase2'].toString());
+                    if (servicio['fn_notif_fase3'] != null)
+                      _abortarMisilOneSignal(
+                          servicio['fn_notif_fase3'].toString());
+                  } else {
+                    // Serviexpress normal: cancelar misiles estándar
+                    if (servicio['onesignal_30s'] != null)
+                      _abortarMisilOneSignal(
+                          servicio['onesignal_30s'].toString());
+                    if (servicio['onesignal_2m'] != null)
+                      _abortarMisilOneSignal(
+                          servicio['onesignal_2m'].toString());
+                    if (servicio['onesignal_5m'] != null)
+                      _abortarMisilOneSignal(
+                          servicio['onesignal_5m'].toString());
+                  }
 
                   _notificarAlCreador(
                     servicio['creador'] ?? 'Central',
@@ -7565,12 +7884,22 @@ class _MovilScreenState extends State<MovilScreen>
         _detenerMiAlertaPanico(silencioso: true);
       }
 
-      if (servicio['onesignal_30s'] != null)
-        _abortarMisilOneSignal(servicio['onesignal_30s'].toString());
-      if (servicio['onesignal_2m'] != null)
-        _abortarMisilOneSignal(servicio['onesignal_2m'].toString());
-      if (servicio['onesignal_5m'] != null)
-        _abortarMisilOneSignal(servicio['onesignal_5m'].toString());
+      // Cancelar misiles pendientes según tipo de servicio
+      if (servicio['tipo_fn'] == true) {
+        // FN: cancelar cascada de fases FN (NO tocar onesignal_*)
+        if (servicio['fn_notif_fase2'] != null)
+          _abortarMisilOneSignal(servicio['fn_notif_fase2'].toString());
+        if (servicio['fn_notif_fase3'] != null)
+          _abortarMisilOneSignal(servicio['fn_notif_fase3'].toString());
+      } else {
+        // Serviexpress normal: cancelar misiles estándar
+        if (servicio['onesignal_30s'] != null)
+          _abortarMisilOneSignal(servicio['onesignal_30s'].toString());
+        if (servicio['onesignal_2m'] != null)
+          _abortarMisilOneSignal(servicio['onesignal_2m'].toString());
+        if (servicio['onesignal_5m'] != null)
+          _abortarMisilOneSignal(servicio['onesignal_5m'].toString());
+      }
 
       _notificarAlCreador(
         servicio['creador'] ?? 'Central',
@@ -7617,24 +7946,52 @@ class _MovilScreenState extends State<MovilScreen>
 
     setState(() => _procesando = true);
     try {
-      // Cancelar misiles pendientes de la asignación anterior antes de reiniciar
-      if (servicio['onesignal_30s'] != null)
-        await MotorNotificaciones.cancelarMisil(servicio['onesignal_30s'].toString());
-      if (servicio['onesignal_2m'] != null)
-        await MotorNotificaciones.cancelarMisil(servicio['onesignal_2m'].toString());
-      if (servicio['onesignal_5m'] != null)
-        await MotorNotificaciones.cancelarMisil(servicio['onesignal_5m'].toString());
+      final bool esFnLiberar = servicio['tipo_fn'] == true;
+
+      // Cancelar misiles pendientes según tipo de servicio
+      if (esFnLiberar) {
+        // FN: cancelar cascada FN — NUNCA tocar onesignal_*
+        if (servicio['fn_notif_fase2'] != null)
+          await MotorNotificaciones.cancelarMisil(
+              servicio['fn_notif_fase2'].toString());
+        if (servicio['fn_notif_fase3'] != null)
+          await MotorNotificaciones.cancelarMisil(
+              servicio['fn_notif_fase3'].toString());
+      } else {
+        // Serviexpress normal: cancelar misiles estándar
+        if (servicio['onesignal_30s'] != null)
+          await MotorNotificaciones.cancelarMisil(
+              servicio['onesignal_30s'].toString());
+        if (servicio['onesignal_2m'] != null)
+          await MotorNotificaciones.cancelarMisil(
+              servicio['onesignal_2m'].toString());
+        if (servicio['onesignal_5m'] != null)
+          await MotorNotificaciones.cancelarMisil(
+              servicio['onesignal_5m'].toString());
+      }
+
+      final String ahoraLibera =
+          DateTime.now().toUtc().toIso8601String();
 
       await Supabase.instance.client
           .from('servicios')
           .update({
             'movil_id': null,
             'estado': 'pendiente',
-            'liberacion_at': DateTime.now().toUtc().toIso8601String(),
+            'liberacion_at': ahoraLibera,
             'accepted_at': null,
+            // Serviexpress normal
             'onesignal_30s': null,
             'onesignal_2m': null,
             'onesignal_5m': null,
+            // FN: reinicio completo de escalamiento
+            if (esFnLiberar) 'fn_radar_t0': ahoraLibera,
+            if (esFnLiberar) 'fn_fase2_movil_id': null,
+            if (esFnLiberar) 'fn_fase2_at': null,
+            if (esFnLiberar) 'fn_fase3_at': null,
+            if (esFnLiberar) 'fn_notif_fase2': null,
+            if (esFnLiberar) 'fn_notif_fase3': null,
+            if (esFnLiberar) 'fn_notificados_fase1': <String>[],
           })
           .eq('id', servicio['id']);
 
@@ -7642,102 +7999,236 @@ class _MovilScreenState extends State<MovilScreen>
       // cancela un servicio (ver canal radar_bg).
       if (_estaEnLinea) _intentarRegistroParadero();
 
-      // CASCADA DE NOTIFICACIONES — reinicio limpio desde cero:
-      // T=0: Masters, T=30s: paradero #1, T=60s: zona 1km, T=90s: todos
       final servicioId = servicio['id'] as int;
-      final destino = servicio['destino']?.toString() ?? 'destino';
-      final msgAlerta = '📍 Servicio liberado — disponible para: $destino';
 
-      // T=0: notificar a todos los Masters
-      final mastersData = await Supabase.instance.client
-          .from('usuarios')
-          .select('id')
-          .or('rol.eq.central,rol.eq.master,rango_movil.eq.MASTER')
-          .eq('activo', true)
-          .neq('suspendido', true);
-      final masterIds = mastersData.map((u) => u['id'].toString()).toList();
-      if (masterIds.isNotEmpty) {
-        await MotorNotificaciones.dispararRafa(
-          idsDestinos: masterIds,
-          titulo: '👑 SERVICIO LIBERADO',
-          mensaje: msgAlerta,
-        );
-      }
+      if (esFnLiberar) {
+        // ══════════════════════════════════════════════════════════════════
+        // CASCADA FN — reinicio limpio, 3 fases separadas de Serviexpress.
+        // fn_radar_t0 ya fue actualizado a NOW() en el update anterior.
+        // ══════════════════════════════════════════════════════════════════
+        final zonaFn = servicio['zona_fn']?.toString() ?? 'FN';
 
-      // T=30s: notificar al #1 de paradero
-      final exclusivoStr = servicio['exclusivo_id']?.toString() ?? '';
-      final paraderoIds = exclusivoStr.isEmpty
-          ? <String>[]
-          : exclusivoStr
-              .split(',')
-              .map((e) => e.trim())
-              .where((e) => e.isNotEmpty && !masterIds.contains(e))
-              .toList();
+        // Cargar todos los FN online con rango y ubicación
+        final movFnData = await Supabase.instance.client
+            .from('usuarios')
+            .select('id, rango_movil, latitud, longitud')
+            .eq('rol', 'movil')
+            .eq('en_linea', true)
+            .eq('activo', true)
+            .eq('tiene_fn', true)
+            .not('suspendido', 'is', true);
 
-      if (paraderoIds.isNotEmpty) {
-        // Misil programado T+30s — guardar ID para cancelar si alguien acepta
-        final id30s = await MotorNotificaciones.programarMisilRetardado(
-          externalIds: paraderoIds,
-          titulo: 'TU TURNO DE PARADERO',
-          mensaje: msgAlerta,
-          segundosRetardo: 30,
-        );
-        if (id30s != null) {
-          await Supabase.instance.client
-              .from('servicios')
-              .update({'onesignal_30s': id30s})
-              .eq('id', servicioId);
+        // Contar servicios activos
+        final svcActivos = await Supabase.instance.client
+            .from('servicios')
+            .select('movil_id')
+            .inFilter('estado', [
+              'en_ruta_origen', 'en_origen', 'en_ruta_destino', 'problema'
+            ])
+            .not('movil_id', 'is', null);
+        final Map<String, int> cntFn = {};
+        for (final sv in svcActivos as List) {
+          final sid = sv['movil_id'].toString();
+          cntFn[sid] = (cntFn[sid] ?? 0) + 1;
         }
-      }
+        int limRango(String? r) {
+          switch (r?.toUpperCase().trim()) {
+            case 'PRO': return 1;
+            case 'ELITE': return 2;
+            case 'LEYENDA': return 3;
+            case 'MASTER': return 999;
+            default: return 1;
+          }
+        }
+        bool tieneCapFn(Map m) =>
+            (cntFn[m['id'].toString()] ?? 0) <
+            limRango(m['rango_movil']?.toString());
 
-      // T=60s: motos en radio 1km (no Masters, no paradero ya notificado)
-      // T=+60s y T=+90s — misiles server-side (OneSignal programa en sus servidores)
-      // Pre-fetch al momento de liberar; onesignal_2m/5m se cancelan si alguien acepta
-      final double? origLat = (servicio['origen_lat'] as num?)?.toDouble();
-      final double? origLng = (servicio['origen_lng'] as num?)?.toDouble();
-      final movilesLib = await Supabase.instance.client
-          .from('usuarios').select('id, latitud, longitud')
-          .eq('rol', 'movil').eq('en_linea', true)
-          .neq('suspendido', true)
-          .not('rango_movil', 'in', '("MASTER")');
-      final idsZona60 = movilesLib.where((u) {
-        final id = u['id'].toString();
-        if (masterIds.contains(id) || paraderoIds.contains(id)) return false;
-        if (origLat == null || origLng == null) return true;
-        final uLat = (u['latitud'] as num?)?.toDouble();
-        final uLng = (u['longitud'] as num?)?.toDouble();
-        if (uLat == null || uLng == null) return false;
-        return const Distance().as(
-              LengthUnit.Meter, LatLng(uLat, uLng), LatLng(origLat, origLng),
-            ) <= 1000;
-      }).map((u) => u['id'].toString()).toList();
-      final idsTodos90 = movilesLib
-          .map((u) => u['id'].toString())
-          .where((id) => !masterIds.contains(id))
-          .toList();
-      String? idLib60;
-      String? idLib90;
-      if (idsZona60.isNotEmpty) {
-        idLib60 = await MotorNotificaciones.programarMisilRetardado(
-          externalIds: idsZona60,
-          titulo: '📡 SERVICIO CERCA (1km)',
-          mensaje: msgAlerta,
-          segundosRetardo: 60,
-        );
-      }
-      if (idsTodos90.isNotEmpty) {
-        idLib90 = await MotorNotificaciones.programarMisilRetardado(
-          externalIds: idsTodos90,
-          titulo: '🚨 SERVICIO SIN TOMAR',
-          mensaje: msgAlerta,
-          segundosRetardo: 90,
-        );
-      }
-      if (idLib60 != null || idLib90 != null) {
+        final mastersFn = (movFnData as List)
+            .where((m) =>
+                m['rango_movil']?.toString().toUpperCase() == 'MASTER' &&
+                tieneCapFn(m))
+            .toList();
+        final noMastersFn = movFnData
+            .where((m) =>
+                m['rango_movil']?.toString().toUpperCase() != 'MASTER' &&
+                tieneCapFn(m))
+            .toList();
+
+        final masterIdsFn =
+            mastersFn.map<String>((m) => m['id'].toString()).toList();
+        final noMasterIdsFn =
+            noMastersFn.map<String>((m) => m['id'].toString()).toList();
+
+        // Más cercano para fase 2
+        final double? origLatFn =
+            (servicio['origen_lat'] as num?)?.toDouble();
+        final double? origLngFn =
+            (servicio['origen_lng'] as num?)?.toDouble();
+        String? fase2IdFn;
+        if (origLatFn != null && origLngFn != null && noMastersFn.isNotEmpty) {
+          double minD = double.infinity;
+          for (final m in noMastersFn) {
+            final uLat = (m['latitud'] as num?)?.toDouble();
+            final uLng = (m['longitud'] as num?)?.toDouble();
+            if (uLat == null || uLng == null) continue;
+            final d = const Distance().as(LengthUnit.Meter,
+                LatLng(uLat, uLng), LatLng(origLatFn, origLngFn));
+            if (d < minD) { minD = d; fase2IdFn = m['id'].toString(); }
+          }
+        } else if (noMastersFn.isNotEmpty) {
+          fase2IdFn = noMastersFn.first['id'].toString();
+        }
+
+        final fase3IdsFn =
+            noMasterIdsFn.where((id) => id != fase2IdFn).toList();
+
+        // FASE 1 (T=0)
+        if (masterIdsFn.isNotEmpty) {
+          await MotorNotificaciones.dispararRafa(
+            idsDestinos: masterIdsFn,
+            titulo: '👑 TURNO FN LIBERADO — MASTER',
+            mensaje: 'Servicio Farmanorte reiniciado · $zonaFn',
+            urgente: true,
+            sonido: Sonidos.movilParadero,
+          );
+        }
+
+        // Guardar fase2_movil_id y notificados_fase1 en BD
         await Supabase.instance.client.from('servicios').update({
-          if (idLib60 != null) 'onesignal_2m': idLib60,
-          if (idLib90 != null) 'onesignal_5m': idLib90,
+          if (fase2IdFn != null) 'fn_fase2_movil_id': fase2IdFn,
+          if (masterIdsFn.isNotEmpty) 'fn_notificados_fase1': masterIdsFn,
         }).eq('id', servicioId);
+
+        // FASE 2 (T+31s)
+        String? notifFase2Lib;
+        if (fase2IdFn != null) {
+          notifFase2Lib = await MotorNotificaciones.programarMisilRetardado(
+            externalIds: [fase2IdFn],
+            titulo: '🔵 TURNO FN LIBERADO — PARA TI',
+            mensaje: 'Servicio Farmanorte disponible · $zonaFn',
+            segundosRetardo: 31,
+            sonido: Sonidos.movilParadero,
+          );
+        }
+
+        // FASE 3 (T+61s)
+        String? notifFase3Lib;
+        if (fase3IdsFn.isNotEmpty) {
+          notifFase3Lib = await MotorNotificaciones.programarMisilRetardado(
+            externalIds: fase3IdsFn,
+            titulo: '🔵 TURNO FN LIBERADO',
+            mensaje: 'Servicio Farmanorte sin tomar · $zonaFn',
+            segundosRetardo: 61,
+            sonido: Sonidos.movilParadero,
+          );
+        }
+
+        if (notifFase2Lib != null || notifFase3Lib != null) {
+          await Supabase.instance.client.from('servicios').update({
+            if (notifFase2Lib != null) 'fn_notif_fase2': notifFase2Lib,
+            if (notifFase3Lib != null) 'fn_notif_fase3': notifFase3Lib,
+          }).eq('id', servicioId);
+        }
+      } else {
+        // ══════════════════════════════════════════════════════════════════
+        // CASCADA SERVIEXPRESS NORMAL — sin cambios
+        // T=0: Masters, T=30s: paradero #1, T=60s: zona 1km, T=90s: todos
+        // ══════════════════════════════════════════════════════════════════
+        final destino = servicio['destino']?.toString() ?? 'destino';
+        final msgAlerta = '📍 Servicio liberado — disponible para: $destino';
+
+        final mastersData = await Supabase.instance.client
+            .from('usuarios')
+            .select('id')
+            .or('rol.eq.central,rol.eq.master,rango_movil.eq.MASTER')
+            .eq('activo', true)
+            .neq('suspendido', true);
+        final masterIds =
+            mastersData.map((u) => u['id'].toString()).toList();
+        if (masterIds.isNotEmpty) {
+          await MotorNotificaciones.dispararRafa(
+            idsDestinos: masterIds,
+            titulo: '👑 SERVICIO LIBERADO',
+            mensaje: msgAlerta,
+          );
+        }
+
+        final exclusivoStr = servicio['exclusivo_id']?.toString() ?? '';
+        final paraderoIds = exclusivoStr.isEmpty
+            ? <String>[]
+            : exclusivoStr
+                .split(',')
+                .map((e) => e.trim())
+                .where((e) => e.isNotEmpty && !masterIds.contains(e))
+                .toList();
+
+        if (paraderoIds.isNotEmpty) {
+          final id30s = await MotorNotificaciones.programarMisilRetardado(
+            externalIds: paraderoIds,
+            titulo: 'TU TURNO DE PARADERO',
+            mensaje: msgAlerta,
+            segundosRetardo: 30,
+          );
+          if (id30s != null) {
+            await Supabase.instance.client
+                .from('servicios')
+                .update({'onesignal_30s': id30s})
+                .eq('id', servicioId);
+          }
+        }
+
+        final double? origLat =
+            (servicio['origen_lat'] as num?)?.toDouble();
+        final double? origLng =
+            (servicio['origen_lng'] as num?)?.toDouble();
+        final movilesLib = await Supabase.instance.client
+            .from('usuarios')
+            .select('id, latitud, longitud')
+            .eq('rol', 'movil')
+            .eq('en_linea', true)
+            .neq('suspendido', true)
+            .not('rango_movil', 'in', '("MASTER")');
+        final idsZona60 = movilesLib.where((u) {
+          final id = u['id'].toString();
+          if (masterIds.contains(id) || paraderoIds.contains(id))
+            return false;
+          if (origLat == null || origLng == null) return true;
+          final uLat = (u['latitud'] as num?)?.toDouble();
+          final uLng = (u['longitud'] as num?)?.toDouble();
+          if (uLat == null || uLng == null) return false;
+          return const Distance().as(LengthUnit.Meter, LatLng(uLat, uLng),
+                  LatLng(origLat, origLng)) <=
+              1000;
+        }).map((u) => u['id'].toString()).toList();
+        final idsTodos90 = movilesLib
+            .map((u) => u['id'].toString())
+            .where((id) => !masterIds.contains(id))
+            .toList();
+        String? idLib60;
+        String? idLib90;
+        if (idsZona60.isNotEmpty) {
+          idLib60 = await MotorNotificaciones.programarMisilRetardado(
+            externalIds: idsZona60,
+            titulo: '📡 SERVICIO CERCA (1km)',
+            mensaje: msgAlerta,
+            segundosRetardo: 60,
+          );
+        }
+        if (idsTodos90.isNotEmpty) {
+          idLib90 = await MotorNotificaciones.programarMisilRetardado(
+            externalIds: idsTodos90,
+            titulo: '🚨 SERVICIO SIN TOMAR',
+            mensaje: msgAlerta,
+            segundosRetardo: 90,
+          );
+        }
+        if (idLib60 != null || idLib90 != null) {
+          await Supabase.instance.client.from('servicios').update({
+            if (idLib60 != null) 'onesignal_2m': idLib60,
+            if (idLib90 != null) 'onesignal_5m': idLib90,
+          }).eq('id', servicioId);
+        }
       }
 
       if (mounted) {
@@ -7827,10 +8318,14 @@ class _MovilScreenState extends State<MovilScreen>
 
       // Si es un servicio FN desde sede → activar factura automática
       final esFnSede = servicio['fn_origen']?.toString() == 'sede';
-      final Map<String, dynamic> updateData = {'estado': 'en_origen'};
+      final String ahoraIso = DateTime.now().toUtc().toIso8601String();
+      final Map<String, dynamic> updateData = {
+        'estado': 'en_origen',
+        'llegada_sede_at': ahoraIso, // timestamp para regla de 10 minutos mínimos
+      };
       if (esFnSede) {
         updateData['fn_factura_auto'] = true;
-        updateData['fn_movil_asignado_at'] = DateTime.now().toUtc().toIso8601String();
+        updateData['fn_movil_asignado_at'] = ahoraIso;
       }
 
       await Supabase.instance.client
@@ -8974,30 +9469,59 @@ class _MovilScreenState extends State<MovilScreen>
                             final String exclusivoId =
                                 s['exclusivo_id']?.toString() ?? '';
 
-                            // ─── REGLA FN (FARMANORTE) ────────────────────────
-                            // Lógica propia: ignora paradero y embudo estándar.
-                            //   T=0 a T+30s : solo motos en fn_primera_ola
-                            //   T+31s+      : todos con tiene_fn = true
+                            // ═══ REGLA FN (FARMANORTE) — escalamiento 3 fases ═══
+                            // Sistema PROPIO de FN — completamente separado del
+                            // embudo de paraderos/zonas de Serviexpress normal.
+                            //
+                            // El timing se mide desde fn_radar_t0 (momento exacto
+                            // en que el servicio entró al radar). Si fn_radar_t0
+                            // no está seteado (servicios legacy), cae a created_at.
+                            //
+                            //  FASE 1 (0–30s)  → SOLO móviles con rango MASTER
+                            //  FASE 2 (31–60s) → MASTER + el más cercano a la sede
+                            //                    (fn_fase2_movil_id)
+                            //  FASE 3 (61s+)   → TODOS los móviles con tiene_fn
+                            //
+                            // Filtro de capacidad aplica en TODAS las fases:
+                            // un móvil al límite de servicios simultáneos NO ve
+                            // el turno aunque le corresponda por fase/rango.
                             if (s['tipo_fn'] == true) {
+                              // Permiso base: ser MASTER o tener tiene_fn habilitado
                               final bool tienePermFN = esMaster ||
                                   miPerfilEnVivo['tiene_fn'] == true;
-                              if (tienePermFN && tieneCapacidad) {
-                                final primeraOlaRaw = s['fn_primera_ola'];
-                                final List<String> primeraOla =
-                                    primeraOlaRaw is List
-                                        ? primeraOlaRaw
-                                            .map((e) => e.toString())
-                                            .toList()
-                                        : [];
-                                if (primeraOla.isEmpty ||
-                                    primeraOla.contains(miId)) {
-                                  // En primera ola o sin restricción → visible desde T=0
-                                  puedeVer = true;
-                                } else if (segundos >= 31) {
-                                  // Segunda ola → visible a partir de T+31s
-                                  puedeVer = true;
-                                }
+
+                              // Sin permiso o sin capacidad → invisible siempre
+                              if (!tienePermFN || !tieneCapacidad) {
+                                continue; // salta embudo estándar
                               }
+
+                              // Anchor de tiempo: fn_radar_t0 > created_at (fallback)
+                              final String t0Raw =
+                                  s['fn_radar_t0']?.toString() ??
+                                  s['created_at']?.toString() ??
+                                  '';
+                              final int segFn = t0Raw.isNotEmpty
+                                  ? ahoraUtc
+                                      .difference(DateTime.parse(t0Raw).toUtc())
+                                      .inSeconds
+                                  : 9999;
+
+                              final String fase2MovilId =
+                                  s['fn_fase2_movil_id']?.toString() ?? '';
+
+                              if (segFn < 30) {
+                                // FASE 1: exclusivo de MASTER
+                                puedeVer = esMaster;
+                              } else if (segFn < 61) {
+                                // FASE 2: MASTER + el más cercano pre-seleccionado
+                                puedeVer = esMaster ||
+                                    (fase2MovilId.isNotEmpty &&
+                                        fase2MovilId == miId);
+                              } else {
+                                // FASE 3: todos con permiso FN (ya validado arriba)
+                                puedeVer = true;
+                              }
+
                               if (puedeVer) pendientes.add(s);
                               continue; // salta embudo estándar
                             }

@@ -53,6 +53,7 @@ class _CentralScreenState extends State<CentralScreen>
   RealtimeChannel? _canalRadarCentral;
   RealtimeChannel? _canalChatCentral;
   RealtimeChannel? _canalPanico;
+  RealtimeChannel? _canalUbicacionesMoviles; // Canal dedicado: refresca mapa al cambiar lat/lng
   RealtimeChannel? _canalActivaciones;
   RealtimeChannel? _canalFn; // Solicitudes FN desde sedes
 
@@ -128,6 +129,7 @@ class _CentralScreenState extends State<CentralScreen>
   StreamSubscription<List<Map<String, dynamic>>>? _subUsuariosMoviles;
   StreamSubscription<List<Map<String, dynamic>>>? _subServiciosMonitor;
   Timer? _reconexionTimer;
+  Timer? _debounceUbicaciones; // Limita el REST fetch de ubicaciones a 1 por segundo
 
   // Caché de motos — se actualiza en el listener de _subUsuariosMoviles
   // para que _construirBloqueServicios pueda resolver movil_id → #numero real.
@@ -248,6 +250,40 @@ class _CentralScreenState extends State<CentralScreen>
                   break;
               }
             }
+          },
+        )
+        .subscribe();
+
+    // --- CANAL UBICACIONES: refresca el mapa al instante cuando un móvil
+    // actualiza su lat/lng. El .stream() de usuarios puede tener lag de
+    // varios segundos; este canal Postgres dispara un REST fetch inmediato
+    // en cuanto detecta cualquier UPDATE en la tabla usuarios (en_linea,
+    // latitud, longitud, etc.) — así el mapa siempre muestra posiciones frescas.
+    _canalUbicacionesMoviles?.unsubscribe();
+    _canalUbicacionesMoviles = Supabase.instance.client
+        .channel('central_ubicaciones_moviles')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'usuarios',
+          callback: (_) {
+            // Debounce: si hay 10 motos actualizando lat/lng al mismo tiempo,
+            // agrupa los eventos y hace UN solo fetch 800ms después del último.
+            _debounceUbicaciones?.cancel();
+            _debounceUbicaciones = Timer(const Duration(milliseconds: 800), () {
+              if (!mounted) return;
+              Supabase.instance.client
+                  .from('usuarios')
+                  .select()
+                  .eq('rol', 'movil')
+                  .then((data) {
+                    _movilesCache = List.from(data);
+                    if (!_ctrlUsuariosMoviles.isClosed) {
+                      _ctrlUsuariosMoviles.add(_movilesCache);
+                    }
+                  })
+                  .catchError((_) {});
+            });
           },
         )
         .subscribe();
@@ -536,6 +572,8 @@ class _CentralScreenState extends State<CentralScreen>
     _canalRadarCentral?.unsubscribe();
     _canalChatCentral?.unsubscribe();
     _canalPanico?.unsubscribe();
+    _canalUbicacionesMoviles?.unsubscribe();
+    _debounceUbicaciones?.cancel();
     _canalActivaciones?.unsubscribe();
     _canalFn?.unsubscribe();
     if (_listenerActivacion != null && !kIsWeb) {

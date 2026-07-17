@@ -160,8 +160,6 @@ El sistema debe ser una propuesta difícil de rechazar para Farmanorte:
 7. **Adjuntar foto de la factura** (opcional) al crear el servicio o al editarla en el historial, como soporte adicional.
 8. **Distancia como insumo del tarifario aprendido**: como las sedes ya tienen coordenadas, el sistema puede calcular la distancia real del trayecto (recogidas → destino) y usarla tanto en el minimapa de la central como en el aprendizaje de tarifas por ruta.
 9. **Indicador de horario de convenio en el formulario**: mostrarle a la sede si está pidiendo dentro del horario de convenio (7:00am–10:59pm) o fuera de él, para que sepa de antemano que el precio será mayor.
-10. **Sonido de notificacion especial para la cotizacion de FN**: Este sonido se utilizara para que suene cuando el FN cotice a la central le suene a la central y le sonara tambien a los de FN cuando la central responda la cotizacion. El archivo se llama fn_cotizacion.mp3
-11. **Sonido de notificacion especial para la cotizacion de FN**: Crear una pagina web adicional para el servicio FN, donde ellos podran ingresar y puedan acceder a su panel desde la web tambien. https://databasesvm.github.io/serviexpressweb/fn/
 
 ---
 

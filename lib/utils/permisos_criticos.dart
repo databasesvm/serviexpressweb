@@ -380,10 +380,9 @@ class _PermisosCriticosScreenState extends State<PermisosCriticosScreen>
     }
 
     return PopScope(
-      // Siempre se puede salir: el botón OMITIR y el botón Atrás cierran la
-      // pantalla. Si faltan permisos requeridos, la pantalla reaparecerá
-      // automáticamente en el próximo inicio de sesión.
-      canPop: true,
+      // BLOQUEANTE: sin todos los permisos no se puede salir de esta pantalla.
+      // El botón Atrás queda deshabilitado hasta que _todoListo sea true.
+      canPop: _todoListo,
       child: Scaffold(
         backgroundColor: Colors.black,
         body: SafeArea(
@@ -488,23 +487,17 @@ class _PermisosCriticosScreenState extends State<PermisosCriticosScreen>
                   ),
                 ),
 
+                // Enlace a ajustes — siempre visible cuando faltan permisos
                 if (!_todoListo && !_verificando)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 12),
                     child: Center(
                       child: TextButton.icon(
                         onPressed: () => openAppSettings(),
-                        icon: const Icon(
-                          Icons.settings,
-                          color: Colors.white38,
-                          size: 16,
-                        ),
+                        icon: const Icon(Icons.settings, color: Colors.white38, size: 16),
                         label: const Text(
                           '¿Algo no se activa? Abrir ajustes de la app',
-                          style: TextStyle(
-                            color: Colors.white38,
-                            fontSize: 12,
-                          ),
+                          style: TextStyle(color: Colors.white38, fontSize: 12),
                         ),
                       ),
                     ),
@@ -519,13 +512,13 @@ class _PermisosCriticosScreenState extends State<PermisosCriticosScreen>
                           ? const Color(0xff3AF500)
                           : Colors.grey[800],
                     ),
+                    // BLOQUEANTE: onPressed null hasta que todos los permisos estén activos.
+                    // No hay botón OMITIR, no hay back, no hay forma de entrar sin activarlos.
                     onPressed: _todoListo
                         ? () => Navigator.of(context).pop(true)
                         : null,
                     child: Text(
-                      _todoListo
-                          ? 'CONTINUAR'
-                          : 'Activa todo para continuar',
+                      _todoListo ? 'CONTINUAR' : 'Activa los 3 permisos para continuar',
                       style: TextStyle(
                         color: _todoListo ? Colors.black : Colors.white38,
                         fontWeight: FontWeight.bold,
@@ -533,26 +526,8 @@ class _PermisosCriticosScreenState extends State<PermisosCriticosScreen>
                     ),
                   ),
                 ),
-                // Omitir — solo visible cuando faltan permisos. No guarda ningún
-                // flag: la pantalla reaparece en el próximo inicio de sesión.
-                if (!_todoListo && !_verificando)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: SizedBox(
-                      width: double.infinity,
-                      height: 44,
-                      child: TextButton(
-                        onPressed: () => Navigator.of(context).pop(false),
-                        child: const Text(
-                          'OMITIR — se pedirá de nuevo al iniciar sesión',
-                          style: TextStyle(
-                            color: Colors.white38,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
+                // Sin botón OMITIR — la pantalla es infranqueable hasta que
+                // los 3 permisos críticos estén activos.
               ],
             ),
           ),

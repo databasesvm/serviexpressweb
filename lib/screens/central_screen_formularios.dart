@@ -1065,6 +1065,13 @@ extension CentralScreenFormularios on _CentralScreenState {
     final instruccionesCtrl = TextEditingController();
     bool vaConDatafono = false;
     bool procesando = false;
+    // ── Modo de envío FN ──────────────────────────────────────────────────────
+    String modoAsignacion = 'radar'; // 'radar' | 'directa'
+    String? movilDirectoId;
+    String? movilDirectoNombre;
+    bool movilDirectoSobreLimite = false;
+    List<Map<String, dynamic>> movilesDirectaCache = [];
+    bool cargandoMovilesDirecta = false;
 
     // Helper: dropdown de sedes ordenadas
     Widget dropdownSede({
@@ -1345,6 +1352,233 @@ extension CentralScreenFormularios on _CentralScreenState {
                             horizontal: 12, vertical: 10),
                       ),
                     ),
+                    const SizedBox(height: 14),
+
+                    // ── Modo de envío FN ─────────────────────────────────────
+                    // RADAR: cascada 3 fases (Master→Cercano→Todos)
+                    // DIRECTO: la central asigna a un móvil específico
+                    const Text('Modo de envío:',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black54,
+                            fontSize: 12)),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: procesando
+                                ? null
+                                : () => setDialogState(
+                                    () => modoAsignacion = 'radar'),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: 9, horizontal: 4),
+                              decoration: BoxDecoration(
+                                color: modoAsignacion == 'radar'
+                                    ? Colors.indigo[900]
+                                    : Colors.grey[100],
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                    color: Colors.indigo[900]!, width: 1.5),
+                              ),
+                              child: Text(
+                                '📡  RADAR',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: modoAsignacion == 'radar'
+                                      ? Colors.white
+                                      : Colors.indigo[900],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: procesando
+                                ? null
+                                : () async {
+                                    setDialogState(() {
+                                      modoAsignacion = 'directa';
+                                      if (movilesDirectaCache.isEmpty)
+                                        cargandoMovilesDirecta = true;
+                                    });
+                                    if (movilesDirectaCache.isEmpty) {
+                                      try {
+                                        final data = await Supabase
+                                            .instance.client
+                                            .from('usuarios')
+                                            .select('id, nombre, rango_movil')
+                                            .eq('rol', 'movil')
+                                            .eq('activo', true)
+                                            .not('suspendido', 'is', true)
+                                            .eq('tiene_fn', true)
+                                            .order('nombre');
+                                        final activos = await Supabase
+                                            .instance.client
+                                            .from('servicios')
+                                            .select('movil_id')
+                                            .inFilter('estado', [
+                                              'en_ruta_origen',
+                                              'en_origen',
+                                              'en_ruta_destino',
+                                              'problema',
+                                            ])
+                                            .not('movil_id', 'is', null);
+                                        final Map<String, int> cnt = {};
+                                        for (final sv in activos as List) {
+                                          final sid =
+                                              sv['movil_id'].toString();
+                                          cnt[sid] = (cnt[sid] ?? 0) + 1;
+                                        }
+                                        int limR(String? r) {
+                                          switch (r?.toUpperCase().trim()) {
+                                            case 'PRO': return 1;
+                                            case 'ELITE': return 2;
+                                            case 'LEYENDA': return 3;
+                                            case 'MASTER': return 999;
+                                            default: return 1;
+                                          }
+                                        }
+                                        final lista = (data as List)
+                                            .map<Map<String, dynamic>>((m) {
+                                          final sobreLimite =
+                                              (cnt[m['id'].toString()] ?? 0) >=
+                                                  limR(m['rango_movil']
+                                                      ?.toString());
+                                          return {
+                                            ...Map<String, dynamic>.from(m),
+                                            'sobre_limite': sobreLimite,
+                                          };
+                                        }).toList();
+                                        setDialogState(() {
+                                          movilesDirectaCache = lista;
+                                          cargandoMovilesDirecta = false;
+                                        });
+                                      } catch (_) {
+                                        setDialogState(() =>
+                                            cargandoMovilesDirecta = false);
+                                      }
+                                    }
+                                  },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: 9, horizontal: 4),
+                              decoration: BoxDecoration(
+                                color: modoAsignacion == 'directa'
+                                    ? Colors.orange[800]
+                                    : Colors.grey[100],
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                    color: Colors.orange[800]!, width: 1.5),
+                              ),
+                              child: Text(
+                                '👤  DIRECTO',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: modoAsignacion == 'directa'
+                                      ? Colors.white
+                                      : Colors.orange[800],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    // Selector de móvil — solo en modo directa
+                    if (modoAsignacion == 'directa') ...[
+                      const SizedBox(height: 10),
+                      if (cargandoMovilesDirecta)
+                        const Center(
+                            child: SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2)))
+                      else if (movilesDirectaCache.isEmpty)
+                        const Text('Sin móviles FN registrados',
+                            style: TextStyle(
+                                fontSize: 12, color: Colors.black38))
+                      else
+                        DropdownButtonFormField<String>(
+                          value: movilDirectoId,
+                          isExpanded: true,
+                          hint: const Text('Seleccionar móvil...',
+                              style: TextStyle(
+                                  fontSize: 13, color: Colors.black38)),
+                          decoration: InputDecoration(
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8)),
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                          ),
+                          items: movilesDirectaCache
+                              .map((m) => DropdownMenuItem<String>(
+                                    value: m['id'].toString(),
+                                    child: Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            m['nombre']?.toString() ?? '—',
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              fontSize: 13,
+                                              color:
+                                                  m['sobre_limite'] == true
+                                                      ? Colors.orange[700]
+                                                      : Colors.black87,
+                                            ),
+                                          ),
+                                        ),
+                                        if (m['sobre_limite'] == true)
+                                          const Text(' ⚠️',
+                                              style: TextStyle(fontSize: 12)),
+                                      ],
+                                    ),
+                                  ))
+                              .toList(),
+                          onChanged: procesando
+                              ? null
+                              : (v) {
+                                  final sel = movilesDirectaCache
+                                      .firstWhere(
+                                          (m) => m['id'].toString() == v,
+                                          orElse: () => {});
+                                  setDialogState(() {
+                                    movilDirectoId = v;
+                                    movilDirectoNombre =
+                                        sel['nombre']?.toString();
+                                    movilDirectoSobreLimite =
+                                        sel['sobre_limite'] == true;
+                                  });
+                                },
+                        ),
+                      if (movilDirectoSobreLimite && movilDirectoId != null)
+                        Container(
+                          margin: const EdgeInsets.only(top: 6),
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.orange[50],
+                            borderRadius: BorderRadius.circular(6),
+                            border:
+                                Border.all(color: Colors.orange[300]!),
+                          ),
+                          child: const Text(
+                            '⚠️ Este móvil está en su límite de servicios. La central puede forzar la asignación.',
+                            style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.deepOrange),
+                          ),
+                        ),
+                    ],
                   ],
                 ),
               ),
@@ -1389,7 +1623,6 @@ extension CentralScreenFormularios on _CentralScreenState {
                           final sLng = (sede['lng'] as num?)?.toDouble();
                           final nombreSede = _fnLabelSede(sede);
 
-                          // Recogidas seleccionadas (solo las no nulas)
                           final recogidasList = recogidasSel
                               .whereType<Map<String, dynamic>>()
                               .map((s) => {
@@ -1403,128 +1636,357 @@ extension CentralScreenFormularios on _CentralScreenState {
                                   })
                               .toList();
 
-                          // ── Cargar FN motos online ─────────────────────────
-                          // Filtros explícitos para garantizar que desconectados
-                          // y suspendidos nunca reciban heads-up FN:
-                          //   • en_linea = true    → excluye desconectados
-                          //   • activo   = true    → excluye cuentas desactivadas
-                          //   • suspendido IS NOT TRUE → excluye suspendidos;
-                          //     "IS NOT TRUE" incluye NULLs (a diferencia de ≠ true)
-                          final movilesConFn = await Supabase
-                              .instance.client
-                              .from('usuarios')
-                              .select('id, latitud, longitud')
-                              .eq('rol', 'movil')
-                              .eq('en_linea', true)
-                              .eq('activo', true)
-                              .eq('tiene_fn', true)
-                              .not('suspendido', 'is', true);
+                          if (modoAsignacion == 'directa') {
+                            // ══════════════════════════════════════════════════
+                            // ASIGNACIÓN DIRECTA — la central elige el móvil.
+                            // El servicio nace ya asignado (en_ruta_origen).
+                            // No entra al radar ni dispara la cascada de fases.
+                            // ══════════════════════════════════════════════════
+                            if (movilDirectoId == null) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                    content: Text(
+                                        'Selecciona el móvil a asignar'),
+                                    backgroundColor: Colors.orange),
+                              );
+                              setDialogState(() => procesando = false);
+                              return;
+                            }
 
-                          final idsTodos = (movilesConFn as List)
-                              .map<String>((m) => m['id'].toString())
-                              .toList();
+                            // Confirmación si el móvil está sobre su límite
+                            if (movilDirectoSobreLimite) {
+                              bool confirmo = false;
+                              await showDialog(
+                                context: context,
+                                builder: (ctx) => AlertDialog(
+                                  title: const Text('⚠️ MÓVIL EN LÍMITE'),
+                                  content: Text(
+                                    '${movilDirectoNombre ?? 'Este móvil'} ya está en su límite de servicios simultáneos.\n\n¿Asignar de todas formas?',
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(ctx),
+                                      child: const Text('Cancelar'),
+                                    ),
+                                    ElevatedButton(
+                                      style: ElevatedButton.styleFrom(
+                                          backgroundColor:
+                                              Colors.orange[700]),
+                                      onPressed: () {
+                                        confirmo = true;
+                                        Navigator.pop(ctx);
+                                      },
+                                      child: const Text(
+                                        'FORZAR ASIGNACIÓN',
+                                        style: TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.bold),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                              if (!confirmo) {
+                                setDialogState(() => procesando = false);
+                                return;
+                              }
+                            }
 
-                          // ── Calcular ola 1: 2km desde la sede ─────────────
-                          List<String> ids2km = [];
-                          if (sLat != null && sLng != null) {
-                            ids2km = movilesConFn.where((u) {
-                              final uLat =
-                                  (u['latitud'] as num?)?.toDouble();
-                              final uLng =
-                                  (u['longitud'] as num?)?.toDouble();
-                              if (uLat == null || uLng == null) return false;
-                              return const Distance().as(
-                                    LengthUnit.Meter,
-                                    LatLng(uLat, uLng),
-                                    LatLng(sLat, sLng),
-                                  ) <=
-                                  2000;
-                            }).map<String>((u) => u['id'].toString()).toList();
-                          }
+                            final ahora =
+                                DateTime.now().toUtc().toIso8601String();
 
-                          final wave1Ids =
-                              ids2km.isNotEmpty ? ids2km : idsTodos;
-                          // Ola 2 solo si ola 1 fue subconjunto
-                          final wave2Needed = ids2km.isNotEmpty &&
-                              ids2km.length < idsTodos.length;
+                            await Supabase.instance.client
+                                .from('servicios')
+                                .insert({
+                              'origen': nombreSede,
+                              'destino':
+                                  destinoCtrl.text.trim().toUpperCase(),
+                              'tarifa': tarifa,
+                              'estado': 'en_ruta_origen',
+                              'creador': 'Central FN',
+                              'tipo_servicio': 'FARMANORTE',
+                              'tipo_fn': true,
+                              'zona_fn': zona,
+                              'fn_sede_id': sede['id'],
+                              'recogidas': recogidasList,
+                              'metodo_pago':
+                                  vaConDatafono ? 'Datafono' : 'Efectivo',
+                              'archivado': false,
+                              'movil_id': int.tryParse(movilDirectoId!),
+                              'accepted_at': ahora,
+                              'fn_asignacion_tipo': 'directa',
+                              'fn_asignado_por': 'Central',
+                              if (sLat != null) 'origen_lat': sLat,
+                              if (sLng != null) 'origen_lng': sLng,
+                              if (sede['telefono_whatsapp'] != null &&
+                                  (sede['telefono_whatsapp'] as String)
+                                      .isNotEmpty)
+                                'fn_whatsapp':
+                                    sede['telefono_whatsapp'] as String,
+                              if (instruccionesCtrl.text.trim().isNotEmpty)
+                                'instrucciones_especiales':
+                                    instruccionesCtrl.text.trim(),
+                            });
 
-                          // ── T=0: Disparo ola 1 ─────────────────────────────
-                          if (wave1Ids.isNotEmpty) {
+                            // Notificación diferenciada: no es "turno disponible",
+                            // es "la central te asignó" — tono y título distintos
                             await MotorNotificaciones.dispararRafa(
-                              idsDestinos: wave1Ids,
-                              titulo: '🔵 TURNO FARMANORTE',
-                              mensaje: 'Servicio FN · $zonaLabel',
+                              idsDestinos: [movilDirectoId!],
+                              titulo: '📋 CENTRAL TE ASIGNÓ UN TURNO FN',
+                              mensaje:
+                                  'Tienes un servicio Farmanorte asignado · $zonaLabel',
                               urgente: true,
                               sonido: Sonidos.movilParadero,
                             );
-                          }
 
-                          // ── Insertar servicio ──────────────────────────────
-                          final insertedSvc = await Supabase
-                              .instance.client
-                              .from('servicios')
-                              .insert({
-                                'origen': nombreSede,
-                                'destino': destinoCtrl.text
-                                    .trim()
-                                    .toUpperCase(),
-                                'tarifa': tarifa,
-                                'estado':
-                                    tarifa > 0 ? 'pendiente' : 'cotizacion',
-                                'creador': 'Central FN',
-                                'tipo_servicio': 'FARMANORTE',
-                                'tipo_fn': true,
-                                'zona_fn': zona,
-                                'fn_sede_id': sede['id'],
-                                'recogidas': recogidasList,
-                                'fn_primera_ola': wave1Ids,
-                                'metodo_pago': vaConDatafono ? 'Datafono' : 'Efectivo',
-                                'archivado': false,
-                                if (sLat != null) 'origen_lat': sLat,
-                                if (sLng != null) 'origen_lng': sLng,
-                                if (sede['telefono_whatsapp'] != null &&
-                                    (sede['telefono_whatsapp'] as String).isNotEmpty)
-                                  'fn_whatsapp': sede['telefono_whatsapp'] as String,
-                                if (instruccionesCtrl.text.trim().isNotEmpty)
-                                  'instrucciones_especiales': instruccionesCtrl.text.trim(),
-                              })
-                              .select('id')
-                              .single();
+                            if (context.mounted) {
+                              Navigator.pop(context);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    'FN asignado directamente a ${movilDirectoNombre ?? movilDirectoId}',
+                                  ),
+                                  backgroundColor: Colors.orange[700],
+                                ),
+                              );
+                            }
+                          } else {
+                            // ══════════════════════════════════════════════════
+                            // CASCADA RADAR FN — 3 FASES
+                            // Completamente separada de Serviexpress normal.
+                            // NUNCA toca onesignal_30s / onesignal_2m / onesignal_5m.
+                            //
+                            // FASE 1 (T=0,  inmediato) → SOLO masters con capacidad
+                            // FASE 2 (T+31s, programado) → el más cercano a la sede
+                            // FASE 3 (T+61s, programado) → todos los FN restantes
+                            //
+                            // Los IDs se guardan en fn_notif_fase2/3 para
+                            // cancelarlos si alguien acepta el servicio.
+                            // ══════════════════════════════════════════════════
+                            final ahora =
+                                DateTime.now().toUtc().toIso8601String();
 
-                          final int nuevoId =
-                              (insertedSvc['id'] as num).toInt();
+                            // 1. Cargar todos los móviles FN online
+                            final movilesData = await Supabase.instance
+                                .client
+                                .from('usuarios')
+                                .select('id, rango_movil, latitud, longitud')
+                                .eq('rol', 'movil')
+                                .eq('en_linea', true)
+                                .eq('activo', true)
+                                .eq('tiene_fn', true)
+                                .not('suspendido', 'is', true);
 
-                          // ── T+31s: Disparo ola 2 (todos FN) ───────────────
-                          if (wave2Needed && idsTodos.isNotEmpty) {
-                            final id31s = await MotorNotificaciones
-                                .programarMisilRetardado(
-                              externalIds: idsTodos,
-                              titulo: '🔵 TURNO FARMANORTE',
-                              mensaje:
-                                  'Servicio FN sin tomar · $zonaLabel',
-                              segundosRetardo: 31,
-                              sonido: Sonidos.movilParadero,
-                            );
-                            if (id31s != null) {
+                            // 2. Contar servicios activos por móvil
+                            final serviciosActivos = await Supabase
+                                .instance.client
+                                .from('servicios')
+                                .select('movil_id')
+                                .inFilter('estado', [
+                                  'en_ruta_origen',
+                                  'en_origen',
+                                  'en_ruta_destino',
+                                  'problema',
+                                ])
+                                .not('movil_id', 'is', null);
+
+                            final Map<String, int> conteoActivos = {};
+                            for (final sv in serviciosActivos as List) {
+                              final sid = sv['movil_id'].toString();
+                              conteoActivos[sid] =
+                                  (conteoActivos[sid] ?? 0) + 1;
+                            }
+
+                            int limiteRango(String? r) {
+                              switch (r?.toUpperCase().trim()) {
+                                case 'PRO': return 1;
+                                case 'ELITE': return 2;
+                                case 'LEYENDA': return 3;
+                                case 'MASTER': return 999;
+                                default: return 1;
+                              }
+                            }
+
+                            bool tieneCapFn(Map m) {
+                              final sid = m['id'].toString();
+                              return (conteoActivos[sid] ?? 0) <
+                                  limiteRango(
+                                      m['rango_movil']?.toString());
+                            }
+
+                            // Separar masters de no-masters (solo con cupo)
+                            final masters = (movilesData as List)
+                                .where((m) =>
+                                    m['rango_movil']
+                                            ?.toString()
+                                            .toUpperCase() ==
+                                        'MASTER' &&
+                                    tieneCapFn(m))
+                                .toList();
+                            final noMasters = movilesData
+                                .where((m) =>
+                                    m['rango_movil']
+                                            ?.toString()
+                                            .toUpperCase() !=
+                                        'MASTER' &&
+                                    tieneCapFn(m))
+                                .toList();
+
+                            final masterIds = masters
+                                .map<String>((m) => m['id'].toString())
+                                .toList();
+                            final noMasterIds = noMasters
+                                .map<String>((m) => m['id'].toString())
+                                .toList();
+
+                            // 3. Calcular el móvil más cercano a la sede
+                            String? fase2MovilId;
+                            if (sLat != null &&
+                                sLng != null &&
+                                noMasters.isNotEmpty) {
+                              double minDist = double.infinity;
+                              for (final m in noMasters) {
+                                final uLat =
+                                    (m['latitud'] as num?)?.toDouble();
+                                final uLng =
+                                    (m['longitud'] as num?)?.toDouble();
+                                if (uLat == null || uLng == null) continue;
+                                final dist = const Distance().as(
+                                  LengthUnit.Meter,
+                                  LatLng(uLat, uLng),
+                                  LatLng(sLat, sLng),
+                                );
+                                if (dist < minDist) {
+                                  minDist = dist;
+                                  fase2MovilId = m['id'].toString();
+                                }
+                              }
+                            } else if (noMasters.isNotEmpty) {
+                              // Sin coordenadas de sede → primer disponible
+                              fase2MovilId =
+                                  noMasters.first['id'].toString();
+                            }
+
+                            // Fase 3: todos los no-masters excepto el de fase 2
+                            final fase3Ids = noMasterIds
+                                .where((id) => id != fase2MovilId)
+                                .toList();
+
+                            // ── FASE 1 (T=0): heads-up exclusivo a MASTERS ──
+                            if (masterIds.isNotEmpty) {
+                              await MotorNotificaciones.dispararRafa(
+                                idsDestinos: masterIds,
+                                titulo: '👑 TURNO FN — MASTER',
+                                mensaje:
+                                    'Servicio Farmanorte · $zonaLabel',
+                                urgente: true,
+                                sonido: Sonidos.movilParadero,
+                              );
+                            }
+
+                            // ── Insertar servicio en BD ──────────────────────
+                            final insertedSvc = await Supabase.instance
+                                .client
+                                .from('servicios')
+                                .insert({
+                                  'origen': nombreSede,
+                                  'destino': destinoCtrl.text
+                                      .trim()
+                                      .toUpperCase(),
+                                  'tarifa': tarifa,
+                                  'estado': tarifa > 0
+                                      ? 'pendiente'
+                                      : 'cotizacion',
+                                  'creador': 'Central FN',
+                                  'tipo_servicio': 'FARMANORTE',
+                                  'tipo_fn': true,
+                                  'zona_fn': zona,
+                                  'fn_sede_id': sede['id'],
+                                  'recogidas': recogidasList,
+                                  'metodo_pago':
+                                      vaConDatafono ? 'Datafono' : 'Efectivo',
+                                  'archivado': false,
+                                  'fn_radar_t0': ahora,
+                                  'fn_asignacion_tipo': 'radar',
+                                  if (fase2MovilId != null)
+                                    'fn_fase2_movil_id': fase2MovilId,
+                                  if (masterIds.isNotEmpty)
+                                    'fn_notificados_fase1': masterIds,
+                                  if (sLat != null) 'origen_lat': sLat,
+                                  if (sLng != null) 'origen_lng': sLng,
+                                  if (sede['telefono_whatsapp'] != null &&
+                                      (sede['telefono_whatsapp'] as String)
+                                          .isNotEmpty)
+                                    'fn_whatsapp':
+                                        sede['telefono_whatsapp'] as String,
+                                  if (instruccionesCtrl.text
+                                      .trim()
+                                      .isNotEmpty)
+                                    'instrucciones_especiales':
+                                        instruccionesCtrl.text.trim(),
+                                })
+                                .select('id')
+                                .single();
+
+                            final int nuevoId =
+                                (insertedSvc['id'] as num).toInt();
+
+                            // ── FASE 2 (T+31s): heads-up al más cercano ─────
+                            String? notifFase2;
+                            if (fase2MovilId != null) {
+                              notifFase2 = await MotorNotificaciones
+                                  .programarMisilRetardado(
+                                externalIds: [fase2MovilId],
+                                titulo: '🔵 TURNO FN — PARA TI',
+                                mensaje:
+                                    'Servicio Farmanorte disponible · $zonaLabel',
+                                segundosRetardo: 31,
+                                sonido: Sonidos.movilParadero,
+                              );
+                            }
+
+                            // ── FASE 3 (T+61s): heads-up a todos los demás ──
+                            String? notifFase3;
+                            if (fase3Ids.isNotEmpty) {
+                              notifFase3 = await MotorNotificaciones
+                                  .programarMisilRetardado(
+                                externalIds: fase3Ids,
+                                titulo: '🔵 TURNO FN DISPONIBLE',
+                                mensaje:
+                                    'Servicio Farmanorte sin tomar · $zonaLabel',
+                                segundosRetardo: 61,
+                                sonido: Sonidos.movilParadero,
+                              );
+                            }
+
+                            // Guardar IDs de misiles FN para cancelarlos
+                            // si alguien acepta (NO son onesignal_30s/2m/5m)
+                            if (notifFase2 != null || notifFase3 != null) {
                               await Supabase.instance.client
                                   .from('servicios')
-                                  .update({'onesignal_30s': id31s})
-                                  .eq('id', nuevoId);
+                                  .update({
+                                if (notifFase2 != null)
+                                  'fn_notif_fase2': notifFase2,
+                                if (notifFase3 != null)
+                                  'fn_notif_fase3': notifFase3,
+                              }).eq('id', nuevoId);
                             }
-                          }
 
-                          if (context.mounted) {
-                            Navigator.pop(context);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  wave1Ids.isEmpty
-                                      ? 'Servicio FN creado (sin motos FN en línea)'
-                                      : 'Servicio FN enviado a ${wave1Ids.length} moto${wave1Ids.length == 1 ? '' : 's'}',
+                            if (context.mounted) {
+                              Navigator.pop(context);
+                              final totalNotif = masterIds.length +
+                                  (fase2MovilId != null ? 1 : 0);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    totalNotif == 0
+                                        ? 'Servicio FN creado (sin móviles FN disponibles)'
+                                        : 'Servicio FN al radar — ${masterIds.length} master${masterIds.length != 1 ? 's' : ''} notificados',
+                                  ),
+                                  backgroundColor: Colors.indigo[700],
                                 ),
-                                backgroundColor: Colors.indigo[700],
-                              ),
-                            );
+                              );
+                            }
                           }
                         } catch (e) {
                           if (context.mounted) {
@@ -1548,8 +2010,11 @@ extension CentralScreenFormularios on _CentralScreenState {
                         child: CircularProgressIndicator(
                             strokeWidth: 2, color: Colors.white),
                       )
-                    : const Text('ENVIAR AL RADAR',
-                        style: TextStyle(
+                    : Text(
+                        modoAsignacion == 'directa'
+                            ? 'ASIGNAR DIRECTO'
+                            : 'ENVIAR AL RADAR',
+                        style: const TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.bold)),
               ),
