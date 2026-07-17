@@ -319,6 +319,12 @@ class _FormularioTabState extends State<_FormularioTab> {
 
   // Recogidas seleccionadas: lista de fn_sedes (pueden ser null si pendiente)
   final List<Map<String, dynamic>?> _recogidasSel = [null];
+  // Modo por recogida: false=sede oficial, true=dirección libre
+  final List<bool> _recogidasEsManual = [false];
+  // Controladores para entradas manuales
+  final List<TextEditingController> _recogidasNombreCtrl = [TextEditingController()];
+  final List<TextEditingController> _recogidasDireccionCtrl = [TextEditingController()];
+  final List<TextEditingController> _recogidasGpsCtrl = [TextEditingController()];
 
   // Destino
   final _destinoCtrl = TextEditingController();
@@ -350,6 +356,9 @@ class _FormularioTabState extends State<_FormularioTab> {
     _facturaNumCtrl.dispose();
     _facturaValCtrl.dispose();
     _instruccionesCtrl.dispose();
+    for (final c in _recogidasNombreCtrl) c.dispose();
+    for (final c in _recogidasDireccionCtrl) c.dispose();
+    for (final c in _recogidasGpsCtrl) c.dispose();
     super.dispose();
   }
 
@@ -382,7 +391,9 @@ class _FormularioTabState extends State<_FormularioTab> {
   }
 
   bool _tieneRecogidaFueraDe() {
-    for (final r in _recogidasSel) {
+    for (int i = 0; i < _recogidasSel.length; i++) {
+      if (_recogidasEsManual[i]) return true; // manual = por evaluar
+      final r = _recogidasSel[i];
       if (r != null && r['cobertura'] == 'fuera') return true;
       if (r != null && r['cobertura'] == 'por_evaluar') return true;
     }
@@ -398,26 +409,44 @@ class _FormularioTabState extends State<_FormularioTab> {
       return;
     }
 
-    // Validar al menos 1 recogida seleccionada
-    final recogidasValidas = _recogidasSel.whereType<Map<String, dynamic>>().toList();
-    if (recogidasValidas.isEmpty) {
-      _snack('Selecciona al menos una sede de recogida.');
-      return;
-    }
-
     setState(() => _enviando = true);
     try {
       // Construir lista de recogidas para el JSONB
-      final recogidasList = recogidasValidas.map((s) => {
-        'id': s['id'],
-        'tipo': s['tipo'],
-        'nombre': s['nombre'],
-        'numero': s['numero'],
-        'zona': s['zona'],
-        'lat': s['lat'],
-        'lng': s['lng'],
-        'cobertura': s['cobertura'] ?? 'dentro',
-      }).toList();
+      final recogidasList = <Map<String, dynamic>>[];
+      for (int i = 0; i < _recogidasSel.length; i++) {
+        if (_recogidasEsManual[i]) {
+          final nombre = _recogidasNombreCtrl[i].text.trim();
+          if (nombre.isNotEmpty) {
+            recogidasList.add({
+              'es_manual': true,
+              'nombre': nombre,
+              'direccion': _recogidasDireccionCtrl[i].text.trim(),
+              'gps_link': _recogidasGpsCtrl[i].text.trim(),
+              'cobertura': 'por_evaluar',
+            });
+          }
+        } else {
+          final s = _recogidasSel[i];
+          if (s != null) {
+            recogidasList.add({
+              'id': s['id'],
+              'tipo': s['tipo'],
+              'nombre': s['nombre'],
+              'numero': s['numero'],
+              'zona': s['zona'],
+              'lat': s['lat'],
+              'lng': s['lng'],
+              'cobertura': s['cobertura'] ?? 'dentro',
+            });
+          }
+        }
+      }
+      if (recogidasList.isEmpty) {
+        _snack('Agrega al menos una recogida válida.');
+        setState(() => _enviando = false);
+        return;
+      }
+      final primeraRecogida = recogidasList.first;
 
       // Generar consecutivo
       final consec = await _db
@@ -447,7 +476,7 @@ class _FormularioTabState extends State<_FormularioTab> {
         'tipo_fn': true,
         'fn_origen': 'sede',
         'fn_sede_solicitante_id': sedeId,
-        'fn_sede_id': recogidasValidas.first['id'], // primera recogida como sede principal
+        'fn_sede_id': primeraRecogida['es_manual'] == true ? null : primeraRecogida['id'],
         'recogidas': recogidasList,
         'metodo_pago': _conDatafono ? 'Datafono' : 'Efectivo',
         'fn_pagar_producto': _pagarProducto,
@@ -461,11 +490,11 @@ class _FormularioTabState extends State<_FormularioTab> {
         'archivado': false,
         if (_instruccionesCtrl.text.trim().isNotEmpty)
           'instrucciones_especiales': _instruccionesCtrl.text.trim(),
-        // Coordenadas de la primera sede de recogida como origen
-        if (recogidasValidas.first['lat'] != null)
-          'origen_lat': (recogidasValidas.first['lat'] as num).toDouble(),
-        if (recogidasValidas.first['lng'] != null)
-          'origen_lng': (recogidasValidas.first['lng'] as num).toDouble(),
+        // Coordenadas de la primera sede de recogida como origen (solo si es sede oficial)
+        if (primeraRecogida['lat'] != null)
+          'origen_lat': (primeraRecogida['lat'] as num).toDouble(),
+        if (primeraRecogida['lng'] != null)
+          'origen_lng': (primeraRecogida['lng'] as num).toDouble(),
       });
 
       // Notificar a la central con sonido especial FN
@@ -481,9 +510,14 @@ class _FormularioTabState extends State<_FormularioTab> {
       if (!mounted) return;
       // Limpiar formulario
       setState(() {
-        _recogidasSel
-          ..clear()
-          ..add(null);
+        _recogidasSel..clear()..add(null);
+        _recogidasEsManual..clear()..add(false);
+        for (final c in _recogidasNombreCtrl) c.dispose();
+        _recogidasNombreCtrl..clear()..add(TextEditingController());
+        for (final c in _recogidasDireccionCtrl) c.dispose();
+        _recogidasDireccionCtrl..clear()..add(TextEditingController());
+        for (final c in _recogidasGpsCtrl) c.dispose();
+        _recogidasGpsCtrl..clear()..add(TextEditingController());
         _conDatafono = false;
         _pagarProducto = false;
       });
@@ -513,7 +547,9 @@ class _FormularioTabState extends State<_FormularioTab> {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
+    return AutofillGroup(
+      onDisposeAction: AutofillContextAction.cancel,
+      child: SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Form(
         key: _formKey,
@@ -552,51 +588,110 @@ class _FormularioTabState extends State<_FormularioTab> {
             if (_cargandoSedes)
               const Center(child: CircularProgressIndicator(color: Colors.indigo))
             else ...[
-              ...List.generate(_recogidasSel.length, (i) => Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: DropdownButtonFormField<Map<String, dynamic>>(
-                        value: _recogidasSel[i],
-                        decoration: _inputDeco(
-                          'Recogida ${i + 1}',
-                          hint: 'Seleccionar sede FN',
+              ...List.generate(_recogidasSel.length, (i) {
+                final esManual = _recogidasEsManual[i];
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // ── Toggle sede / manual ──────────────────────────────
+                      Row(
+                        children: [
+                          _modoChip('Sede FN', !esManual,
+                              () => setState(() => _recogidasEsManual[i] = false)),
+                          const SizedBox(width: 8),
+                          _modoChip('Dirección libre', esManual,
+                              () => setState(() => _recogidasEsManual[i] = true)),
+                          const Spacer(),
+                          if (_recogidasSel.length > 1)
+                            IconButton(
+                              icon: const Icon(Icons.remove_circle, color: Colors.red, size: 20),
+                              onPressed: () => setState(() {
+                                _recogidasSel.removeAt(i);
+                                _recogidasEsManual.removeAt(i);
+                                _recogidasNombreCtrl[i].dispose();
+                                _recogidasNombreCtrl.removeAt(i);
+                                _recogidasDireccionCtrl[i].dispose();
+                                _recogidasDireccionCtrl.removeAt(i);
+                                _recogidasGpsCtrl[i].dispose();
+                                _recogidasGpsCtrl.removeAt(i);
+                              }),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      // ── Contenido según modo ──────────────────────────────
+                      if (!esManual)
+                        DropdownButtonFormField<Map<String, dynamic>>(
+                          value: _recogidasSel[i],
+                          decoration: _inputDeco('Recogida ${i + 1}'),
+                          dropdownColor: const Color(0xFF1E1E1E),
+                          style: const TextStyle(color: Colors.white, fontSize: 13),
+                          iconEnabledColor: Colors.white54,
+                          iconDisabledColor: Colors.white24,
+                          isExpanded: true,
+                          hint: const Text('Seleccionar sede FN',
+                              style: TextStyle(color: Colors.white54, fontSize: 12)),
+                          items: _sedesDisponibles.map((s) => DropdownMenuItem(
+                            value: s,
+                            child: Text(_labelSede(s),
+                                style: const TextStyle(color: Colors.white, fontSize: 13)),
+                          )).toList(),
+                          onChanged: (v) => setState(() => _recogidasSel[i] = v),
+                          validator: (v) => (i == 0 && v == null && !_recogidasEsManual[i])
+                              ? 'Requerido' : null,
+                        )
+                      else ...[
+                        TextFormField(
+                          controller: _recogidasNombreCtrl[i],
+                          textCapitalization: TextCapitalization.words,
+                          style: const TextStyle(color: Colors.white),
+                          decoration: _inputDeco('Nombre / referencia del local'),
+                          autofillHints: const <String>[],
+                          validator: (v) => (i == 0 && (v == null || v.trim().isEmpty))
+                              ? 'Requerido' : null,
                         ),
-                        dropdownColor: const Color(0xFF1E1E1E),
-                        style: const TextStyle(color: Colors.white, fontSize: 13),
-                        isExpanded: true,
-                        items: _sedesDisponibles.map((s) => DropdownMenuItem(
-                          value: s,
-                          child: Text(_labelSede(s),
-                              style: const TextStyle(color: Colors.white, fontSize: 13)),
-                        )).toList(),
-                        onChanged: (v) =>
-                            setState(() => _recogidasSel[i] = v),
-                        validator: (v) =>
-                            (i == 0 && v == null) ? 'Requerido' : null,
-                      ),
-                    ),
-                    if (_recogidasSel.length > 1) ...[
-                      const SizedBox(width: 6),
-                      IconButton(
-                        icon: const Icon(Icons.remove_circle,
-                            color: Colors.red),
-                        onPressed: () =>
-                            setState(() => _recogidasSel.removeAt(i)),
-                      ),
+                        const SizedBox(height: 6),
+                        TextFormField(
+                          controller: _recogidasDireccionCtrl[i],
+                          textCapitalization: TextCapitalization.characters,
+                          style: const TextStyle(color: Colors.white),
+                          decoration: _inputDeco('Dirección (opcional)'),
+                          autofillHints: const <String>[],
+                        ),
+                        const SizedBox(height: 6),
+                        TextFormField(
+                          controller: _recogidasGpsCtrl[i],
+                          style: const TextStyle(color: Colors.white),
+                          keyboardType: TextInputType.url,
+                          decoration: _inputDeco('Link GPS (opcional)',
+                              hint: 'https://maps.google.com/...'),
+                          autofillHints: const <String>[],
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(
+                            '⚠ La Central revisará y podrá añadir esta dirección oficialmente.',
+                            style: TextStyle(color: Colors.orange[400], fontSize: 10),
+                          ),
+                        ),
+                      ],
                     ],
-                  ],
-                ),
-              )),
+                  ),
+                );
+              }),
               TextButton.icon(
-                onPressed: () =>
-                    setState(() => _recogidasSel.add(null)),
+                onPressed: () => setState(() {
+                  _recogidasSel.add(null);
+                  _recogidasEsManual.add(false);
+                  _recogidasNombreCtrl.add(TextEditingController());
+                  _recogidasDireccionCtrl.add(TextEditingController());
+                  _recogidasGpsCtrl.add(TextEditingController());
+                }),
                 icon: const Icon(Icons.add, size: 16),
-                label: const Text('Agregar recogida',
-                    style: TextStyle(fontSize: 13)),
-                style: TextButton.styleFrom(
-                    foregroundColor: Colors.indigo[300]),
+                label: const Text('Agregar recogida', style: TextStyle(fontSize: 13)),
+                style: TextButton.styleFrom(foregroundColor: Colors.indigo[300]),
               ),
             ],
 
@@ -610,6 +705,7 @@ class _FormularioTabState extends State<_FormularioTab> {
               textCapitalization: TextCapitalization.characters,
               style: const TextStyle(color: Colors.white),
               decoration: _inputDeco('Dirección de entrega'),
+              autofillHints: const <String>[],
               validator: (v) =>
                   (v == null || v.trim().isEmpty) ? 'Requerido' : null,
             ),
@@ -643,6 +739,7 @@ class _FormularioTabState extends State<_FormularioTab> {
                     style: const TextStyle(color: Colors.white),
                     decoration: _inputDeco('N° factura'),
                     keyboardType: TextInputType.text,
+                    autofillHints: const <String>[],
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -653,6 +750,7 @@ class _FormularioTabState extends State<_FormularioTab> {
                     decoration: _inputDeco('Valor (\$)'),
                     keyboardType: TextInputType.number,
                     inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    autofillHints: const <String>[],
                   ),
                 ),
               ],
@@ -669,6 +767,7 @@ class _FormularioTabState extends State<_FormularioTab> {
               style: const TextStyle(color: Colors.white),
               decoration: _inputDeco(
                   'Ej: Tocar timbre, dejar con el portero, etc.'),
+              autofillHints: const <String>[],
             ),
 
             const SizedBox(height: 24),
@@ -703,7 +802,8 @@ class _FormularioTabState extends State<_FormularioTab> {
           ],
         ),
       ),
-    );
+    ),   // SingleChildScrollView
+    );   // AutofillGroup
   }
 
   Widget _seccionLabel(String texto) => Text(
@@ -713,6 +813,28 @@ class _FormularioTabState extends State<_FormularioTab> {
             fontSize: 12,
             fontWeight: FontWeight.bold,
             letterSpacing: 0.5),
+      );
+
+  Widget _modoChip(String label, bool activo, VoidCallback onTap) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: activo ? Colors.indigo[700] : const Color(0xFF1A1A1A),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+              color: activo ? Colors.indigo[300]! : Colors.white.withValues(alpha: 0.15),
+            ),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: activo ? Colors.white : Colors.white38,
+              fontSize: 11,
+              fontWeight: activo ? FontWeight.bold : FontWeight.normal,
+            ),
+          ),
+        ),
       );
 
   InputDecoration _inputDeco(String label, {String? hint}) => InputDecoration(
@@ -1424,6 +1546,11 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
   }
 
   String _labelRecogida(Map<String, dynamic> r) {
+    if (r['es_manual'] == true) {
+      final dir = r['direccion']?.toString() ?? '';
+      final nom = r['nombre']?.toString() ?? '';
+      return dir.isNotEmpty ? '$nom · $dir' : nom.isNotEmpty ? nom : 'Dirección libre';
+    }
     final tipo = r['tipo']?.toString() ?? '';
     final num = r['numero']?.toString() ?? '';
     final nombre = r['nombre']?.toString() ?? '';

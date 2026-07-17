@@ -8744,23 +8744,74 @@ class _MovilScreenState extends State<MovilScreen>
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(color: Colors.green[400]!),
                           ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                etiquetaProducido,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.green,
-                                ),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    etiquetaProducido,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.green,
+                                    ),
+                                  ),
+                                  Text(
+                                    _formatearMoneda(producidoCalculado, mostrarCero: true),
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 22,
+                                      color: Colors.black,
+                                    ),
+                                  ),
+                                ],
                               ),
-                              Text(
-                                _formatearMoneda(producidoCalculado, mostrarCero: true),
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 22,
-                                  color: Colors.black,
-                                ),
+                              const SizedBox(height: 8),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text(
+                                    'ACTIVO HOY:',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.blueGrey,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                  Builder(builder: (_) {
+                                    final mins = _minutosActivosHoyTotal;
+                                    final h = mins ~/ 60;
+                                    final m = mins % 60;
+                                    final label = mins == 0
+                                        ? '—'
+                                        : h > 0
+                                            ? '${h}h ${m.toString().padLeft(2, '0')}m'
+                                            : '${m}m';
+                                    return Row(
+                                      children: [
+                                        Text(
+                                          label,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 18,
+                                            color: Colors.black87,
+                                          ),
+                                        ),
+                                        if (_estaEnLinea) ...[
+                                          const SizedBox(width: 5),
+                                          Container(
+                                            width: 7, height: 7,
+                                            decoration: BoxDecoration(
+                                              color: Colors.green[600],
+                                              shape: BoxShape.circle,
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    );
+                                  }),
+                                ],
                               ),
                             ],
                           ),

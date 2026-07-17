@@ -864,6 +864,12 @@ extension CentralScreenGestion on _CentralScreenState {
   Widget _subtituloMovilFlota(Map<String, dynamic> m) {
     final ping = _pingLabel(m);
     final online = ping.startsWith('●');
+    final mins = _minutosHoyMoviles[m['id'] as int? ?? -1] ?? 0;
+    final h = mins ~/ 60;
+    final min = mins % 60;
+    final horasSuffix = mins == 0
+        ? ''
+        : ' · ${h > 0 ? '${h}h ${min.toString().padLeft(2, '0')}m' : '${min}m'}';
     return Row(
       children: [
         if (m['ticket_prioridad'] == true) ...[
@@ -877,7 +883,7 @@ extension CentralScreenGestion on _CentralScreenState {
         ),
         const SizedBox(width: 6),
         Text(
-          ping,
+          '$ping$horasSuffix',
           style: TextStyle(
               fontSize: 9,
               fontWeight: FontWeight.w600,
@@ -1088,6 +1094,15 @@ extension CentralScreenGestion on _CentralScreenState {
                           builder: (_) => const HistorialServiciosScreen(),
                         ),
                       ),
+                    ),
+                    _tarjetaGestion(
+                      icono: Icons.flag_outlined,
+                      color: Colors.orange[700]!,
+                      titulo: 'Reportes y Quejas',
+                      subtitulo: _reportesSinLeer > 0
+                          ? '$_reportesSinLeer sin leer — quejas de clientes y sedes'
+                          : 'Quejas de clientes y sedes activas',
+                      onTap: () => _abrirPanelReportes(context),
                     ),
 
                   ]),

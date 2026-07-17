@@ -83,6 +83,9 @@ class _CentralScreenState extends State<CentralScreen>
   // REPORTES DE SERVICIO — badge de no leídos
   int _reportesSinLeer = 0;
 
+  // HORAS ACTIVAS HOY — mapa movil_id → minutos acumulados
+  Map<int, int> _minutosHoyMoviles = {};
+
   // MENÚ DE FILTRO DEL MONITOR — qué secciones se muestran. Vacío =
   // todas visibles (comportamiento de siempre). Las claves coinciden
   // con las usadas en _construirBloqueServicios.
@@ -202,6 +205,7 @@ class _CentralScreenState extends State<CentralScreen>
     _iniciarVigilanteDeConexion();
     _construirCanalFn(); // Canal Realtime para solicitudes FN desde sedes
     Future.delayed(const Duration(milliseconds: 700), _cargarReportesSinLeer);
+    Future.delayed(const Duration(milliseconds: 900), _cargarMinutosHoyMoviles);
 
     // OTA: cubre sesión persistente (solo Android/iOS, no web)
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -492,6 +496,26 @@ class _CentralScreenState extends State<CentralScreen>
   /// Carga inmediata vía REST para que el paradero aparezca sin esperar
   /// que el WebSocket emita su primer evento (puede tardar 1–3s).
   // ── REPORTES DE SERVICIO ────────────────────────────────────────────────────
+
+  Future<void> _cargarMinutosHoyMoviles() async {
+    try {
+      final hoy = DateTime.now();
+      final fechaHoy =
+          '${hoy.year}-${hoy.month.toString().padLeft(2, '0')}-${hoy.day.toString().padLeft(2, '0')}';
+      final rows = await Supabase.instance.client
+          .from('sesiones_movil')
+          .select('movil_id, duracion_minutos')
+          .eq('fecha', fechaHoy)
+          .not('duracion_minutos', 'is', null);
+      final Map<int, int> mapa = {};
+      for (final r in rows as List) {
+        final mid = r['movil_id'] as int?;
+        if (mid == null) continue;
+        mapa[mid] = (mapa[mid] ?? 0) + ((r['duracion_minutos'] as num?)?.toInt() ?? 0);
+      }
+      if (mounted) setState(() => _minutosHoyMoviles = mapa);
+    } catch (_) {}
+  }
 
   Future<void> _cargarReportesSinLeer() async {
     try {
@@ -784,26 +808,6 @@ class _CentralScreenState extends State<CentralScreen>
         elevation: 0,
         actions: esPantallaGrande
             ? [
-                // Botón Reportes
-                Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.flag_outlined, color: Colors.orange),
-                      tooltip: 'Reportes de clientes y sedes',
-                      onPressed: () => _abrirPanelReportes(context),
-                    ),
-                    if (_reportesSinLeer > 0)
-                      Positioned(
-                        top: 6, right: 6,
-                        child: Container(
-                          padding: const EdgeInsets.all(3),
-                          decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
-                          child: Text('$_reportesSinLeer', style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold)),
-                        ),
-                      ),
-                  ],
-                ),
                 // Botón FN Farmanorte
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
@@ -927,24 +931,6 @@ class _CentralScreenState extends State<CentralScreen>
                 IconButton(
                   icon: const Icon(Icons.add_box, color: Color(0xff3AF500)),
                   onPressed: () => _abrirFormularioDespacho(context),
-                ),
-                Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.flag_outlined, color: Colors.orange),
-                      onPressed: () => _abrirPanelReportes(context),
-                    ),
-                    if (_reportesSinLeer > 0)
-                      Positioned(
-                        top: 6, right: 6,
-                        child: Container(
-                          padding: const EdgeInsets.all(3),
-                          decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
-                          child: Text('$_reportesSinLeer', style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold)),
-                        ),
-                      ),
-                  ],
                 ),
                 IconButton(
                   icon: const Icon(Icons.share_rounded, color: Color(0xff25D366)),
