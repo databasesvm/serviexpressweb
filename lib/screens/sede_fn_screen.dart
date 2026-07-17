@@ -1004,7 +1004,7 @@ class _ActivosTabState extends State<_ActivosTab> {
           .toList();
 
       final zona   = s['zona_fn']?.toString() ?? 'FN';
-      final consec = s['fn_consecutivo']?.toString() ?? '#\${s['id']}';
+      final consec = s['fn_consecutivo']?.toString() ?? '#${s['id']}';
 
       // ── FASE 1 (T=0): Masters ────────────────────────────────────────────────
       if (masters.isNotEmpty) {
@@ -1062,7 +1062,7 @@ class _ActivosTabState extends State<_ActivosTab> {
       // Notificar a la central
       await MotorNotificaciones.dispararACentral(
         titulo: '✅ Cotización aprobada — $consec',
-        mensaje: '\${_labelSede(s)} aprobó. Enviando al radar FN.',
+        mensaje: '${_labelSede(s)} aprobó. Enviando al radar FN.',
         urgente: false,
         sonido: Sonidos.fnCotizacion,
       );
