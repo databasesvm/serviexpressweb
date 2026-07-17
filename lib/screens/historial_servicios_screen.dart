@@ -301,6 +301,21 @@ class _HistorialServiciosScreenState extends State<HistorialServiciosScreen> {
                     style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: color)),
               ),
               const SizedBox(width: 5),
+              if (s['tipo_fn'] == true) ...[
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                  margin: const EdgeInsets.only(right: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.indigo.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(3),
+                    border: Border.all(color: Colors.indigo.withValues(alpha: 0.5), width: 0.8),
+                  ),
+                  child: Text(
+                    s['fn_consecutivo'] != null ? 'FN-${s["fn_consecutivo"]}' : 'FN',
+                    style: const TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.indigo),
+                  ),
+                ),
+              ],
               if (esVip) const Text('👑 ', style: TextStyle(fontSize: 11)),
               Expanded(
                 child: Text(
@@ -423,6 +438,38 @@ class _HistorialServiciosScreenState extends State<HistorialServiciosScreen> {
                   if (s['notas'] != null) _detalleRow('Notas', fmt(s['notas'])),
                   if (s['multi_ruta_id'] != null)
                     _detalleRow('Multi-ruta', 'Orden #${s["multi_ruta_orden"] ?? "?"}'),
+                  // ── Sección exclusiva FN ────────────────────────────
+                  if (s['tipo_fn'] == true) ...[
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8),
+                      child: Divider(height: 1),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Text('FARMANORTE',
+                          style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.indigo[700],
+                              letterSpacing: 0.8)),
+                    ),
+                    if (s['fn_consecutivo'] != null)
+                      _detalleRow('Consecutivo', 'FN-${s["fn_consecutivo"]}'),
+                    if (s['fn_factura_numero'] != null)
+                      _detalleRow('N° Factura', fmt(s['fn_factura_numero'])),
+                    if (s['fn_factura_valor'] != null && (s['fn_factura_valor'] as num) > 0)
+                      _detalleRow('Valor factura', _fmtPeso(s['fn_factura_valor'])),
+                    if (s['fn_pagar_producto'] != null && (s['fn_pagar_producto'] as num) > 0)
+                      _detalleRow('Pagar producto', _fmtPeso(s['fn_pagar_producto'])),
+                    if (s['recogidas'] is List && (s['recogidas'] as List).isNotEmpty)
+                      _detalleRow('Recogidas', '${(s["recogidas"] as List).length} sede(s)'),
+                    if (s['metodo_pago'] != null)
+                      _detalleRow('Método pago', fmt(s['metodo_pago'])),
+                    if (s['fn_alta_demanda'] == true)
+                      _detalleRow('Alta demanda', '🔥 Sí'),
+                    if (s['accepted_at'] != null)
+                      _detalleRow('Aceptado', fmtFecha(s['accepted_at'])),
+                  ],
                   const SizedBox(height: 16),
                 ],
               ),

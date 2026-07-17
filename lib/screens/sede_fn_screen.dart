@@ -1671,8 +1671,12 @@ class _HistorialTabState extends State<_HistorialTab> {
                         itemBuilder: (ctx, i) {
                           final s = _servicios[i];
                           final estado = s['estado']?.toString() ?? '';
+                          final consecutivo = s['fn_consecutivo']?.toString();
                           final tarifa = (s['tarifa'] as num?)?.toInt();
                           final numMovil = s['numero_movil']?.toString();
+                          final facturaNum = s['fn_factura_numero']?.toString();
+                          final recogidas = s['recogidas'];
+                          final altaDemanda = s['fn_alta_demanda'] == true;
 
                           Color color = estado == 'finalizado'
                               ? Colors.green[700]!
@@ -1680,97 +1684,214 @@ class _HistorialTabState extends State<_HistorialTab> {
                                   ? Colors.red[800]!
                                   : Colors.grey[600]!;
 
-                          return Card(
-                            color: const Color(0xFF111111),
-                            margin: const EdgeInsets.only(bottom: 8),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                              side: BorderSide(
-                                  color: color.withValues(alpha: 0.3)),
-                            ),
-                            child: ListTile(
-                              dense: true,
-                              leading: Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 6, vertical: 3),
-                                decoration: BoxDecoration(
-                                  color: color.withValues(alpha: 0.15),
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Text(
-                                  estado == 'finalizado'
-                                      ? '✓'
-                                      : estado == 'cancelado' || estado == 'fn_rechazado'
-                                          ? '✗'
-                                          : '?',
-                                  style: TextStyle(
-                                      color: color,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 14),
-                                ),
+                          String labelEstado;
+                          switch (estado) {
+                            case 'finalizado': labelEstado = 'ENTREGADO'; break;
+                            case 'cancelado': labelEstado = 'CANCELADO'; break;
+                            case 'fn_rechazado': labelEstado = 'RECHAZADO'; break;
+                            case 'caducado': labelEstado = 'CADUCADO'; break;
+                            case 'finalizado_con_problema': labelEstado = 'FIN+PROB'; break;
+                            default: labelEstado = estado.toUpperCase();
+                          }
+
+                          return GestureDetector(
+                            onTap: () => _mostrarDetalle(context, s),
+                            child: Card(
+                              color: const Color(0xFF111111),
+                              margin: const EdgeInsets.only(bottom: 8),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                                side: BorderSide(color: color.withValues(alpha: 0.3)),
                               ),
-                              title: Row(
-                                children: [
-                                  Text(
-                                    s['fn_consecutivo']?.toString() ?? '#${s['id']}',
-                                    style: const TextStyle(
-                                        color: Colors.white70,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.bold),
-                                  ),
-                                  if (s['fn_factura_numero'] != null) ...[
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      'Fac. ${s['fn_factura_numero']}',
-                                      style: const TextStyle(
-                                          color: Colors.white38,
-                                          fontSize: 11),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: color.withValues(alpha: 0.15),
+                                            borderRadius: BorderRadius.circular(4),
+                                            border: Border.all(color: color.withValues(alpha: 0.5), width: 0.8),
+                                          ),
+                                          child: Text(labelEstado,
+                                              style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: color)),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          consecutivo != null ? 'FN-$consecutivo' : '#${s["id"]}',
+                                          style: const TextStyle(
+                                              color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                                        ),
+                                        if (altaDemanda) ...[
+                                          const SizedBox(width: 6),
+                                          const Text('\u{1F525}', style: TextStyle(fontSize: 11)),
+                                        ],
+                                        const Spacer(),
+                                        Text(_formatFecha(s['created_at']?.toString()),
+                                            style: const TextStyle(color: Colors.white38, fontSize: 10)),
+                                      ],
+                                    ),
+                                    if (s['destino'] != null) ...[
+                                      const SizedBox(height: 5),
+                                      Text(
+                                        s['destino'].toString(),
+                                        style: const TextStyle(color: Colors.white60, fontSize: 11),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ],
+                                    const SizedBox(height: 6),
+                                    Row(
+                                      children: [
+                                        if (numMovil != null) ...[
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: Colors.indigo[900],
+                                              borderRadius: BorderRadius.circular(4),
+                                            ),
+                                            child: Text('\u{1F343} M\u00F3vil $numMovil',
+                                                style: const TextStyle(
+                                                    color: Colors.white70, fontSize: 9, fontWeight: FontWeight.bold)),
+                                          ),
+                                          const SizedBox(width: 8),
+                                        ],
+                                        if (tarifa != null && tarifa > 0)
+                                          Text('\$${_miles(tarifa)}',
+                                              style: const TextStyle(
+                                                  color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                                        if (facturaNum != null) ...[
+                                          const SizedBox(width: 8),
+                                          Text('Fact. $facturaNum',
+                                              style: TextStyle(color: Colors.indigo[300], fontSize: 10)),
+                                        ],
+                                        const Spacer(),
+                                        if (recogidas is List && recogidas.isNotEmpty)
+                                          Text('${recogidas.length} recog.',
+                                              style: const TextStyle(color: Colors.white38, fontSize: 10)),
+                                      ],
                                     ),
                                   ],
-                                ],
-                              ),
-                              subtitle: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    s['destino']?.toString() ?? '—',
-                                    style: const TextStyle(
-                                        color: Colors.white54,
-                                        fontSize: 11),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  Text(
-                                    _formatFecha(s['created_at']?.toString()),
-                                    style: const TextStyle(
-                                        color: Colors.white24,
-                                        fontSize: 10),
-                                  ),
-                                ],
-                              ),
-                              trailing: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                crossAxisAlignment: CrossAxisAlignment.end,
-                                children: [
-                                  if (tarifa != null)
-                                    Text('\$${_miles(tarifa)}',
-                                        style: const TextStyle(
-                                            color: Colors.green,
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 13)),
-                                  if (numMovil != null)
-                                    Text('Móvil $numMovil',
-                                        style: const TextStyle(
-                                            color: Colors.white38,
-                                            fontSize: 10)),
-                                ],
+                                ),
                               ),
                             ),
                           );
                         },
                       ),
                     ),
+                  ),
+              ],
+            );
+  }
+
+  void _mostrarDetalle(BuildContext context, Map<String, dynamic> s) {
+    String fmt(dynamic v) => v == null ? '\u2014' : v.toString();
+    String fmtPeso(dynamic v) {
+      if (v == null) return '\u2014';
+      final n = (v as num).toInt();
+      return n == 0 ? '\u2014' : '\$${_miles(n)}';
+    }
+
+    final consecutivo = s['fn_consecutivo']?.toString();
+    final estado = s['estado']?.toString() ?? '';
+    final recogidas = s['recogidas'];
+    final recogidasCount = recogidas is List ? recogidas.length : null;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        minChildSize: 0.4,
+        maxChildSize: 0.92,
+        builder: (_, ctrl) => Container(
+          decoration: const BoxDecoration(
+            color: Color(0xFF1A1A1A),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+          ),
+          child: Column(
+            children: [
+              Container(
+                width: 36, height: 4,
+                margin: const EdgeInsets.symmetric(vertical: 10),
+                decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  children: [
+                    Text(
+                      consecutivo != null ? 'FN-$consecutivo' : 'Servicio #${s["id"]}',
+                      style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                    const Spacer(),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: Colors.indigo.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(estado.toUpperCase(),
+                          style: const TextStyle(color: Colors.indigo, fontSize: 10, fontWeight: FontWeight.bold)),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 16, color: Colors.white12),
+              Expanded(
+                child: ListView(
+                  controller: ctrl,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  children: [
+                    if (s['destino'] != null) _filaDetalle('Destino', fmt(s['destino'])),
+                    _filaDetalle('Tarifa', fmtPeso(s['tarifa'])),
+                    if (s['fn_factura_numero'] != null)
+                      _filaDetalle('N\u00B0 Factura', fmt(s['fn_factura_numero'])),
+                    if (s['fn_factura_valor'] != null)
+                      _filaDetalle('Valor factura', fmtPeso(s['fn_factura_valor'])),
+                    if (s['fn_pagar_producto'] != null && (s['fn_pagar_producto'] as num) > 0)
+                      _filaDetalle('Pagar producto', fmtPeso(s['fn_pagar_producto'])),
+                    if (recogidasCount != null)
+                      _filaDetalle('Recogidas', '$recogidasCount sede${recogidasCount == 1 ? "" : "s"}'),
+                    if (s['numero_movil'] != null)
+                      _filaDetalle('M\u00F3vil asignado', 'M\u00F3vil ${s["numero_movil"]}'),
+                    if (s['metodo_pago'] != null)
+                      _filaDetalle('M\u00E9todo de pago', fmt(s['metodo_pago'])),
+                    if (s['fn_alta_demanda'] == true)
+                      _filaDetalle('Alta demanda', '\u{1F525} S\u00ED'),
+                    _filaDetalle('Creado', _formatFecha(s['created_at']?.toString())),
+                    if (s['accepted_at'] != null)
+                      _filaDetalle('Aceptado', _formatFecha(s['accepted_at']?.toString())),
+                    const SizedBox(height: 16),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
-      ],
+      ),
     );
   }
+
+  Widget _filaDetalle(String label, String valor) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 130,
+              child: Text(label,
+                  style: const TextStyle(color: Colors.white38, fontSize: 12, fontWeight: FontWeight.w600)),
+            ),
+            Expanded(
+              child: Text(valor, style: const TextStyle(color: Colors.white, fontSize: 12)),
+            ),
+          ],
+        ),
+      );
 }
