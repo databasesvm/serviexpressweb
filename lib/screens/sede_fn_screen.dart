@@ -929,51 +929,100 @@ class _ActivosTabState extends State<_ActivosTab> {
     }
   }
 
-  // ── Reportar problema ───────────────────────────────────────────────────────
+  // ── Reportar problema / queja desde la sede FN ──────────────────────────────
   Future<void> _reportarProblema(Map<String, dynamic> s) async {
-    final ctrl = TextEditingController();
+    const categoriasSedeF = [
+      'Tardanza',
+      'No recogió correctamente',
+      'Daño al paquete',
+      'Mala actitud',
+      'Otro',
+    ];
+    String? categoriaSeleccionada;
+    final notaCtrl = TextEditingController();
+
     await showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Reportar problema'),
-        content: TextField(
-          controller: ctrl,
-          maxLines: 3,
-          decoration: const InputDecoration(
-            hintText: 'Describe el problema...',
-            border: OutlineInputBorder(),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDs) => AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          title: Text(
+            'Queja — ${s['fn_consecutivo'] ?? '#${s['id']}'}',
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
           ),
-        ),
-        actions: [
-          TextButton(
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('¿Cuál es el problema?',
+                    style: TextStyle(fontSize: 12, color: Colors.black54)),
+                const SizedBox(height: 6),
+                ...categoriasSedeF.map((cat) => RadioListTile<String>(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(cat, style: const TextStyle(fontSize: 13)),
+                      value: cat,
+                      groupValue: categoriaSeleccionada,
+                      onChanged: (v) => setDs(() => categoriaSeleccionada = v),
+                    )),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: notaCtrl,
+                  maxLines: 2,
+                  decoration: const InputDecoration(
+                    hintText: 'Nota adicional (opcional)...',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(ctx);
-              try {
-                await _db.from('servicios').update({
-                  'estado': 'problema',
-                  'observacion':
-                      '[PROBLEMA FN] ${ctrl.text.trim()}',
-                }).eq('id', s['id']);
-                await MotorNotificaciones.dispararACentral(
-                  titulo: '⚠ Problema FN — ${s['fn_consecutivo'] ?? '#${s['id']}'}',
-                  mensaje: ctrl.text.trim(),
-                  urgente: true,
-                  sonido: Sonidos.fnCotizacion,
-                );
-              } catch (e) {
-                _snack('Error: $e');
-              }
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange[800]),
-            child: const Text('Enviar', style: TextStyle(color: Colors.white)),
-          ),
-        ],
+              child: const Text('Cancelar',
+                  style: TextStyle(color: Colors.black54)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange[800],
+                  foregroundColor: Colors.white),
+              onPressed: categoriaSeleccionada == null
+                  ? null
+                  : () async {
+                      final cat = categoriaSeleccionada!;
+                      final nota = notaCtrl.text.trim();
+                      Navigator.pop(ctx);
+                      try {
+                        await _db.from('reportes_servicio').insert({
+                          'servicio_id': s['id'],
+                          'movil_id': s['movil_id'],
+                          'origen': 'fn_sede',
+                          'categoria': cat,
+                          'nota': nota.isEmpty ? null : nota,
+                        });
+                        await MotorNotificaciones.dispararACentral(
+                          titulo:
+                              '⚠️ Queja sede FN — ${s['fn_consecutivo'] ?? '#${s['id']}'}',
+                          mensaje: nota.isNotEmpty ? '$cat: $nota' : cat,
+                          urgente: true,
+                          sonido: Sonidos.fnCotizacion,
+                        );
+                        _snack('Queja enviada a la central.');
+                      } catch (e) {
+                        _snack('Error: $e');
+                      }
+                    },
+              child: const Text('ENVIAR'),
+            ),
+          ],
+        ),
       ),
     );
-    ctrl.dispose();
+    notaCtrl.dispose();
   }
 
   String _labelSede(Map<String, dynamic> s) {

@@ -133,6 +133,20 @@ class _MovilScreenState extends State<MovilScreen>
   double _producidoFnHoy = 0;
   double _producidoFnTotal = 0;
 
+  // SESIONES — horas activas acumuladas hoy
+  int? _sesionActivaId;             // ID de la sesión abierta (null si offline)
+  DateTime? _sesionInicioAt;        // hora local de conexión (para calcular en vivo)
+  int _minutosActivosHoy = 0;      // suma de sesiones cerradas del día
+
+  // Minutos totales de hoy = cerradas + sesión en curso (si aplica)
+  int get _minutosActivosHoyTotal {
+    int total = _minutosActivosHoy;
+    if (_estaEnLinea && _sesionInicioAt != null) {
+      total += DateTime.now().difference(_sesionInicioAt!).inMinutes;
+    }
+    return total;
+  }
+
   // =====================================================================
   bool _gpsEnProceso = false;
   // Permisos críticos — banner persistente si alguno de los 3 falta
@@ -268,6 +282,7 @@ class _MovilScreenState extends State<MovilScreen>
     // Fix #3: escalonar operaciones de red del arranque para no saturar
     // la conexión en el primer segundo (causa de ANR / pantalla congelada).
     Future.delayed(const Duration(milliseconds: 600), _cargarProduccion);
+    Future.delayed(const Duration(milliseconds: 800), _cargarMinutosActivosHoy);
     Future.delayed(const Duration(milliseconds: 1000), _verificarPanicoUsadoHoy);
 
     // ---- DOMICILIOS: suscripción a pedidos sin asignar ----
@@ -1664,6 +1679,7 @@ class _MovilScreenState extends State<MovilScreen>
               'ingreso_fila': null,
             })
             .eq('id', widget.usuario['id']);
+        _cerrarSesion(); // cierra sesión de tiempo activo al cerrar sesión de app
       }
       _gpsTimer?.cancel();
       _detenerHeartbeatUbicacion(); // Fallback GPS
@@ -2515,6 +2531,78 @@ class _MovilScreenState extends State<MovilScreen>
     _ubicacionHeartbeatTimer = null;
   }
 
+  // ── SESIONES DE TIEMPO ACTIVO ───────────────────────────────────────────────
+
+  /// Abre una sesión al conectarse — inserta en sesiones_movil y guarda el ID.
+  Future<void> _abrirSesion() async {
+    try {
+      final ahora = DateTime.now().toUtc();
+      final fecha = '${ahora.year}-${ahora.month.toString().padLeft(2,'0')}-${ahora.day.toString().padLeft(2,'0')}';
+      final res = await Supabase.instance.client
+          .from('sesiones_movil')
+          .insert({
+            'movil_id': widget.usuario['id'],
+            'conectado_at': ahora.toIso8601String(),
+            'fecha': fecha,
+          })
+          .select('id')
+          .single();
+      if (mounted) {
+        setState(() {
+          _sesionActivaId = res['id'] as int?;
+          _sesionInicioAt = DateTime.now();
+        });
+      }
+    } catch (_) {}
+  }
+
+  /// Cierra la sesión activa al desconectarse — calcula duración en minutos.
+  Future<void> _cerrarSesion() async {
+    final id = _sesionActivaId;
+    if (id == null) return;
+    if (mounted) setState(() { _sesionActivaId = null; _sesionInicioAt = null; });
+    try {
+      final ahora = DateTime.now().toUtc();
+      // Recuperamos la hora de conexión para calcular la duración
+      final row = await Supabase.instance.client
+          .from('sesiones_movil')
+          .select('conectado_at')
+          .eq('id', id)
+          .maybeSingle();
+      int duracion = 0;
+      if (row != null && row['conectado_at'] != null) {
+        final inicio = DateTime.parse(row['conectado_at'].toString()).toUtc();
+        duracion = ahora.difference(inicio).inMinutes;
+      }
+      await Supabase.instance.client
+          .from('sesiones_movil')
+          .update({
+            'desconectado_at': ahora.toIso8601String(),
+            'duracion_minutos': duracion,
+          })
+          .eq('id', id);
+    } catch (_) {}
+  }
+
+  /// Carga los minutos activos acumulados hoy (sesiones cerradas del día).
+  Future<void> _cargarMinutosActivosHoy() async {
+    try {
+      final hoy = DateTime.now();
+      final fechaHoy = '${hoy.year}-${hoy.month.toString().padLeft(2,'0')}-${hoy.day.toString().padLeft(2,'0')}';
+      final rows = await Supabase.instance.client
+          .from('sesiones_movil')
+          .select('duracion_minutos')
+          .eq('movil_id', widget.usuario['id'])
+          .eq('fecha', fechaHoy)
+          .not('duracion_minutos', 'is', null);
+      int total = 0;
+      for (final r in rows as List) {
+        total += (r['duracion_minutos'] as num? ?? 0).toInt();
+      }
+      if (mounted) setState(() => _minutosActivosHoy = total);
+    } catch (_) {}
+  }
+
   /// El cron "limpiar_motos_zombis" puede marcarnos offline cuando el foreground
   /// service muere temporalmente. Esta función reafirma la conexión en Supabase
   /// sin cambiar el estado local — el usuario sigue viendo que está en línea.
@@ -2592,6 +2680,7 @@ class _MovilScreenState extends State<MovilScreen>
             'ingreso_fila': null,
           })
           .eq('id', widget.usuario['id']);
+      _cerrarSesion(); // cierra sesión de tiempo activo
       _detenerHeartbeat(); // ← Opción A
       if (!kIsWeb) stopForegroundService().catchError((_) {}); // ← Opción B
       if (mounted) {
@@ -2730,6 +2819,14 @@ class _MovilScreenState extends State<MovilScreen>
       // Sonido de conexión — se reproduce justo antes del setState para
       // que el feedback auditivo coincida con el cambio visual.
       if (nuevoEstado) _sonidos.reproducirSuave(Sonidos.movilConectado);
+
+      // Registro de sesión de tiempo activo
+      if (nuevoEstado) {
+        _abrirSesion();
+        _cargarMinutosActivosHoy();
+      } else {
+        _cerrarSesion();
+      }
 
       setState(() {
         _estaEnLinea = nuevoEstado;
@@ -3529,7 +3626,7 @@ class _MovilScreenState extends State<MovilScreen>
                     ),
                     Divider(height: 1, color: Colors.grey[100]),
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
+                      padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
@@ -3538,6 +3635,46 @@ class _MovilScreenState extends State<MovilScreen>
                           Text('Total', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
                           const SizedBox(width: 8),
                           Text('$_serviciosTotal', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black87)),
+                        ],
+                      ),
+                    ),
+                    Divider(height: 1, color: Colors.grey[100]),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
+                      child: Row(
+                        children: [
+                          Icon(Icons.access_time_outlined, size: 16, color: Colors.grey[500]),
+                          const SizedBox(width: 8),
+                          Text('Activo hoy', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                          const Spacer(),
+                          Builder(builder: (_) {
+                            final mins = _minutosActivosHoyTotal;
+                            final h = mins ~/ 60;
+                            final m = mins % 60;
+                            final label = mins == 0
+                                ? '—'
+                                : h > 0
+                                    ? '${h}h ${m.toString().padLeft(2, '0')}m'
+                                    : '${m}m';
+                            return Text(
+                              label,
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                color: _estaEnLinea ? Colors.green[700] : Colors.black87,
+                              ),
+                            );
+                          }),
+                          if (_estaEnLinea) ...[
+                            const SizedBox(width: 4),
+                            Container(
+                              width: 6, height: 6,
+                              decoration: BoxDecoration(
+                                color: Colors.green[600],
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     ),

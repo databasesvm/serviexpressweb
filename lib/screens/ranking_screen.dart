@@ -11,11 +11,40 @@ class RankingScreen extends StatefulWidget {
 class _RankingScreenState extends State<RankingScreen> {
   List<Map<String, dynamic>> _ranking = [];
   bool _cargando = true;
+  Map<int, int> _minutosHoyPorMovil = {}; // movil_id → minutos activos hoy
 
   @override
   void initState() {
     super.initState();
     _calcularRankingSemanal();
+    _cargarHorasHoy();
+  }
+
+  Future<void> _cargarHorasHoy() async {
+    try {
+      final hoy = DateTime.now();
+      final fechaHoy =
+          '${hoy.year}-${hoy.month.toString().padLeft(2, '0')}-${hoy.day.toString().padLeft(2, '0')}';
+      final rows = await Supabase.instance.client
+          .from('sesiones_movil')
+          .select('movil_id, duracion_minutos')
+          .eq('fecha', fechaHoy)
+          .not('duracion_minutos', 'is', null);
+      final Map<int, int> map = {};
+      for (final r in rows as List) {
+        final mid = r['movil_id'] as int?;
+        if (mid == null) continue;
+        map[mid] = (map[mid] ?? 0) + ((r['duracion_minutos'] as num?)?.toInt() ?? 0);
+      }
+      if (mounted) setState(() => _minutosHoyPorMovil = map);
+    } catch (_) {}
+  }
+
+  String _fmtMinutos(int mins) {
+    if (mins == 0) return '—';
+    final h = mins ~/ 60;
+    final m = mins % 60;
+    return h > 0 ? '${h}h${m.toString().padLeft(2, '0')}m' : '${m}m';
   }
 
   Future<void> _calcularRankingSemanal() async {
@@ -143,6 +172,7 @@ class _RankingScreenState extends State<RankingScreen> {
           }
 
           listaTemporal.add({
+            'id': u['id'],
             'nombre': u['nombre'],
             'usuario': u['usuario'], // MOVIL## para mostrar en ranking
             'foto_perfil_url': u['foto_perfil_url'],
@@ -312,6 +342,18 @@ class _RankingScreenState extends State<RankingScreen> {
                                             ? Colors.red[400]
                                             : Colors.white54),
                                 ),
+                              ),
+                              const SizedBox(height: 2),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.access_time, size: 10, color: Colors.white30),
+                                  const SizedBox(width: 2),
+                                  Text(
+                                    _fmtMinutos(_minutosHoyPorMovil[item['id'] as int? ?? -1] ?? 0),
+                                    style: const TextStyle(fontSize: 10, color: Colors.white38),
+                                  ),
+                                ],
                               ),
                             ],
                           ),

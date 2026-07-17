@@ -160,6 +160,113 @@ class _ClienteScreenState extends State<ClienteScreen>
     if (mounted) Navigator.pushReplacementNamed(context, '/');
   }
 
+  // ── Queja / reporte durante servicio activo ───────────────────────────────
+  Future<void> _reportarQueja(Map<String, dynamic> servicio) async {
+    const categoriasCliente = [
+      'Tardanza',
+      'Mala actitud',
+      'Daño al paquete',
+      'Cobro incorrecto',
+      'Otro',
+    ];
+    String? categoriaSeleccionada;
+    final notaCtrl = TextEditingController();
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDs) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          title: const Text('Reportar problema',
+              style: TextStyle(fontWeight: FontWeight.bold)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('¿Cuál es el problema?',
+                    style: TextStyle(fontSize: 12, color: Colors.black54)),
+                const SizedBox(height: 6),
+                ...categoriasCliente.map((cat) => RadioListTile<String>(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(cat, style: const TextStyle(fontSize: 13)),
+                      value: cat,
+                      groupValue: categoriaSeleccionada,
+                      onChanged: (v) => setDs(() => categoriaSeleccionada = v),
+                    )),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: notaCtrl,
+                  maxLines: 2,
+                  decoration: const InputDecoration(
+                    hintText: 'Nota adicional (opcional)...',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar',
+                  style: TextStyle(color: Colors.black54)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red[700],
+                  foregroundColor: Colors.white),
+              onPressed: categoriaSeleccionada == null
+                  ? null
+                  : () async {
+                      final cat = categoriaSeleccionada!;
+                      final nota = notaCtrl.text.trim();
+                      Navigator.pop(ctx);
+                      try {
+                        await Supabase.instance.client
+                            .from('reportes_servicio')
+                            .insert({
+                          'servicio_id': servicio['id'],
+                          'movil_id': servicio['movil_id'],
+                          'origen': 'cliente',
+                          'categoria': cat,
+                          'nota': nota.isEmpty ? null : nota,
+                        });
+                        await MotorNotificaciones.dispararACentral(
+                          titulo:
+                              '⚠️ Queja cliente — #${servicio['numero_cliente'] ?? servicio['id']}',
+                          mensaje: nota.isNotEmpty ? '$cat: $nota' : cat,
+                          urgente: false,
+                        );
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Reporte enviado a la central.'),
+                              backgroundColor: Colors.green,
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                                content: Text('Error: $e'),
+                                backgroundColor: Colors.red),
+                          );
+                        }
+                      }
+                    },
+              child: const Text('ENVIAR'),
+            ),
+          ],
+        ),
+      ),
+    );
+    notaCtrl.dispose();
+  }
+
   Future<void> _cancelarPedido(int id) async {
     // ... tu código sigue igual
     try {
@@ -654,6 +761,30 @@ class _ClienteScreenState extends State<ClienteScreen>
                           label: const Text(
                             'ENRUTAR (sumar otro encargo)',
                             style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ),
+                    ),
+
+                  // REPORTAR QUEJA — visible en cualquier estado activo con móvil
+                  if (['en_ruta_origen', 'en_origen', 'en_ruta_destino']
+                      .contains(estado))
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.red[700],
+                            side: BorderSide(color: Colors.red[300]!),
+                            padding: const EdgeInsets.symmetric(vertical: 6),
+                          ),
+                          onPressed: () => _reportarQueja(servicio),
+                          icon: const Icon(Icons.flag_outlined, size: 14),
+                          label: const Text(
+                            'REPORTAR PROBLEMA',
+                            style: TextStyle(
+                                fontSize: 10, fontWeight: FontWeight.bold),
                           ),
                         ),
                       ),

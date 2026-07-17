@@ -33,6 +33,7 @@ part 'central_screen_monitor.dart';
 part 'central_screen_panel_control.dart';
 part 'central_screen_gestion.dart';
 part 'central_screen_fn.dart';
+part 'central_screen_reportes.dart';
 
 class CentralScreen extends StatefulWidget {
   final Map<String, dynamic>? usuario;
@@ -78,6 +79,9 @@ class _CentralScreenState extends State<CentralScreen>
 
   int _panelActivoMobile = 1;
   bool _radarActivo = false;
+
+  // REPORTES DE SERVICIO — badge de no leídos
+  int _reportesSinLeer = 0;
 
   // MENÚ DE FILTRO DEL MONITOR — qué secciones se muestran. Vacío =
   // todas visibles (comportamiento de siempre). Las claves coinciden
@@ -197,6 +201,7 @@ class _CentralScreenState extends State<CentralScreen>
     _construirStreams();
     _iniciarVigilanteDeConexion();
     _construirCanalFn(); // Canal Realtime para solicitudes FN desde sedes
+    Future.delayed(const Duration(milliseconds: 700), _cargarReportesSinLeer);
 
     // OTA: cubre sesión persistente (solo Android/iOS, no web)
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -486,6 +491,35 @@ class _CentralScreenState extends State<CentralScreen>
 
   /// Carga inmediata vía REST para que el paradero aparezca sin esperar
   /// que el WebSocket emita su primer evento (puede tardar 1–3s).
+  // ── REPORTES DE SERVICIO ────────────────────────────────────────────────────
+
+  Future<void> _cargarReportesSinLeer() async {
+    try {
+      final rows = await Supabase.instance.client
+          .from('reportes_servicio')
+          .select('id')
+          .eq('leido', false);
+      if (mounted) setState(() => _reportesSinLeer = (rows as List).length);
+    } catch (_) {}
+  }
+
+  Future<void> _abrirPanelReportes(BuildContext context) async {
+    // Marcar todos como leídos
+    await Supabase.instance.client
+        .from('reportes_servicio')
+        .update({'leido': true})
+        .eq('leido', false);
+    if (mounted) setState(() => _reportesSinLeer = 0);
+
+    if (!mounted) return;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _PanelReportesBottomSheet(),
+    );
+  }
+
   Future<void> _preCargarDatosIniciales() async {
     try {
       final moviles = await Supabase.instance.client
@@ -750,6 +784,26 @@ class _CentralScreenState extends State<CentralScreen>
         elevation: 0,
         actions: esPantallaGrande
             ? [
+                // Botón Reportes
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.flag_outlined, color: Colors.orange),
+                      tooltip: 'Reportes de clientes y sedes',
+                      onPressed: () => _abrirPanelReportes(context),
+                    ),
+                    if (_reportesSinLeer > 0)
+                      Positioned(
+                        top: 6, right: 6,
+                        child: Container(
+                          padding: const EdgeInsets.all(3),
+                          decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+                          child: Text('$_reportesSinLeer', style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold)),
+                        ),
+                      ),
+                  ],
+                ),
                 // Botón FN Farmanorte
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
@@ -873,6 +927,24 @@ class _CentralScreenState extends State<CentralScreen>
                 IconButton(
                   icon: const Icon(Icons.add_box, color: Color(0xff3AF500)),
                   onPressed: () => _abrirFormularioDespacho(context),
+                ),
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.flag_outlined, color: Colors.orange),
+                      onPressed: () => _abrirPanelReportes(context),
+                    ),
+                    if (_reportesSinLeer > 0)
+                      Positioned(
+                        top: 6, right: 6,
+                        child: Container(
+                          padding: const EdgeInsets.all(3),
+                          decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+                          child: Text('$_reportesSinLeer', style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold)),
+                        ),
+                      ),
+                  ],
                 ),
                 IconButton(
                   icon: const Icon(Icons.share_rounded, color: Color(0xff25D366)),
