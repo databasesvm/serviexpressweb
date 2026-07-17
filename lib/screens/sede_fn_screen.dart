@@ -1,5 +1,6 @@
 // ignore_for_file: use_build_context_synchronously
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -8,6 +9,7 @@ import 'package:serviexpress_app/utils/sonido_manager.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart';
 import 'package:serviexpress_app/screens/login_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Panel sede FN — rol: sede_fn
@@ -518,6 +520,10 @@ class _FormularioTabState extends State<_FormularioTab> {
           'origen_lat': (primeraRecogida['lat'] as num).toDouble(),
         if (primeraRecogida['lng'] != null)
           'origen_lng': (primeraRecogida['lng'] as num).toDouble(),
+        // WhatsApp de la sede solicitante para que el móvil pueda contactarla
+        if (widget.sede?['telefono_whatsapp'] != null &&
+            (widget.sede!['telefono_whatsapp'] as String).trim().isNotEmpty)
+          'fn_whatsapp': (widget.sede!['telefono_whatsapp'] as String).trim(),
       });
 
       // Notificar a la central con sonido especial FN
@@ -926,22 +932,154 @@ class _ActivosTabState extends State<_ActivosTab> {
   List<Map<String, dynamic>> _filtrarActivos(List<Map<String, dynamic>> todos) =>
       todos.where((s) => _estadosActivos.contains(s['estado'])).toList();
 
-  // ── Aprobar cotización ──────────────────────────────────────────────────────
+  // ── Aprobar cotización + lanzar cascada FN ────────────────────────────────
   Future<void> _aprobar(Map<String, dynamic> s) async {
     try {
+      // 1. Móviles FN disponibles en línea
+      final movilesRaw = await _db
+          .from('usuarios')
+          .select('id, rango_movil, latitud, longitud')
+          .eq('rol', 'movil')
+          .eq('en_linea', true)
+          .eq('activo', true)
+          .eq('tiene_fn', true)
+          .neq('suspendido', true);
+
+      // 2. Contar servicios activos por móvil
+      final svActivos = await _db
+          .from('servicios')
+          .select('movil_id')
+          .inFilter('estado', ['en_ruta_origen', 'en_origen', 'en_ruta_destino', 'problema'])
+          .not('movil_id', 'is', null);
+
+      final Map<String, int> activos = {};
+      for (final sv in svActivos as List) {
+        final mid = sv['movil_id'].toString();
+        activos[mid] = (activos[mid] ?? 0) + 1;
+      }
+
+      int limiteRango(String? r) {
+        switch (r?.toUpperCase().trim()) {
+          case 'PRO':     return 1;
+          case 'ELITE':   return 2;
+          case 'LEYENDA': return 3;
+          case 'MASTER':  return 999;
+          default:        return 1;
+        }
+      }
+
+      // Solo los que tienen capacidad para más servicios FN
+      final moviles = (movilesRaw as List)
+          .where((m) => (activos[m['id'].toString()] ?? 0) < limiteRango(m['rango_movil']?.toString()))
+          .toList();
+
+      final masters = moviles
+          .where((m) => m['rango_movil']?.toString().toUpperCase() == 'MASTER')
+          .map<String>((m) => m['id'].toString())
+          .toList();
+      final noMasters = moviles
+          .where((m) => m['rango_movil']?.toString().toUpperCase() != 'MASTER')
+          .toList();
+
+      // 3. Más cercano a la sede (para fase 2)
+      String? fase2Id;
+      final sLat = (s['origen_lat'] as num?)?.toDouble();
+      final sLng = (s['origen_lng'] as num?)?.toDouble();
+      if (sLat != null && sLng != null && noMasters.isNotEmpty) {
+        double minD = double.infinity;
+        for (final m in noMasters) {
+          final uLat = (m['latitud'] as num?)?.toDouble();
+          final uLng = (m['longitud'] as num?)?.toDouble();
+          if (uLat == null || uLng == null) continue;
+          final d = _haversine(sLat, sLng, uLat, uLng);
+          if (d < minD) { minD = d; fase2Id = m['id'].toString(); }
+        }
+      } else if (noMasters.isNotEmpty) {
+        fase2Id = noMasters.first['id'].toString();
+      }
+
+      final fase3Ids = noMasters
+          .map<String>((m) => m['id'].toString())
+          .where((id) => id != fase2Id)
+          .toList();
+
+      final zona   = s['zona_fn']?.toString() ?? 'FN';
+      final consec = s['fn_consecutivo']?.toString() ?? '#\${s['id']}';
+
+      // ── FASE 1 (T=0): Masters ────────────────────────────────────────────────
+      if (masters.isNotEmpty) {
+        await MotorNotificaciones.dispararRafa(
+          idsDestinos: masters,
+          titulo: '👑 TURNO FN — MASTER',
+          mensaje: 'Servicio disponible · $zona',
+          urgente: true,
+          sonido: Sonidos.movilParadero,
+        );
+      }
+
+      // Pasar a pendiente + registrar radar_t0
+      final ahora = DateTime.now().toUtc().toIso8601String();
       await _db.from('servicios').update({
         'estado': 'pendiente',
+        'fn_radar_t0': ahora,
+        'fn_asignacion_tipo': 'radar',
+        if (masters.isNotEmpty) 'fn_notificados_fase1': masters,
+        if (fase2Id != null) 'fn_fase2_movil_id': fase2Id,
       }).eq('id', s['id']);
-      // Notificar a la central que fue aprobada
+
+      // ── FASE 2 (T+31s): Más cercano ─────────────────────────────────────────
+      String? notifF2;
+      if (fase2Id != null) {
+        notifF2 = await MotorNotificaciones.programarMisilRetardado(
+          externalIds: [fase2Id],
+          titulo: '🔵 TURNO FN — PARA TI',
+          mensaje: 'Servicio disponible · $zona',
+          segundosRetardo: 31,
+          sonido: Sonidos.movilParadero,
+        );
+      }
+
+      // ── FASE 3 (T+61s): Resto ───────────────────────────────────────────────
+      String? notifF3;
+      if (fase3Ids.isNotEmpty) {
+        notifF3 = await MotorNotificaciones.programarMisilRetardado(
+          externalIds: fase3Ids,
+          titulo: '🔵 TURNO FN DISPONIBLE',
+          mensaje: 'Servicio sin tomar · $zona',
+          segundosRetardo: 61,
+          sonido: Sonidos.movilParadero,
+        );
+      }
+
+      // Guardar IDs de notificaciones programadas para cancelarlas si alguien acepta
+      if (notifF2 != null || notifF3 != null) {
+        await _db.from('servicios').update({
+          if (notifF2 != null) 'fn_notif_fase2': notifF2,
+          if (notifF3 != null) 'fn_notif_fase3': notifF3,
+        }).eq('id', s['id']);
+      }
+
+      // Notificar a la central
       await MotorNotificaciones.dispararACentral(
-        titulo: '✅ Cotización aprobada — ${s['fn_consecutivo'] ?? '#${s['id']}'}',
-        mensaje: '${_labelSede(s)} aprobó. Enviando al radar FN.',
+        titulo: '✅ Cotización aprobada — $consec',
+        mensaje: '\${_labelSede(s)} aprobó. Enviando al radar FN.',
         urgente: false,
         sonido: Sonidos.fnCotizacion,
       );
     } catch (e) {
-      _snack('Error: $e');
+      _snack('Error: \$e');
     }
+  }
+
+  // Distancia Haversine en metros (sin dependencia de latlong2)
+  double _haversine(double lat1, double lng1, double lat2, double lng2) {
+    const r = 6371000.0;
+    final dLat = (lat2 - lat1) * math.pi / 180;
+    final dLng = (lng2 - lng1) * math.pi / 180;
+    final a = math.sin(dLat / 2) * math.sin(dLat / 2) +
+        math.cos(lat1 * math.pi / 180) * math.cos(lat2 * math.pi / 180) *
+        math.sin(dLng / 2) * math.sin(dLng / 2);
+    return 2 * r * math.asin(math.sqrt(a));
   }
 
   // ── Rechazar cotización ─────────────────────────────────────────────────────
@@ -1261,46 +1399,40 @@ class _CardServicioActivo extends StatefulWidget {
 }
 
 class _CardServicioActivoState extends State<_CardServicioActivo> {
-  Timer? _etaTimer;
-  int _etaSegundos = 0;
+  final _db = Supabase.instance.client;
+  String? _movilTelefono;
+  String? _movilIdCargado;
 
   @override
   void initState() {
     super.initState();
-    _iniciarEta();
+    _cargarTelefonoMovil();
   }
 
   @override
   void didUpdateWidget(_CardServicioActivo old) {
     super.didUpdateWidget(old);
-    _iniciarEta();
+    final nuevoId = widget.servicio['movil_id']?.toString();
+    if (nuevoId != _movilIdCargado) _cargarTelefonoMovil();
   }
 
-  void _iniciarEta() {
-    _etaTimer?.cancel();
-    final s = widget.servicio;
-    // ETA arranca cuando se asigna el móvil (fn_movil_asignado_at)
-    final raw = s['fn_movil_asignado_at']?.toString() ?? s['updated_at']?.toString();
-    final etaBase = (s['fn_sedes']?['eta_base'] as int?) ?? 15;
-    if (raw == null || !['en_ruta_origen', 'pendiente'].contains(s['estado'])) {
-      return;
-    }
+  Future<void> _cargarTelefonoMovil() async {
+    final mid = widget.servicio['movil_id']?.toString();
+    if (mid == null) return;
+    _movilIdCargado = mid;
     try {
-      final inicio = DateTime.parse(raw).toLocal();
-      final metaSeg = etaBase * 60;
-      void tick() {
-        if (!mounted) return;
-        final transcurridos = DateTime.now().difference(inicio).inSeconds;
-        setState(() => _etaSegundos = (metaSeg - transcurridos).clamp(0, metaSeg));
-      }
-      tick();
-      _etaTimer = Timer.periodic(const Duration(seconds: 1), (_) => tick());
+      final row = await _db
+          .from('usuarios')
+          .select('telefono')
+          .eq('id', mid)
+          .maybeSingle();
+      if (!mounted) return;
+      setState(() => _movilTelefono = row?['telefono']?.toString());
     } catch (_) {}
   }
 
   @override
   void dispose() {
-    _etaTimer?.cancel();
     super.dispose();
   }
 
@@ -1440,7 +1572,7 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
               ),
             ],
 
-            // ── Móvil asignado + ETA ──────────────────────────────────────
+            // ── Móvil asignado + WA ───────────────────────────────────────
             if (numMovil != null && estado != 'cotizacion' && estado != 'cotizada') ...[
               const SizedBox(height: 8),
               Row(
@@ -1452,21 +1584,93 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
                           color: Colors.white70,
                           fontSize: 12,
                           fontWeight: FontWeight.bold)),
-                  if (_etaSegundos > 0 && estado == 'en_ruta_origen') ...[
-                    const SizedBox(width: 12),
-                    const Icon(Icons.timer,
-                        size: 12, color: Colors.orange),
-                    const SizedBox(width: 4),
-                    Text(
-                      'ETA: ${(_etaSegundos ~/ 60).toString().padLeft(2, '0')}:${(_etaSegundos % 60).toString().padLeft(2, '0')}',
-                      style: const TextStyle(
-                          color: Colors.orange,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold),
+                  const Spacer(),
+                  // Botón WhatsApp del móvil asignado
+                  if (_movilTelefono != null && _movilTelefono!.isNotEmpty)
+                    GestureDetector(
+                      onTap: () {
+                        final tel = _movilTelefono!.replaceAll(RegExp(r'\D'), '');
+                        launchUrl(Uri.parse('https://wa.me/57$tel'),
+                            mode: LaunchMode.externalApplication);
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF25D366).withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                              color: const Color(0xFF25D366).withValues(alpha: 0.5)),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.chat, size: 13, color: Color(0xFF25D366)),
+                            SizedBox(width: 4),
+                            Text('WA Móvil',
+                                style: TextStyle(
+                                    color: Color(0xFF25D366),
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                      ),
                     ),
-                  ],
                 ],
               ),
+
+              // ── Tiempo estimado según estado ────────────────────────────
+              Builder(builder: (_) {
+                // Extra recogidas = las que NO son la sede solicitante
+                final extraRec = recogidas
+                    .where((r) => r['es_sede_solicitante'] != true)
+                    .length;
+
+                if (estado == 'en_ruta_origen') {
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 5),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(children: [
+                          const Icon(Icons.schedule, size: 12, color: Colors.orange),
+                          const SizedBox(width: 4),
+                          const Text('Llegada a sede: ~15 min',
+                              style: TextStyle(color: Colors.orange, fontSize: 11)),
+                        ]),
+                        if (extraRec > 0) ...[
+                          const SizedBox(height: 2),
+                          Row(children: [
+                            const Icon(Icons.add_location_alt_outlined,
+                                size: 12, color: Colors.orange),
+                            const SizedBox(width: 4),
+                            Text(
+                              '+ ~${extraRec * 5} min por '
+                              '${extraRec == 1 ? "1 recogida adicional" : "$extraRec recogidas adicionales"}',
+                              style: TextStyle(
+                                  color: Colors.orange[300], fontSize: 10),
+                            ),
+                          ]),
+                        ],
+                      ],
+                    ),
+                  );
+                }
+
+                if (estado == 'en_ruta_destino') {
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 5),
+                    child: Row(children: [
+                      const Icon(Icons.schedule, size: 12, color: Colors.greenAccent),
+                      const SizedBox(width: 4),
+                      const Text('Entrega: ~15 min',
+                          style: TextStyle(
+                              color: Colors.greenAccent, fontSize: 11)),
+                    ]),
+                  );
+                }
+
+                return const SizedBox.shrink();
+              }),
             ],
 
             // ── Renegociación: cotización aceptada por central ────────────
@@ -1537,18 +1741,30 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
               ),
             ],
 
+            // ── Cancelar (≤5 min desde aprobación) ──────────────────────
+            if (widget.onCancelar != null) ...[
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: widget.onCancelar,
+                  icon: const Icon(Icons.cancel_outlined, size: 15, color: Colors.red),
+                  label: const Text('Cancelar servicio',
+                      style: TextStyle(color: Colors.red, fontSize: 13)),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Colors.red),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                ),
+              ),
+            ],
+
             // ── Acciones secundarias ──────────────────────────────────────
             if (estado != 'cotizacion') ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: 4),
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  if (widget.onCancelar != null)
-                    TextButton(
-                      onPressed: widget.onCancelar,
-                      child: const Text('Cancelar',
-                          style: TextStyle(color: Colors.red, fontSize: 12)),
-                    ),
                   if (!['cotizada', 'fn_renegociando'].contains(estado))
                     TextButton(
                       onPressed: widget.onReportarProblema,
