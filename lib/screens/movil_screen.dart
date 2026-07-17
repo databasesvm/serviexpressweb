@@ -6809,10 +6809,24 @@ class _MovilScreenState extends State<MovilScreen>
                     ),
                   if (servicio['zona_fn'] != null) const SizedBox(height: 6),
 
-                  // Sede → GPS + WhatsApp en la misma fila
+                  // ── SOLICITANTE ───────────────────────────────────────
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.indigo[100],
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text('SOLICITANTE',
+                        style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.indigo[800],
+                            letterSpacing: 0.6)),
+                  ),
+                  const SizedBox(height: 4),
                   Row(
                     children: [
-                      const Text('📦 ', style: TextStyle(fontSize: 13)),
+                      const Text('🏥 ', style: TextStyle(fontSize: 13)),
                       Expanded(
                         child: Text(servicio['origen'] ?? '—',
                             style: const TextStyle(
@@ -6896,70 +6910,148 @@ class _MovilScreenState extends State<MovilScreen>
                     ],
                   ),
 
-                  // Recogidas
-                  if (recogidas.isNotEmpty) ...[
-                    const SizedBox(height: 5),
-                    ...recogidas.map((r) {
-                      final rMap = r as Map<String, dynamic>;
-                      final tipo = rMap['tipo'] as String? ?? '';
-                      final nombre = rMap['nombre'] as String? ?? '';
-                      final numero = rMap['numero'];
-                      final lat = (rMap['lat'] as num?)?.toDouble();
-                      final lng = (rMap['lng'] as num?)?.toDouble();
-                      final label = tipo == 'FN' && numero != null
-                          ? 'FN #$numero – $nombre'
-                          : '$tipo – $nombre';
+                  // ── RECOGIDAS ─────────────────────────────────────────────
+                  Builder(builder: (_) {
+                    // Separa: recogidas que son la sede solicitante vs extras
+                    final otrasRecogidas = recogidas
+                        .where((r) =>
+                            (r as Map<String, dynamic>)['es_sede_solicitante'] != true)
+                        .cast<Map<String, dynamic>>()
+                        .toList();
+                    final soloSolicitante = recogidas.isNotEmpty &&
+                        recogidas.every((r) =>
+                            (r as Map<String, dynamic>)['es_sede_solicitante'] == true);
+
+                    // Sin recogidas extra + sede es el único punto → nota simple
+                    if (soloSolicitante) {
                       return Padding(
                         padding: const EdgeInsets.only(top: 5),
                         child: Row(
                           children: [
                             Icon(Icons.subdirectory_arrow_right,
-                                size: 14, color: Colors.indigo[400]),
+                                size: 13, color: Colors.indigo[300]),
                             const SizedBox(width: 4),
-                            Expanded(
-                              child: Text(label,
-                                  style: const TextStyle(fontSize: 13)),
-                            ),
-                            GestureDetector(
-                              onTap: () async {
-                                if (lat != null && lng != null) {
-                                  _abrirMapsHaciaCoords(lat, lng, label);
-                                } else {
-                                  final q = Uri.encodeComponent(label);
-                                  await launchUrl(
-                                    Uri.parse(
-                                        'https://www.google.com/maps/search/?api=1&query=$q'),
-                                    mode: LaunchMode.externalApplication,
-                                  );
-                                }
-                              },
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 10, vertical: 6),
-                                decoration: BoxDecoration(
-                                  color: Colors.indigo[600],
-                                  borderRadius: BorderRadius.circular(5),
-                                ),
-                                child: const Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(Icons.navigation,
-                                        size: 14, color: Colors.white),
-                                    SizedBox(width: 3),
-                                    Text('GPS',
-                                        style: TextStyle(
-                                            fontSize: 12,
-                                            color: Colors.white,
-                                            fontWeight: FontWeight.bold)),
-                                  ],
-                                ),
-                              ),
-                            ),
+                            Text('↳ Recoger en la sede solicitante',
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.indigo[400],
+                                    fontStyle: FontStyle.italic)),
                           ],
                         ),
                       );
-                    }),
-                  ],
+                    }
+
+                    if (otrasRecogidas.isEmpty) return const SizedBox.shrink();
+
+                    // Hay recogidas extra → mostrarlas con etiqueta verde
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.green[100],
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                              otrasRecogidas.length == 1
+                                  ? 'RECOGIDA'
+                                  : 'RECOGIDAS (${otrasRecogidas.length})',
+                              style: TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.green[800],
+                                  letterSpacing: 0.6)),
+                        ),
+                        const SizedBox(height: 4),
+                        ...otrasRecogidas.asMap().entries.map((entry) {
+                          final idx = entry.key;
+                          final rMap = entry.value;
+                          final tipo = rMap['tipo'] as String? ?? '';
+                          final nombre = rMap['nombre'] as String? ?? '';
+                          final numero = rMap['numero'];
+                          final lat = (rMap['lat'] as num?)?.toDouble();
+                          final lng = (rMap['lng'] as num?)?.toDouble();
+                          final esManual = rMap['es_manual'] == true;
+                          final direccion =
+                              rMap['direccion']?.toString() ?? '';
+                          final gpsLink = rMap['gps_link']?.toString() ?? '';
+                          final label = esManual
+                              ? (direccion.isNotEmpty
+                                  ? '$nombre · $direccion'
+                                  : nombre)
+                              : (tipo == 'FN' && numero != null
+                                  ? 'FN#$numero – $nombre'
+                                  : nombre.isNotEmpty ? nombre : tipo);
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 5),
+                            child: Row(
+                              children: [
+                                if (otrasRecogidas.length > 1) ...[
+                                  Text('${idx + 1}.',
+                                      style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.green[700])),
+                                  const SizedBox(width: 3),
+                                ],
+                                Icon(Icons.storefront,
+                                    size: 13, color: Colors.green[700]),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                    child: Text(label,
+                                        style: const TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w500))),
+                                GestureDetector(
+                                  onTap: () async {
+                                    if (lat != null && lng != null) {
+                                      _abrirMapsHaciaCoords(lat, lng, label);
+                                    } else if (esManual &&
+                                        gpsLink.isNotEmpty) {
+                                      await launchUrl(
+                                          Uri.parse(gpsLink),
+                                          mode: LaunchMode.externalApplication);
+                                    } else {
+                                      final q = Uri.encodeComponent(label);
+                                      await launchUrl(
+                                        Uri.parse(
+                                            'https://www.google.com/maps/search/?api=1&query=$q'),
+                                        mode: LaunchMode.externalApplication,
+                                      );
+                                    }
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 10, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: Colors.green[700],
+                                      borderRadius: BorderRadius.circular(5),
+                                    ),
+                                    child: const Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.navigation,
+                                            size: 14, color: Colors.white),
+                                        SizedBox(width: 3),
+                                        Text('GPS',
+                                            style: TextStyle(
+                                                fontSize: 12,
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.bold)),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }),
+                      ],
+                    );
+                  }),
 
                   // Destino — bloqueado hasta confirmar llegada a la sede
                   const SizedBox(height: 6),
@@ -7350,28 +7442,90 @@ class _MovilScreenState extends State<MovilScreen>
                 const Divider(height: 1),
                 const SizedBox(height: 10),
 
-                // Recogidas
-                if (recogidasList.isNotEmpty) ...[
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(Icons.store, size: 13, color: Colors.indigo[400]),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          recogidasList.map((r) {
-                            final tipo = r['tipo']?.toString() ?? '';
-                            final num = r['numero']?.toString() ?? '';
-                            final nombre = r['nombre']?.toString() ?? '';
-                            return tipo == 'FN' && num.isNotEmpty ? 'FN$num — $nombre' : nombre;
-                          }).join(' · '),
-                          style: TextStyle(color: Colors.indigo[700], fontSize: 12, fontWeight: FontWeight.w500),
-                        ),
+                // ── Solicitante (quién pide) ──────────────────────────
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: Colors.indigo[100],
+                        borderRadius: BorderRadius.circular(3),
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                ],
+                      child: Text('SOLICITANTE',
+                          style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.indigo[800], letterSpacing: 0.5)),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(servicio['origen']?.toString() ?? '—',
+                          style: TextStyle(color: Colors.indigo[900], fontSize: 12, fontWeight: FontWeight.bold)),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+
+                // ── Recogidas (donde recoger antes de entregar) ──────────────
+                Builder(builder: (_) {
+                  final otrasRec = recogidasList
+                      .where((r) => (r as Map)['es_sede_solicitante'] != true)
+                      .cast<Map<String, dynamic>>()
+                      .toList();
+                  final soloSolic = recogidasList.isNotEmpty &&
+                      recogidasList.every((r) => (r as Map)['es_sede_solicitante'] == true);
+
+                  if (soloSolic) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Row(
+                        children: [
+                          Icon(Icons.subdirectory_arrow_right, size: 12, color: Colors.indigo[300]),
+                          const SizedBox(width: 4),
+                          Text('↳ Recoger en la sede solicitante',
+                              style: TextStyle(fontSize: 11, color: Colors.indigo[400], fontStyle: FontStyle.italic)),
+                        ],
+                      ),
+                    );
+                  }
+
+                  if (otrasRec.isEmpty) return const SizedBox(height: 0);
+
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                              decoration: BoxDecoration(color: Colors.green[100], borderRadius: BorderRadius.circular(3)),
+                              child: Text(otrasRec.length == 1 ? 'RECOGIDA' : 'RECOGIDAS (${otrasRec.length})',
+                                  style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.green[800], letterSpacing: 0.5)),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        ...otrasRec.map((r) {
+                          final tipo = r['tipo']?.toString() ?? '';
+                          final num = r['numero']?.toString() ?? '';
+                          final nombre = r['nombre']?.toString() ?? '';
+                          final esManual = r['es_manual'] == true;
+                          final dir = r['direccion']?.toString() ?? '';
+                          final label = esManual
+                              ? (dir.isNotEmpty ? '$nombre · $dir' : nombre)
+                              : (tipo == 'FN' && num.isNotEmpty ? 'FN$num — $nombre' : nombre);
+                          return Row(
+                            children: [
+                              Icon(Icons.storefront, size: 12, color: Colors.green[700]),
+                              const SizedBox(width: 5),
+                              Expanded(child: Text(label,
+                                  style: TextStyle(color: Colors.green[800], fontSize: 11, fontWeight: FontWeight.w600))),
+                            ],
+                          );
+                        }),
+                      ],
+                    ),
+                  );
+                }),
 
                 // Destino
                 if (destino.isNotEmpty)

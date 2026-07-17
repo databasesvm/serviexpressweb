@@ -398,7 +398,9 @@ class _FormularioTabState extends State<_FormularioTab> {
 
   bool _tieneRecogidaFueraDe() {
     for (int i = 0; i < _recogidasSel.length; i++) {
-      if (_recogidasEsManual[i]) return true; // manual = por evaluar
+      // Manual con contenido = por evaluar
+      if (_recogidasEsManual[i] &&
+          _recogidasNombreCtrl[i].text.trim().isNotEmpty) return true;
       final r = _recogidasSel[i];
       if (r != null && r['cobertura'] == 'fuera') return true;
       if (r != null && r['cobertura'] == 'por_evaluar') return true;
@@ -447,12 +449,25 @@ class _FormularioTabState extends State<_FormularioTab> {
           }
         }
       }
+      // Sin recogidas explícitas → la sede solicitante es el punto de recogida
       if (recogidasList.isEmpty) {
-        _snack('Agrega al menos una recogida válida.');
-        setState(() => _enviando = false);
-        return;
+        final sedeData = widget.sede;
+        if (sedeData != null) {
+          recogidasList.add({
+            'id': sedeData['id'],
+            'tipo': sedeData['tipo'],
+            'nombre': sedeData['nombre'],
+            'numero': sedeData['numero'],
+            'zona': sedeData['zona'],
+            'lat': sedeData['lat'],
+            'lng': sedeData['lng'],
+            'cobertura': sedeData['cobertura'] ?? 'dentro',
+            'es_sede_solicitante': true,
+          });
+        }
       }
-      final primeraRecogida = recogidasList.first;
+      final primeraRecogida =
+          recogidasList.isNotEmpty ? recogidasList.first : <String, dynamic>{};
 
       // Generar consecutivo
       final consec = await _db
@@ -482,7 +497,9 @@ class _FormularioTabState extends State<_FormularioTab> {
         'tipo_fn': true,
         'fn_origen': 'sede',
         'fn_sede_solicitante_id': sedeId,
-        'fn_sede_id': primeraRecogida['es_manual'] == true ? null : primeraRecogida['id'],
+        'fn_sede_id': primeraRecogida['es_manual'] == true
+            ? null
+            : (primeraRecogida['id'] ?? sedeId),
         'recogidas': recogidasList,
         'metodo_pago': _conDatafono ? 'Datafono' : 'Efectivo',
         'fn_pagar_producto': _pagarProducto,
@@ -588,7 +605,7 @@ class _FormularioTabState extends State<_FormularioTab> {
               ),
 
             // ── Sección: Recogidas ──────────────────────────────────────────
-            _seccionLabel('📦 Recogidas (sedes donde recoger)'),
+            _seccionLabel('📦 Recogidas (opcional — si hay otra sede donde recoger)'),
             const SizedBox(height: 8),
 
             if (_cargandoSedes)
@@ -645,8 +662,6 @@ class _FormularioTabState extends State<_FormularioTab> {
                                 style: const TextStyle(color: Colors.white, fontSize: 13)),
                           )).toList(),
                           onChanged: (v) => setState(() => _recogidasSel[i] = v),
-                          validator: (v) => (i == 0 && v == null && !_recogidasEsManual[i])
-                              ? 'Requerido' : null,
                         )
                       else ...[
                         TextFormField(
@@ -655,8 +670,6 @@ class _FormularioTabState extends State<_FormularioTab> {
                           style: const TextStyle(color: Colors.white),
                           decoration: _inputDeco('Nombre / referencia del local'),
                           autofillHints: const <String>[],
-                          validator: (v) => (i == 0 && (v == null || v.trim().isEmpty))
-                              ? 'Requerido' : null,
                         ),
                         const SizedBox(height: 6),
                         TextFormField(
