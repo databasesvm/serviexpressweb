@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base href="/serviexpressweb/form/">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="Plataforma de domicilios y mototaxi en Cúcuta">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+  <!-- ═══ PWA / APPLE META TAGS ═══════════════════════════════════════════ -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="ServiExpress">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+  <link rel="apple-touch-icon" sizes="152x152" href="icons/Icon-192.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="icons/Icon-192.png">
+  <link rel="apple-touch-icon" sizes="167x167" href="icons/Icon-192.png">
+  <meta name="theme-color" content="#0D0D0D">
+  <meta name="msapplication-TileColor" content="#0D0D0D">
+
+  <link rel="icon" type="image/png" href="favicon.png">
+  <title>ServiExpress</title>
+  <link rel="manifest" href="manifest.json">
+
+  <!-- ═══ ONESIGNAL WEB SDK ════════════════════════════════════════════════
+       Notificaciones push en navegadores y PWA instaladas.
+       En iPhone: requiere iOS 16.4+ y que la app esté instalada como PWA.
+  ════════════════════════════════════════════════════════════════════════ -->
+  <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+  <script>
+    window.OneSignalDeferred = window.OneSignalDeferred || [];
+    OneSignalDeferred.push(async function(OneSignal) {
+      await OneSignal.init({
+        appId: "207d1d0a-0218-46e0-9f35-7d8d88f6765a",
+        serviceWorkerPath: "OneSignalSDKWorker.js",
+        promptOptions: {
+          slidedown: { prompts: [] }
+        },
+        notifyButton: { enable: false },
+        allowLocalhostAsSecureOrigin: true,
+      });
+    });
+  </script>
+
+  <style id="splash-screen-style">
+    html { height: 100% }
+    body { margin: 0; min-height: 100%; background-color: #0D0D0D; }
+    .center {
+      margin: 0; position: absolute; top: 50%; left: 50%;
+      -ms-transform: translate(-50%, -50%); transform: translate(-50%, -50%);
+    }
+    .contain  { display:block; width:100%; height:100%; object-fit:contain; }
+    .stretch  { display:block; width:100%; height:100%; }
+    .cover    { display:block; width:100%; height:100%; object-fit:cover; }
+    .bottom   { position:absolute; bottom:0; left:50%; transform:translate(-50%,0); }
+    .bottomLeft  { position:absolute; bottom:0; left:0; }
+    .bottomRight { position:absolute; bottom:0; right:0; }
+
+    /* ── Banner instalación iOS ─────────────────────────────────────────── */
+    #ios-install-banner {
+      display: none;
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      z-index: 9999;
+      background: #1A1A1A;
+      border-top: 2px solid #3AF500;
+      padding: 14px 16px 34px;
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      color: #fff;
+      box-shadow: 0 -4px 24px rgba(0,0,0,0.7);
+      animation: slideUp 0.35s ease-out;
+    }
+    @keyframes slideUp {
+      from { transform: translateY(100%); }
+      to   { transform: translateY(0); }
+    }
+    #ios-install-banner .b-close {
+      position: absolute; top: 10px; right: 14px;
+      font-size: 20px; cursor: pointer; color: #666;
+      background: none; border: none; padding: 4px;
+    }
+    #ios-install-banner .b-title {
+      font-size: 15px; font-weight: 700; color: #3AF500; margin-bottom: 8px;
+    }
+    #ios-install-banner .b-sub {
+      font-size: 12px; color: #aaa; margin-bottom: 10px;
+    }
+    #ios-install-banner .b-step {
+      display: flex; align-items: flex-start; gap: 10px;
+      margin-top: 8px; font-size: 13px; color: #ddd; line-height: 1.45;
+    }
+    #ios-install-banner .b-step .ico { font-size: 18px; min-width: 22px; margin-top: 1px; }
+  </style>
+
+  <script id="splash-screen-script">
+    function removeSplashFromWeb() {
+      document.getElementById("splash")?.remove();
+      document.getElementById("splash-branding")?.remove();
+      document.body.style.background = "transparent";
+    }
+  </script>
+</head>
+<body>
+  <picture id="splash">
+    <source srcset="splash/img/light-1x.png 1x, splash/img/light-2x.png 2x, splash/img/light-3x.png 3x, splash/img/light-4x.png 4x" media="(prefers-color-scheme: light)">
+    <source srcset="splash/img/dark-1x.png 1x, splash/img/dark-2x.png 2x, splash/img/dark-3x.png 3x, splash/img/dark-4x.png 4x" media="(prefers-color-scheme: dark)">
+    <img class="center" aria-hidden="true" src="splash/img/light-1x.png" alt="">
+  </picture>
+
+  <!-- ═══ BANNER DE INSTALACIÓN iOS ════════════════════════════════════════
+       Solo visible en Safari iPhone/iPad cuando la app NO está instalada.
+  ════════════════════════════════════════════════════════════════════════ -->
+  <div id="ios-install-banner" role="dialog" aria-label="Instalar ServiExpress">
+    <button class="b-close" onclick="dismissIosBanner()" aria-label="Cerrar">✕</button>
+    <div class="b-title">📲 Instala ServiExpress en tu iPhone</div>
+    <div class="b-sub">Para recibir notificaciones de servicios y usarla como app nativa</div>
+    <div class="b-step">
+      <span class="ico">1️⃣</span>
+      <span>Toca el botón <strong>Compartir</strong> ⬆️ en la barra inferior de Safari</span>
+    </div>
+    <div class="b-step">
+      <span class="ico">2️⃣</span>
+      <span>Desliza y selecciona <strong>"Agregar a pantalla de inicio"</strong></span>
+    </div>
+    <div class="b-step">
+      <span class="ico">3️⃣</span>
+      <span>Toca <strong>"Agregar"</strong> — abre la app desde tu pantalla de inicio y listo ✅</span>
+    </div>
+  </div>
+
+  <script>
+    // Mostrar banner solo en Safari de iOS y solo si no está instalada como PWA
+    (function() {
+      var isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+      var isSafari = /safari/i.test(navigator.userAgent) &&
+                     !/chrome|crios|fxios|opios|gsa/i.test(navigator.userAgent);
+      var isInstalled = window.navigator.standalone === true;
+      var dismissed = sessionStorage.getItem('ios_banner_dismissed');
+      if (isIos && isSafari && !isInstalled && !dismissed) {
+        setTimeout(function() {
+          var b = document.getElementById('ios-install-banner');
+          if (b) b.style.display = 'block';
+        }, 3500);
+      }
+    })();
+
+    function dismissIosBanner() {
+      var b = document.getElementById('ios-install-banner');
+      if (b) b.style.display = 'none';
+      sessionStorage.setItem('ios_banner_dismissed', '1');
+    }
+  </script>
+
+  <script src="flutter_bootstrap.js" async=""></script>
+</body>
+</html>
