@@ -7183,25 +7183,26 @@ class _MovilScreenState extends State<MovilScreen>
             // ── Fila botones secundarios ──────────────────────────────────
             Row(
               children: [
-                // Reportar Factura
-                Expanded(
-                  child: SizedBox(
-                    height: 36,
-                    child: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.indigo[900],
-                        foregroundColor: Colors.white,
-                        padding: EdgeInsets.zero,
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(7)),
+                // Reportar Factura (no aplica cuando la sede ya cargó la factura)
+                if (servicio['fn_origen']?.toString() != 'sede')
+                  Expanded(
+                    child: SizedBox(
+                      height: 36,
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.indigo[900],
+                          foregroundColor: Colors.white,
+                          padding: EdgeInsets.zero,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(7)),
+                        ),
+                        onPressed: () => _mostrarFormularioFactura(servicio),
+                        icon: const Icon(Icons.receipt_long, size: 14),
+                        label: const Text('Factura',
+                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                       ),
-                      onPressed: () => _mostrarFormularioFactura(servicio),
-                      icon: const Icon(Icons.receipt_long, size: 14),
-                      label: const Text('Factura',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                     ),
                   ),
-                ),
 
                 // Navegar destino (solo en_ruta_destino)
                 if (estado == 'en_ruta_destino' && !tieneProblema) ...[

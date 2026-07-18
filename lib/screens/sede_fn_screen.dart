@@ -339,13 +339,11 @@ class _FormularioTabState extends State<_FormularioTab> {
 
   // Factura
   final _facturaNumCtrl = TextEditingController();
-  final _facturaValCtrl = TextEditingController();
 
   // Instrucciones
   final _instruccionesCtrl = TextEditingController();
 
   bool _conDatafono = false;
-  bool _pagarProducto = false;
   bool _enviando = false;
 
   // Sedes disponibles para seleccionar como recogida
@@ -362,7 +360,6 @@ class _FormularioTabState extends State<_FormularioTab> {
   void dispose() {
     _destinoCtrl.dispose();
     _facturaNumCtrl.dispose();
-    _facturaValCtrl.dispose();
     _instruccionesCtrl.dispose();
     for (final c in _recogidasNombreCtrl) c.dispose();
     for (final c in _recogidasDireccionCtrl) c.dispose();
@@ -483,13 +480,6 @@ class _FormularioTabState extends State<_FormularioTab> {
 
       final altaDemanda = widget.altaDemanda;
 
-      // Factura valor
-      final factValorStr = _facturaValCtrl.text
-          .replaceAll('.', '')
-          .replaceAll(',', '')
-          .trim();
-      final factValor = double.tryParse(factValorStr);
-
       await _db.from('servicios').insert({
         'origen': nombreSede,
         'destino': _destinoCtrl.text.trim().toUpperCase(),
@@ -504,11 +494,9 @@ class _FormularioTabState extends State<_FormularioTab> {
             : (primeraRecogida['id'] ?? sedeId),
         'recogidas': recogidasList,
         'metodo_pago': _conDatafono ? 'Datafono' : 'Efectivo',
-        'fn_pagar_producto': _pagarProducto,
         'fn_factura_numero': _facturaNumCtrl.text.trim().isEmpty
             ? null
             : _facturaNumCtrl.text.trim(),
-        'fn_factura_valor': factValor,
         'fn_alta_demanda': altaDemanda,
         'fn_consecutivo': consec?.toString(),
         'fn_recotizacion': 1,
@@ -548,11 +536,9 @@ class _FormularioTabState extends State<_FormularioTab> {
         for (final c in _recogidasGpsCtrl) c.dispose();
         _recogidasGpsCtrl..clear()..add(TextEditingController());
         _conDatafono = false;
-        _pagarProducto = false;
       });
       _destinoCtrl.clear();
       _facturaNumCtrl.clear();
-      _facturaValCtrl.clear();
       _instruccionesCtrl.clear();
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -648,6 +634,16 @@ class _FormularioTabState extends State<_FormularioTab> {
                               }),
                             ),
                         ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        esManual
+                            ? 'Añade una recogida en cualquier otra dirección: una sede FN no registrada o una droguería/farmacia externa'
+                            : 'Selecciona una o más sedes de Farmanorte registradas como punto de recogida',
+                        style: const TextStyle(
+                            color: Colors.white54,
+                            fontSize: 11,
+                            fontStyle: FontStyle.italic),
                       ),
                       const SizedBox(height: 6),
                       // ── Contenido según modo ──────────────────────────────
@@ -745,40 +741,18 @@ class _FormularioTabState extends State<_FormularioTab> {
               _conDatafono,
               (v) => setState(() => _conDatafono = v),
             ),
-            _switchTile(
-              '¿El móvil debe pagar el producto?',
-              _pagarProducto,
-              (v) => setState(() => _pagarProducto = v),
-            ),
 
             const SizedBox(height: 16),
 
             // ── Factura ─────────────────────────────────────────────────────
             _seccionLabel('🧾 Datos de la factura (opcional)'),
             const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: TextFormField(
-                    controller: _facturaNumCtrl,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: _inputDeco('N° factura'),
-                    keyboardType: TextInputType.text,
-                    autofillHints: const <String>[],
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: TextFormField(
-                    controller: _facturaValCtrl,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: _inputDeco('Valor (\$)'),
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    autofillHints: const <String>[],
-                  ),
-                ),
-              ],
+            TextFormField(
+              controller: _facturaNumCtrl,
+              style: const TextStyle(color: Colors.white),
+              decoration: _inputDeco('N° factura'),
+              keyboardType: TextInputType.text,
+              autofillHints: const <String>[],
             ),
 
             const SizedBox(height: 16),
@@ -1401,35 +1375,44 @@ class _CardServicioActivo extends StatefulWidget {
 class _CardServicioActivoState extends State<_CardServicioActivo> {
   final _db = Supabase.instance.client;
   String? _movilTelefono;
+  String? _movilNumero; // número real: extraído de usuarios.usuario
   String? _movilIdCargado;
 
   @override
   void initState() {
     super.initState();
-    _cargarTelefonoMovil();
+    _cargarDatosMovil();
   }
 
   @override
   void didUpdateWidget(_CardServicioActivo old) {
     super.didUpdateWidget(old);
     final nuevoId = widget.servicio['movil_id']?.toString();
-    if (nuevoId != _movilIdCargado) _cargarTelefonoMovil();
+    if (nuevoId != _movilIdCargado) _cargarDatosMovil();
   }
 
-  Future<void> _cargarTelefonoMovil() async {
+  Future<void> _cargarDatosMovil() async {
     final mid = widget.servicio['movil_id']?.toString();
     if (mid == null) return;
     _movilIdCargado = mid;
     try {
       final row = await _db
           .from('usuarios')
-          .select('telefono')
+          .select('telefono, usuario')
           .eq('id', mid)
           .maybeSingle();
       if (!mounted) return;
-      setState(() => _movilTelefono = row?['telefono']?.toString());
+      final usuarioField = row?['usuario']?.toString();
+      final numExtraido = usuarioField != null
+          ? (RegExp(r'\d+').firstMatch(usuarioField)?.group(0) ?? usuarioField)
+          : null;
+      setState(() {
+        _movilTelefono = row?['telefono']?.toString();
+        _movilNumero = numExtraido;
+      });
     } catch (_) {}
   }
+
 
   @override
   void dispose() {
@@ -1442,7 +1425,8 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
     final estado = s['estado']?.toString() ?? '';
     final consec = s['fn_consecutivo']?.toString() ?? '#${s['id']}';
     final destino = s['destino']?.toString() ?? '—';
-    final numMovil = s['numero_movil']?.toString();
+    // Usar número real cargado desde usuarios.usuario; fallback vacío mientras carga
+    final numMovil = _movilNumero;
     final tarifa = (s['tarifa'] as num?)?.toInt();
 
     final recogidas = s['recogidas'] is List
@@ -1888,7 +1872,8 @@ class _HistorialTabState extends State<_HistorialTab> {
               'id, fn_consecutivo, estado, creador, destino, tarifa, fn_factura_numero, '
               'fn_factura_valor, fn_pagar_producto, numero_movil, fn_movil_asignado_at, '
               'accepted_at, created_at, fn_alta_demanda, recogidas, metodo_pago, '
-              'instrucciones_especiales, fn_rechazo_motivo')
+              'instrucciones_especiales, fn_rechazo_motivo, '
+              'movil_data:usuarios!servicios_movil_id_fkey(usuario)')
           .eq('fn_sede_solicitante_id', sedeId)
           .not('estado', 'in', '("cotizacion","cotizada","pendiente","en_ruta_origen","en_origen","en_ruta_destino","fn_renegociando")')
           .gte('created_at', _rango?.start.toUtc().toIso8601String() ?? '2000-01-01T00:00:00Z')
@@ -2036,7 +2021,11 @@ class _HistorialTabState extends State<_HistorialTab> {
                           final estado = s['estado']?.toString() ?? '';
                           final consecutivo = s['fn_consecutivo']?.toString();
                           final tarifa = (s['tarifa'] as num?)?.toInt();
-                          final numMovil = s['numero_movil']?.toString();
+                          // Número real del móvil desde usuarios.usuario (ej: "movil05" → "05")
+                          final movilUsuario = s['movil_data']?['usuario']?.toString();
+                          final numMovil = movilUsuario != null
+                              ? (RegExp(r'\d+').firstMatch(movilUsuario)?.group(0) ?? movilUsuario)
+                              : null;
                           final facturaNum = s['fn_factura_numero']?.toString();
                           final recogidas = s['recogidas'];
                           final altaDemanda = s['fn_alta_demanda'] == true;
@@ -2170,6 +2159,11 @@ class _HistorialTabState extends State<_HistorialTab> {
     final estado = s['estado']?.toString() ?? '';
     final recogidas = s['recogidas'];
     final recogidasCount = recogidas is List ? recogidas.length : null;
+    // Número real del móvil desde join usuarios.usuario
+    final movilUsuarioDetalle = s['movil_data']?['usuario']?.toString();
+    final numMovilDetalle = movilUsuarioDetalle != null
+        ? (RegExp(r'\d+').firstMatch(movilUsuarioDetalle)?.group(0) ?? movilUsuarioDetalle)
+        : null;
 
     showModalBottomSheet(
       context: context,
@@ -2232,8 +2226,8 @@ class _HistorialTabState extends State<_HistorialTab> {
                               : 'Sí'),
                     if (recogidasCount != null)
                       _filaDetalle('Recogidas', '$recogidasCount sede${recogidasCount == 1 ? "" : "s"}'),
-                    if (s['numero_movil'] != null)
-                      _filaDetalle('M\u00F3vil asignado', 'M\u00F3vil ${s["numero_movil"]}'),
+                    if (numMovilDetalle != null)
+                      _filaDetalle('M\u00F3vil asignado', 'M\u00F3vil $numMovilDetalle'),
                     if (s['metodo_pago'] != null)
                       _filaDetalle('M\u00E9todo de pago', fmt(s['metodo_pago'])),
                     if (s['fn_alta_demanda'] == true)
@@ -2309,49 +2303,25 @@ class _HistorialTabState extends State<_HistorialTab> {
     );
   }
 
-  // ── Editar factura con auditoría (spec. sección 7) ─────────────────────────
+  // ── Editar N° factura con auditoría ────────────────────────────────────────
   Future<void> _editarFactura(Map<String, dynamic> s) async {
     final numCtrl = TextEditingController(text: s['fn_factura_numero']?.toString() ?? '');
-    final valCtrl = TextEditingController(
-        text: s['fn_factura_valor'] != null
-            ? (s['fn_factura_valor'] as num).toInt().toString()
-            : '');
 
     final confirmar = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1A1A2E),
-        title: const Text('Editar factura',
+        title: const Text('Editar N° de factura',
             style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: numCtrl,
-              style: const TextStyle(color: Colors.white),
-              decoration: const InputDecoration(
-                labelText: 'N° de factura',
-                labelStyle: TextStyle(color: Colors.white54),
-                enabledBorder: UnderlineInputBorder(
-                    borderSide: BorderSide(color: Colors.white24)),
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: valCtrl,
-              style: const TextStyle(color: Colors.white),
-              keyboardType: TextInputType.number,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              decoration: const InputDecoration(
-                labelText: 'Valor de la factura',
-                labelStyle: TextStyle(color: Colors.white54),
-                prefixText: '\$ ',
-                prefixStyle: TextStyle(color: Colors.white54),
-                enabledBorder: UnderlineInputBorder(
-                    borderSide: BorderSide(color: Colors.white24)),
-              ),
-            ),
-          ],
+        content: TextField(
+          controller: numCtrl,
+          style: const TextStyle(color: Colors.white),
+          decoration: const InputDecoration(
+            labelText: 'N° de factura',
+            labelStyle: TextStyle(color: Colors.white54),
+            enabledBorder: UnderlineInputBorder(
+                borderSide: BorderSide(color: Colors.white24)),
+          ),
         ),
         actions: [
           TextButton(
@@ -2367,64 +2337,38 @@ class _HistorialTabState extends State<_HistorialTab> {
     );
 
     numCtrl.dispose();
-    valCtrl.dispose();
     if (confirmar != true || !mounted) return;
 
     try {
       final nuevoNum = numCtrl.text.trim().isEmpty ? null : numCtrl.text.trim();
-      final nuevoVal = valCtrl.text.trim().isEmpty
-          ? null
-          : double.tryParse(valCtrl.text.trim());
 
-      // Detectar cambios para auditoría
-      final editorId = widget.usuario['id'];
-      final audits = <Map<String, dynamic>>[];
-
-      if (nuevoNum != s['fn_factura_numero']?.toString()) {
-        audits.add({
-          'servicio_id': s['id'],
-          'editor_id': editorId,
-          'editor_tipo': 'sede_fn',
-          'campo': 'fn_factura_numero',
-          'valor_anterior': s['fn_factura_numero']?.toString(),
-          'valor_nuevo': nuevoNum,
-        });
-      }
-      final valAnterior = s['fn_factura_valor'] != null
-          ? (s['fn_factura_valor'] as num).toInt().toString()
-          : null;
-      if (nuevoVal?.toInt().toString() != valAnterior) {
-        audits.add({
-          'servicio_id': s['id'],
-          'editor_id': editorId,
-          'editor_tipo': 'sede_fn',
-          'campo': 'fn_factura_valor',
-          'valor_anterior': valAnterior,
-          'valor_nuevo': nuevoVal?.toInt().toString(),
-        });
-      }
-
-      if (audits.isEmpty) {
+      if (nuevoNum == s['fn_factura_numero']?.toString()) {
         ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Sin cambios que guardar')));
         return;
       }
 
+      final editorId = widget.usuario['id'];
+
       await _db.from('servicios').update({
-        if (nuevoNum != null) 'fn_factura_numero': nuevoNum,
-        'fn_factura_valor': nuevoVal,
+        'fn_factura_numero': nuevoNum,
       }).eq('id', s['id']);
 
-      await _db.from('fn_auditorias_factura').insert(audits);
+      await _db.from('fn_auditorias_factura').insert({
+        'servicio_id': s['id'],
+        'editor_id': editorId,
+        'editor_tipo': 'sede_fn',
+        'campo': 'fn_factura_numero',
+        'valor_anterior': s['fn_factura_numero']?.toString(),
+        'valor_nuevo': nuevoNum,
+      });
 
-      // Actualizar en memoria para que el historial refleje el cambio
       setState(() {
         final idx = _servicios.indexWhere((x) => x['id'] == s['id']);
         if (idx >= 0) {
           _servicios[idx] = {
             ..._servicios[idx],
             'fn_factura_numero': nuevoNum,
-            'fn_factura_valor': nuevoVal,
           };
         }
       });
@@ -2432,7 +2376,7 @@ class _HistorialTabState extends State<_HistorialTab> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('✅ Factura actualizada y registrada en auditoría'),
+            content: Text('✅ N° de factura actualizado y registrado en auditoría'),
             backgroundColor: Colors.green,
           ),
         );
