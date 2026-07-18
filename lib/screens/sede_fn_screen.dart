@@ -1887,7 +1887,8 @@ class _HistorialTabState extends State<_HistorialTab> {
           .select(
               'id, fn_consecutivo, estado, creador, destino, tarifa, fn_factura_numero, '
               'fn_factura_valor, fn_pagar_producto, numero_movil, fn_movil_asignado_at, '
-              'accepted_at, created_at, fn_alta_demanda, recogidas, metodo_pago')
+              'accepted_at, created_at, fn_alta_demanda, recogidas, metodo_pago, '
+              'instrucciones_especiales, fn_rechazo_motivo')
           .eq('fn_sede_solicitante_id', sedeId)
           .not('estado', 'in', '("cotizacion","cotizada","pendiente","en_ruta_origen","en_origen","en_ruta_destino","fn_renegociando")')
           .gte('created_at', _rango?.start.toUtc().toIso8601String() ?? '2000-01-01T00:00:00Z')
@@ -2131,6 +2132,13 @@ class _HistorialTabState extends State<_HistorialTab> {
                                           Text('Fact. $facturaNum',
                                               style: TextStyle(color: Colors.indigo[300], fontSize: 10)),
                                         ],
+                                        if (s['fn_factura_valor'] != null && (s['fn_factura_valor'] as num) > 0) ...[
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            '\$${_miles((s['fn_factura_valor'] as num).toInt())} prod.',
+                                            style: TextStyle(color: Colors.indigo[200], fontSize: 10),
+                                          ),
+                                        ],
                                         const Spacer(),
                                         if (recogidas is List && recogidas.isNotEmpty)
                                           Text('${recogidas.length} recog.',
@@ -2216,8 +2224,12 @@ class _HistorialTabState extends State<_HistorialTab> {
                       _filaDetalle('N\u00B0 Factura', fmt(s['fn_factura_numero'])),
                     if (s['fn_factura_valor'] != null)
                       _filaDetalle('Valor factura', fmtPeso(s['fn_factura_valor'])),
-                    if (s['fn_pagar_producto'] != null && (s['fn_pagar_producto'] as num) > 0)
-                      _filaDetalle('Pagar producto', fmtPeso(s['fn_pagar_producto'])),
+                    if (s['fn_pagar_producto'] == true ||
+                        (s['fn_pagar_producto'] is num && (s['fn_pagar_producto'] as num) > 0))
+                      _filaDetalle('Pagar producto',
+                          s['fn_pagar_producto'] is num
+                              ? fmtPeso(s['fn_pagar_producto'])
+                              : 'Sí'),
                     if (recogidasCount != null)
                       _filaDetalle('Recogidas', '$recogidasCount sede${recogidasCount == 1 ? "" : "s"}'),
                     if (s['numero_movil'] != null)
@@ -2229,6 +2241,63 @@ class _HistorialTabState extends State<_HistorialTab> {
                     _filaDetalle('Creado', _formatFecha(s['created_at']?.toString())),
                     if (s['accepted_at'] != null)
                       _filaDetalle('Aceptado', _formatFecha(s['accepted_at']?.toString())),
+                    if (s['fn_movil_asignado_at'] != null)
+                      _filaDetalle('Llegada a sede', _formatFecha(s['fn_movil_asignado_at']?.toString())),
+                    if (s['fn_rechazo_motivo'] != null)
+                      _filaDetalle('Motivo rechazo', s['fn_rechazo_motivo'].toString()),
+                    if (s['instrucciones_especiales'] != null &&
+                        s['instrucciones_especiales'].toString().isNotEmpty)
+                      _filaDetalle('Instrucciones', s['instrucciones_especiales'].toString()),
+                    const SizedBox(height: 12),
+                    // ── Editar factura (sec. 7 de la especificación) ─────────
+                    if (['finalizado', 'finalizado_con_problema'].contains(estado))
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.edit_note, size: 16, color: Colors.indigo),
+                          label: const Text('Editar datos de factura',
+                              style: TextStyle(color: Colors.indigo, fontSize: 13)),
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: Colors.indigo),
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                          ),
+                          onPressed: () {
+                            Navigator.pop(context);
+                            _editarFactura(s);
+                          },
+                        ),
+                      ),
+                    // ── Auditoría de cambios ──────────────────────────────────
+                    FutureBuilder<List<Map<String, dynamic>>>(
+                      future: _db
+                          .from('fn_auditorias_factura')
+                          .select('campo, valor_anterior, valor_nuevo, editor_tipo, created_at')
+                          .eq('servicio_id', s['id'])
+                          .order('created_at', ascending: false),
+                      builder: (_, snap) {
+                        final audits = snap.data ?? [];
+                        if (audits.isEmpty) return const SizedBox.shrink();
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const SizedBox(height: 12),
+                            const Text('Historial de ediciones',
+                                style: TextStyle(color: Colors.white38, fontSize: 11,
+                                    fontWeight: FontWeight.w600)),
+                            const SizedBox(height: 6),
+                            ...audits.map((a) => Padding(
+                              padding: const EdgeInsets.only(bottom: 4),
+                              child: Text(
+                                '${_formatFecha(a['created_at']?.toString())} · '
+                                '${a['editor_tipo']} cambió ${a['campo']}: '
+                                '${a['valor_anterior'] ?? '—'} → ${a['valor_nuevo'] ?? '—'}',
+                                style: const TextStyle(color: Colors.white30, fontSize: 10),
+                              ),
+                            )),
+                          ],
+                        );
+                      },
+                    ),
                     const SizedBox(height: 16),
                   ],
                 ),
@@ -2238,6 +2307,142 @@ class _HistorialTabState extends State<_HistorialTab> {
         ),
       ),
     );
+  }
+
+  // ── Editar factura con auditoría (spec. sección 7) ─────────────────────────
+  Future<void> _editarFactura(Map<String, dynamic> s) async {
+    final numCtrl = TextEditingController(text: s['fn_factura_numero']?.toString() ?? '');
+    final valCtrl = TextEditingController(
+        text: s['fn_factura_valor'] != null
+            ? (s['fn_factura_valor'] as num).toInt().toString()
+            : '');
+
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        title: const Text('Editar factura',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: numCtrl,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                labelText: 'N° de factura',
+                labelStyle: TextStyle(color: Colors.white54),
+                enabledBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white24)),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: valCtrl,
+              style: const TextStyle(color: Colors.white),
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              decoration: const InputDecoration(
+                labelText: 'Valor de la factura',
+                labelStyle: TextStyle(color: Colors.white54),
+                prefixText: '\$ ',
+                prefixStyle: TextStyle(color: Colors.white54),
+                enabledBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white24)),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar', style: TextStyle(color: Colors.white54))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Guardar', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    numCtrl.dispose();
+    valCtrl.dispose();
+    if (confirmar != true || !mounted) return;
+
+    try {
+      final nuevoNum = numCtrl.text.trim().isEmpty ? null : numCtrl.text.trim();
+      final nuevoVal = valCtrl.text.trim().isEmpty
+          ? null
+          : double.tryParse(valCtrl.text.trim());
+
+      // Detectar cambios para auditoría
+      final editorId = widget.usuario['id'];
+      final audits = <Map<String, dynamic>>[];
+
+      if (nuevoNum != s['fn_factura_numero']?.toString()) {
+        audits.add({
+          'servicio_id': s['id'],
+          'editor_id': editorId,
+          'editor_tipo': 'sede_fn',
+          'campo': 'fn_factura_numero',
+          'valor_anterior': s['fn_factura_numero']?.toString(),
+          'valor_nuevo': nuevoNum,
+        });
+      }
+      final valAnterior = s['fn_factura_valor'] != null
+          ? (s['fn_factura_valor'] as num).toInt().toString()
+          : null;
+      if (nuevoVal?.toInt().toString() != valAnterior) {
+        audits.add({
+          'servicio_id': s['id'],
+          'editor_id': editorId,
+          'editor_tipo': 'sede_fn',
+          'campo': 'fn_factura_valor',
+          'valor_anterior': valAnterior,
+          'valor_nuevo': nuevoVal?.toInt().toString(),
+        });
+      }
+
+      if (audits.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Sin cambios que guardar')));
+        return;
+      }
+
+      await _db.from('servicios').update({
+        if (nuevoNum != null) 'fn_factura_numero': nuevoNum,
+        'fn_factura_valor': nuevoVal,
+      }).eq('id', s['id']);
+
+      await _db.from('fn_auditorias_factura').insert(audits);
+
+      // Actualizar en memoria para que el historial refleje el cambio
+      setState(() {
+        final idx = _servicios.indexWhere((x) => x['id'] == s['id']);
+        if (idx >= 0) {
+          _servicios[idx] = {
+            ..._servicios[idx],
+            'fn_factura_numero': nuevoNum,
+            'fn_factura_valor': nuevoVal,
+          };
+        }
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Factura actualizada y registrada en auditoría'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Error: $e')));
+      }
+    }
   }
 
   Widget _filaDetalle(String label, String valor) => Padding(
