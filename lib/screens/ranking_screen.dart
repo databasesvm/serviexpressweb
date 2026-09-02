@@ -31,7 +31,7 @@ class _RankingScreenState extends State<RankingScreen> {
           .eq('fecha', fechaHoy)
           .not('duracion_minutos', 'is', null);
       final Map<int, int> map = {};
-      for (final r in rows as List) {
+      for (final r in rows) {
         final mid = r['movil_id'] as int?;
         if (mid == null) continue;
         map[mid] = (map[mid] ?? 0) + ((r['duracion_minutos'] as num?)?.toInt() ?? 0);
@@ -202,10 +202,11 @@ class _RankingScreenState extends State<RankingScreen> {
         _cargando = false;
       });
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Error al cargar ranking: $e')));
+      }
       setState(() => _cargando = false);
     }
   }

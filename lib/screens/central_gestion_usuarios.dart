@@ -55,10 +55,10 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
       ]);
       if (!mounted) return;
       setState(() {
-        _solicitudes = List<Map<String, dynamic>>.from(results[0] as List);
-        _activaciones = List<Map<String, dynamic>>.from(results[1] as List);
-        _moviles     = List<Map<String, dynamic>>.from(results[2] as List);
-        _registros   = List<Map<String, dynamic>>.from(results[3] as List);
+        _solicitudes = List<Map<String, dynamic>>.from(results[0]);
+        _activaciones = List<Map<String, dynamic>>.from(results[1]);
+        _moviles     = List<Map<String, dynamic>>.from(results[2]);
+        _registros   = List<Map<String, dynamic>>.from(results[3]);
         _cargando = false;
       });
     } catch (_) {
@@ -331,6 +331,113 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
     }
   }
 
+  // ── Eliminar cuenta de móvil (soft delete) ───────────────────────────────
+  Future<void> _eliminarCuentaMovil(Map<String, dynamic> u) async {
+    final nombre = u['nombre']?.toString() ?? 'este móvil';
+
+    // Paso 1: confirmación inicial
+    final confirmado = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: Row(children: [
+          Icon(Icons.warning_amber_rounded, color: Colors.red[300], size: 22),
+          const SizedBox(width: 8),
+          const Text('Eliminar cuenta', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+        ]),
+        content: Text(
+          '¿Estás seguro de que quieres eliminar la cuenta de $nombre?\n\n'
+          'El historial de servicios se conserva, pero el móvil no podrá volver a iniciar sesión.',
+          style: const TextStyle(color: Colors.white70, fontSize: 13),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('CANCELAR', style: TextStyle(color: Colors.white38))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red[700], foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('CONTINUAR', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+    if (confirmado != true || !mounted) return;
+
+    // Paso 2: verificar si tiene servicio activo
+    try {
+      final activos = await _db.from('servicios')
+          .select('id')
+          .eq('movil_id', u['id'])
+          .inFilter('estado', ['en_ruta_origen', 'en_origen', 'en_ruta_destino', 'problema'])
+          .limit(1);
+      if (activos.isNotEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('⚠️ No se puede eliminar: el móvil tiene un servicio activo en este momento.'),
+            backgroundColor: Colors.orange,
+          ));
+        }
+        return;
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error verificando servicios: $e'), backgroundColor: Colors.red));
+      }
+      return;
+    }
+
+    // Paso 3: confirmación final
+    final confirmadoFinal = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: const Text('⚠️ Confirmar eliminación', style: TextStyle(color: Colors.redAccent, fontSize: 16, fontWeight: FontWeight.bold)),
+        content: Text(
+          'Esta acción no se puede deshacer.\n\n'
+          'La cuenta de $nombre quedará deshabilitada permanentemente.',
+          style: const TextStyle(color: Colors.white70, fontSize: 13),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('NO, VOLVER', style: TextStyle(color: Colors.white38))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red[900], foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('SÍ, ELIMINAR', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+    if (confirmadoFinal != true || !mounted) return;
+
+    // Paso 4: soft delete
+    try {
+      await _db.from('usuarios').update({
+        'activo': false,
+        'en_linea': false,
+        'suspendido': true,
+        'paradero_actual': null,
+        'ingreso_fila': null,
+        'nombre': '[Eliminado]',
+        'correo': null,
+        'telefono': null,
+      }).eq('id', u['id']);
+
+      if (mounted) {
+        setState(() => _moviles.removeWhere((m) => m['id'] == u['id']));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('✅ Cuenta de $nombre eliminada correctamente.'),
+          backgroundColor: Colors.green[800],
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al eliminar: $e'), backgroundColor: Colors.red));
+      }
+    }
+  }
+
   // ── Build ─────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
@@ -426,7 +533,7 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
       itemCount: lista.length,
       itemBuilder: (_, i) {
         final l = lista[i];
-        final fecha = l['created_at'] != null ? DateTime.tryParse(l['created_at'].toString()) : null;
+        final fecha = DateTime.tryParse(l['created_at']?.toString() ?? '');
         return Container(
           margin: const EdgeInsets.only(bottom: 12),
           decoration: BoxDecoration(
@@ -626,6 +733,13 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                   tooltip: 'Cambiar contraseña',
                   icon: const Icon(Icons.lock_reset_rounded, color: Colors.amber, size: 16),
                   onPressed: () => _cambiarContrasenaDialog(u),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                ),
+                IconButton(
+                  tooltip: 'Eliminar cuenta',
+                  icon: Icon(Icons.delete_forever_rounded, color: Colors.red[300], size: 16),
+                  onPressed: () => _eliminarCuentaMovil(u),
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                 ),

@@ -814,7 +814,7 @@ class _ChatScreenState extends State<ChatScreen> {
           .order('created_at', ascending: false)
           .limit(50);
 
-      final nuevos = (rows as List).cast<Map<String, dynamic>>();
+      final nuevos = rows;
       if (nuevos.isEmpty) {
         setState(() => _hayMas = false);
       } else {
@@ -1200,14 +1200,14 @@ class _ChatScreenState extends State<ChatScreen> {
       appBar: AppBar(
         title: Text(
           widget.titulo,
-          style: TextStyle(
+          style: const TextStyle(
             fontWeight: FontWeight.bold,
             color: Colors.white,
             fontSize: 16,
           ),
         ),
         backgroundColor: Colors.black,
-        iconTheme: IconThemeData(color: Colors.white),
+        iconTheme: const IconThemeData(color: Colors.white),
         actions: [
           if (_habilitarFaq)
             IconButton(

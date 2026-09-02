@@ -1,4 +1,4 @@
-// ignore_for_file: use_build_context_synchronously, invalid_use_of_protected_member
+// ignore_for_file: use_build_context_synchronously, invalid_use_of_protected_member, library_private_types_in_public_api
 part of 'central_screen.dart';
 
 extension CentralScreenPerfil on _CentralScreenState {
@@ -337,6 +337,9 @@ extension CentralScreenPerfil on _CentralScreenState {
                           _filaPagoCentral('Bancolombia',
                               const Color(0xFFFFCC00), Colors.black,
                               movil['pago_bancolombia']),
+                          _filaPagoCentral('Llave',
+                              const Color(0xFF00796B), Colors.white,
+                              movil['pago_llave']),
 
                           // —— CALIFICACIONES (con nombre real del calificador) ——
                           seccionHeader('CALIFICACIONES RECIBIDAS'),

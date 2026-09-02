@@ -461,8 +461,8 @@ class _HistorialServiciosScreenState extends State<HistorialServiciosScreen> {
                       _detalleRow('Valor factura', _fmtPeso(s['fn_factura_valor'])),
                     if (s['fn_pagar_producto'] != null && (s['fn_pagar_producto'] as num) > 0)
                       _detalleRow('Pagar producto', _fmtPeso(s['fn_pagar_producto'])),
-                    if (s['recogidas'] is List && (s['recogidas'] as List).isNotEmpty)
-                      _detalleRow('Recogidas', '${(s["recogidas"] as List).length} sede(s)'),
+                    if (s['recogidas'] is List && s['recogidas'].isNotEmpty)
+                      _detalleRow('Recogidas', '${s["recogidas"].length} sede(s)'),
                     if (s['metodo_pago'] != null)
                       _detalleRow('Método pago', fmt(s['metodo_pago'])),
                     if (s['fn_alta_demanda'] == true)

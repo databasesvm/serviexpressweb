@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 // VERSIONES ATRÁS PARA OBLIGAR ACTUALIZACIÓN
@@ -12,7 +13,23 @@ const int _versionesObligatorias = 3;
 // Tamaño mínimo para considerar un APK "completo" (5 MB)
 const int _tamanoMinimoApk = 5 * 1024 * 1024;
 
+// Clave de SharedPreferences para la actualización pendiente
+const String kOtaPendienteVersionCode = 'ota_pendiente_version_code';
+
 class OtaUpdater {
+  /// Llama esto al liberar un servicio — muestra el diálogo si había
+  /// una actualización pendiente que se pospuso por tener servicio activo.
+  static Future<void> verificarPendiente(BuildContext context) async {
+    if (!Platform.isAndroid) return;
+    final prefs = await SharedPreferences.getInstance();
+    final pendiente = prefs.getInt(kOtaPendienteVersionCode);
+    if (pendiente == null) return;
+    await prefs.remove(kOtaPendienteVersionCode);
+    // Relanzar verificación normal — si el APK ya fue descargado antes,
+    // el diálogo ofrecerá "Instalar ahora" directamente.
+    if (context.mounted) await verificar(context);
+  }
+
   static Future<void> verificar(BuildContext context) async {
     if (!Platform.isAndroid) return;
 
@@ -33,6 +50,30 @@ class OtaUpdater {
 
       final int versionesAtras = codigoNuevo - codigoActual;
       final bool obligatoria = versionesAtras >= _versionesObligatorias;
+
+      // ANTIINTERRUPCIONES — si hay servicio activo y la actualización
+      // no es obligatoria, guardar flag y esperar a que termine el servicio.
+      if (!obligatoria) {
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          final userId = prefs.getString('bg_user_id'); // misma clave que kBgUserId en background_service_mobile.dart
+          if (userId != null) {
+            final activos = await Supabase.instance.client
+                .from('servicios')
+                .select('id')
+                .eq('movil_id', int.tryParse(userId) ?? 0)
+                .inFilter('estado', ['en_ruta_origen', 'en_origen', 'en_ruta_destino', 'problema'])
+                .limit(1);
+            if (activos.isNotEmpty) {
+              // Guardar pendiente — se mostrará al liberar el servicio
+              await prefs.setInt(kOtaPendienteVersionCode, codigoNuevo);
+              return;
+            }
+          }
+        } catch (_) {
+          // Si falla la consulta, continuar con el diálogo normal
+        }
+      }
 
       // Verificar si el APK ya fue descargado (interrupción previa o descarga
       // terminada pero instalación pendiente).
@@ -259,7 +300,7 @@ class _DialogoOtaState extends State<_DialogoOta> {
                   vertical: 6,
                 ),
                 decoration: BoxDecoration(
-                  color: Colors.red.withOpacity(0.15),
+                  color: Colors.red.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: Colors.red.shade700),
                 ),

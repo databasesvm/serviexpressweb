@@ -334,7 +334,7 @@ class _ClienteShoppingFormState extends State<ClienteShoppingForm> {
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
         backgroundColor: Colors.black,
-        iconTheme: IconThemeData(color: Colors.white),
+        iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: Form(
         key: _formKey,
@@ -453,7 +453,7 @@ class _ClienteShoppingFormState extends State<ClienteShoppingForm> {
                       style: TextStyle(fontSize: 11),
                     ),
                     value: _requiereCotizacion,
-                    activeColor: Colors.orange,
+                    activeThumbColor: Colors.orange,
                     onChanged: (val) => setState(() {
                       _requiereCotizacion = val;
                       if (val) _tarifaSugerida = 0;

@@ -2,7 +2,6 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:serviexpress_app/utils/sonido_manager.dart';
@@ -10,6 +9,7 @@ import 'package:serviexpress_app/utils/onesignal_api.dart';
 import 'package:serviexpress_app/screens/login_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'fn_facturacion_screen.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Panel sede FN — rol: sede_fn
@@ -361,9 +361,9 @@ class _FormularioTabState extends State<_FormularioTab> {
     _destinoCtrl.dispose();
     _facturaNumCtrl.dispose();
     _instruccionesCtrl.dispose();
-    for (final c in _recogidasNombreCtrl) c.dispose();
-    for (final c in _recogidasDireccionCtrl) c.dispose();
-    for (final c in _recogidasGpsCtrl) c.dispose();
+    for (final c in _recogidasNombreCtrl) { c.dispose(); }
+    for (final c in _recogidasDireccionCtrl) { c.dispose(); }
+    for (final c in _recogidasGpsCtrl) { c.dispose(); }
     super.dispose();
   }
 
@@ -399,7 +399,7 @@ class _FormularioTabState extends State<_FormularioTab> {
     for (int i = 0; i < _recogidasSel.length; i++) {
       // Manual con contenido = por evaluar
       if (_recogidasEsManual[i] &&
-          _recogidasNombreCtrl[i].text.trim().isNotEmpty) return true;
+          _recogidasNombreCtrl[i].text.trim().isNotEmpty) { return true; }
       final r = _recogidasSel[i];
       if (r != null && r['cobertura'] == 'fuera') return true;
       if (r != null && r['cobertura'] == 'por_evaluar') return true;
@@ -529,11 +529,11 @@ class _FormularioTabState extends State<_FormularioTab> {
       setState(() {
         _recogidasSel..clear()..add(null);
         _recogidasEsManual..clear()..add(false);
-        for (final c in _recogidasNombreCtrl) c.dispose();
+        for (final c in _recogidasNombreCtrl) { c.dispose(); }
         _recogidasNombreCtrl..clear()..add(TextEditingController());
-        for (final c in _recogidasDireccionCtrl) c.dispose();
+        for (final c in _recogidasDireccionCtrl) { c.dispose(); }
         _recogidasDireccionCtrl..clear()..add(TextEditingController());
-        for (final c in _recogidasGpsCtrl) c.dispose();
+        for (final c in _recogidasGpsCtrl) { c.dispose(); }
         _recogidasGpsCtrl..clear()..add(TextEditingController());
         _conDatafono = false;
       });
@@ -649,6 +649,7 @@ class _FormularioTabState extends State<_FormularioTab> {
                       // ── Contenido según modo ──────────────────────────────
                       if (!esManual)
                         DropdownButtonFormField<Map<String, dynamic>>(
+                          // ignore: deprecated_member_use
                           value: _recogidasSel[i],
                           decoration: _inputDeco('Recogida ${i + 1}'),
                           dropdownColor: const Color(0xFF1E1E1E),
@@ -869,7 +870,7 @@ class _FormularioTabState extends State<_FormularioTab> {
               style: const TextStyle(color: Colors.white70, fontSize: 13)),
           value: value,
           onChanged: onChanged,
-          activeColor: Colors.indigo[300],
+          activeThumbColor: Colors.indigo[300],
         ),
       );
 }
@@ -927,7 +928,7 @@ class _ActivosTabState extends State<_ActivosTab> {
           .not('movil_id', 'is', null);
 
       final Map<String, int> activos = {};
-      for (final sv in svActivos as List) {
+      for (final sv in svActivos) {
         final mid = sv['movil_id'].toString();
         activos[mid] = (activos[mid] ?? 0) + 1;
       }
@@ -943,7 +944,7 @@ class _ActivosTabState extends State<_ActivosTab> {
       }
 
       // Solo los que tienen capacidad para más servicios FN
-      final moviles = (movilesRaw as List)
+      final moviles = movilesRaw
           .where((m) => (activos[m['id'].toString()] ?? 0) < limiteRango(m['rango_movil']?.toString()))
           .toList();
 
@@ -972,9 +973,25 @@ class _ActivosTabState extends State<_ActivosTab> {
         fase2Id = noMasters.first['id'].toString();
       }
 
-      final fase3Ids = noMasters
+      // fase3Ids: no-masters dentro de 2km de la sede (excl. fase2)
+      final fase3Ids = noMasters.map<String>((m) => m['id'].toString()).where((id) {
+        if (id == fase2Id) return false;
+        if (sLat == null || sLng == null) return false;
+        final mData = noMasters.firstWhere(
+          (m) => m['id'].toString() == id,
+          orElse: () => {},
+        );
+        if (mData.isEmpty) return false;
+        final uLat = (mData['latitud'] as num?)?.toDouble();
+        final uLng = (mData['longitud'] as num?)?.toDouble();
+        if (uLat == null || uLng == null) return false;
+        return _haversine(sLat, sLng, uLat, uLng) <= 2000;
+      }).toList();
+
+      // fase4Ids: resto global (excl. fase2 y fase3)
+      final fase4Ids = noMasters
           .map<String>((m) => m['id'].toString())
-          .where((id) => id != fase2Id)
+          .where((id) => id != fase2Id && !fase3Ids.contains(id))
           .toList();
 
       final zona   = s['zona_fn']?.toString() ?? 'FN';
@@ -1001,35 +1018,40 @@ class _ActivosTabState extends State<_ActivosTab> {
         if (fase2Id != null) 'fn_fase2_movil_id': fase2Id,
       }).eq('id', s['id']);
 
-      // ── FASE 2 (T+31s): Más cercano ─────────────────────────────────────────
-      String? notifF2;
-      if (fase2Id != null) {
-        notifF2 = await MotorNotificaciones.programarMisilRetardado(
-          externalIds: [fase2Id],
-          titulo: '🔵 TURNO FN — PARA TI',
-          mensaje: 'Servicio disponible · $zona',
-          segundosRetardo: 31,
-          sonido: Sonidos.movilParadero,
-        );
-      }
+      // ── FASE 2 (T+30s): auto-asignación via pg_cron ───────────────────────
+      // El Edge Function fn-auto-asignar-fase2 detecta fn_fase2_movil_id +
+      // fn_radar_t0 y asigna automáticamente. No se programa notificación aquí.
 
-      // ── FASE 3 (T+61s): Resto ───────────────────────────────────────────────
+      // ── FASE 3 (T+60s): Zona 2km ────────────────────────────────────────────
       String? notifF3;
       if (fase3Ids.isNotEmpty) {
         notifF3 = await MotorNotificaciones.programarMisilRetardado(
           externalIds: fase3Ids,
-          titulo: '🔵 TURNO FN DISPONIBLE',
+          titulo: '🔵 TURNO FN CERCA',
+          mensaje: 'Servicio disponible · $zona',
+          segundosRetardo: 60,
+          sonido: Sonidos.movilParadero,
+        );
+      }
+
+      // ── FASE 4 (T+90s): Global ──────────────────────────────────────────────
+      String? notifF4;
+      if (fase4Ids.isNotEmpty) {
+        notifF4 = await MotorNotificaciones.programarMisilRetardado(
+          externalIds: fase4Ids,
+          titulo: '🔵 TURNO FN SIN TOMAR',
           mensaje: 'Servicio sin tomar · $zona',
-          segundosRetardo: 61,
+          segundosRetardo: 90,
           sonido: Sonidos.movilParadero,
         );
       }
 
       // Guardar IDs de notificaciones programadas para cancelarlas si alguien acepta
-      if (notifF2 != null || notifF3 != null) {
+      // fn_notif_fase2 ya no se guarda — la fase2 es auto-asignada por pg_cron.
+      if (notifF3 != null || notifF4 != null) {
         await _db.from('servicios').update({
-          if (notifF2 != null) 'fn_notif_fase2': notifF2,
           if (notifF3 != null) 'fn_notif_fase3': notifF3,
+          if (notifF4 != null) 'fn_notif_fase4': notifF4,
         }).eq('id', s['id']);
       }
 
@@ -1059,13 +1081,13 @@ class _ActivosTabState extends State<_ActivosTab> {
   // ── Rechazar cotización ─────────────────────────────────────────────────────
   Future<void> _rechazar(Map<String, dynamic> s) async {
     String motivoSel = 'precio_alto';
-    final _motivos = {
+    final motivos = {
       'precio_alto': 'Precio muy alto',
       'ya_no_necesita': 'Ya no se necesita',
       'error_datos': 'Error en los datos',
       'otro': 'Otro motivo',
     };
-    final _precioCtrl = TextEditingController();
+    final precioCtrl = TextEditingController();
     bool renegociar = false;
 
     await showDialog(
@@ -1078,11 +1100,14 @@ class _ActivosTabState extends State<_ActivosTab> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                ..._motivos.entries.map((e) => RadioListTile<String>(
+                // ignore: deprecated_member_use
+                ...motivos.entries.map((e) => RadioListTile<String>(
                       dense: true,
                       title: Text(e.value, style: const TextStyle(fontSize: 13)),
                       value: e.key,
+                      // ignore: deprecated_member_use
                       groupValue: motivoSel,
+                      // ignore: deprecated_member_use
                       onChanged: (v) => setS(() => motivoSel = v!),
                     )),
                 const Divider(),
@@ -1096,7 +1121,7 @@ class _ActivosTabState extends State<_ActivosTab> {
                 if (renegociar) ...[
                   const SizedBox(height: 8),
                   TextField(
-                    controller: _precioCtrl,
+                    controller: precioCtrl,
                     keyboardType: TextInputType.number,
                     decoration: const InputDecoration(
                       labelText: 'Precio sugerido (\$)',
@@ -1117,9 +1142,9 @@ class _ActivosTabState extends State<_ActivosTab> {
               onPressed: () async {
                 Navigator.pop(ctx);
                 try {
-                  if (renegociar && _precioCtrl.text.isNotEmpty) {
+                  if (renegociar && precioCtrl.text.isNotEmpty) {
                     final precio = double.tryParse(
-                        _precioCtrl.text.replaceAll('.', '').trim());
+                        precioCtrl.text.replaceAll('.', '').trim());
                     await _db.from('servicios').update({
                       'estado': 'fn_renegociando',
                       'fn_rechazo_motivo': motivoSel,
@@ -1127,7 +1152,7 @@ class _ActivosTabState extends State<_ActivosTab> {
                     }).eq('id', s['id']);
                     await MotorNotificaciones.dispararACentral(
                       titulo: '🔄 Renegociación FN — ${s['fn_consecutivo'] ?? '#${s['id']}'}',
-                      mensaje: '${_labelSede(s)} propone \$${_precioCtrl.text}',
+                      mensaje: '${_labelSede(s)} propone \$${precioCtrl.text}',
                       urgente: false,
                       sonido: Sonidos.fnCotizacion,
                     );
@@ -1148,7 +1173,7 @@ class _ActivosTabState extends State<_ActivosTab> {
         ),
       ),
     );
-    _precioCtrl.dispose();
+    precioCtrl.dispose();
   }
 
   // ── Cancelar (solo ≤5 min desde aprobación) ────────────────────────────────
@@ -1217,7 +1242,9 @@ class _ActivosTabState extends State<_ActivosTab> {
                       contentPadding: EdgeInsets.zero,
                       title: Text(cat, style: const TextStyle(fontSize: 13)),
                       value: cat,
+                      // ignore: deprecated_member_use
                       groupValue: categoriaSeleccionada,
+                      // ignore: deprecated_member_use
                       onChanged: (v) => setDs(() => categoriaSeleccionada = v),
                     )),
                 const SizedBox(height: 8),
@@ -1505,9 +1532,12 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
                   Icon(Icons.local_pharmacy,
                       size: 13, color: Colors.indigo[300]),
                   const SizedBox(width: 5),
-                  Text(
-                    _labelRecogida(r),
-                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  Expanded(
+                    child: Text(
+                      _labelRecogida(r),
+                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                   if (r['cobertura'] == 'fuera' || r['cobertura'] == 'por_evaluar')
                     const Padding(
@@ -1851,6 +1881,29 @@ class _HistorialTabState extends State<_HistorialTab> {
   DateTimeRange? _rango;
   String _filtroEstado = 'todos';
 
+  String _labelRecogida(Map<String, dynamic> r) {
+    if (r['es_manual'] == true) {
+      final dir = r['direccion']?.toString() ?? '';
+      final nom = r['nombre']?.toString() ?? '';
+      return dir.isNotEmpty ? '$nom · $dir' : nom.isNotEmpty ? nom : 'Dirección libre';
+    }
+    final tipo = r['tipo']?.toString() ?? '';
+    final num = r['numero']?.toString() ?? '';
+    final nombre = r['nombre']?.toString() ?? '';
+    return tipo == 'FN' && num.isNotEmpty ? 'FN$num — $nombre' : nombre;
+  }
+
+  String _labelRecogidaCorto(Map<String, dynamic> r) {
+    if (r['es_manual'] == true) {
+      final nom = r['nombre']?.toString() ?? '';
+      return nom.isNotEmpty ? nom : 'Dir. libre';
+    }
+    final tipo = r['tipo']?.toString() ?? '';
+    final num = r['numero']?.toString() ?? '';
+    final nombre = r['nombre']?.toString() ?? '';
+    return tipo == 'FN' && num.isNotEmpty ? 'FN$num' : nombre;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -1997,6 +2050,25 @@ class _HistorialTabState extends State<_HistorialTab> {
                     _cargar();
                   },
                 ),
+              // ── Acceso a Facturación FN ──────────────────────────────────
+              IconButton(
+                icon: const Icon(Icons.receipt_long, color: Colors.indigo, size: 22),
+                tooltip: 'Facturación FN',
+                onPressed: () {
+                  final sedeId = widget.sede?['id'] is int
+                      ? widget.sede!['id'] as int
+                      : int.tryParse(widget.sede?['id']?.toString() ?? '');
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => FnFacturacionScreen(
+                        sedeId: sedeId,
+                        titulo: 'Facturación — ${widget.sede?['nombre'] ?? 'Mi sede'}',
+                      ),
+                    ),
+                  );
+                },
+              ),
             ],
           ),
         ),
@@ -2130,8 +2202,16 @@ class _HistorialTabState extends State<_HistorialTab> {
                                         ],
                                         const Spacer(),
                                         if (recogidas is List && recogidas.isNotEmpty)
-                                          Text('${recogidas.length} recog.',
-                                              style: const TextStyle(color: Colors.white38, fontSize: 10)),
+                                          Flexible(
+                                            child: Text(
+                                              recogidas
+                                                  .cast<Map<String, dynamic>>()
+                                                  .map((r) => _labelRecogidaCorto(r))
+                                                  .join(' · '),
+                                              style: const TextStyle(color: Colors.white38, fontSize: 10),
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
                                       ],
                                     ),
                                   ],
@@ -2224,8 +2304,15 @@ class _HistorialTabState extends State<_HistorialTab> {
                           s['fn_pagar_producto'] is num
                               ? fmtPeso(s['fn_pagar_producto'])
                               : 'Sí'),
-                    if (recogidasCount != null)
-                      _filaDetalle('Recogidas', '$recogidasCount sede${recogidasCount == 1 ? "" : "s"}'),
+                    if (recogidas is List && recogidasCount != null) ...[
+                      _filaDetalle(
+                        'Recogidas',
+                        recogidas
+                            .cast<Map<String, dynamic>>()
+                            .map((r) => _labelRecogida(r))
+                            .join('\n'),
+                      ),
+                    ],
                     if (numMovilDetalle != null)
                       _filaDetalle('M\u00F3vil asignado', 'M\u00F3vil $numMovilDetalle'),
                     if (s['metodo_pago'] != null)

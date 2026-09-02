@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
+import 'fn_facturacion_screen.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Panel supervisor FN — rol: supervisor_fn
@@ -106,7 +107,7 @@ class _SupervisorFnScreenState extends State<SupervisorFnScreen>
             controller: _tab,
             children: [
               _TabEnVivo(todos: todos),
-              _TabHistorial(db: _db),
+              const FnFacturacionScreen(embedded: true),
               _TabDashboard(todos: todos, db: _db),
               _TabAuditoria(db: _db),
             ],

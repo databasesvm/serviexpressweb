@@ -133,7 +133,7 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
           .not('local_id', 'is', null);
 
       final Map<int, List<int>> ratingsPorLocal = {};
-      for (final r in (ratingsData as List)) {
+      for (final r in ratingsData) {
         final lid = (r['local_id'] as num?)?.toInt();
         if (lid != null) {
           ratingsPorLocal
@@ -168,7 +168,7 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
           .order('created_at', ascending: false);
 
       final entregadosIds =
-          (entregados as List).map((p) => p['id'].toString()).toList();
+          entregados.map((p) => p['id'].toString()).toList();
       Set<String> yaCalificados = {};
       if (entregadosIds.isNotEmpty) {
         final cals = await _db
@@ -177,11 +177,11 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
             .eq('calificador_tipo', 'cliente_domicilio')
             .inFilter('pedido_id', entregadosIds);
         yaCalificados =
-            (cals as List).map((c) => c['pedido_id'].toString()).toSet();
+            cals.map((c) => c['pedido_id'].toString()).toSet();
       }
 
       if (!mounted) return;
-      final sinCalificar = (entregados as List)
+      final sinCalificar = entregados
           .where((p) => !yaCalificados.contains(p['id'].toString()))
           .toList();
 
@@ -311,7 +311,7 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
         backgroundColor: Colors.black,
-        iconTheme: IconThemeData(color: Colors.white),
+        iconTheme: const IconThemeData(color: Colors.white),
         title: Text('Pedir Domicilio',
             style: TextStyle(
                 color: Colors.white,
@@ -1536,7 +1536,7 @@ class _MenuLocalScreenState extends State<MenuLocalScreen> {
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
         backgroundColor: Colors.black,
-        iconTheme: IconThemeData(color: Colors.white),
+        iconTheme: const IconThemeData(color: Colors.white),
         title: Text(
           widget.local['nombre'],
           style: TextStyle(

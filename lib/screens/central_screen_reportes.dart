@@ -73,14 +73,14 @@ class _PanelReportesBottomSheetState
 
       // Agrupar minutos por movil_id
       final Map<int, int> minPorMovil = {};
-      for (final s in sesiones as List) {
+      for (final s in sesiones) {
         final mid = s['movil_id'] as int?;
         if (mid == null) continue;
         minPorMovil[mid] = (minPorMovil[mid] ?? 0) + ((s['duracion_minutos'] as num?)?.toInt() ?? 0);
       }
 
       final List<Map<String, dynamic>> lista = [];
-      for (final u in usuarios as List) {
+      for (final u in usuarios) {
         final id = u['id'] as int;
         lista.add({
           'id': id,
@@ -111,7 +111,7 @@ class _PanelReportesBottomSheetState
       final m = dt.minute.toString().padLeft(2, '0');
       final d = dt.day.toString().padLeft(2, '0');
       final mo = dt.month.toString().padLeft(2, '0');
-      return '$d/$mo ${h}:$m';
+      return '$d/$mo $h:$m';
     } catch (_) {
       return '—';
     }

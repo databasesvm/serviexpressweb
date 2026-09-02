@@ -198,7 +198,7 @@ class _ServiMotoTaskHandler extends TaskHandler {
           ])
           .limit(1);
 
-      if ((activos as List).isNotEmpty) {
+      if (activos.isNotEmpty) {
         // Tiene servicio activo → reiniciar contador silenciosamente
         await prefs.setInt(kBgStartTime, ahora.millisecondsSinceEpoch);
         await prefs.remove(kBgAviso2h);

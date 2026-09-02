@@ -192,7 +192,9 @@ class _ClienteScreenState extends State<ClienteScreen>
                       contentPadding: EdgeInsets.zero,
                       title: Text(cat, style: const TextStyle(fontSize: 13)),
                       value: cat,
+                      // ignore: deprecated_member_use
                       groupValue: categoriaSeleccionada,
+                      // ignore: deprecated_member_use
                       onChanged: (v) => setDs(() => categoriaSeleccionada = v),
                     )),
                 const SizedBox(height: 8),
@@ -275,13 +277,14 @@ class _ClienteScreenState extends State<ClienteScreen>
           .update({'estado': 'cancelado'})
           .eq('id', id);
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error al cancelar: $e'),
             backgroundColor: Colors.red,
           ),
         );
+      }
     }
   }
 
@@ -370,20 +373,22 @@ class _ClienteScreenState extends State<ClienteScreen>
           .toList();
       String? id60sK;
       String? id90sK;
-      if (idsZonaK.isNotEmpty)
+      if (idsZonaK.isNotEmpty) {
         id60sK = await MotorNotificaciones.programarMisilRetardado(
           externalIds: idsZonaK,
           titulo: '📡 SERVICIO CERCA (1km)',
           mensaje: msgAlerta,
           segundosRetardo: 60,
         );
-      if (idsTodosK.isNotEmpty)
+      }
+      if (idsTodosK.isNotEmpty) {
         id90sK = await MotorNotificaciones.programarMisilRetardado(
           externalIds: idsTodosK,
           titulo: '🚨 SERVICIO SIN TOMAR',
           mensaje: msgAlerta,
           segundosRetardo: 90,
         );
+      }
       if (id60sK != null || id90sK != null) {
         await Supabase.instance.client.from('servicios').update({
           if (id60sK != null) 'onesignal_2m': id60sK,
@@ -445,18 +450,20 @@ class _ClienteScreenState extends State<ClienteScreen>
         params: {'p_movil_id': movilId.toString()},
       );
 
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('¡Gracias por valorar el servicio!'),
             backgroundColor: Colors.green,
           ),
         );
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Error al calificar: $e')));
+      }
     }
   }
 
@@ -1116,10 +1123,11 @@ class _ClienteScreenState extends State<ClienteScreen>
           Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
         }
       } catch (e) {
-        if (context.mounted)
+        if (context.mounted) {
           ScaffoldMessenger.of(
             context,
           ).showSnackBar(SnackBar(content: Text('Error: $e')));
+        }
       }
     }
   }

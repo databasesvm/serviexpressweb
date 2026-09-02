@@ -68,6 +68,22 @@ extension CentralScreenPanelControl on _CentralScreenState {
                               m['en_linea'] == true,
                         )
                         .toList();
+                    // Orden fijo: más reciente arriba — usa created_at del servicio
+                    movilesEnServicio.sort((a, b) {
+                      final sa = serviciosEnCurso.firstWhere(
+                          (s) => s['movil_id'] == a['id'],
+                          orElse: () => <String, dynamic>{});
+                      final sb = serviciosEnCurso.firstWhere(
+                          (s) => s['movil_id'] == b['id'],
+                          orElse: () => <String, dynamic>{});
+                      final dateA = sa['created_at'] != null
+                          ? DateTime.tryParse(sa['created_at'].toString()) ?? DateTime(0)
+                          : DateTime(0);
+                      final dateB = sb['created_at'] != null
+                          ? DateTime.tryParse(sb['created_at'].toString()) ?? DateTime(0)
+                          : DateTime(0);
+                      return dateB.compareTo(dateA); // más reciente primero
+                    });
 
                     // --- MOTOR DE ORDENAMIENTO TÁCTICO (VIP > HORA) ---
                     int ordenarPorPrioridadYHora(
@@ -86,7 +102,10 @@ extension CentralScreenPanelControl on _CentralScreenState {
                       final horaB = b['ingreso_fila'] != null
                           ? DateTime.parse(b['ingreso_fila'])
                           : DateTime.fromMillisecondsSinceEpoch(0);
-                      return horaA.compareTo(horaB);
+                      final cmp = horaA.compareTo(horaB);
+                      if (cmp != 0) return cmp;
+                      // Empate: desempate por id para orden siempre estable
+                      return ((a['id'] as num?) ?? 0).compareTo((b['id'] as num?) ?? 0);
                     }
 
                     final filaExpuente = moviles
@@ -121,6 +140,17 @@ extension CentralScreenPanelControl on _CentralScreenState {
                         )
                         .toList();
                     filaNocturno.sort(ordenarPorPrioridadYHora);
+
+                    final filaBocono = moviles
+                        .where(
+                          (m) =>
+                              m['en_linea'] == true &&
+                              m['paradero_actual'] == 'BOCONO' &&
+                              m['ingreso_fila'] != null &&
+                              m['suspendido'] != true,
+                        )
+                        .toList();
+                    filaBocono.sort(ordenarPorPrioridadYHora);
 
                     final sinFila = moviles
                         .where(
@@ -555,6 +585,89 @@ extension CentralScreenPanelControl on _CentralScreenState {
                             }),
                         ],
 
+                        GestureDetector(
+                          onTap: () => setState(() {
+                            if (_seccionesOcultasFlota.contains('bocono')) {
+                              _seccionesOcultasFlota.remove('bocono');
+                            } else {
+                              _seccionesOcultasFlota.add('bocono');
+                            }
+                          }),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            color: Colors.teal[800],
+                            child: Row(
+                              children: [
+                                const Expanded(
+                                  child: Text(
+                                    '🏙️ PARADERO BOCONO',
+                                    style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 11),
+                                  ),
+                                ),
+                                AnimatedSwitcher(
+                                  duration: const Duration(milliseconds: 220),
+                                  child: Container(
+                                    key: ValueKey('boc_cnt_${filaBocono.length}'),
+                                    margin: const EdgeInsets.only(right: 6),
+                                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: filaBocono.isNotEmpty ? Colors.teal[300] : Colors.teal[700],
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: Text('${filaBocono.length}',
+                                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                                  ),
+                                ),
+                                if (filaBocono.isNotEmpty)
+                                  TextButton.icon(
+                                    onPressed: () => _vaciarParadero('Bocono', filaBocono),
+                                    icon: const Icon(Icons.delete_sweep, size: 14, color: Colors.orangeAccent),
+                                    label: const Text('Vaciar', style: TextStyle(fontSize: 10, color: Colors.orangeAccent)),
+                                    style: TextButton.styleFrom(
+                                      padding: EdgeInsets.zero,
+                                      minimumSize: Size.zero,
+                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                    ),
+                                  ),
+                                Icon(
+                                  _seccionesOcultasFlota.contains('bocono') ? Icons.expand_more : Icons.expand_less,
+                                  size: 16,
+                                  color: Colors.teal[200],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        if (!_seccionesOcultasFlota.contains('bocono')) ...[
+                          if (filaBocono.isEmpty)
+                            const Padding(
+                              padding: EdgeInsets.all(8),
+                              child: Text(
+                                'Sin móviles en cola',
+                                style: TextStyle(color: Colors.grey, fontSize: 11),
+                              ),
+                            )
+                          else
+                            ...filaBocono.asMap().entries.map((e) {
+                              int idx = e.key + 1;
+                              var m = e.value;
+                              return FadeSlideIn(
+                                key: ValueKey('boc_${m['id']}'),
+                                child: ListTile(
+                                  dense: true,
+                                  leading: _paraderoMovilLeading(m, Colors.teal[600]!),
+                                  title: Text(
+                                    '#$idx. ${m['nombre'].toString().toUpperCase()}',
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                                  ),
+                                  subtitle: _subtituloMovilFlota(m),
+                                  trailing: _movilTrailing(m),
+                                  onTap: () => _abrirMenuAccionesMovil(context, m),
+                                ),
+                              );
+                            }),
+                        ],
+
                         // =====================================================
                         // SECCIÓN: EN SERVICIO
                         // =====================================================
@@ -647,34 +760,81 @@ extension CentralScreenPanelControl on _CentralScreenState {
                                             ...svcsDelMovil.map((s) {
                                               final String ico;
                                               final String fase;
+                                              final Color faseColor;
                                               switch (s['estado']) {
-                                                case 'en_ruta_origen':  ico = '🔵'; fase = 'Ruta origen'; break;
-                                                case 'en_origen':       ico = '📍'; fase = 'En origen'; break;
-                                                case 'en_ruta_destino': ico = '🚀'; fase = 'Ruta destino'; break;
-                                                case 'problema':        ico = '🚨'; fase = 'Problema'; break;
-                                                default: ico = '●'; fase = s['estado'] ?? '';
+                                                case 'en_ruta_origen':
+                                                  ico = '🔵'; fase = 'RUTA ORIGEN'; faseColor = Colors.blue[700]!; break;
+                                                case 'en_origen':
+                                                  ico = '📍'; fase = 'EN LOCAL'; faseColor = Colors.purple[700]!; break;
+                                                case 'en_ruta_destino':
+                                                  ico = '🚀'; fase = 'RUTA DESTINO'; faseColor = Colors.green[700]!; break;
+                                                case 'problema':
+                                                  ico = '🚨'; fase = 'NOVEDAD'; faseColor = Colors.red[700]!; break;
+                                                default:
+                                                  ico = '●'; fase = s['estado'] ?? ''; faseColor = Colors.grey;
                                               }
                                               final String origen = s['origen'] ?? '—';
                                               final String destino = s['destino'] ?? '';
+                                              final String creador = s['creador']?.toString() ?? '';
+                                              // Tiempo transcurrido desde accepted_at
+                                              String tiempoStr = '';
+                                              if (s['accepted_at'] != null) {
+                                                final aceptado = DateTime.tryParse(s['accepted_at'].toString())?.toLocal();
+                                                if (aceptado != null) {
+                                                  final mins = DateTime.now().difference(aceptado).inMinutes;
+                                                  tiempoStr = mins < 60 ? '${mins}min' : '${mins ~/ 60}h${mins % 60}m';
+                                                }
+                                              }
+                                              // Tarifa
+                                              final tarifa = (s['tarifa'] as num?)?.toInt();
+                                              final tarifaStr = tarifa != null && tarifa > 0 ? '\$${_formatearMonedaCentral(tarifa.toDouble())}' : '';
                                               return Container(
-                                                margin: const EdgeInsets.only(top: 3),
-                                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                                margin: const EdgeInsets.only(top: 4),
+                                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
                                                 decoration: BoxDecoration(
                                                   color: Colors.white,
-                                                  borderRadius: BorderRadius.circular(5),
-                                                  border: Border.all(color: Colors.orange[200]!),
+                                                  borderRadius: BorderRadius.circular(6),
+                                                  border: Border.all(color: faseColor.withValues(alpha: 0.4)),
                                                 ),
-                                                child: Row(
+                                                child: Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
                                                   children: [
-                                                    Text('$ico ', style: const TextStyle(fontSize: 11)),
-                                                    Expanded(
-                                                      child: Text(
-                                                        '#${s['id']} $fase · $origen${destino.isNotEmpty ? ' → $destino' : ''}',
-                                                        style: const TextStyle(fontSize: 10, color: Colors.black87),
-                                                        overflow: TextOverflow.ellipsis,
-                                                        maxLines: 1,
-                                                      ),
+                                                    // Fila 1: fase + tiempo + tarifa
+                                                    Row(
+                                                      children: [
+                                                        Container(
+                                                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                                          decoration: BoxDecoration(
+                                                            color: faseColor.withValues(alpha: 0.12),
+                                                            borderRadius: BorderRadius.circular(4),
+                                                          ),
+                                                          child: Text(
+                                                            '$ico $fase',
+                                                            style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: faseColor),
+                                                          ),
+                                                        ),
+                                                        if (tiempoStr.isNotEmpty) ...[
+                                                          const SizedBox(width: 5),
+                                                          Text('⏱ $tiempoStr', style: const TextStyle(fontSize: 9, color: Colors.black38)),
+                                                        ],
+                                                        const Spacer(),
+                                                        if (tarifaStr.isNotEmpty)
+                                                          Text(tarifaStr, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.green[800])),
+                                                      ],
                                                     ),
+                                                    const SizedBox(height: 3),
+                                                    // Fila 2: #id · creador · origen
+                                                    Text(
+                                                      '#${s['id']}${creador.isNotEmpty && creador != 'Central' ? ' · $creador' : ''} · $origen',
+                                                      style: const TextStyle(fontSize: 10, color: Colors.black54),
+                                                      overflow: TextOverflow.ellipsis,
+                                                    ),
+                                                    if (destino.isNotEmpty)
+                                                      Text(
+                                                        '→ $destino',
+                                                        style: const TextStyle(fontSize: 10, color: Colors.black87, fontWeight: FontWeight.w500),
+                                                        overflow: TextOverflow.ellipsis,
+                                                      ),
                                                   ],
                                                 ),
                                               );
@@ -1369,7 +1529,7 @@ extension CentralScreenPanelControl on _CentralScreenState {
                   valueListenable: _filtroVersion,
                   builder: (context, _, __) {
                     // ── FILTRO POR BÚSQUEDA ────────────────────────────────
-                    bool _matchBusqueda(Map<String, dynamic> s) {
+                    bool matchBusqueda(Map<String, dynamic> s) {
                       if (_busquedaTexto.isEmpty) return true;
                       final q = _busquedaTexto;
                       if ((s['origen'] ?? '').toString().toLowerCase().contains(q)) return true;
@@ -1407,7 +1567,7 @@ extension CentralScreenPanelControl on _CentralScreenState {
 
                     // Listas filtradas por búsqueda
                     List<Map<String, dynamic>> _filtrar(List<Map<String, dynamic>> lista) =>
-                        lista.where(_matchBusqueda).toList();
+                        lista.where(matchBusqueda).toList();
 
                     return Column(
                       children: [

@@ -274,12 +274,31 @@ class _LoginScreenState extends State<LoginScreen>
 
       if (mounted) _navegarSegunRol(usuario);
     } catch (e) {
-      final bool esTimeout = e.toString().contains('TimeoutException');
-      setState(
-        () => _mensajeError = esTimeout
-            ? 'Conexión lenta. Verifica tu señal e intenta de nuevo.'
-            : 'Error de conexión. Intenta de nuevo.',
-      );
+      // Log completo en consola para facilitar diagnóstico en dispositivos específicos.
+      // En Android: adb logcat | grep flutter
+      debugPrint('[LOGIN] Excepción al iniciar sesión: ${e.runtimeType} — $e');
+
+      final String eStr = e.toString();
+      final String mensaje;
+      if (eStr.contains('TimeoutException')) {
+        mensaje = 'Conexión lenta. Verifica tu señal e intenta de nuevo.';
+      } else if (eStr.contains('SocketException') ||
+          eStr.contains('NetworkException') ||
+          eStr.contains('Failed host lookup')) {
+        mensaje = 'Sin conexión a internet. Verifica tu red e intenta de nuevo.';
+      } else if (eStr.contains('HandshakeException') ||
+          eStr.contains('CERTIFICATE_VERIFY_FAILED') ||
+          eStr.contains('TlsException')) {
+        mensaje =
+            'Error de certificado SSL. Verifica la fecha/hora del dispositivo '
+            'o actualiza la app.';
+      } else if (eStr.contains('PostgrestException') ||
+          eStr.contains('AuthException')) {
+        mensaje = 'Error en el servidor. Intenta de nuevo en unos segundos.';
+      } else {
+        mensaje = 'Error de conexión. Intenta de nuevo.';
+      }
+      setState(() => _mensajeError = mensaje);
     } finally {
       if (mounted) setState(() => _cargando = false);
     }
@@ -327,6 +346,7 @@ class _LoginScreenState extends State<LoginScreen>
 
     // OTA: verificar si hay nueva versión disponible antes de navegar.
     // Si hay update, muestra el diálogo; el usuario puede instalar o posponer.
+    if (!mounted) return;
     await OtaUpdater.verificar(context);
 
     if (!mounted) return;
@@ -467,7 +487,7 @@ class _LoginScreenState extends State<LoginScreen>
             .inFilter('nombre', nombresProductos);
 
         for (final item in items) {
-          final prod = (prods as List).cast<Map<String, dynamic>>().firstWhere(
+          final prod = prods.firstWhere(
             (p) => p['nombre'].toString() == item['nombre'].toString(),
             orElse: () => <String, dynamic>{},
           );
@@ -640,6 +660,7 @@ class _LoginScreenState extends State<LoginScreen>
     bool enviando = false;
 
     await showDialog(
+      // ignore: use_build_context_synchronously
       context: context,
       barrierDismissible: false,
       builder: (ctx) => StatefulBuilder(

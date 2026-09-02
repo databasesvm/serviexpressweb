@@ -942,7 +942,7 @@ extension CentralScreenGestion on _CentralScreenState {
           .select('id')
           .eq('rol', 'local')
           .eq('estado_local', 'pendiente')
-          .then((r) => (r as List).length),
+          .then((r) => r.length),
       builder: (ctx, snap) {
         final count = snap.data ?? 0;
         return Stack(
@@ -1908,7 +1908,7 @@ extension CentralScreenGestion on _CentralScreenState {
                             itemBuilder: (_, i) {
                               final d = dirs[i];
                               final activo = d['activo'] as bool? ?? true;
-                              final sectorNombre = d['sectores'] != null ? (d['sectores'] as Map)['nombre'] : null;
+                              final sectorNombre = (d['sectores'] as Map?)?['nombre'];
                               return ListTile(
                                 dense: true,
                                 leading: Icon(Icons.place, color: activo ? Colors.indigo : Colors.grey, size: 18),

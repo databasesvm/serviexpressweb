@@ -282,7 +282,7 @@ class _MonitorPedidosScreenState extends State<MonitorPedidosScreen>
       backgroundColor: const Color(0xFF0D0D0D),
       appBar: AppBar(
         backgroundColor: Colors.black,
-        iconTheme: IconThemeData(color: Colors.white),
+        iconTheme: const IconThemeData(color: Colors.white),
         title: Text('Monitor Domicilios',
             style: TextStyle(
                 color: Colors.white,
@@ -665,7 +665,7 @@ class _MonitorPedidosScreenState extends State<MonitorPedidosScreen>
             const SizedBox(width: 6),
             Switch(
               value: activo,
-              activeColor: const Color(0xff3AF500),
+              activeThumbColor: const Color(0xff3AF500),
               onChanged: (_) => _toggleDomicilios(local),
             ),
           ],

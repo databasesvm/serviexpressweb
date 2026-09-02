@@ -198,7 +198,7 @@ class _ClienteFoodFormState extends State<ClienteFoodForm> {
                 .from('usuarios').select('id')
                 .eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true)
                 .not('rango_movil', 'in', '("MASTER")');
-            final idsMoviles = (movilesData as List)
+            final idsMoviles = movilesData
                 .map((u) => u['id'].toString())
                 .where((id) => !masterIds.contains(id))
                 .toList();
@@ -393,7 +393,7 @@ class _ClienteFoodFormState extends State<ClienteFoodForm> {
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
         backgroundColor: Colors.black,
-        iconTheme: IconThemeData(color: Colors.white),
+        iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: Form(
         key: _formKey,

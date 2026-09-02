@@ -251,7 +251,7 @@ class _ClienteDeliveryFormState extends State<ClienteDeliveryForm> {
                 .from('usuarios').select('id, latitud, longitud')
                 .eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true)
                 .not('rango_movil', 'in', '("MASTER")');
-            final idsZonales = (candidatos as List).where((u) {
+            final idsZonales = candidatos.where((u) {
               if (masterIds.contains(u['id'].toString())) return false;
               if (_origenLat == null || _origenLng == null) return true;
               final uLat = (u['latitud'] as num?)?.toDouble();
@@ -275,7 +275,7 @@ class _ClienteDeliveryFormState extends State<ClienteDeliveryForm> {
             final todosData = await Supabase.instance.client
                 .from('usuarios').select('id')
                 .eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true);
-            final todosIds = (todosData as List)
+            final todosIds = todosData
                 .map((u) => u['id'].toString())
                 .where((id) => !masterIds.contains(id))
                 .toList();
@@ -463,7 +463,7 @@ class _ClienteDeliveryFormState extends State<ClienteDeliveryForm> {
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
         backgroundColor: Colors.black,
-        iconTheme: IconThemeData(color: Colors.white),
+        iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: Form(
         key: _formKey,

@@ -268,7 +268,7 @@ class _RegistroScreenState extends State<RegistroScreen> {
           .select('id')
           .eq('telefono', telefono)
           .limit(1);
-      if ((existeTel as List).isNotEmpty) {
+      if (existeTel.isNotEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Este teléfono ya está registrado.'), backgroundColor: Colors.orange),
@@ -283,7 +283,7 @@ class _RegistroScreenState extends State<RegistroScreen> {
           .select('id')
           .eq('usuario', usuarioText)
           .limit(1);
-      if ((existeUsuario as List).isNotEmpty) {
+      if (existeUsuario.isNotEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -303,7 +303,7 @@ class _RegistroScreenState extends State<RegistroScreen> {
           .select('id')
           .eq('correo', correo)
           .limit(1);
-      if ((existeCorreo as List).isNotEmpty) {
+      if (existeCorreo.isNotEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Ese correo ya está registrado.'), backgroundColor: Colors.orange),
@@ -365,6 +365,7 @@ class _RegistroScreenState extends State<RegistroScreen> {
 
           // LOCALES: redirigir a pantalla de espera de aprobación
           if (_rolSeleccionado == 'local') {
+            if (!mounted) return;
             Navigator.pushAndRemoveUntil(
               context,
               MaterialPageRoute(
@@ -377,6 +378,7 @@ class _RegistroScreenState extends State<RegistroScreen> {
             return;
           }
 
+          if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('¡Bienvenido! Cuenta creada con éxito.'),
@@ -392,7 +394,7 @@ class _RegistroScreenState extends State<RegistroScreen> {
                 .select('id')
                 .inFilter('rol', ['central', 'master'])
                 .eq('en_linea', true);
-            final centralIds = (centralUsers as List)
+            final centralIds = centralUsers
                 .map<String>((u) => u['id'].toString())
                 .toList();
             if (centralIds.isNotEmpty) {
@@ -409,6 +411,7 @@ class _RegistroScreenState extends State<RegistroScreen> {
 
           final String usuarioMostrar = filaInsertada['usuario']?.toString() ?? usuarioText;
           final String telefonoPwd   = filaInsertada['telefono']?.toString() ?? telefono;
+          if (!mounted) return;
           showDialog(
             context: context,
             barrierDismissible: false,

@@ -283,6 +283,7 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
 
                         // ---- CATEGORÍA ----
                         DropdownButtonFormField<String>(
+                          // ignore: deprecated_member_use
                           value: (_categorias.contains(categoria)
                               ? categoria
                               : null),
@@ -373,7 +374,7 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
                                     : 'No aparece en el menú',
                                 style: const TextStyle(fontSize: 12, color: Colors.white54)),
                             value: disponible,
-                            activeColor: const Color(0xff3AF500),
+                            activeThumbColor: const Color(0xff3AF500),
                             onChanged: (v) =>
                                 setLocal(() => disponible = v),
                           ),
@@ -710,7 +711,7 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
             Icon(icon, color: Colors.white, size: 15),
             const SizedBox(width: 4),
             Text(label,
-                style: TextStyle(
+                style: const TextStyle(
                     color: Colors.white, fontSize: 11)),
           ],
         ),
@@ -745,10 +746,10 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
         fillColor: Colors.white.withValues(alpha: 0.08),
         border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: Colors.white30)),
+            borderSide: const BorderSide(color: Colors.white30)),
         enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: Colors.white30)),
+            borderSide: const BorderSide(color: Colors.white30)),
         focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
             borderSide:
@@ -797,7 +798,7 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
                       ),
                       child: Text(
                         '$pendientes',
-                        style: TextStyle(
+                        style: const TextStyle(
                             color: Colors.white,
                             fontSize: 10,
                             fontWeight: FontWeight.bold),
@@ -940,7 +941,7 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
         ),
         trailing: Switch(
           value: _domiciliosActivo,
-          activeColor: const Color(0xff3AF500),
+          activeThumbColor: const Color(0xff3AF500),
           onChanged: _toggleDomicilios,
         ),
       ),

@@ -1212,7 +1212,10 @@ extension CentralScreenMonitor on _CentralScreenState {
                             if (moto['ticket_prioridad'] == true) {
                               await Supabase.instance.client
                                   .from('usuarios')
-                                  .update({'ticket_prioridad': false})
+                                  .update({
+                                    'ticket_prioridad': false,
+                                    'ingreso_fila': DateTime.now().toUtc().toIso8601String(),
+                                  })
                                   .eq('id', moto['id']);
                             }
                             await MotorNotificaciones.dispararMisil(
@@ -1258,11 +1261,26 @@ extension CentralScreenMonitor on _CentralScreenState {
       ),
     );
     if (confirm == true) {
+      final esFn = servicio['fn_origen'] != null ||
+          servicio['tipo_fn'] == true;
+
+      // Si es FN, cancelar misiles pendientes de la cascada de notificaciones
+      if (esFn) {
+        final fase2 = servicio['fn_notif_fase2']?.toString();
+        final fase3 = servicio['fn_notif_fase3']?.toString();
+        if (fase2 != null) MotorNotificaciones.cancelarMisil(fase2).catchError((_) {});
+        if (fase3 != null) MotorNotificaciones.cancelarMisil(fase3).catchError((_) {});
+      }
+
       await Supabase.instance.client.from('servicios').update({
         'estado': 'cancelado',
         'observacion': servicio['observacion'] != null
             ? '${servicio["observacion"]} | Cancelado por central'
             : 'Cancelado por central',
+        // Limpiar campos de notificación FN para detener la cascada
+        if (esFn) 'fn_notif_fase2': null,
+        if (esFn) 'fn_notif_fase3': null,
+        if (esFn) 'fn_notificados_fase1': <String>[],
       }).eq('id', servicio['id']);
       _seleccionadoId.value = null;
     }
@@ -1491,7 +1509,7 @@ extension CentralScreenMonitor on _CentralScreenState {
                         Switch(
                           value: esVip,
                           onChanged: (v) => setSheet(() => esVip = v),
-                          activeColor: const Color(0xFFB8860B),
+                          activeThumbColor: const Color(0xFFB8860B),
                         ),
                       ],
                     ),
@@ -2156,7 +2174,12 @@ extension CentralScreenMonitor on _CentralScreenState {
                               servicio['creador'] != 'Central') ||
                           (estado == 'programado' &&
                               servicio['liberacion_at'] != null) ||
-                          servicio['observacion'] != null) ...[
+                          servicio['observacion'] != null ||
+                          servicio['paradero_origen'] != null ||
+                          servicio['tipo_servicio'] == 'RECOGIDA LOCAL' ||
+                          servicio['transferencia_a_movil_id'] != null ||
+                          servicio['transferido'] == true ||
+                          servicio['transferencia_rechazada'] == true) ...[
                         const SizedBox(height: 3),
                         Wrap(
                           spacing: 4,
@@ -2245,6 +2268,70 @@ extension CentralScreenMonitor on _CentralScreenState {
                                       fontWeight: FontWeight.bold),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            if (servicio['paradero_origen'] != null)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.blue[800],
+                                  borderRadius: BorderRadius.circular(3),
+                                ),
+                                child: Text(
+                                  '📍 ${servicio["paradero_origen"].toString().toUpperCase()}',
+                                  style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                            if (servicio['tipo_servicio'] == 'RECOGIDA LOCAL')
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.orange[800],
+                                  borderRadius: BorderRadius.circular(3),
+                                ),
+                                child: const Text(
+                                  '📦 RECOGIDA',
+                                  style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                            // Transferencia pendiente — esperando aceptación
+                            if (servicio['transferencia_a_movil_id'] != null)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.teal[700],
+                                  borderRadius: BorderRadius.circular(3),
+                                  border: Border.all(color: Colors.teal[300]!, width: 0.6),
+                                ),
+                                child: const Text(
+                                  '⏳ TRANSFIRIENDO...',
+                                  style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                            // Servicio ya transferido — queda como soporte/auditoría
+                            if (servicio['transferido'] == true)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.deepPurple[600],
+                                  borderRadius: BorderRadius.circular(3),
+                                ),
+                                child: const Text(
+                                  '🔄 TRANSFERIDO',
+                                  style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                            // Transferencia rechazada — auditoría
+                            if (servicio['transferencia_rechazada'] == true)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.red[800],
+                                  borderRadius: BorderRadius.circular(3),
+                                ),
+                                child: const Text(
+                                  '❌ TRANSF. RECHAZADA',
+                                  style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
                                 ),
                               ),
                           ],

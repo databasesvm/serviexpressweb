@@ -47,6 +47,8 @@ class _MovilScreenState extends State<MovilScreen>
   // _iniciarRelojSupervisionMultitarea).
   late bool _estabaSuspendido;
   bool _procesando = false;
+  bool _dialogoTransferenciaActivo = false; // evita mostrar el diálogo dos veces
+  bool _notifReconexionActiva = false; // true = foreground muestra "📶 Verificando señal..."
 
   Timer? _supervisionTimer;
   StreamSubscription<Position>? _gpsTimer;
@@ -76,6 +78,7 @@ class _MovilScreenState extends State<MovilScreen>
   late final TextEditingController _perfilNequiCtrl;
   late final TextEditingController _perfilDaviplataCtrl;
   late final TextEditingController _perfilBancolombiaCtrl;
+  late final TextEditingController _perfilLlaveCtrl;
   bool _guardandoPerfil = false;
   bool _subiendoFoto = false;
   // REDISEÑO PANEL: la "Fila en Vivo" ahora es colapsable — por
@@ -105,6 +108,7 @@ class _MovilScreenState extends State<MovilScreen>
     'EXPUENTE': [7.863439, -72.475760, 100],
     'MEMOS': [7.863976, -72.479256, 100],
     'NOCTURNO': [7.863283, -72.476152, 100],
+    'BOCONO': [7.851809, -72.467278, 100],
   };
 
   // Caché local del paradero actual — se sincroniza en
@@ -128,6 +132,7 @@ class _MovilScreenState extends State<MovilScreen>
   int _serviciosHoy = 0;
   int _serviciosTotal = 0;
   double _producidoHoy = 0;
+  double _producidoTotal = 0;   // acumulado histórico (Serviexpress + FN)
   // PRODUCCIÓN FN — historial exclusivo de servicios Farmanorte
   int _serviciosFnHoy = 0;
   int _serviciosFnTotal = 0;
@@ -256,6 +261,10 @@ class _MovilScreenState extends State<MovilScreen>
         event.preventDefault();
         if (mounted && _estaEnLinea && !_estabaSuspendido) {
           _sonidos.reproducir(Sonidos.alerta);
+          // El teléfono acaba de despertar → aprovechar para verificar si
+          // el móvil sigue dentro del radio del paradero. Crítico para
+          // usuarios web y teléfonos que no reciben el stream GPS en background.
+          _verificarGeocercaUnaVez();
         }
       };
       OneSignal.Notifications.addForegroundWillDisplayListener(_onForegroundNotif!);
@@ -274,6 +283,9 @@ class _MovilScreenState extends State<MovilScreen>
     );
     _perfilBancolombiaCtrl = TextEditingController(
       text: widget.usuario['pago_bancolombia']?.toString() ?? '',
+    );
+    _perfilLlaveCtrl = TextEditingController(
+      text: widget.usuario['pago_llave']?.toString() ?? '',
     );
     _estabaSuspendido = widget.usuario['suspendido'] ?? false;
     _miParaderoCache = widget.usuario['paradero_actual']?.toString();
@@ -307,21 +319,8 @@ class _MovilScreenState extends State<MovilScreen>
             // payload.oldRecord para esto — Realtime no siempre trae
             // el valor anterior completo salvo REPLICA IDENTITY FULL,
             // así que basta con leer el estado NUEVO directamente.
-            final doc = payload.newRecord;
-            if (doc.isNotEmpty) {
-              final String miId = widget.usuario['id'].toString();
-              final bool fueMiCancelacion =
-                  doc['movil_id']?.toString() == miId &&
-                  [
-                    'cancelado',
-                    'finalizado_por_demora',
-                    'finalizado_con_problema',
-                  ].contains(doc['estado']?.toString());
-
-              if (fueMiCancelacion) {
-                _intentarRegistroParadero();
-              }
-            }
+            // El registro al paradero es decisión del móvil — no se auto-registra.
+            // Si quiere volver a la fila debe pulsar el botón manualmente.
 
             // Notifica solo al ValueListenableBuilder del radar, sin
             // reconstruir todo el árbol (AppBar, perfil, etc.).
@@ -857,7 +856,7 @@ class _MovilScreenState extends State<MovilScreen>
           .eq('en_linea', true)
           .neq('suspendido', true)
           .not('paradero_actual', 'is', null);
-      final paraderoIds = (enParaderoData as List)
+      final paraderoIds = enParaderoData
           .map((u) => u['id'].toString())
           .where((id) => id != movilId?.toString() && !masterIds.contains(id))
           .toList();
@@ -873,7 +872,7 @@ class _MovilScreenState extends State<MovilScreen>
       // T=60s: todos los disponibles — misil server-side
       {
         final todosD = await db.from('usuarios').select('id').eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true);
-        final idsTodosD = (todosD as List).map((u) => u['id'].toString()).where((id) => !masterIds.contains(id)).toList();
+        final idsTodosD = todosD.map((u) => u['id'].toString()).where((id) => !masterIds.contains(id)).toList();
         if (idsTodosD.isNotEmpty) {
           final id60sD = await MotorNotificaciones.programarMisilRetardado(
             externalIds: idsTodosD,
@@ -891,6 +890,7 @@ class _MovilScreenState extends State<MovilScreen>
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
             content: Text('Domicilio liberado. Se está buscando otro móvil.'),
             backgroundColor: Colors.orange));
+        await OtaUpdater.verificar(context);
       }
     } catch (e) {
       if (mounted) {
@@ -1136,6 +1136,7 @@ class _MovilScreenState extends State<MovilScreen>
     _perfilNequiCtrl.dispose();
     _perfilDaviplataCtrl.dispose();
     _perfilBancolombiaCtrl.dispose();
+    _perfilLlaveCtrl.dispose();
     // silenciar() en lugar de dispose(): SonidoManager es singleton —
     // dispose() destruiría los AudioPlayers para todas las pantallas activas.
     _sonidos.silenciar();
@@ -1255,6 +1256,7 @@ class _MovilScreenState extends State<MovilScreen>
         _cacheServicios = data;
         _ultimaEmisionServicios = DateTime.now(); // Fix #2
         if (!_ctrlServicios.isClosed) _ctrlServicios.add(data);
+        _verificarTransferenciaEntrante(List<Map<String, dynamic>>.from(data));
       },
       onError: (e) {
         if (!_ctrlServicios.isClosed) _ctrlServicios.addError(e);
@@ -1289,6 +1291,7 @@ class _MovilScreenState extends State<MovilScreen>
                 .then((data) {
                   _cacheServicios = List<Map<String, dynamic>>.from(data);
                   if (!_ctrlServicios.isClosed) _ctrlServicios.add(_cacheServicios!);
+                  _verificarTransferenciaEntrante(_cacheServicios!);
                 })
                 .catchError((_) {});
           },
@@ -1309,7 +1312,19 @@ class _MovilScreenState extends State<MovilScreen>
       // Evita cancelar y recrear suscripciones sanas cada 30s innecesariamente.
       final sinDatos = _ultimaEmisionServicios == null ||
           DateTime.now().difference(_ultimaEmisionServicios!).inSeconds > 35;
-      if (sinDatos) _construirStreams();
+      if (sinDatos) {
+        _construirStreams();
+        // Notificación silenciosa estilo WhatsApp: avisa que hay problemas de
+        // señal sin hacer ruido. Se cancela sola cuando el stream vuelve a emitir.
+        if (!kIsWeb && _estaEnLinea && !_notifReconexionActiva) {
+          _notifReconexionActiva = true;
+          updateForegroundNotification('📶 Verificando señal...');
+        }
+      } else if (_notifReconexionActiva) {
+        // Conexión restaurada — volver al texto normal
+        _notifReconexionActiva = false;
+        updateForegroundNotification('Conectado · recibiendo servicios');
+      }
       // BAN CHECK (movido aquí desde el timer de 5s — era 12 queries/min,
       // ahora son 2/min, suficiente para detectar suspensión en ≤30s).
       if (_estaEnLinea || _estabaSuspendido) {
@@ -1354,7 +1369,13 @@ class _MovilScreenState extends State<MovilScreen>
           _chequearPermisosCriticos();
           if (_estaEnLinea) {
             _iniciarHeartbeat();
-            if (!kIsWeb) resetBgInactivityTimer();
+            if (!kIsWeb) {
+              resetBgInactivityTimer();
+              // Restaurar texto normal de notificación si se había puesto la advertencia
+              if (!_notifReconexionActiva) {
+                updateForegroundNotification('Conectado · recibiendo servicios');
+              }
+            }
           }
         }
         break;
@@ -1364,7 +1385,21 @@ class _MovilScreenState extends State<MovilScreen>
         // NO cancelamos el heartbeat: el isolate de Dart sigue vivo en background
         // y el Timer.periodic sigue disparando cada 60s → pings continuos aunque
         // el foreground service sea matado por Android.
-        if (_estaEnLinea) _enviarPing();
+        if (_estaEnLinea) {
+          _enviarPing();
+          // Si tiene servicio activo o está en paradero, cambiar el texto
+          // de la notificación foreground a una advertencia visible para
+          // desincentivar el cierre desde la bandeja de apps recientes.
+          if (!kIsWeb) {
+            final tieneServicio = _serviciosActivosData.isNotEmpty;
+            final tieneParadero = _miParaderoCache != null;
+            if (tieneServicio) {
+              updateForegroundNotification('⚠️ SERVICIO ACTIVO — no cierres la app');
+            } else if (tieneParadero) {
+              updateForegroundNotification('📍 En fila ($_miParaderoCache) — no cierres la app');
+            }
+          }
+        }
         break;
 
       default:
@@ -1403,7 +1438,7 @@ class _MovilScreenState extends State<MovilScreen>
           .order('created_at', ascending: false)
           .limit(5);
 
-      for (final ev in (eventos as List)) {
+      for (final ev in eventos) {
         final tipo = ev['tipo']?.toString() ?? 'global';
         final destinoId = ev['destino_id']?.toString() ?? '';
         // Filtramos: global (todos) o individual (solo si el destino soy yo)
@@ -1484,7 +1519,7 @@ class _MovilScreenState extends State<MovilScreen>
           .limit(1);
 
       if (mounted) {
-        setState(() => _panicoUsadoHoy = (resultado as List).isNotEmpty);
+        setState(() => _panicoUsadoHoy = resultado.isNotEmpty);
       }
     } catch (_) {}
   }
@@ -2075,6 +2110,15 @@ class _MovilScreenState extends State<MovilScreen>
               ) <=
               _kZonasParadero['NOCTURNO']![2]) {
         nuevoParadero = 'NOCTURNO';
+      } else if (hora >= 6 &&
+          Geolocator.distanceBetween(
+                pos.latitude,
+                pos.longitude,
+                _kZonasParadero['BOCONO']![0],
+                _kZonasParadero['BOCONO']![1],
+              ) <=
+              _kZonasParadero['BOCONO']![2]) {
+        nuevoParadero = 'BOCONO';
       }
 
       if (nuevoParadero != null) {
@@ -2501,8 +2545,14 @@ class _MovilScreenState extends State<MovilScreen>
   void _iniciarHeartbeatUbicacion() {
     _ubicacionHeartbeatTimer?.cancel();
     _ubicacionHeartbeatTimer =
-        Timer.periodic(const Duration(seconds: 15), (_) async {
-      if (!mounted || !_estaEnLinea || kIsWeb) return;
+        Timer.periodic(const Duration(seconds: 30), (_) async {
+      if (!mounted || !_estaEnLinea) return;
+      // En web: usar el heartbeat para verificar geocerca (el stream GPS puede
+      // dejar de emitir cuando la pestaña queda en segundo plano).
+      if (kIsWeb) {
+        _verificarGeocercaUnaVez();
+        return;
+      }
       // Si el GPS stream emitió hace menos de 10s, ya está actualizado
       if (_ultimoEnvioUbicacion != null &&
           DateTime.now().difference(_ultimoEnvioUbicacion!).inSeconds < 10) {
@@ -2535,6 +2585,180 @@ class _MovilScreenState extends State<MovilScreen>
   void _detenerHeartbeatUbicacion() {
     _ubicacionHeartbeatTimer?.cancel();
     _ubicacionHeartbeatTimer = null;
+  }
+
+  // ── VERIFICACIÓN PUNTUAL DE GEOCERCA ────────────────────────────────────────
+  // Hace un getCurrentPosition único y comprueba si el móvil sigue dentro del
+  // radio del paradero. Si salió, lo expulsa automáticamente.
+  // Útil para web (donde el stream puede dejar de emitir en background) y para
+  // llamarse al recibir un headsup de OneSignal (el teléfono despertó → GPS ok).
+  Future<void> _verificarGeocercaUnaVez() async {
+    if (!_estaEnLinea || _miParaderoCache == null) return;
+    if (!_kZonasParadero.containsKey(_miParaderoCache)) return;
+    try {
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 10),
+        ),
+      );
+      if (!mounted || !_estaEnLinea || _miParaderoCache == null) return;
+      _ultimaPosicionConocida = pos;
+      final zona = _kZonasParadero[_miParaderoCache];
+      if (zona == null) return;
+      final dist = Geolocator.distanceBetween(
+        pos.latitude, pos.longitude, zona[0], zona[1],
+      );
+      if (dist > zona[2] + 50) {
+        final paraderoQueDejo = _miParaderoCache!;
+        _miParaderoCache = null;
+        try {
+          await Supabase.instance.client
+              .from('usuarios')
+              .update({'paradero_actual': null, 'ingreso_fila': null})
+              .eq('id', widget.usuario['id']);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('📍 Saliste del área de $paraderoQueDejo — te sacamos de la fila.'),
+                backgroundColor: Colors.orange,
+                duration: const Duration(seconds: 4),
+              ),
+            );
+          }
+        } catch (_) {
+          _miParaderoCache = paraderoQueDejo; // reintentar próximo tick
+        }
+      }
+      // También actualizar ubicación en BD (web no tiene stream continuo)
+      if (kIsWeb) {
+        try {
+          await Supabase.instance.client
+              .from('usuarios')
+              .update({'latitud': pos.latitude, 'longitud': pos.longitude})
+              .eq('id', widget.usuario['id']);
+        } catch (_) {}
+      }
+    } catch (_) {}
+  }
+
+  // ── REPORTAR MÓVIL AUSENTE DEL PARADERO ─────────────────────────────────────
+  // Flujo al reportar:
+  //   1. Confirma el reporte
+  //   2. Consulta la última posición del reportado en la BD
+  //   3a. Si está fuera del radio → lo saca de la fila automáticamente (no avisa a central)
+  //   3b. Si está dentro del radio (o sin coordenadas) → notifica a Central/Master
+  Future<void> _reportarMovilAusente(
+    Map<String, dynamic> movilReportado,
+    String paradero,
+  ) async {
+    final reportadoNombre = (movilReportado['usuario'] ?? movilReportado['nombre'] ?? '').toString().toUpperCase();
+
+    final bool? confirmar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        backgroundColor: const Color(0xFF1A1A1A),
+        title: const Text('🚩 Reportar ausente', style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)),
+        content: Text(
+          '¿Reportar que $reportadoNombre no está físicamente en el paradero $paradero?\n\n'
+          'El sistema verificará su ubicación actual y actuará en consecuencia.',
+          style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('CANCELAR', style: TextStyle(color: Colors.grey))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.black),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('REPORTAR', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+    if (confirmar != true || !mounted) return;
+
+    try {
+      // Consultar última posición del reportado directamente en BD
+      final datosReportado = await Supabase.instance.client
+          .from('usuarios')
+          .select('id, latitud, longitud, paradero_actual')
+          .eq('id', movilReportado['id'])
+          .maybeSingle();
+
+      if (!mounted) return;
+
+      // Si ya salió del paradero por otra vía, no hacer nada
+      if (datosReportado == null || datosReportado['paradero_actual'] == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$reportadoNombre ya salió de la fila.'), backgroundColor: Colors.grey),
+        );
+        return;
+      }
+
+      final zona = _kZonasParadero[paradero];
+      final double? lat = (datosReportado['latitud'] as num?)?.toDouble();
+      final double? lng = (datosReportado['longitud'] as num?)?.toDouble();
+
+      bool estaFuera = false;
+      if (zona != null && lat != null && lng != null) {
+        final dist = Geolocator.distanceBetween(lat, lng, zona[0], zona[1]);
+        estaFuera = dist > zona[2] + 50; // mismo margen que la geocerca automática
+      }
+
+      if (estaFuera) {
+        // Sacar automáticamente — no molestar a la central
+        await Supabase.instance.client
+            .from('usuarios')
+            .update({'paradero_actual': null, 'ingreso_fila': null})
+            .eq('id', movilReportado['id']);
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('📍 $reportadoNombre no estaba en $paradero — fue sacado de la fila automáticamente.'),
+              backgroundColor: Colors.green[700],
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+      } else {
+        // Está dentro del rango (o sin coordenadas) — avisar a central
+        final reportanteNombre = (widget.usuario['usuario'] ?? widget.usuario['nombre'] ?? '').toString().toUpperCase();
+
+        final receptores = await Supabase.instance.client
+            .from('usuarios')
+            .select('id')
+            .inFilter('rol', ['central', 'master'])
+            .eq('activo', true)
+            .neq('suspendido', true);
+
+        final ids = receptores.map((u) => u['id'].toString()).toList();
+        if (ids.isNotEmpty) {
+          await MotorNotificaciones.dispararRafa(
+            idsDestinos: ids,
+            titulo: '🚩 Reporte de ausencia en $paradero',
+            mensaje: '$reportanteNombre reporta que $reportadoNombre podría no estar en $paradero. La ubicación registrada lo sitúa dentro del rango.',
+            urgente: true,
+          );
+        }
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('⚠️ $reportadoNombre aparece dentro del rango. Se avisó a la central para que verifique.'),
+              backgroundColor: Colors.orange,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al procesar reporte: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   // ── SESIONES DE TIEMPO ACTIVO ───────────────────────────────────────────────
@@ -2602,7 +2826,7 @@ class _MovilScreenState extends State<MovilScreen>
           .eq('fecha', fechaHoy)
           .not('duracion_minutos', 'is', null);
       int total = 0;
-      for (final r in rows as List) {
+      for (final r in rows) {
         total += (r['duracion_minutos'] as num? ?? 0).toInt();
       }
       if (mounted) setState(() => _minutosActivosHoy = total);
@@ -2694,6 +2918,7 @@ class _MovilScreenState extends State<MovilScreen>
           .eq('id', widget.usuario['id']);
       _cerrarSesion(); // cierra sesión de tiempo activo
       _detenerHeartbeat(); // ← Opción A
+      _notifReconexionActiva = false; // reset al desconectar
       if (!kIsWeb) stopForegroundService().catchError((_) {}); // ← Opción B
       if (mounted) {
         setState(() {
@@ -2731,16 +2956,82 @@ class _MovilScreenState extends State<MovilScreen>
   }
 
   Future<void> _cambiarEstado() async {
-    if (_serviciosActivosData.isNotEmpty && _estaEnLinea) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Error: Tienes servicios activos. Finalízalos primero.',
+    // ── BLOQUEOS AL DESCONECTARSE ────────────────────────────────────────────
+    if (_estaEnLinea) {
+      // 1. Servicio activo — bloqueo absoluto
+      if (_serviciosActivosData.isNotEmpty) {
+        await showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: const Color(0xFF1A1A1A),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            title: const Text('🚫 No puedes desconectarte',
+                style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 16)),
+            content: const Text(
+              'Tienes un servicio en curso.\n\n'
+              'Finaliza o libera el servicio antes de cerrar tu turno.',
+              style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
+            ),
+            actions: [
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xff3AF500),
+                  foregroundColor: Colors.black,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('ENTENDIDO', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ],
           ),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
+        );
+        return;
+      }
+
+      // 2. En paradero — confirmar salida de fila antes de desconectar
+      if (_miParaderoCache != null) {
+        final paraderoActual = _miParaderoCache!;
+        final confirmar = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: const Color(0xFF1A1A1A),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            title: Text('📍 Estás en $paraderoActual',
+                style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 16)),
+            content: const Text(
+              'Si te desconectas saldrás automáticamente de la fila.\n\n'
+              '¿Confirmas que quieres desconectarte?',
+              style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('CANCELAR', style: TextStyle(color: Colors.white38)),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red[700],
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('SÍ, SALIR DE LA FILA', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        );
+        if (confirmar != true) return;
+        // Limpiar paradero en BD antes de desconectar
+        try {
+          await Supabase.instance.client.from('usuarios').update({
+            'paradero_actual': null,
+            'ingreso_fila': null,
+          }).eq('id', widget.usuario['id']);
+          _miParaderoCache = null;
+        } catch (_) {}
+      }
     }
 
     if (!_estaEnLinea) {
@@ -2764,10 +3055,24 @@ class _MovilScreenState extends State<MovilScreen>
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('⚠️ Activa el GPS del teléfono primero.'),
-              backgroundColor: Colors.red,
+          await showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (ctx) => AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              backgroundColor: const Color(0xFF1A1A1A),
+              title: const Text('📍 GPS desactivado', style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)),
+              content: const Text(
+                'Para conectarte necesitas tener el GPS del teléfono activado.\n\n'
+                'Ve a Ajustes → Ubicación y actívalo, luego vuelve a intentarlo.',
+                style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.5),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('ENTENDIDO', style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)),
+                ),
+              ],
             ),
           );
         }
@@ -2776,10 +3081,42 @@ class _MovilScreenState extends State<MovilScreen>
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied ||
-            permission == LocationPermission.deniedForever) {
-          return;
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        if (mounted) {
+          await showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (ctx) => AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              backgroundColor: const Color(0xFF1A1A1A),
+              title: const Text('📍 Permiso de ubicación requerido', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+              content: const Text(
+                'ServiExpress necesita acceso a tu ubicación para:\n\n'
+                '• Mostrarte en el mapa en tiempo real\n'
+                '• Registrarte y sacarte del paradero automáticamente\n\n'
+                'Ve a Ajustes → Aplicaciones → ServiExpress → Permisos → Ubicación y selecciona "Siempre" o "Solo al usar la app".',
+                style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('CERRAR', style: TextStyle(color: Colors.grey)),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xff3AF500), foregroundColor: Colors.black),
+                  onPressed: () async {
+                    Navigator.pop(ctx);
+                    await Geolocator.openAppSettings();
+                  },
+                  child: const Text('IR A AJUSTES', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ],
+            ),
+          );
         }
+        return;
       }
     }
 
@@ -2852,6 +3189,7 @@ class _MovilScreenState extends State<MovilScreen>
         } else {
           _detenerHeartbeat(); // ← Opción A
           _detenerHeartbeatUbicacion(); // Fallback GPS
+          _notifReconexionActiva = false; // reset — la notif foreground desaparece al parar el servicio
           // PÁNICO 24H: si hay una alerta activa dentro de su ventana de
           // 24h, el GPS sigue corriendo aunque el móvil se marque offline.
           // La ubicación de emergencia no se detiene por un toggle de turno.
@@ -3599,63 +3937,72 @@ class _MovilScreenState extends State<MovilScreen>
               const SizedBox(height: 16),
 
               // 1. PRODUCCIÓN — cargado en initState, sin parpadeo
-              Container(
-                margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: Colors.grey[200]!),
-                ),
-                child: Column(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
-                      child: Row(
-                        children: [
-                          Icon(Icons.bar_chart, size: 14, color: Colors.black54),
-                          const SizedBox(width: 6),
-                          const Text('PRODUCCIÓN', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.black45, letterSpacing: 0.8)),
-                        ],
-                      ),
+              // Serviexpress (no-FN) y FN se muestran separados.
+              Builder(builder: (_) {
+                // Cuentas no-FN = total - FN
+                final srvHoyNoFn  = _serviciosHoy  - _serviciosFnHoy;
+                final srvTotalNoFn = _serviciosTotal - _serviciosFnTotal;
+                final prodHoyNoFn  = _producidoHoy  - _producidoFnHoy;
+                final tieneFn = miPerfil['tiene_fn'] == true;
+
+                return Column(children: [
+                  // ── Serviexpress ──
+                  Container(
+                    margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: Colors.grey[200]!),
                     ),
-                    // Fila compacta: ícono + label + número + producido hoy alineados
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
+                    child: Column(children: [
+                      // Cabecera
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+                        child: Row(children: [
+                          Icon(Icons.motorcycle, size: 14, color: Colors.black54),
+                          const SizedBox(width: 6),
+                          const Text('SERVIEXPRESS',
+                              style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.black45, letterSpacing: 0.8)),
+                        ]),
+                      ),
+                      // Hoy
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+                        child: Row(children: [
                           Icon(Icons.today, size: 16, color: Colors.grey[500]),
                           const SizedBox(width: 8),
                           Text('Hoy', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
                           const SizedBox(width: 8),
-                          Text('$_serviciosHoy', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black87)),
+                          Text('$srvHoyNoFn',
+                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black87)),
                           const Spacer(),
-                          Text(
-                            _formatearMoneda(_producidoHoy, mostrarCero: true),
-                            style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.green[700]),
-                          ),
-                        ],
+                          Text(_formatearMoneda(prodHoyNoFn, mostrarCero: true),
+                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.green[700])),
+                        ]),
                       ),
-                    ),
-                    Divider(height: 1, color: Colors.grey[100]),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
+                      Divider(height: 1, color: Colors.grey[100]),
+                      // Total histórico (conteo + acumulado)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+                        child: Row(children: [
                           Icon(Icons.check_circle_outline, size: 16, color: Colors.grey[500]),
                           const SizedBox(width: 8),
                           Text('Total', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
                           const SizedBox(width: 8),
-                          Text('$_serviciosTotal', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black87)),
-                        ],
+                          Text('$srvTotalNoFn',
+                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black87)),
+                          const Spacer(),
+                          Text(
+                            _formatearMoneda(_producidoTotal - _producidoFnTotal, mostrarCero: true),
+                            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                          ),
+                        ]),
                       ),
-                    ),
-                    Divider(height: 1, color: Colors.grey[100]),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
-                      child: Row(
-                        children: [
+                      Divider(height: 1, color: Colors.grey[100]),
+                      // Tiempo activo
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
+                        child: Row(children: [
                           Icon(Icons.access_time_outlined, size: 16, color: Colors.grey[500]),
                           const SizedBox(width: 8),
                           Text('Activo hoy', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
@@ -3669,112 +4016,86 @@ class _MovilScreenState extends State<MovilScreen>
                                 : h > 0
                                     ? '${h}h ${m.toString().padLeft(2, '0')}m'
                                     : '${m}m';
-                            return Text(
-                              label,
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
-                                color: _estaEnLinea ? Colors.green[700] : Colors.black87,
-                              ),
-                            );
+                            return Text(label,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                  color: _estaEnLinea ? Colors.green[700] : Colors.black87,
+                                ));
                           }),
                           if (_estaEnLinea) ...[
                             const SizedBox(width: 4),
                             Container(
                               width: 6, height: 6,
-                              decoration: BoxDecoration(
-                                color: Colors.green[600],
-                                shape: BoxShape.circle,
-                              ),
+                              decoration: BoxDecoration(color: Colors.green[600], shape: BoxShape.circle),
                             ),
                           ],
-                        ],
+                        ]),
                       ),
-                    ),
-                  ],
-                ),
-              ),
-
-              // 1b. PRODUCCIÓN FN — solo visible si tiene_fn = true
-              if (miPerfil['tiene_fn'] == true)
-                Container(
-                  margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1A237E).withValues(alpha: 0.04),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: const Color(0xFF3949AB).withValues(alpha: 0.5)),
+                    ]),
                   ),
-                  child: Column(
-                    children: [
-                      // Cabecera
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
-                        child: Row(
-                          children: [
+
+                  // ── Farmanorte (FN) — solo si tiene_fn ──
+                  if (tieneFn)
+                    Container(
+                      margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1A237E).withValues(alpha: 0.04),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFF3949AB).withValues(alpha: 0.5)),
+                      ),
+                      child: Column(children: [
+                        // Cabecera
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+                          child: Row(children: [
                             const Icon(Icons.local_pharmacy, size: 14, color: Color(0xFF3949AB)),
                             const SizedBox(width: 6),
-                            const Text(
-                              'FARMANORTE',
-                              style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF3949AB), letterSpacing: 0.8),
-                            ),
+                            const Text('FARMANORTE',
+                                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF3949AB), letterSpacing: 0.8)),
                             const Spacer(),
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF1A237E),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
+                              decoration: BoxDecoration(color: const Color(0xFF1A237E), borderRadius: BorderRadius.circular(8)),
                               child: const Text('FN', style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold, letterSpacing: 0.8)),
                             ),
-                          ],
+                          ]),
                         ),
-                      ),
-                      // Hoy
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
-                        child: Row(
-                          children: [
+                        // Hoy FN
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+                          child: Row(children: [
                             const Icon(Icons.today, size: 16, color: Color(0xFF5C6BC0)),
                             const SizedBox(width: 8),
                             const Text('Hoy', style: TextStyle(fontSize: 12, color: Color(0xFF5C6BC0))),
                             const SizedBox(width: 8),
-                            Text(
-                              '$_serviciosFnHoy',
-                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1A237E)),
-                            ),
+                            Text('$_serviciosFnHoy',
+                                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1A237E))),
                             const Spacer(),
-                            Text(
-                              _formatearMoneda(_producidoFnHoy, mostrarCero: true),
-                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF1565C0)),
-                            ),
-                          ],
+                            Text(_formatearMoneda(_producidoFnHoy, mostrarCero: true),
+                                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF1565C0))),
+                          ]),
                         ),
-                      ),
-                      Divider(height: 1, color: const Color(0xFF3949AB).withValues(alpha: 0.15)),
-                      // Total
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
-                        child: Row(
-                          children: [
+                        Divider(height: 1, color: const Color(0xFF3949AB).withValues(alpha: 0.15)),
+                        // Total FN
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
+                          child: Row(children: [
                             const Icon(Icons.check_circle_outline, size: 16, color: Color(0xFF5C6BC0)),
                             const SizedBox(width: 8),
                             const Text('Total FN', style: TextStyle(fontSize: 12, color: Color(0xFF5C6BC0))),
                             const SizedBox(width: 8),
-                            Text(
-                              '$_serviciosFnTotal',
-                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1A237E)),
-                            ),
+                            Text('$_serviciosFnTotal',
+                                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1A237E))),
                             const Spacer(),
-                            Text(
-                              _formatearMoneda(_producidoFnTotal, mostrarCero: true),
-                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF1565C0)),
-                            ),
-                          ],
+                            Text(_formatearMoneda(_producidoFnTotal, mostrarCero: true),
+                                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF1565C0))),
+                          ]),
                         ),
-                      ),
-                    ],
-                  ),
-                ),
+                      ]),
+                    ),
+                ]);
+              }),
 
               // 2. RANGO Y BENEFICIOS — desplegable, Master oculto para no-masters
               _seccionPerfilDesplegable(
@@ -3922,6 +4243,8 @@ class _MovilScreenState extends State<MovilScreen>
                             _filaCuentaPago('Daviplata', const Color(0xFFEE2A24), Colors.white, _perfilDaviplataCtrl),
                             const SizedBox(height: 8),
                             _filaCuentaPago('Bancolombia', const Color(0xFFFFCC00), Colors.black, _perfilBancolombiaCtrl),
+                            const SizedBox(height: 8),
+                            _filaCuentaPago('Llave', const Color(0xFF00796B), Colors.white, _perfilLlaveCtrl),
                             const SizedBox(height: 12),
                             SizedBox(
                               width: double.infinity,
@@ -4065,7 +4388,7 @@ class _MovilScreenState extends State<MovilScreen>
                         style: const TextStyle(fontSize: 11, color: Colors.black45),
                       ),
                       value: miPerfil['silenciar_radar'] == true,
-                      activeColor: const Color(0xFFE040FB),
+                      activeThumbColor: const Color(0xFFE040FB),
                       onChanged: (val) async {
                         try {
                           await Supabase.instance.client
@@ -4307,61 +4630,70 @@ class _MovilScreenState extends State<MovilScreen>
           DateTime(hoy.year, hoy.month, hoy.day).toUtc().toIso8601String();
       final miId = widget.usuario['id'];
 
-      // Producción general
-      final total = await Supabase.instance.client
+      // Producción general (Serviexpress + FN, todas finalizadas)
+      final totalData = await Supabase.instance.client
           .from('servicios')
-          .select('id')
+          .select('id, tarifa, tipo_fn')
           .eq('movil_id', miId)
           .eq('estado', 'finalizado');
+
       final hoyData = await Supabase.instance.client
           .from('servicios')
-          .select('id, tarifa')
+          .select('id, tarifa, tipo_fn')
           .eq('movil_id', miId)
           .eq('estado', 'finalizado')
           .gte('created_at', inicioHoy);
 
-      // Producción FN (tipo_fn = true) — selecciona tarifa para sumar valor
-      final fnTotal = await Supabase.instance.client
-          .from('servicios')
-          .select('id, tarifa')
-          .eq('movil_id', miId)
-          .eq('estado', 'finalizado')
-          .eq('tipo_fn', true);
-      final fnHoyData = await Supabase.instance.client
-          .from('servicios')
-          .select('id, tarifa')
-          .eq('movil_id', miId)
-          .eq('estado', 'finalizado')
-          .eq('tipo_fn', true)
-          .gte('created_at', inicioHoy);
+      if (!mounted) return;
 
-      if (mounted) {
-        final hoyList = hoyData as List;
-        double producido = 0;
-        for (final s in hoyList) {
-          producido += (s['tarifa'] as num? ?? 0).toDouble();
+      final totalList = totalData;
+      final hoyList   = hoyData;
+
+      // Totales generales
+      int   srvTotal      = 0;
+      double producidoTotal = 0;
+      // Hoy general
+      int   srvHoy        = 0;
+      double producidoHoy  = 0;
+      // FN totales
+      int    fnTotal       = 0;
+      double fnProdTotal   = 0;
+      // FN hoy
+      int    fnHoy         = 0;
+      double fnProdHoy     = 0;
+
+      for (final s in totalList) {
+        srvTotal++;
+        final tarifa = (s['tarifa'] as num? ?? 0).toDouble();
+        producidoTotal += tarifa;
+        if (s['tipo_fn'] == true) {
+          fnTotal++;
+          fnProdTotal += tarifa;
         }
-        final fnTotalList = fnTotal as List;
-        double producidoFnTotal = 0;
-        for (final s in fnTotalList) {
-          producidoFnTotal += (s['tarifa'] as num? ?? 0).toDouble();
-        }
-        final fnHoyList = fnHoyData as List;
-        double producidoFnHoy = 0;
-        for (final s in fnHoyList) {
-          producidoFnHoy += (s['tarifa'] as num? ?? 0).toDouble();
-        }
-        setState(() {
-          _serviciosTotal = (total as List).length;
-          _serviciosHoy = hoyList.length;
-          _producidoHoy = producido;
-          _serviciosFnTotal = fnTotalList.length;
-          _producidoFnTotal = producidoFnTotal;
-          _serviciosFnHoy = fnHoyList.length;
-          _producidoFnHoy = producidoFnHoy;
-        });
       }
-    } catch (_) {}
+      for (final s in hoyList) {
+        srvHoy++;
+        final tarifa = (s['tarifa'] as num? ?? 0).toDouble();
+        producidoHoy += tarifa;
+        if (s['tipo_fn'] == true) {
+          fnHoy++;
+          fnProdHoy += tarifa;
+        }
+      }
+
+      setState(() {
+        _serviciosTotal    = srvTotal;
+        _serviciosHoy      = srvHoy;
+        _producidoHoy      = producidoHoy;
+        _producidoTotal    = producidoTotal;
+        _serviciosFnTotal  = fnTotal;
+        _producidoFnTotal  = fnProdTotal;
+        _serviciosFnHoy    = fnHoy;
+        _producidoFnHoy    = fnProdHoy;
+      });
+    } catch (e) {
+      debugPrint('[PRODUCCION] Error al cargar producción del móvil ${widget.usuario['id']}: $e');
+    }
   }
 
   // Tarjeta de sección desplegable — misma estructura que _seccionPerfil
@@ -4577,6 +4909,9 @@ class _MovilScreenState extends State<MovilScreen>
             'pago_bancolombia': _perfilBancolombiaCtrl.text.trim().isEmpty
                 ? null
                 : _perfilBancolombiaCtrl.text.trim(),
+            'pago_llave': _perfilLlaveCtrl.text.trim().isEmpty
+                ? null
+                : _perfilLlaveCtrl.text.trim(),
           })
           .eq('id', movilId);
       if (mounted) {
@@ -5095,12 +5430,14 @@ class _MovilScreenState extends State<MovilScreen>
               u['ingreso_fila'] != null,
         )
         .toList();
-    // Ticket de prioridad va primero, luego por ingreso_fila
+    // Ticket de prioridad va primero, luego por ingreso_fila, luego por id (estable)
     enFila.sort((a, b) {
       final tA = a['ticket_prioridad'] == true ? 1 : 0;
       final tB = b['ticket_prioridad'] == true ? 1 : 0;
       if (tA != tB) return tB.compareTo(tA);
-      return DateTime.parse(a['ingreso_fila']).compareTo(DateTime.parse(b['ingreso_fila']));
+      final cmp = DateTime.parse(a['ingreso_fila']).compareTo(DateTime.parse(b['ingreso_fila']));
+      if (cmp != 0) return cmp;
+      return ((a['id'] as num?) ?? 0).compareTo((b['id'] as num?) ?? 0);
     });
 
     if (enFila.isEmpty) return const SizedBox.shrink();
@@ -5282,6 +5619,15 @@ class _MovilScreenState extends State<MovilScreen>
                               child: Text(
                                 'TÚ',
                                 style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 10),
+                              ),
+                            ),
+                          // Botón de reporte: solo si NO soy yo y estoy en el MISMO paradero
+                          if (!soyYo && _miParaderoCache == nombreParadero)
+                            GestureDetector(
+                              onTap: () => _reportarMovilAusente(movil, nombreParadero),
+                              child: const Padding(
+                                padding: EdgeInsets.only(left: 4),
+                                child: Text('🚩', style: TextStyle(fontSize: 13)),
                               ),
                             ),
                         ],
@@ -5704,29 +6050,80 @@ class _MovilScreenState extends State<MovilScreen>
                   ),
                 ),
               ),
-            // Origen / Destino estándar
-            if (true) ...[
+            // Origen siempre visible
             const SizedBox(height: 12),
             Text(
               '📍 Origen: ${servicio['origen']}',
               style: const TextStyle(fontSize: 16),
             ),
-            Text(
-              '🏁 Destino: ${servicio['destino']}',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-            ],
+            // Destino: solo visible después de llegar al local/pasajero
+            if (['en_ruta_destino', 'problema', 'finalizado',
+                 'finalizado_con_problema'].contains(estado))
+              Text(
+                '🏁 Destino: ${servicio['destino']}',
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              )
+            else
+              Container(
+                margin: const EdgeInsets.only(top: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.grey[200],
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.lock_outline, size: 14, color: Colors.black38),
+                    SizedBox(width: 6),
+                    Text(
+                      'Destino visible al llegar al local',
+                      style: TextStyle(fontSize: 13, color: Colors.black45),
+                    ),
+                  ],
+                ),
+              ),
             // ---> INYECCIÓN VISUAL DEL NÚMERO <---
             if (servicio['telefono_receptor'] != null &&
                 servicio['telefono_receptor'].toString().trim().isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  '📱 Recibe: ${servicio['telefono_receptor']}',
-                  style: TextStyle(
-                    fontSize: 15,
-                    color: Colors.blue[800],
-                    fontWeight: FontWeight.bold,
+                child: GestureDetector(
+                  onTap: () async {
+                    String num = servicio['telefono_receptor']
+                        .toString()
+                        .replaceAll(RegExp(r'[^0-9]'), '');
+                    if (num.length == 10) num = '57$num';
+                    final uri = Uri.parse(
+                        'https://wa.me/$num?text=${Uri.encodeComponent('Hola, soy el móvil de Serviexpress que lleva tu servicio.')}');
+                    await launchUrl(uri, mode: LaunchMode.externalApplication);
+                  },
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF25D366),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text('📱', style: TextStyle(fontSize: 13)),
+                            const SizedBox(width: 4),
+                            Text(
+                              'WA ${servicio['telefono_receptor']}',
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -5828,6 +6225,50 @@ class _MovilScreenState extends State<MovilScreen>
                     icon: const Icon(Icons.replay, size: 18),
                     label: const Text(
                       'LIBERAR',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                    ),
+                  ),
+                ),
+              ),
+
+            // BOTÓN REASIGNAR — solo Masters, asignación instantánea sin confirmación.
+            if (esMaster && !tieneProblema)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFFFFB300),
+                      side: const BorderSide(color: Color(0xFFFFB300)),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    onPressed: _procesando ? null : () => _reasignarServicio(servicio),
+                    icon: const Icon(Icons.swap_horiz, size: 18),
+                    label: const Text(
+                      'REASIGNAR',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                    ),
+                  ),
+                ),
+              ),
+
+            // BOTÓN TRANSFERIR — no-Masters. Envía solicitud; el receptor debe aceptar.
+            if (!esMaster && !tieneProblema)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.teal,
+                      side: const BorderSide(color: Colors.teal),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    onPressed: _procesando ? null : () => _transferirServicio(servicio),
+                    icon: const Icon(Icons.send, size: 18),
+                    label: const Text(
+                      'TRANSFERIR',
                       style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
                     ),
                   ),
@@ -5991,7 +6432,11 @@ class _MovilScreenState extends State<MovilScreen>
                                         builder: (context) => ChatScreen(
                                           salaId: 'soporte_movil_${servicio['id']}',
                                           miId: widget.usuario['id'],
-                                          miNombre: widget.usuario['nombre'],
+                                          miNombre: () {
+                                            final usr = widget.usuario['usuario']?.toString() ?? '';
+                                            final num = RegExp(r'\d+').firstMatch(usr)?.group(0);
+                                            return num != null ? 'Móvil $num' : (widget.usuario['nombre'] ?? 'Móvil');
+                                          }(),
                                           titulo: 'Soporte Central',
                                           servicioId: servicio['id'],
                                           alarmaLocal: 'chat_central_movil',
@@ -7317,6 +7762,44 @@ class _MovilScreenState extends State<MovilScreen>
                     ),
                   ),
                 ],
+                // Reasignar — solo Masters
+                if (esMaster && !tieneProblema) ...[
+                  const SizedBox(width: 6),
+                  SizedBox(
+                    height: 36,
+                    child: OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFFFFB300),
+                        side: const BorderSide(color: Color(0xFFFFB300)),
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(7)),
+                      ),
+                      onPressed: _procesando ? null : () => _reasignarServicio(servicio),
+                      child: const Text('REASIGNAR',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                    ),
+                  ),
+                ],
+                // Transferir — no-Masters, requiere aceptación del receptor
+                if (!esMaster && !tieneProblema) ...[
+                  const SizedBox(width: 6),
+                  SizedBox(
+                    height: 36,
+                    child: OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.teal,
+                        side: const BorderSide(color: Colors.teal),
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(7)),
+                      ),
+                      onPressed: _procesando ? null : () => _transferirServicio(servicio),
+                      child: const Text('TRANSFERIR',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                    ),
+                  ),
+                ],
               ],
             ),
 
@@ -8097,6 +8580,9 @@ class _MovilScreenState extends State<MovilScreen>
                     if (servicio['fn_notif_fase3'] != null)
                       _abortarMisilOneSignal(
                           servicio['fn_notif_fase3'].toString());
+                    if (servicio['fn_notif_fase4'] != null)
+                      _abortarMisilOneSignal(
+                          servicio['fn_notif_fase4'].toString());
                   } else {
                     // Serviexpress normal: cancelar misiles estándar
                     if (servicio['onesignal_30s'] != null)
@@ -8196,6 +8682,8 @@ class _MovilScreenState extends State<MovilScreen>
           _abortarMisilOneSignal(servicio['fn_notif_fase2'].toString());
         if (servicio['fn_notif_fase3'] != null)
           _abortarMisilOneSignal(servicio['fn_notif_fase3'].toString());
+        if (servicio['fn_notif_fase4'] != null)
+          _abortarMisilOneSignal(servicio['fn_notif_fase4'].toString());
       } else {
         // Serviexpress normal: cancelar misiles estándar
         if (servicio['onesignal_30s'] != null)
@@ -8214,6 +8702,284 @@ class _MovilScreenState extends State<MovilScreen>
     }
   }
 
+  // ══════════════════════════════════════════════════════════════════════
+  // TRANSFERIR SERVICIO — no-Masters solamente.
+  // Guarda el ID del receptor en transferencia_a_movil_id.
+  // El receptor ve un diálogo y decide ACEPTAR o RECHAZAR.
+  // ══════════════════════════════════════════════════════════════════════
+  Future<void> _transferirServicio(Map<String, dynamic> servicio) async {
+    setState(() => _procesando = true);
+    try {
+      // 1. IDs con servicio activo (para filtrar)
+      final activosSvc = await Supabase.instance.client
+          .from('servicios')
+          .select('movil_id')
+          .inFilter('estado', [
+            'en_ruta_origen',
+            'en_origen',
+            'en_ruta_destino',
+            'problema',
+          ])
+          .not('movil_id', 'is', null);
+      final idsOcupados = activosSvc
+          .map((s) => s['movil_id'].toString())
+          .toSet();
+      idsOcupados.add(widget.usuario['id'].toString());
+
+      // 2. Móviles disponibles
+      final disponiblesData = await Supabase.instance.client
+          .from('usuarios')
+          .select('id, nombre, usuario, rango_movil')
+          .eq('rol', 'movil')
+          .eq('en_linea', true)
+          .eq('activo', true)
+          .not('suspendido', 'is', true)
+          .order('nombre', ascending: true);
+
+      final disponibles = disponiblesData
+          .where((m) => !idsOcupados.contains(m['id'].toString()))
+          .toList();
+
+      if (!mounted) return;
+
+      if (disponibles.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No hay móviles disponibles para transferir'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
+      // 3. Selector de móvil
+      final seleccionado = await showDialog<Map<String, dynamic>>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          title: const Text('¿A quién transferir?'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: disponibles.length,
+              itemBuilder: (_, i) {
+                final m = disponibles[i];
+                final rango = m['rango_movil']?.toString().toUpperCase() ?? 'NOVATO';
+                return ListTile(
+                  dense: true,
+                  leading: CircleAvatar(
+                    radius: 16,
+                    backgroundColor: Colors.black87,
+                    child: Text(
+                      RegExp(r'\d+').firstMatch(m['usuario']?.toString() ?? '')?.group(0) ?? '?',
+                      style: const TextStyle(
+                          color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  title: Text(m['nombre'] ?? '—',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  subtitle: Text('@${m['usuario']} · $rango',
+                      style: const TextStyle(fontSize: 11)),
+                  onTap: () => Navigator.pop(ctx, m),
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar'),
+            ),
+          ],
+        ),
+      );
+
+      if (seleccionado == null || !mounted) return;
+
+      // 4. Confirmar
+      final confirmar = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          title: const Text('¿Solicitar transferencia?'),
+          content: Text(
+            'Se enviará una solicitud a ${seleccionado['nombre']}.\n'
+            'Él debe aceptarla desde su teléfono para que se realice.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text(
+                'ENVIAR',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmar != true || !mounted) return;
+
+      // 5. Guardar solicitud en BD
+      final nuevoId = seleccionado['id'] as int;
+      await Supabase.instance.client.from('servicios').update({
+        'transferencia_a_movil_id': nuevoId.toString(),
+      }).eq('id', servicio['id']);
+
+      // 6. Notificar al receptor
+      await MotorNotificaciones.dispararMisil(
+        idDestino: nuevoId.toString(),
+        titulo: '📨 SOLICITUD DE TRANSFERENCIA',
+        mensaje: '${widget.usuario['nombre']} quiere transferirte un servicio',
+        urgente: true,
+        sonido: Sonidos.movilParadero,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+                'Solicitud enviada a ${seleccionado['nombre']}, esperando respuesta...'),
+            backgroundColor: Colors.teal,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('Error al transferir: $e'),
+              backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _procesando = false);
+    }
+  }
+
+  // Revisa si algún servicio tiene transferencia_a_movil_id apuntando a este móvil.
+  // Se llama cada vez que llegan datos del stream.
+  void _verificarTransferenciaEntrante(List<Map<String, dynamic>> servicios) {
+    if (_dialogoTransferenciaActivo || !mounted) return;
+    final miId = widget.usuario['id'].toString();
+    Map<String, dynamic>? srv;
+    for (final s in servicios) {
+      if (s['transferencia_a_movil_id']?.toString() == miId) {
+        srv = s;
+        break;
+      }
+    }
+    if (srv == null) return;
+    _dialogoTransferenciaActivo = true;
+    _mostrarDialogoTransferenciaEntrante(srv);
+  }
+
+  Future<void> _mostrarDialogoTransferenciaEntrante(
+      Map<String, dynamic> servicio) async {
+    if (!mounted) {
+      _dialogoTransferenciaActivo = false;
+      return;
+    }
+
+    // Buscar nombre del que envía
+    String deMovilNombre = 'otro móvil';
+    final deMovilId = servicio['movil_id'];
+    if (deMovilId != null) {
+      try {
+        final data = await Supabase.instance.client
+            .from('usuarios')
+            .select('nombre')
+            .eq('id', deMovilId)
+            .maybeSingle();
+        deMovilNombre = data?['nombre'] ?? 'otro móvil';
+      } catch (_) {}
+    }
+
+    if (!mounted) {
+      _dialogoTransferenciaActivo = false;
+      return;
+    }
+
+    final decision = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: const Text('📨 Solicitud de transferencia'),
+        content: Text(
+          '$deMovilNombre quiere transferirte su servicio #${servicio['id']}.\n\n'
+          '¿Aceptas tomarlo?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('RECHAZAR',
+                style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              'ACEPTAR',
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (decision == true) {
+      // Aceptar: asignarme el servicio + guardar auditoría
+      await Supabase.instance.client.from('servicios').update({
+        'movil_id': int.parse(widget.usuario['id'].toString()),
+        'estado': 'en_ruta_origen',
+        'accepted_at': DateTime.now().toUtc().toIso8601String(),
+        'transferencia_a_movil_id': null,
+        'transferido': true,
+        'transferido_de_movil_id': servicio['movil_id']?.toString(),
+        'transferido_at': DateTime.now().toUtc().toIso8601String(),
+      }).eq('id', servicio['id']);
+
+      // Avisar al que lo cedió
+      if (deMovilId != null) {
+        await MotorNotificaciones.dispararMisil(
+          idDestino: deMovilId.toString(),
+          titulo: '✅ Transferencia aceptada',
+          mensaje: '${widget.usuario['nombre']} aceptó tu servicio #${servicio['id']}',
+          urgente: false,
+          sonido: 'alerta',
+        );
+      }
+    } else {
+      // Rechazar: limpiar campo + guardar auditoría de rechazo
+      await Supabase.instance.client.from('servicios').update({
+        'transferencia_a_movil_id': null,
+        'transferencia_rechazada': true,
+        'transferencia_rechazada_por': widget.usuario['id'].toString(),
+        'transferencia_rechazada_at': DateTime.now().toUtc().toIso8601String(),
+      }).eq('id', servicio['id']);
+
+      // Avisar al que lo cedió
+      if (deMovilId != null) {
+        await MotorNotificaciones.dispararMisil(
+          idDestino: deMovilId.toString(),
+          titulo: '❌ Transferencia rechazada',
+          mensaje: '${widget.usuario['nombre']} rechazó tu solicitud',
+          urgente: false,
+          sonido: 'alerta',
+        );
+      }
+    }
+
+    if (mounted) setState(() => _dialogoTransferenciaActivo = false);
+  }
+
   // --- LIBERAR (exclusivo Master) — el servicio "renace" desde cero ---
   // Resetea movil_id y estado, y MUY IMPORTANTE: resetea liberacion_at
   // a NOW(). El embudo táctico calcula sus fases (Master ve todo a T=0,
@@ -8221,6 +8987,154 @@ class _MovilScreenState extends State<MovilScreen>
   // de ese campo — sin resetearlo, el servicio "heredaría" la edad
   // real desde su creación original y podría saltarse fases enteras
   // en vez de volver a empezar limpio para todos.
+  // ══════════════════════════════════════════════════════════════════════
+  // REASIGNAR SERVICIO — transfiere el servicio activo a otro móvil
+  // disponible. Solo aplica a servicios en estado en_ruta_origen.
+  // El móvil original queda libre; el nuevo recibe un headsup.
+  // ══════════════════════════════════════════════════════════════════════
+  Future<void> _reasignarServicio(Map<String, dynamic> servicio) async {
+    setState(() => _procesando = true);
+    try {
+      // 1. IDs con servicio activo (para filtrar)
+      final activosSvc = await Supabase.instance.client
+          .from('servicios')
+          .select('movil_id')
+          .inFilter('estado', [
+            'en_ruta_origen',
+            'en_origen',
+            'en_ruta_destino',
+            'problema',
+          ])
+          .not('movil_id', 'is', null);
+      final idsOcupados = activosSvc
+          .map((s) => s['movil_id'].toString())
+          .toSet();
+      idsOcupados.add(widget.usuario['id'].toString()); // excluir a sí mismo
+
+      // 2. Móviles disponibles
+      final disponiblesData = await Supabase.instance.client
+          .from('usuarios')
+          .select('id, nombre, usuario, rango_movil')
+          .eq('rol', 'movil')
+          .eq('en_linea', true)
+          .eq('activo', true)
+          .not('suspendido', 'is', true)
+          .order('nombre', ascending: true);
+
+      final disponibles = disponiblesData
+          .where((m) => !idsOcupados.contains(m['id'].toString()))
+          .toList();
+
+      if (!mounted) return;
+
+      if (disponibles.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No hay móviles disponibles para reasignar'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
+      // 3. Selector de móvil
+      final seleccionado = await showDialog<Map<String, dynamic>>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          title: const Text('¿A quién reasignas?'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: disponibles.length,
+              itemBuilder: (_, i) {
+                final m = disponibles[i];
+                final rango = m['rango_movil']?.toString().toUpperCase() ?? 'NOVATO';
+                return ListTile(
+                  dense: true,
+                  leading: CircleAvatar(
+                    radius: 16,
+                    backgroundColor: Colors.black87,
+                    child: Text(
+                      RegExp(r'\d+').firstMatch(m['usuario']?.toString() ?? '')?.group(0) ?? '?',
+                      style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  title: Text(m['nombre'] ?? '—', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  subtitle: Text('@${m['usuario']} · $rango', style: const TextStyle(fontSize: 11)),
+                  onTap: () => Navigator.pop(ctx, m),
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar'),
+            ),
+          ],
+        ),
+      );
+
+      if (seleccionado == null || !mounted) return;
+
+      // 4. Confirmar
+      final confirmar = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          title: const Text('¿Confirmar reasignación?'),
+          content: Text(
+            'El servicio pasará a ${seleccionado['nombre']}.\n'
+            'Tú quedarás libre.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.black),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text(
+                'REASIGNAR',
+                style: TextStyle(color: Color(0xff3AF500), fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmar != true || !mounted) return;
+
+      // 5. Actualizar BD
+      final nuevoId = seleccionado['id'] as int;
+      await Supabase.instance.client.from('servicios').update({
+        'movil_id': nuevoId,
+        'estado': 'en_ruta_origen',
+        'accepted_at': DateTime.now().toUtc().toIso8601String(),
+      }).eq('id', servicio['id']);
+
+      // 6. Headsup al nuevo móvil
+      await MotorNotificaciones.dispararMisil(
+        idDestino: nuevoId.toString(),
+        titulo: '📍 TU TURNO EN EL PARADERO',
+        mensaje: 'Un servicio está esperando por ti',
+        urgente: true,
+        sonido: Sonidos.movilParadero,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al reasignar: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _procesando = false);
+    }
+  }
+
   Future<void> _liberarServicio(Map<String, dynamic> servicio) async {
     final confirmar = await showDialog<bool>(
       context: context,
@@ -8262,6 +9176,9 @@ class _MovilScreenState extends State<MovilScreen>
         if (servicio['fn_notif_fase3'] != null)
           await MotorNotificaciones.cancelarMisil(
               servicio['fn_notif_fase3'].toString());
+        if (servicio['fn_notif_fase4'] != null)
+          await MotorNotificaciones.cancelarMisil(
+              servicio['fn_notif_fase4'].toString());
       } else {
         // Serviexpress normal: cancelar misiles estándar
         if (servicio['onesignal_30s'] != null)
@@ -8296,13 +9213,12 @@ class _MovilScreenState extends State<MovilScreen>
             if (esFnLiberar) 'fn_fase3_at': null,
             if (esFnLiberar) 'fn_notif_fase2': null,
             if (esFnLiberar) 'fn_notif_fase3': null,
+            if (esFnLiberar) 'fn_notif_fase4': null,
             if (esFnLiberar) 'fn_notificados_fase1': <String>[],
           })
           .eq('id', servicio['id']);
 
-      // El Master vuelve a su fila — mismo flujo que cuando Central
-      // cancela un servicio (ver canal radar_bg).
-      if (_estaEnLinea) _intentarRegistroParadero();
+      // El registro al paradero es decisión del móvil — no se auto-registra al liberar.
 
       final servicioId = servicio['id'] as int;
 
@@ -8332,7 +9248,7 @@ class _MovilScreenState extends State<MovilScreen>
             ])
             .not('movil_id', 'is', null);
         final Map<String, int> cntFn = {};
-        for (final sv in svcActivos as List) {
+        for (final sv in svcActivos) {
           final sid = sv['movil_id'].toString();
           cntFn[sid] = (cntFn[sid] ?? 0) + 1;
         }
@@ -8349,7 +9265,7 @@ class _MovilScreenState extends State<MovilScreen>
             (cntFn[m['id'].toString()] ?? 0) <
             limRango(m['rango_movil']?.toString());
 
-        final mastersFn = (movFnData as List)
+        final mastersFn = movFnData
             .where((m) =>
                 m['rango_movil']?.toString().toUpperCase() == 'MASTER' &&
                 tieneCapFn(m))
@@ -8543,6 +9459,9 @@ class _MovilScreenState extends State<MovilScreen>
             backgroundColor: Color(0xFFE040FB),
           ),
         );
+        // Verificar si había una actualización OTA pendiente que se
+        // pospuso porque había un servicio activo
+        await OtaUpdater.verificar(context);
       }
     } catch (e) {
       if (mounted) {
@@ -9214,17 +10133,42 @@ class _MovilScreenState extends State<MovilScreen>
   Future<bool> _confirmarSalida() async {
     if (!_estaEnLinea) return true; // sin estado activo → salir libre
 
+    // ── BLOQUEO ABSOLUTO: servicio activo ────────────────────────────────────
+    if (_tieneServicioActivo) {
+      await showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A1A),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          title: const Text('🚫 No puedes salir',
+              style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 16)),
+          content: const Text(
+            'Tienes un servicio en curso.\n\n'
+            'Finaliza o libera el servicio antes de cerrar la app.',
+            style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
+          ),
+          actions: [
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xff3AF500),
+                foregroundColor: Colors.black,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('ENTENDIDO', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      );
+      return false; // no permite salir
+    }
+
+    // ── ADVERTENCIA CON CONFIRMACIÓN: en paradero o conectado sin servicio ───
     String titulo;
     String mensaje;
 
-    if (_tieneServicioActivo) {
-      titulo = '⚠️ Tienes un servicio activo';
-      mensaje =
-          'Si cierras la app, el cliente y el local dejarán de ver tu ubicación '
-          'y el servicio se marcará como demorado.\n\n'
-          'El sistema limpiará tu estado automáticamente en 2 minutos, '
-          'pero puede generar problemas. ¿Seguro que quieres salir?';
-    } else if (_miParaderoCache != null) {
+    if (_miParaderoCache != null) {
       titulo = '⚠️ Estás en la fila de $_miParaderoCache';
       mensaje =
           'Si cierras la app sin salir de la fila, quedarás como #1 bloqueando '
@@ -9243,13 +10187,13 @@ class _MovilScreenState extends State<MovilScreen>
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        backgroundColor: const Color(0xFF1A1A1A),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         title: Text(titulo,
-            style: const TextStyle(
+            style: const TextStyle(color: Colors.orange,
                 fontWeight: FontWeight.bold, fontSize: 16)),
         content: Text(mensaje,
-            style: const TextStyle(fontSize: 14, height: 1.5)),
+            style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.5)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -9259,8 +10203,7 @@ class _MovilScreenState extends State<MovilScreen>
                     fontWeight: FontWeight.bold)),
           ),
           TextButton(
-            style:
-                TextButton.styleFrom(foregroundColor: Colors.red[700]),
+            style: TextButton.styleFrom(foregroundColor: Colors.red[400]),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('SALIR DE TODAS FORMAS'),
           ),
@@ -9292,7 +10235,7 @@ class _MovilScreenState extends State<MovilScreen>
           ),
         ),
         backgroundColor: Colors.black,
-        iconTheme: IconThemeData(color: Colors.white),
+        iconTheme: const IconThemeData(color: Colors.white),
         actions: [
           // AppBar simplificado: Perfil, Ranking y Cerrar sesión ahora
           // viven en la pestaña de Perfil — el AppBar solo conserva lo
@@ -9474,7 +10417,9 @@ class _MovilScreenState extends State<MovilScreen>
             final tA = a['ticket_prioridad'] == true ? 1 : 0;
             final tB = b['ticket_prioridad'] == true ? 1 : 0;
             if (tA != tB) return tB.compareTo(tA);
-            return DateTime.parse(a['ingreso_fila']).compareTo(DateTime.parse(b['ingreso_fila']));
+            final cmp = DateTime.parse(a['ingreso_fila']).compareTo(DateTime.parse(b['ingreso_fila']));
+            if (cmp != 0) return cmp;
+            return ((a['id'] as num?) ?? 0).compareTo((b['id'] as num?) ?? 0);
           });
 
           bool radarAbierto = false;
@@ -9704,11 +10649,11 @@ class _MovilScreenState extends State<MovilScreen>
                           // lo expulsamos de la fila automáticamente.
                           if (_miParaderoCache != null &&
                               _serviciosActivosData.isNotEmpty) {
-                            final _paraderoQueDejo = _miParaderoCache;
+                            final paraderoQueDejo = _miParaderoCache;
                             _miParaderoCache = null; // evita re-disparar en siguientes builds
                             WidgetsBinding.instance.addPostFrameCallback((_) async {
                               if (!mounted) {
-                                _miParaderoCache = _paraderoQueDejo;
+                                _miParaderoCache = paraderoQueDejo;
                                 return;
                               }
                               try {
@@ -9723,7 +10668,7 @@ class _MovilScreenState extends State<MovilScreen>
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(
                                       content: Text(
-                                        '📍 Tienes un servicio activo — te sacamos de la fila $_paraderoQueDejo.',
+                                        '📍 Tienes un servicio activo — te sacamos de la fila $paraderoQueDejo.',
                                       ),
                                       backgroundColor: Colors.orange[800],
                                       duration: const Duration(seconds: 4),
@@ -9731,7 +10676,7 @@ class _MovilScreenState extends State<MovilScreen>
                                   );
                                 }
                               } catch (_) {
-                                _miParaderoCache = _paraderoQueDejo; // reintento en próximo tick
+                                _miParaderoCache = paraderoQueDejo; // reintento en próximo tick
                               }
                             });
                           }
@@ -9763,7 +10708,6 @@ class _MovilScreenState extends State<MovilScreen>
                                   ?.toString()
                                   .toUpperCase() ==
                               'MASTER';
-                          final String miId = widget.usuario['id'].toString();
                           final Distance medidorDistancia = const Distance();
 
                           // Helper: tiempo canónico de un servicio (GREATEST fix)
@@ -9777,40 +10721,12 @@ class _MovilScreenState extends State<MovilScreen>
                             return (lib != null && lib.isAfter(ca)) ? lib : ca;
                           }
 
-                          // Helper: si exclusivo_id incluye este móvil
-                          // (puede ser "id1,id2,..." para multi-paradero)
-                          bool _esExclusivoMio(String excl) =>
-                              excl.split(',').map((e) => e.trim()).contains(miId);
-
-                          // PRE-CÁLCULO FASE 1 — EL #1 DEL PARADERO SOLO VE 1 SERVICIO.
-                          // Regla: el más antiguo de los servicios en FASE 1
-                          // que le corresponden a este móvil (exclusivo o abierto).
-                          // Los 14 restantes permanecen ocultos hasta que él tome
-                          // ese uno y el #2 suba al #1.
-                          int? soloFase1Id;
-                          if (!esMaster && radarAbierto) {
-                            final candidatosFase1 = todos.where((x) {
-                              if (x['estado'] != 'pendiente') return false;
-                              if (_serviciosOcultosLocales.contains(x['id'])) return false;
-                              final secs = ahoraUtc.difference(_canonTime(x)).inSeconds;
-                              if (secs < 30 || secs >= 60) return false; // Solo FASE 1 (30s–60s)
-                              final excl = x['exclusivo_id']?.toString() ?? '';
-                              // Le corresponde si es exclusivo suyo O si no tiene exclusivo
-                              return excl.isEmpty || _esExclusivoMio(excl);
-                            }).toList();
-
-                            if (candidatosFase1.isNotEmpty) {
-                              candidatosFase1.sort(
-                                (a, b) => _canonTime(a).compareTo(_canonTime(b)));
-                              soloFase1Id = candidatosFase1.first['id'] as int;
-                            }
-                          }
-
                           for (var s in todos.where(
                             (x) => x['estado'] == 'pendiente',
                           )) {
-                            if (_serviciosOcultosLocales.contains(s['id']))
+                            if (_serviciosOcultosLocales.contains(s['id'])) {
                               continue;
+                            }
 
                             // 1. Leemos el reloj inteligente (GREATEST fix)
                             final targetUtc = _canonTime(s);
@@ -9822,8 +10738,6 @@ class _MovilScreenState extends State<MovilScreen>
                             if (segundos < 0 && !esMaster) continue;
 
                             bool puedeVer = false;
-                            final String exclusivoId =
-                                s['exclusivo_id']?.toString() ?? '';
 
                             // ═══ REGLA FN (FARMANORTE) — escalamiento 3 fases ═══
                             // Sistema PROPIO de FN — completamente separado del
@@ -9833,10 +10747,11 @@ class _MovilScreenState extends State<MovilScreen>
                             // en que el servicio entró al radar). Si fn_radar_t0
                             // no está seteado (servicios legacy), cae a created_at.
                             //
-                            //  FASE 1 (0–30s)  → SOLO móviles con rango MASTER
-                            //  FASE 2 (31–60s) → MASTER + el más cercano a la sede
-                            //                    (fn_fase2_movil_id)
-                            //  FASE 3 (61s+)   → TODOS los móviles con tiene_fn
+                            //  FASE 1 (0–30s)   → SOLO Masters (card con detalles + aceptar)
+                            //  FASE 2 (30–60s)  → Auto-asignación via pg_cron al más cercano
+                            //                     (fn_fase2_movil_id). Masters ven como fallback.
+                            //  FASE 3 (60–90s)  → No-masters en radio 2km (card + aceptar)
+                            //  FASE 4 (90s+)    → Todos los FN habilitados (card + aceptar)
                             //
                             // Filtro de capacidad aplica en TODAS las fases:
                             // un móvil al límite de servicios simultáneos NO ve
@@ -9862,19 +10777,42 @@ class _MovilScreenState extends State<MovilScreen>
                                       .inSeconds
                                   : 9999;
 
-                              final String fase2MovilId =
-                                  s['fn_fase2_movil_id']?.toString() ?? '';
-
                               if (segFn < 30) {
-                                // FASE 1: exclusivo de MASTER
+                                // FASE 1 (0-30s): exclusivo de MASTER
+                                // Masters ven la card con detalles completos y
+                                // botón de aceptar. Nadie más puede ver el servicio.
                                 puedeVer = esMaster;
-                              } else if (segFn < 61) {
-                                // FASE 2: MASTER + el más cercano pre-seleccionado
-                                puedeVer = esMaster ||
-                                    (fase2MovilId.isNotEmpty &&
-                                        fase2MovilId == miId);
+                              } else if (segFn < 60) {
+                                // FASE 2 (30-60s): el más cercano es auto-asignado
+                                // por pg_cron (fn-auto-asignar-fase2). Los Masters
+                                // siguen viéndolo como fallback mientras llega el cron.
+                                // El fn_fase2_movil_id NO ve la card — ya está siendo
+                                // asignado automáticamente sin necesidad de aceptar.
+                                puedeVer = esMaster;
+                              } else if (segFn < 90) {
+                                // FASE 3 (60-90s): zona 2km alrededor de la sede.
+                                // Muestra card con botón ACEPTAR a los no-masters cercanos.
+                                if (esMaster) {
+                                  puedeVer = true;
+                                } else {
+                                  final svcLat = (s['origen_lat'] as num?)?.toDouble();
+                                  final svcLng = (s['origen_lng'] as num?)?.toDouble();
+                                  if (svcLat != null &&
+                                      svcLng != null &&
+                                      _ultimaPosicionConocida != null) {
+                                    final distFn = medidorDistancia.as(
+                                      LengthUnit.Meter,
+                                      LatLng(_ultimaPosicionConocida!.latitude,
+                                             _ultimaPosicionConocida!.longitude),
+                                      LatLng(svcLat, svcLng),
+                                    );
+                                    puedeVer = distFn <= 2000;
+                                  } else {
+                                    puedeVer = false;
+                                  }
+                                }
                               } else {
-                                // FASE 3: todos con permiso FN (ya validado arriba)
+                                // FASE 4 (90s+): global — todos con permiso FN
                                 puedeVer = true;
                               }
 
@@ -9907,34 +10845,23 @@ class _MovilScreenState extends State<MovilScreen>
                             // 5. EMBUDO DE TIEMPO — 4 FASES DE 30s (total 2 min)
                             else {
                               if (segundos < 30) {
-                                // FASE 0: (0–29s) — PUNTO CIEGO
-                                // Exclusivo del Master. Nadie más lo ve.
+                                // FASE 1 (0–29s): exclusivo del Master.
+                                // Nadie más lo ve. Masters tienen 30s para aceptar.
                                 puedeVer = false;
                               } else if (segundos < 60) {
-                                // FASE 1: (30–59s) — Prioridad Paradero Estricta
-                                // El #1 del paradero solo ve 1 servicio: el más antiguo
-                                // de la cola (soloFase1Id). Los demás quedan en espera.
-                                // Si el servicio tiene exclusivo_id, solo lo ve ese móvil.
-                                final bool esElMioExclusivo =
-                                    exclusivoId.isNotEmpty && _esExclusivoMio(exclusivoId);
-                                final bool esElUnico =
-                                    exclusivoId.isEmpty &&
-                                    tienePermisoDeRadar &&
-                                    (s['id'] as int) == soloFase1Id;
-                                if (esElMioExclusivo && (s['id'] as int) == soloFase1Id) {
-                                  puedeVer = true;
-                                } else if (esElUnico) {
-                                  puedeVer = true;
-                                }
+                                // FASE 2 (30–59s): pg_cron auto-asigna al #1 del
+                                // paradero (paradero_auto_movil_id). Los no-masters
+                                // no deben ver la card — el #1 será asignado sin
+                                // necesidad de aceptar. Masters siguen como fallback.
+                                puedeVer = false;
                               } else if (segundos < 90) {
-                                // FASE 2: (60–89s) — Radar Zonal 1km
-                                // Se rompe el candado del paradero. Capacidad según rango.
-                                if (tieneCapacidad && distMetros <= 1000) {
+                                // FASE 3 (60–89s): Zona 2km desde el origen.
+                                // No-masters con capacidad dentro del radio ven la card.
+                                if (tieneCapacidad && distMetros <= 2000) {
                                   puedeVer = true;
                                 }
                               } else {
-                                // FASE 3: (90s+) — Todos los disponibles
-                                // Todos los rangos con capacidad disponible pueden ver.
+                                // FASE 4 (90s+): Todos los disponibles con capacidad.
                                 if (tieneCapacidad) {
                                   puedeVer = true;
                                 }

@@ -132,7 +132,7 @@ class _AltaDemandaFnToggleState extends State<_AltaDemandaFnToggle> {
         Switch(
           value: activo,
           onChanged: _valor == null ? null : _toggle,
-          activeColor: Colors.orange[600],
+          activeThumbColor: Colors.orange[600],
           materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
         ),
       ],
@@ -174,7 +174,7 @@ class _SedesTabState extends State<_SedesTab> {
             .inFilter('rol', ['sede_fn', 'supervisor_fn']),
       ]);
 
-      final lista = List<Map<String, dynamic>>.from(results[0] as List);
+      final lista = List<Map<String, dynamic>>.from(results[0]);
       lista.sort((a, b) {
         final na = int.tryParse(a['numero']?.toString() ?? '') ?? 999999;
         final nb = int.tryParse(b['numero']?.toString() ?? '') ?? 999999;
@@ -185,7 +185,7 @@ class _SedesTabState extends State<_SedesTab> {
 
       setState(() {
         _sedes = lista;
-        _usuariosFn = List<Map<String, dynamic>>.from(results[1] as List);
+        _usuariosFn = List<Map<String, dynamic>>.from(results[1]);
       });
     } catch (e) {
       _snack('Error cargando sedes: $e');
@@ -557,7 +557,7 @@ class _SedeCard extends StatelessWidget {
                   children: [
                     Switch(
                       value: activo,
-                      activeColor: Colors.green[400],
+                      activeThumbColor: Colors.green[400],
                       onChanged: (_) => onToggle(),
                     ),
                     Row(
@@ -925,7 +925,7 @@ class _UsuarioSedeDialogState extends State<_UsuarioSedeDialog> {
                     style: TextStyle(color: Colors.white70, fontSize: 13)),
                 value: _activo,
                 onChanged: (v) => setState(() => _activo = v),
-                activeColor: Colors.green,
+                activeThumbColor: Colors.green,
               ),
 
               // Rol (informativo)
@@ -1230,6 +1230,7 @@ class _SedeDialogState extends State<_SedeDialog> {
                 // Tipo
                 _label('Tipo'),
                 DropdownButtonFormField<String>(
+                  // ignore: deprecated_member_use
                   value: _tipo,
                   dropdownColor: const Color(0xFF2A2A2A),
                   style: const TextStyle(color: Colors.white),
@@ -1273,6 +1274,7 @@ class _SedeDialogState extends State<_SedeDialog> {
                 // Zona
                 _label('Zona'),
                 DropdownButtonFormField<String>(
+                  // ignore: deprecated_member_use
                   value: _zona,
                   dropdownColor: const Color(0xFF2A2A2A),
                   style: const TextStyle(color: Colors.white),
@@ -1362,7 +1364,7 @@ class _SedeDialogState extends State<_SedeDialog> {
                     const Spacer(),
                     Switch(
                       value: _activo,
-                      activeColor: Colors.green[400],
+                      activeThumbColor: Colors.green[400],
                       onChanged: (v) => setState(() => _activo = v),
                     ),
                   ],
@@ -1733,7 +1735,7 @@ class _MotoFnCard extends StatelessWidget {
               children: [
                 Switch(
                   value: tieneFn,
-                  activeColor: Colors.indigo[300],
+                  activeThumbColor: Colors.indigo[300],
                   onChanged: (_) => onToggleFn(),
                 ),
                 Text(
@@ -2111,7 +2113,7 @@ class _CardServicioFN extends StatelessWidget {
         '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
     if (dt.year == now.year &&
         dt.month == now.month &&
-        dt.day == now.day) return hm;
+        dt.day == now.day) { return hm; }
     return '${dt.day}/${dt.month} $hm';
   }
 

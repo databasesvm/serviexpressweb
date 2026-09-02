@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -10,7 +11,6 @@ import 'package:serviexpress_app/screens/reporte_financiero_screen.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart';
 import 'package:serviexpress_app/screens/chat_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:flutter/services.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:serviexpress_app/screens/ranking_screen.dart'; // FIX #7: fuente única de verdad para el ranking
 import 'package:serviexpress_app/screens/monitor_pedidos_screen.dart';
@@ -20,6 +20,7 @@ import 'package:serviexpress_app/utils/panico_widgets.dart'; // Botón de pánic
 import 'package:serviexpress_app/utils/campo_tarifa_inteligente.dart'; // Motor de tarifas
 import 'package:serviexpress_app/services/ota_updater.dart'; // OTA updates
 import 'package:serviexpress_app/screens/fn_panel_screen.dart'; // Panel FN Farmanorte
+import 'package:serviexpress_app/screens/fn_facturacion_screen.dart'; // Facturación FN
 import 'package:serviexpress_app/utils/auth_helper.dart'; // hashContrasena
 import 'package:serviexpress_app/screens/historial_servicios_screen.dart'; // Historial de servicios
 part 'central_panel_precios.dart';
@@ -405,7 +406,7 @@ class _CentralScreenState extends State<CentralScreen>
                   .from('usuarios')
                   .select('id')
                   .eq('rol', 'central');
-              final ids = (centrales as List)
+              final ids = centrales
                   .map((u) => u['id'].toString())
                   .toList();
               if (ids.isNotEmpty) {
@@ -421,7 +422,7 @@ class _CentralScreenState extends State<CentralScreen>
             } catch (_) {}
 
             if (mounted) {
-              setState(() => _usuariosPendientes = (pendientes as List).length);
+              setState(() => _usuariosPendientes = pendientes.length);
               _sonidos.reproducir(Sonidos.centralRadar);
               ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                 content: Text('👤 $identificador por activar'),
@@ -447,11 +448,12 @@ class _CentralScreenState extends State<CentralScreen>
           event: PostgresChangeEvent.update,
           schema: 'public',
           table: 'usuarios',
-          callback: (payload) {
-            final oldDoc = payload.oldRecord;
+          callback: (payload) async {
             final newDoc = payload.newRecord;
-            // Solo nos interesa la transición false → true
-            if (oldDoc['activo'] != false || newDoc['activo'] != true) return;
+            // newDoc['activo'] == true significa que un usuario fue activado.
+            // NO usamos oldDoc porque Supabase sin REPLICA IDENTITY FULL
+            // lo devuelve vacío, haciendo la condición siempre falsa.
+            if (newDoc['activo'] != true) return;
             final userId = newDoc['id']?.toString();
             if (userId != null && !kIsWeb) {
               final nid = _activacionNotifIds.remove(userId);
@@ -459,9 +461,22 @@ class _CentralScreenState extends State<CentralScreen>
                 OneSignal.Notifications.removeNotification(nid);
               }
             }
-            if (mounted) {
-              setState(() =>
-                  _usuariosPendientes = (_usuariosPendientes - 1).clamp(0, 9999));
+            // Refetch del count real desde la BD — más confiable que
+            // decrementar manualmente (evita desincronizaciones).
+            try {
+              final pendientes = await Supabase.instance.client
+                  .from('usuarios')
+                  .select('id')
+                  .eq('activo', false)
+                  .not('rol', 'in', '("cliente")');
+              if (mounted) {
+                setState(() => _usuariosPendientes = pendientes.length);
+              }
+            } catch (_) {
+              if (mounted) {
+                setState(() =>
+                    _usuariosPendientes = (_usuariosPendientes - 1).clamp(0, 9999));
+              }
             }
           },
         )
@@ -475,7 +490,7 @@ class _CentralScreenState extends State<CentralScreen>
             .select('id')
             .eq('activo', false)
             .not('rol', 'in', '("cliente")');
-        if (mounted) setState(() => _usuariosPendientes = (pendientes as List).length);
+        if (mounted) setState(() => _usuariosPendientes = pendientes.length);
       } catch (_) {}
     });
 
@@ -508,7 +523,7 @@ class _CentralScreenState extends State<CentralScreen>
           .eq('fecha', fechaHoy)
           .not('duracion_minutos', 'is', null);
       final Map<int, int> mapa = {};
-      for (final r in rows as List) {
+      for (final r in rows) {
         final mid = r['movil_id'] as int?;
         if (mid == null) continue;
         mapa[mid] = (mapa[mid] ?? 0) + ((r['duracion_minutos'] as num?)?.toInt() ?? 0);
@@ -523,7 +538,7 @@ class _CentralScreenState extends State<CentralScreen>
           .from('reportes_servicio')
           .select('id')
           .eq('leido', false);
-      if (mounted) setState(() => _reportesSinLeer = (rows as List).length);
+      if (mounted) setState(() => _reportesSinLeer = rows.length);
     } catch (_) {}
   }
 
@@ -823,6 +838,17 @@ class _CentralScreenState extends State<CentralScreen>
                         fontWeight: FontWeight.bold,
                         fontSize: 15,
                         letterSpacing: 2),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                IconButton(
+                  icon: const Icon(Icons.receipt_long, color: Colors.indigo, size: 22),
+                  tooltip: 'Facturación FN',
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const FnFacturacionScreen(titulo: 'Facturación FN — Central'),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 6),
