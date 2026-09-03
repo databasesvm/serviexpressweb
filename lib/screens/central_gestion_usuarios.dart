@@ -527,27 +527,29 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
               // ── Stat boxes (scroll horizontal para 5 tabs) ─────────────
               SizedBox(
                 height: 56,
-                child: ListView(
+                child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
-                  children: [
-                    _statBox('${_solicitudes.length}', 'Solicitudes', const Color(0xFFF59E0B), onTap: () => _tabCtrl.animateTo(0)),
-                    const SizedBox(width: 8),
-                    _statBox('${_activaciones.length}', 'Por activar', const Color(0xFF3B82F6), onTap: () => _tabCtrl.animateTo(1)),
-                    const SizedBox(width: 8),
-                    _statBox('${_moviles.length}', 'Móviles', const Color(0xff3AF500), onTap: () => _tabCtrl.animateTo(2)),
-                    const SizedBox(width: 8),
-                    _statBox('${_registros.length}', 'Recientes', const Color(0xFFA855F7), onTap: () => _tabCtrl.animateTo(3)),
-                    const SizedBox(width: 8),
-                    _statBox(
-                      '${_solicitudesDescansoList.where((s) => s['estado'] == 'pendiente').length}',
-                      'Descansos',
-                      const Color(0xFF10B981),
-                      onTap: () => _tabCtrl.animateTo(4),
-                    ),
-                    const SizedBox(width: 8),
-                    _statBox('${_eliminados.length}', 'Eliminados', Colors.red[400]!, onTap: () => _tabCtrl.animateTo(5)),
-                  ],
+                  child: Row(
+                    children: [
+                      _statBox('${_solicitudes.length}', 'Solicitudes', const Color(0xFFF59E0B), onTap: () => _tabCtrl.animateTo(0)),
+                      const SizedBox(width: 8),
+                      _statBox('${_activaciones.length}', 'Por activar', const Color(0xFF3B82F6), onTap: () => _tabCtrl.animateTo(1)),
+                      const SizedBox(width: 8),
+                      _statBox('${_moviles.length}', 'Móviles', const Color(0xff3AF500), onTap: () => _tabCtrl.animateTo(2)),
+                      const SizedBox(width: 8),
+                      _statBox('${_registros.length}', 'Recientes', const Color(0xFFA855F7), onTap: () => _tabCtrl.animateTo(3)),
+                      const SizedBox(width: 8),
+                      _statBox(
+                        '${_solicitudesDescansoList.where((s) => s['estado'] == 'pendiente').length}',
+                        'Descansos',
+                        const Color(0xFF10B981),
+                        onTap: () => _tabCtrl.animateTo(4),
+                      ),
+                      const SizedBox(width: 8),
+                      _statBox('${_eliminados.length}', 'Eliminados', Colors.red[400]!, onTap: () => _tabCtrl.animateTo(5)),
+                    ],
+                  ),
                 ),
               ),
               // ── Búsqueda ───────────────────────────────────────────────
@@ -586,7 +588,8 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
     );
   }
 
-  Widget _statBox(String val, String label, Color color, {VoidCallback? onTap}) => Expanded(
+  Widget _statBox(String val, String label, Color color, {VoidCallback? onTap}) => SizedBox(
+    width: 86,
     child: GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
