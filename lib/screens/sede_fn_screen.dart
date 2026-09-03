@@ -1212,6 +1212,41 @@ class _ActivosTabState extends State<_ActivosTab> {
   // ── Aprobar cotización + lanzar cascada FN ────────────────────────────────
   Future<void> _aprobar(Map<String, dynamic> s) async {
     try {
+      // ── Móvil preseleccionado: asignar directo sin cascada ──────────────
+      final preselId = s['fn_movil_preseleccionado_id']?.toString();
+      if (preselId != null && preselId.isNotEmpty) {
+        final consec = s['fn_consecutivo']?.toString() ?? '#${s['id']}';
+        final destino = s['destino']?.toString() ?? '';
+        final tarifa = (s['tarifa'] as num?)?.toInt();
+        final movilIdInt = int.tryParse(preselId);
+
+        await _db.from('servicios').update({
+          'estado': 'pendiente',
+          'movil_id': movilIdInt,
+          'fn_radar_t0': DateTime.now().toUtc().toIso8601String(),
+          'fn_asignacion_tipo': 'directo_presel',
+          'fn_movil_preseleccionado_id': null,
+        }).eq('id', s['id']);
+
+        // Notificar solo al móvil preseleccionado
+        await MotorNotificaciones.dispararMisil(
+          idDestino: preselId,
+          titulo: '🎯 SERVICIO FN ASIGNADO',
+          mensaje: 'Servicio asignado · $destino'
+              '${tarifa != null ? ' · \$${_miles(tarifa)}' : ''}',
+          urgente: true,
+          sonido: Sonidos.movilParadero,
+        );
+
+        await MotorNotificaciones.dispararACentral(
+          titulo: '✅ Cotización aprobada — $consec',
+          mensaje: '${_labelSede(s)} aprobó. Móvil asignado directo.',
+          urgente: false,
+          sonido: Sonidos.fnCotizacion,
+        );
+        return;
+      }
+
       // 1. Móviles FN disponibles en línea
       final movilesRaw = await _db
           .from('usuarios')
@@ -1366,6 +1401,333 @@ class _ActivosTabState extends State<_ActivosTab> {
       );
     } catch (e) {
       _snack('Error: \$e');
+    }
+  }
+
+  // ── Helper formateo miles ───────────────────────────────────────────────────
+  String _miles(int v) {
+    final s = v.toString();
+    final buf = StringBuffer();
+    for (int i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) buf.write('.');
+      buf.write(s[i]);
+    }
+    return buf.toString();
+  }
+
+  // ── Nuevo servicio con un móvil ya asignado ─────────────────────────────────
+  Future<void> _nuevoServicioConMovil(
+      Map<String, dynamic> svActivo, String movilId, String movilNum) async {
+    final sedeId = widget.sede?['id'];
+    if (sedeId == null) return;
+
+    // Cargar red de direcciones de la sede
+    List<Map<String, dynamic>> redDirs = [];
+    try {
+      final data = await _db
+          .from('fn_red_direcciones')
+          .select('id, nombre, direccion, precio')
+          .eq('sede_id', sedeId)
+          .eq('activo', true)
+          .order('nombre');
+      redDirs = List<Map<String, dynamic>>.from(data);
+    } catch (_) {}
+
+    final destinoCtrl = TextEditingController();
+    int? redDirSelId;
+    double? precioSugerido;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A1A),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          title: Row(
+            children: [
+              const Icon(Icons.add_circle, color: Colors.indigo, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Nuevo servicio — Móvil $movilNum',
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14),
+                ),
+              ),
+            ],
+          ),
+          content: SizedBox(
+            width: 340,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Campo destino
+                  TextField(
+                    controller: destinoCtrl,
+                    textCapitalization: TextCapitalization.characters,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      labelText: 'Dirección de destino',
+                      labelStyle: const TextStyle(color: Colors.white54),
+                      border: const OutlineInputBorder(),
+                      isDense: true,
+                      filled: true,
+                      fillColor: const Color(0xFF111111),
+                    ),
+                    onChanged: (_) {
+                      if (redDirSelId != null) {
+                        setD(() { redDirSelId = null; precioSugerido = null; });
+                      }
+                    },
+                  ),
+
+                  // Chips red de direcciones
+                  if (redDirs.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    const Text('Direcciones guardadas:',
+                        style: TextStyle(color: Colors.white54, fontSize: 11)),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: redDirs.map((dir) {
+                        final sel = redDirSelId == dir['id'];
+                        return GestureDetector(
+                          onTap: () => setD(() {
+                            if (sel) {
+                              redDirSelId = null;
+                              precioSugerido = null;
+                              destinoCtrl.clear();
+                            } else {
+                              redDirSelId = dir['id'] as int;
+                              precioSugerido = (dir['precio'] as num).toDouble();
+                              destinoCtrl.text =
+                                  dir['direccion'].toString().toUpperCase();
+                            }
+                          }),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: sel
+                                  ? Colors.indigo[700]
+                                  : const Color(0xFF252525),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                  color: sel
+                                      ? Colors.indigo[300]!
+                                      : Colors.white24),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  dir['nombre'].toString(),
+                                  style: TextStyle(
+                                    color: sel ? Colors.white : Colors.white70,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                Text(
+                                  '\$${_miles((dir['precio'] as num).toInt())}',
+                                  style: TextStyle(
+                                    color: sel
+                                        ? Colors.greenAccent
+                                        : Colors.white38,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ],
+
+                  // Banner precio sugerido
+                  if (precioSugerido != null) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.green[900]!.withValues(alpha: 0.3),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.flash_on,
+                              color: Colors.greenAccent, size: 14),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              '⚡ \$${_miles(precioSugerido!.toInt())} — se asigna directo al Móvil $movilNum sin cascada',
+                              style: const TextStyle(
+                                  color: Colors.greenAccent, fontSize: 11),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ] else ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'Sin precio sugerido: la central cotizará. Al aprobar, irá directo al Móvil $movilNum.',
+                      style: const TextStyle(color: Colors.white38, fontSize: 11),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar',
+                  style: TextStyle(color: Colors.white54)),
+            ),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.indigo[700],
+                foregroundColor: Colors.white,
+              ),
+              icon: const Icon(Icons.send_rounded, size: 16),
+              label: Text(precioSugerido != null
+                  ? 'CREAR DIRECTO'
+                  : 'SOLICITAR COTIZACIÓN'),
+              onPressed: () async {
+                final destino = destinoCtrl.text.trim();
+                if (destino.isEmpty) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    const SnackBar(content: Text('Ingresa el destino')));
+                  return;
+                }
+                Navigator.pop(ctx);
+                await _crearServicioConMovil(
+                  svActivo: svActivo,
+                  movilId: movilId,
+                  movilNum: movilNum,
+                  destino: destino,
+                  precioSugerido: precioSugerido,
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+    destinoCtrl.dispose();
+  }
+
+  // ── Crear servicio con móvil preseleccionado ────────────────────────────────
+  Future<void> _crearServicioConMovil({
+    required Map<String, dynamic> svActivo,
+    required String movilId,
+    required String movilNum,
+    required String destino,
+    double? precioSugerido,
+  }) async {
+    try {
+      final sedeId = widget.sede?['id'];
+      if (sedeId == null) return;
+
+      final sedeData = widget.sede!;
+      final nombreSede = _labelSede(svActivo);
+      final movilIdInt = int.tryParse(movilId);
+      final usaPrecio = precioSugerido != null;
+
+      // Consecutivo
+      final consec = await _db.rpc(
+          'fn_generar_consecutivo', params: {'p_sede_id': sedeId});
+
+      // Recogida mínima desde la sede solicitante
+      final recogidaSede = {
+        'id': sedeId,
+        'tipo': sedeData['tipo']?.toString() ?? 'FN',
+        'numero': sedeData['numero']?.toString() ?? '',
+        'nombre': sedeData['nombre']?.toString() ?? '',
+        'lat': sedeData['lat'],
+        'lng': sedeData['lng'],
+        'cobertura': sedeData['cobertura'] ?? 'dentro',
+        'es_sede_solicitante': true,
+      };
+
+      final insertedRow = await _db.from('servicios').insert({
+        'origen': nombreSede,
+        'destino': destino.toUpperCase(),
+        'estado': usaPrecio ? 'pendiente' : 'cotizacion',
+        'creador': 'FN-Sede',
+        'tipo_servicio': 'FARMANORTE',
+        'tipo_fn': true,
+        'fn_origen': 'sede',
+        'fn_sede_solicitante_id': sedeId,
+        'fn_sede_id': sedeId,
+        'recogidas': [recogidaSede],
+        'metodo_pago': 'Efectivo',
+        'fn_alta_demanda': false,
+        'fn_consecutivo': consec?.toString(),
+        'fn_recotizacion': 1,
+        'archivado': false,
+        if (usaPrecio) ...{
+          'tarifa': precioSugerido,
+          'tarifa_detalle': {
+            'total': precioSugerido,
+            'fuente': 'red_fn',
+            'precio_red': precioSugerido,
+          },
+          'movil_id': movilIdInt,
+          'fn_asignacion_tipo': 'directo',
+        },
+        if (!usaPrecio) 'fn_movil_preseleccionado_id': movilIdInt,
+        if (sedeData['lat'] != null)
+          'origen_lat': (sedeData['lat'] as num).toDouble(),
+        if (sedeData['lng'] != null)
+          'origen_lng': (sedeData['lng'] as num).toDouble(),
+        if (sedeData['telefono_whatsapp'] != null &&
+            (sedeData['telefono_whatsapp'] as String).trim().isNotEmpty)
+          'fn_whatsapp': (sedeData['telefono_whatsapp'] as String).trim(),
+      }).select('id').single();
+
+      final newId = insertedRow['id'] is int
+          ? insertedRow['id'] as int
+          : int.tryParse(insertedRow['id']?.toString() ?? '');
+
+      if (usaPrecio) {
+        // Asignar directo — notificar solo al móvil preseleccionado
+        await MotorNotificaciones.dispararMisil(
+          idDestino: movilId,
+          titulo: '🎯 SERVICIO FN DIRECTO',
+          mensaje: 'Nuevo servicio asignado · $destino'
+              ' · \$${_miles(precioSugerido.toInt())}',
+          urgente: true,
+          sonido: Sonidos.movilParadero,
+        );
+        await MotorNotificaciones.dispararACentral(
+          titulo: '🏥 Servicio FN directo — ${consec ?? '#$newId'}',
+          mensaje:
+              '✅ $destino · \$${_miles(precioSugerido.toInt())} (Móvil $movilNum asignado)',
+          urgente: true,
+          sonido: Sonidos.fnCotizacion,
+        );
+        _snack('✅ Servicio creado y asignado al Móvil $movilNum');
+      } else {
+        // Cotización — notificar a la central
+        await MotorNotificaciones.dispararACentral(
+          titulo: '🏥 Solicitud FN — ${consec ?? '#$newId'}',
+          mensaje: 'Cotizar para $destino (Móvil $movilNum preseleccionado)',
+          urgente: true,
+          sonido: Sonidos.fnCotizacion,
+        );
+        _snack('📤 Solicitud enviada a la central');
+      }
+    } catch (e) {
+      _snack('Error al crear servicio: $e');
     }
   }
 
@@ -1670,6 +2032,9 @@ class _ActivosTabState extends State<_ActivosTab> {
                   ? () => _cancelar(activos[i])
                   : null,
               onReportarProblema: () => _reportarProblema(activos[i]),
+              onNuevoServicio: activos[i]['movil_id'] != null
+                  ? (mid, mnum) => _nuevoServicioConMovil(activos[i], mid, mnum)
+                  : null,
             ),
           ),
         );
@@ -1688,6 +2053,7 @@ class _CardServicioActivo extends StatefulWidget {
   final VoidCallback onRechazar;
   final VoidCallback? onCancelar;
   final VoidCallback onReportarProblema;
+  final Function(String movilId, String movilNum)? onNuevoServicio;
 
   const _CardServicioActivo({
     required this.servicio,
@@ -1695,6 +2061,7 @@ class _CardServicioActivo extends StatefulWidget {
     required this.onRechazar,
     required this.onCancelar,
     required this.onReportarProblema,
+    this.onNuevoServicio,
   });
 
   @override
@@ -2078,6 +2445,30 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
             // ── Acciones secundarias ──────────────────────────────────────
             if (estado != 'cotizacion') ...[
               const SizedBox(height: 4),
+              // Botón "Nuevo servicio con este móvil"
+              if (s['movil_id'] != null &&
+                  widget.onNuevoServicio != null &&
+                  !['cotizada', 'fn_renegociando', 'cotizacion'].contains(estado)) ...[
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () => widget.onNuevoServicio!(
+                      s['movil_id'].toString(),
+                      numMovil ?? s['movil_id'].toString(),
+                    ),
+                    icon: const Icon(Icons.add_circle_outline, size: 15, color: Colors.indigo),
+                    label: Text(
+                      '➕ Nuevo servicio con Móvil ${numMovil ?? s['movil_id']}',
+                      style: const TextStyle(color: Colors.indigo, fontSize: 12),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: Colors.indigo),
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 4),
+              ],
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
