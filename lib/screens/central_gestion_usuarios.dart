@@ -46,10 +46,13 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
             .select('id, nombre, usuario, correo, telefono, direccion_local, tipo_negocio, zona_cobertura, created_at')
             .eq('rol', 'local').eq('estado_local', 'pendiente').order('created_at'),
         _db.from('usuarios')
-            .select('id, nombre, usuario, rol, telefono, correo, activo, suspendido, created_at, numero_movil')
-            .eq('activo', false).neq('suspendido', true).order('created_at'),
+            .select('id, nombre, usuario, rol, telefono, correo, activo, suspendido, created_at, numero_movil, tipo_plan_movil, doc_perfil_url, doc_cedula_url, doc_licencia_url, doc_soat_url')
+            .eq('activo', false)
+            .or('suspendido.is.null,suspendido.eq.false')
+            .or('eliminado.is.null,eliminado.eq.false')
+            .order('created_at'),
         _db.from('usuarios')
-            .select('id, nombre, usuario, rango_movil, puntuacion, activo, tipo_plan, numero_movil')
+            .select('id, nombre, usuario, rango_movil, puntuacion, activo, tipo_plan_movil, numero_movil')
             .eq('rol', 'movil').order('usuario', ascending: true),
         _db.from('usuarios')
             .select('id, nombre, usuario, rol, estado_local, activo, suspendido, created_at')
@@ -715,6 +718,103 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
     ]),
   );
 
+  // ── Dialog: Ver registro completo del usuario ────────────────────────────
+  void _verRegistroDialog(Map<String, dynamic> u) {
+    final plan = u['tipo_plan_movil']?.toString() ?? '';
+    final numMovil = u['numero_movil']?.toString() ?? '';
+    Widget _docImg(String? url, String label) {
+      if (url == null || url.isEmpty) {
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Row(children: [
+            const Icon(Icons.image_not_supported_rounded, color: Colors.white24, size: 16),
+            const SizedBox(width: 6),
+            Text('$label: no subido', style: const TextStyle(color: Colors.white30, fontSize: 12)),
+          ]),
+        );
+      }
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(label, style: const TextStyle(color: Colors.white54, fontSize: 11)),
+          const SizedBox(height: 4),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: Image.network(url, height: 160, width: double.infinity, fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => Container(
+                height: 60, color: Colors.white10,
+                child: const Center(child: Text('No se pudo cargar', style: TextStyle(color: Colors.white30, fontSize: 11))),
+              ),
+            ),
+          ),
+        ]),
+      );
+    }
+
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              const Icon(Icons.person_search_rounded, color: Colors.lightBlueAccent, size: 20),
+              const SizedBox(width: 8),
+              Expanded(child: Text('Registro de ${u['nombre'] ?? '—'}',
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15))),
+              IconButton(icon: const Icon(Icons.close, color: Colors.white54, size: 18),
+                  onPressed: () => Navigator.pop(ctx), padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 24, minHeight: 24)),
+            ]),
+            const Divider(color: Colors.white12, height: 20),
+            // ── Datos básicos ──
+            _infoRow(Icons.badge_rounded, 'Usuario', '@${u['usuario'] ?? '—'}'),
+            _infoRow(Icons.phone_rounded, 'Teléfono', u['telefono']?.toString() ?? '—'),
+            _infoRow(Icons.email_rounded, 'Correo', u['correo']?.toString() ?? '—'),
+            if (numMovil.isNotEmpty)
+              _infoRow(Icons.tag_rounded, 'Número solicitado', '#$numMovil'),
+            if (plan.isNotEmpty)
+              _infoRow(Icons.work_rounded, 'Plan', plan.toUpperCase()),
+            _infoRow(Icons.people_rounded, 'Rol', u['rol']?.toString().toUpperCase() ?? '—'),
+            const SizedBox(height: 12),
+            // ── Documentos ──
+            const Text('Documentación', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            _docImg(u['doc_perfil_url']?.toString(), '📸 Selfie de verificación'),
+            _docImg(u['doc_cedula_url']?.toString(), '🪪 Cédula'),
+            _docImg(u['doc_licencia_url']?.toString(), '🚗 Licencia de conducción'),
+            _docImg(u['doc_soat_url']?.toString(), '🛡️ SOAT'),
+            const SizedBox(height: 4),
+            Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+              TextButton(onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Cerrar', style: TextStyle(color: Colors.white54))),
+              const SizedBox(width: 8),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.green[700], foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                icon: const Icon(Icons.check_rounded, size: 16),
+                label: const Text('ACTIVAR', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                onPressed: () { Navigator.pop(ctx); _activarUsuario(u); },
+              ),
+            ]),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _infoRow(IconData icon, String label, String val) => Padding(
+    padding: const EdgeInsets.only(bottom: 6),
+    child: Row(children: [
+      Icon(icon, color: Colors.white38, size: 14),
+      const SizedBox(width: 6),
+      Text('$label: ', style: const TextStyle(color: Colors.white38, fontSize: 12)),
+      Expanded(child: Text(val, style: const TextStyle(color: Colors.white70, fontSize: 12))),
+    ]),
+  );
+
   // ── Tab 1: Activaciones pendientes (usuarios inactivos no suspendidos) ────
   Widget _tabActivaciones() {
     final lista = _filtrar(_activaciones);
@@ -763,6 +863,14 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
               _chip(rol.toUpperCase(), color),
             ]),
             trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+              IconButton(
+                tooltip: 'Ver registro',
+                icon: const Icon(Icons.person_search_rounded, color: Colors.lightBlueAccent, size: 20),
+                onPressed: () => _verRegistroDialog(u),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+              ),
+              const SizedBox(width: 2),
               IconButton(
                 tooltip: 'Cambiar contraseña',
                 icon: const Icon(Icons.lock_reset_rounded, color: Colors.amber, size: 18),

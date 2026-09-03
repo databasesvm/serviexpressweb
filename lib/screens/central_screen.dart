@@ -88,6 +88,7 @@ class _CentralScreenState extends State<CentralScreen>
 
   int _panelActivoMobile = 1;
   bool _radarActivo = false;
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
 
   // REPORTES DE SERVICIO — badge de no leídos
   int _reportesSinLeer = 0;
@@ -845,7 +846,9 @@ class _CentralScreenState extends State<CentralScreen>
     final esPantallaGrande = MediaQuery.of(context).size.width > 850;
 
     return Scaffold(
+      key: _scaffoldKey,
       backgroundColor: Colors.grey[300],
+      endDrawer: esPantallaGrande ? null : _buildMenuLateral(context),
       appBar: AppBar(
         title: Text(
           esPantallaGrande
@@ -978,56 +981,43 @@ class _CentralScreenState extends State<CentralScreen>
                 const SizedBox(width: 8),
               ]
             : [
-                // Botón FN compacto
+                // Acceso rápido: FN
                 Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
                   child: InkWell(
                     onTap: () => _abrirFormularioFN(context),
                     borderRadius: BorderRadius.circular(6),
                     child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.indigo[900],
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: const Text(
-                        'FN',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
-                            letterSpacing: 1.5),
-                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(color: Colors.indigo[900], borderRadius: BorderRadius.circular(6)),
+                      child: const Text('FN', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13, letterSpacing: 1.5)),
                     ),
                   ),
                 ),
+                // Acceso rápido: Nuevo servicio
                 IconButton(
-                  icon: const Icon(Icons.add_box, color: Color(0xff3AF500)),
+                  icon: const Icon(Icons.add_box_rounded, color: Color(0xff3AF500)),
+                  tooltip: 'Nuevo servicio',
                   onPressed: () => _abrirFormularioDespacho(context),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.share_rounded, color: Color(0xff25D366)),
-                  tooltip: 'Enviar link al cliente',
-                  onPressed: () => _enviarLinkInvitado(context),
-                ),
-                BotonPanicoTrigger(
-                  esCompacto: true,
-                  segundos: 2,
-                  icono: Icons.campaign_rounded,
-                  colorAcento: Colors.orange,
-                  titulo: 'CONVOCATORIA GENERAL',
-                  descripcion:
-                      'Se notificará a TODO el personal en línea (móviles y central) que necesitas su atención urgente.',
-                  onActivado: _dispararPanico,
-                  onDetener: () => _detenerAlerta(tipo: 'global'),
-                ),
-                IconButton(
-                  icon: const Icon(
-                    Icons.power_settings_new,
-                    color: Colors.redAccent,
-                  ),
-                  onPressed: _cerrarSesionSegura,
+                // Badge de gestión + menú lateral
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.menu_rounded, color: Colors.white),
+                      tooltip: 'Menú',
+                      onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
+                    ),
+                    if (_usuariosPendientes > 0)
+                      Positioned(
+                        top: 6, right: 6,
+                        child: Container(
+                          width: 8, height: 8,
+                          decoration: const BoxDecoration(color: Colors.orange, shape: BoxShape.circle),
+                        ),
+                      ),
+                  ],
                 ),
               ],
       ),
@@ -1126,6 +1116,107 @@ class _CentralScreenState extends State<CentralScreen>
                 ),
               ],
             ),
+    );
+  }
+
+  // ── Menú lateral (endDrawer) — solo en vista móvil ───────────────────────
+  Widget _buildMenuLateral(BuildContext context) {
+    void cerrar() => Navigator.of(context).pop();
+
+    Widget _item(IconData icon, String label, Color color, VoidCallback onTap) =>
+        InkWell(
+          onTap: () { cerrar(); onTap(); },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+            child: Row(children: [
+              Icon(icon, color: color, size: 20),
+              const SizedBox(width: 14),
+              Text(label, style: const TextStyle(color: Colors.white, fontSize: 14)),
+            ]),
+          ),
+        );
+
+    return Drawer(
+      width: 270,
+      backgroundColor: const Color(0xFF111111),
+      child: SafeArea(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          // ── Cabecera ──
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+            color: Colors.black,
+            child: Row(children: [
+              const Icon(Icons.settings_suggest_rounded, color: Color(0xff3AF500), size: 20),
+              const SizedBox(width: 10),
+              const Expanded(child: Text('Comando Central',
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15))),
+              IconButton(
+                icon: const Icon(Icons.close_rounded, color: Colors.white54, size: 20),
+                padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+                onPressed: cerrar,
+              ),
+            ]),
+          ),
+          const Divider(color: Colors.white10, height: 1),
+
+          Expanded(child: ListView(padding: EdgeInsets.zero, children: [
+            // ── FN Farmanorte ──
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+              child: Text('FN FARMANORTE', style: TextStyle(color: Colors.indigo[300], fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
+            ),
+            _item(Icons.local_pharmacy_rounded, 'Crear servicio FN', Colors.indigo[200]!, () => _abrirFormularioFN(context)),
+            _item(Icons.receipt_long_rounded, 'Facturación FN', Colors.indigo[200]!, () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FnFacturacionScreen(titulo: 'Facturación FN — Central')))),
+            _item(Icons.location_on_rounded, 'Red de direcciones FN', Colors.teal[300]!, () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FnRedDireccionesScreen()))),
+
+            const Divider(color: Colors.white10, height: 20),
+
+            // ── Operaciones ──
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+              child: Text('OPERACIONES', style: TextStyle(color: Colors.white38, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
+            ),
+            _item(Icons.add_box_rounded, 'Nuevo servicio', const Color(0xff3AF500), () => _abrirFormularioDespacho(context)),
+            _item(Icons.share_rounded, 'Enviar link al cliente', const Color(0xff25D366), () => _enviarLinkInvitado(context)),
+
+            const Divider(color: Colors.white10, height: 20),
+
+            // ── Gestión ──
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+              child: Text('GESTIÓN', style: TextStyle(color: Colors.white38, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
+            ),
+            InkWell(
+              onTap: () { cerrar(); _abrirPanelGestion(context); },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+                child: Row(children: [
+                  const Icon(Icons.admin_panel_settings_rounded, color: Colors.orangeAccent, size: 20),
+                  const SizedBox(width: 14),
+                  const Text('Gestión de usuarios', style: TextStyle(color: Colors.white, fontSize: 14)),
+                  if (_usuariosPendientes > 0) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(color: Colors.orange, borderRadius: BorderRadius.circular(10)),
+                      child: Text('$_usuariosPendientes', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                    ),
+                  ],
+                ]),
+              ),
+            ),
+            _item(Icons.campaign_rounded, 'Convocatoria general', Colors.orange, () {
+              // Abre el diálogo de pánico directamente
+              _dispararPanico();
+            }),
+
+            const Divider(color: Colors.white10, height: 20),
+
+            // ── Sesión ──
+            _item(Icons.power_settings_new_rounded, 'Cerrar sesión', Colors.redAccent, _cerrarSesionSegura),
+          ])),
+        ]),
+      ),
     );
   }
 }
