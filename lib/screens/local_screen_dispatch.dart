@@ -621,7 +621,7 @@ mixin _DispatchMixin on State<LocalScreen> {
     Map<String, dynamic> servicio,
     Map<String, dynamic> moto,
   ) async {
-    final movilUsuario = (moto['usuario'] ?? moto['nombre'] ?? '').toString().toUpperCase();
+    final movilUsuario = movilLabel(moto).toUpperCase();
     final String movilId = moto['id'].toString();
 
     try {

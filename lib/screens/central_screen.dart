@@ -83,6 +83,9 @@ class _CentralScreenState extends State<CentralScreen>
   // Toggle bloqueo automático por inactividad (config_sistema)
   bool _bloqueoInactividadActivo = false;
 
+  // Offset para mostrar el consecutivo de servicios desde 1 tras un reset
+  int _serviciosConsecutivoOffset = 0;
+
   final Set<int> _demorasAlertadas =
       {}; // IDs ya alertados por demora (no repetir)
 
@@ -556,12 +559,18 @@ class _CentralScreenState extends State<CentralScreen>
     try {
       final row = await Supabase.instance.client
           .from('config_sistema')
-          .select('bloqueo_inactividad_activo')
+          .select('bloqueo_inactividad_activo, servicios_consecutivo_offset')
           .eq('id', 1)
           .single();
-      if (mounted) setState(() => _bloqueoInactividadActivo = row['bloqueo_inactividad_activo'] as bool? ?? false);
+      if (mounted) setState(() {
+        _bloqueoInactividadActivo = row['bloqueo_inactividad_activo'] as bool? ?? false;
+        _serviciosConsecutivoOffset = (row['servicios_consecutivo_offset'] as int?) ?? 0;
+      });
     } catch (_) {}
   }
+
+  /// Número de orden visible = id - offset (arranca desde 1 tras cada reset)
+  int _consec(int id) => (id - _serviciosConsecutivoOffset).clamp(1, 999999);
 
   Future<void> _toggleBloqueoInactividad(bool nuevoValor) async {
     setState(() => _bloqueoInactividadActivo = nuevoValor);

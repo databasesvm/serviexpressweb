@@ -37,6 +37,22 @@ String fmtPeso(dynamic monto, {bool mostrarCero = false}) {
 }
 
 // =========================================================================
+// ETIQUETA DE MÓVIL — "Móvil 12" a partir del mapa de usuario
+// =========================================================================
+// Uso: movilLabel(m)                → 'Móvil 12'
+//      movilLabel(m, fallback: '—') → '—' si no se puede determinar el número
+//
+// Prioridad: numero_movil (int) → usuario field regex → fallback
+String movilLabel(Map<String, dynamic> u, {String fallback = '—'}) {
+  final num = u['numero_movil'];
+  if (num != null) return 'Móvil $num';
+  final uStr = u['usuario']?.toString() ?? '';
+  final match = RegExp(r'\d+').firstMatch(uStr)?.group(0);
+  if (match != null) return 'Móvil $match';
+  return fallback;
+}
+
+// =========================================================================
 // PULSING PANICO BUTTON — Latido de corazón + borde/glow animado
 // Úsalo cuando un botón de pánico o convocatoria está ACTIVO.
 // Parámetros: color = color del glow (rojo para pánico, naranja para convocatoria)

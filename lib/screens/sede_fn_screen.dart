@@ -34,6 +34,10 @@ class _SedeFnScreenState extends State<SedeFnScreen>
   Map<String, dynamic>? _sede;
   bool _altaDemanda = false;
 
+  // Móvil preseleccionado desde "Nuevo servicio con este móvil"
+  String? _movilPreselId;
+  String? _movilPreselNum;
+
   // Stream antiparpadeo de servicios activos
   final _ctrlServicios =
       StreamController<List<Map<String, dynamic>>>.broadcast();
@@ -93,6 +97,14 @@ class _SedeFnScreenState extends State<SedeFnScreen>
         setState(() => _altaDemanda = row?['alta_demanda_fn'] == true);
       }
     } catch (_) {}
+  }
+
+  void _irAFormularioConMovil(String movilId, String movilNum) {
+    setState(() {
+      _movilPreselId = movilId;
+      _movilPreselNum = movilNum;
+    });
+    _tab.animateTo(0);
   }
 
   // ── Stream antiparpadeo de servicios de esta sede ──────────────────────────
@@ -280,12 +292,19 @@ class _SedeFnScreenState extends State<SedeFnScreen>
                   sede: _sede,
                   altaDemanda: _altaDemanda,
                   onServicioCreado: () => _tab.animateTo(1),
+                  movilPreselId: _movilPreselId,
+                  movilPreselNum: _movilPreselNum,
+                  onPreselLimpiado: () => setState(() {
+                    _movilPreselId = null;
+                    _movilPreselNum = null;
+                  }),
                 ),
                 _ActivosTab(
                   usuario: widget.usuario,
                   sede: _sede,
                   stream: _ctrlServicios.stream,
                   cache: _cacheServicios,
+                  onIniciarConMovil: _irAFormularioConMovil,
                 ),
                 _HistorialTab(
                   usuario: widget.usuario,
@@ -309,12 +328,18 @@ class _FormularioTab extends StatefulWidget {
   final Map<String, dynamic>? sede;
   final bool altaDemanda;
   final VoidCallback onServicioCreado;
+  final String? movilPreselId;
+  final String? movilPreselNum;
+  final VoidCallback? onPreselLimpiado;
 
   const _FormularioTab({
     required this.usuario,
     required this.sede,
     required this.altaDemanda,
     required this.onServicioCreado,
+    this.movilPreselId,
+    this.movilPreselNum,
+    this.onPreselLimpiado,
   });
 
   @override
@@ -362,11 +387,29 @@ class _FormularioTabState extends State<_FormularioTab> {
   double? _precioSugerido; // precio de la dirección seleccionada de la red
   int? _redDireccionSelId; // id del registro seleccionado
 
+  // Móvil preseleccionado desde tab Activos
+  String? _movilPreselId;
+  String? _movilPreselNum;
+
   @override
   void initState() {
     super.initState();
+    _movilPreselId = widget.movilPreselId;
+    _movilPreselNum = widget.movilPreselNum;
     _cargarSedes();
     _cargarRedDirecciones();
+  }
+
+  @override
+  void didUpdateWidget(_FormularioTab old) {
+    super.didUpdateWidget(old);
+    if (widget.movilPreselId != old.movilPreselId &&
+        widget.movilPreselId != null) {
+      setState(() {
+        _movilPreselId = widget.movilPreselId;
+        _movilPreselNum = widget.movilPreselNum;
+      });
+    }
   }
 
   @override
@@ -448,40 +491,15 @@ class _FormularioTabState extends State<_FormularioTab> {
           .eq('tiene_fn', true)
           .not('suspendido', 'is', true);
 
-      // 2. Conteo de servicios activos
-      final serviciosActivos = await _db
-          .from('servicios')
-          .select('movil_id')
-          .inFilter('estado', ['en_ruta_origen','en_origen','en_ruta_destino','problema'])
-          .not('movil_id', 'is', null);
-
-      final Map<String, int> conteoActivos = {};
-      for (final sv in serviciosActivos as List) {
-        final sid = sv['movil_id'].toString();
-        conteoActivos[sid] = (conteoActivos[sid] ?? 0) + 1;
-      }
-
-      int limiteRango(String? r) {
-        switch (r?.toUpperCase().trim()) {
-          case 'PRO': return 1;
-          case 'ELITE': return 2;
-          case 'LEYENDA': return 3;
-          case 'MASTER': return 999;
-          default: return 1;
-        }
-      }
-
-      bool tieneCapFn(Map m) {
-        final sid = m['id'].toString();
-        return (conteoActivos[sid] ?? 0) < limiteRango(m['rango_movil']?.toString());
-      }
+      // FN: sin límite de capacidad — todos los móviles FN reciben notificaciones
+      // independientemente de cuántos servicios activos tengan.
 
       final moviles = List<Map<String, dynamic>>.from(movilesData as List);
       final masters = moviles
-          .where((m) => m['rango_movil']?.toString().toUpperCase() == 'MASTER' && tieneCapFn(m))
+          .where((m) => m['rango_movil']?.toString().toUpperCase() == 'MASTER')
           .toList();
       final noMasters = moviles
-          .where((m) => m['rango_movil']?.toString().toUpperCase() != 'MASTER' && tieneCapFn(m))
+          .where((m) => m['rango_movil']?.toString().toUpperCase() != 'MASTER')
           .toList();
 
       final masterIds = masters.map<String>((m) => m['id'].toString()).toList();
@@ -514,7 +532,7 @@ class _FormularioTabState extends State<_FormularioTab> {
 
       final fase3Ids = noMasterIds.where((id) => id != fase2Id).toList();
 
-      final titulo = '🏥 FN $consec';
+      final titulo = '🔵 FN $consec';
       final msg = '\$${_miles(tarifa)} → $destino';
 
       // FASE 1 (inmediata): Masters
@@ -687,6 +705,13 @@ class _FormularioTabState extends State<_FormularioTab> {
             if (_conDatafono) 'recargo_datafono': _recargoDaatafonoCOP,
           },
         },
+        // Móvil preseleccionado desde "Nuevo servicio con este móvil"
+        if (_movilPreselId != null && usaPrecioSugerido) ...{
+          'movil_id': int.tryParse(_movilPreselId!),
+          'fn_asignacion_tipo': 'directo_presel',
+        },
+        if (_movilPreselId != null && !usaPrecioSugerido)
+          'fn_movil_preseleccionado_id': int.tryParse(_movilPreselId!),
         if (_instruccionesCtrl.text.trim().isNotEmpty)
           'instrucciones_especiales': _instruccionesCtrl.text.trim(),
         // Coordenadas de la primera sede de recogida como origen (solo si es sede oficial)
@@ -718,22 +743,35 @@ class _FormularioTabState extends State<_FormularioTab> {
         sonido: Sonidos.fnCotizacion,
       );
 
-      // Si tiene precio sugerido → lanzar cascada FN automáticamente
+      // Si tiene precio sugerido → notificar o lanzar cascada
       if (usaPrecioSugerido && newServiceId != null) {
-        final sLatF = primeraRecogida['lat'] != null
-            ? (primeraRecogida['lat'] as num).toDouble()
-            : null;
-        final sLngF = primeraRecogida['lng'] != null
-            ? (primeraRecogida['lng'] as num).toDouble()
-            : null;
-        await _lanzarCascadaFn(
-          serviceId: newServiceId,
-          consec: consec?.toString() ?? '#$newServiceId',
-          destino: _destinoCtrl.text.trim(),
-          tarifa: _tarifaEfectiva!.toInt(),
-          sLat: sLatF,
-          sLng: sLngF,
-        );
+        if (_movilPreselId != null) {
+          // Asignación directa al móvil preseleccionado
+          await MotorNotificaciones.dispararMisil(
+            idDestino: _movilPreselId!,
+            titulo: '🎯 SERVICIO FN DIRECTO',
+            mensaje: 'Servicio asignado · ${_destinoCtrl.text.trim()}'
+                ' · \$${_miles(_tarifaEfectiva!.toInt())}',
+            urgente: true,
+            sonido: Sonidos.movilParadero,
+          );
+        } else {
+          // Cascada abierta
+          final sLatF = primeraRecogida['lat'] != null
+              ? (primeraRecogida['lat'] as num).toDouble()
+              : null;
+          final sLngF = primeraRecogida['lng'] != null
+              ? (primeraRecogida['lng'] as num).toDouble()
+              : null;
+          await _lanzarCascadaFn(
+            serviceId: newServiceId,
+            consec: consec?.toString() ?? '#$newServiceId',
+            destino: _destinoCtrl.text.trim(),
+            tarifa: _tarifaEfectiva!.toInt(),
+            sLat: sLatF,
+            sLng: sLngF,
+          );
+        }
       }
 
       if (!mounted) return;
@@ -750,10 +788,13 @@ class _FormularioTabState extends State<_FormularioTab> {
         _conDatafono = false;
         _precioSugerido = null;
         _redDireccionSelId = null;
+        _movilPreselId = null;
+        _movilPreselNum = null;
       });
       _destinoCtrl.clear();
       _facturaNumCtrl.clear();
       _instruccionesCtrl.clear();
+      widget.onPreselLimpiado?.call();
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -785,6 +826,44 @@ class _FormularioTabState extends State<_FormularioTab> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // ── Banner móvil preseleccionado ────────────────────────────────
+            if (_movilPreselId != null)
+              Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.indigo[900],
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.person_pin_rounded,
+                        color: Colors.white, size: 16),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Asignando a Móvil $_movilPreselNum',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13),
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: () {
+                        setState(() {
+                          _movilPreselId = null;
+                          _movilPreselNum = null;
+                        });
+                        widget.onPreselLimpiado?.call();
+                      },
+                      child: const Icon(Icons.close,
+                          color: Colors.white54, size: 18),
+                    ),
+                  ],
+                ),
+              ),
+
             // ── Aviso fuera de cobertura ────────────────────────────────────
             if (_tieneRecogidaFueraDe())
               Container(
@@ -1124,7 +1203,11 @@ class _FormularioTabState extends State<_FormularioTab> {
                             color: Colors.white, strokeWidth: 2))
                     : const Icon(Icons.send_rounded),
                 label: Text(
-                  _enviando ? 'Enviando...' : 'SOLICITAR COTIZACIÓN',
+                  _enviando
+                      ? 'Enviando...'
+                      : _movilPreselId != null
+                          ? 'ENVIAR — MÓVIL $_movilPreselNum'
+                          : 'SOLICITAR COTIZACIÓN',
                   style: const TextStyle(
                       fontWeight: FontWeight.bold, fontSize: 15),
                 ),
@@ -1216,12 +1299,14 @@ class _ActivosTab extends StatefulWidget {
   final Map<String, dynamic>? sede;
   final Stream<List<Map<String, dynamic>>> stream;
   final List<Map<String, dynamic>>? cache;
+  final void Function(String movilId, String movilNum)? onIniciarConMovil;
 
   const _ActivosTab({
     required this.usuario,
     required this.sede,
     required this.stream,
     required this.cache,
+    this.onIniciarConMovil,
   });
 
   @override
@@ -1297,33 +1382,8 @@ class _ActivosTabState extends State<_ActivosTab> {
           .eq('tiene_fn', true)
           .neq('suspendido', true);
 
-      // 2. Contar servicios activos por móvil
-      final svActivos = await _db
-          .from('servicios')
-          .select('movil_id')
-          .inFilter('estado', ['en_ruta_origen', 'en_origen', 'en_ruta_destino', 'problema'])
-          .not('movil_id', 'is', null);
-
-      final Map<String, int> activos = {};
-      for (final sv in svActivos) {
-        final mid = sv['movil_id'].toString();
-        activos[mid] = (activos[mid] ?? 0) + 1;
-      }
-
-      int limiteRango(String? r) {
-        switch (r?.toUpperCase().trim()) {
-          case 'PRO':     return 1;
-          case 'ELITE':   return 2;
-          case 'LEYENDA': return 3;
-          case 'MASTER':  return 999;
-          default:        return 1;
-        }
-      }
-
-      // Solo los que tienen capacidad para más servicios FN
-      final moviles = movilesRaw
-          .where((m) => (activos[m['id'].toString()] ?? 0) < limiteRango(m['rango_movil']?.toString()))
-          .toList();
+      // FN: sin límite de capacidad — todos reciben la cascada
+      final moviles = List<Map<String, dynamic>>.from(movilesRaw as List);
 
       final masters = moviles
           .where((m) => m['rango_movil']?.toString().toUpperCase() == 'MASTER')
@@ -1453,322 +1513,6 @@ class _ActivosTabState extends State<_ActivosTab> {
       buf.write(s[i]);
     }
     return buf.toString();
-  }
-
-  // ── Nuevo servicio con un móvil ya asignado ─────────────────────────────────
-  Future<void> _nuevoServicioConMovil(
-      Map<String, dynamic> svActivo, String movilId, String movilNum) async {
-    final sedeId = widget.sede?['id'];
-    if (sedeId == null) return;
-
-    // Cargar red de direcciones de la sede
-    List<Map<String, dynamic>> redDirs = [];
-    try {
-      final data = await _db
-          .from('fn_red_direcciones')
-          .select('id, nombre, direccion, precio')
-          .eq('sede_id', sedeId)
-          .eq('activo', true)
-          .order('nombre');
-      redDirs = List<Map<String, dynamic>>.from(data);
-    } catch (_) {}
-
-    final destinoCtrl = TextEditingController();
-    int? redDirSelId;
-    double? precioSugerido;
-
-    await showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setD) => AlertDialog(
-          backgroundColor: const Color(0xFF1A1A1A),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          title: Row(
-            children: [
-              const Icon(Icons.add_circle, color: Colors.indigo, size: 18),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Nuevo servicio — Móvil $movilNum',
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14),
-                ),
-              ),
-            ],
-          ),
-          content: SizedBox(
-            width: 340,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Campo destino
-                  TextField(
-                    controller: destinoCtrl,
-                    textCapitalization: TextCapitalization.characters,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: InputDecoration(
-                      labelText: 'Dirección de destino',
-                      labelStyle: const TextStyle(color: Colors.white54),
-                      border: const OutlineInputBorder(),
-                      isDense: true,
-                      filled: true,
-                      fillColor: const Color(0xFF111111),
-                    ),
-                    onChanged: (_) {
-                      if (redDirSelId != null) {
-                        setD(() { redDirSelId = null; precioSugerido = null; });
-                      }
-                    },
-                  ),
-
-                  // Chips red de direcciones
-                  if (redDirs.isNotEmpty) ...[
-                    const SizedBox(height: 10),
-                    const Text('Direcciones guardadas:',
-                        style: TextStyle(color: Colors.white54, fontSize: 11)),
-                    const SizedBox(height: 6),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      children: redDirs.map((dir) {
-                        final sel = redDirSelId == dir['id'];
-                        return GestureDetector(
-                          onTap: () => setD(() {
-                            if (sel) {
-                              redDirSelId = null;
-                              precioSugerido = null;
-                              destinoCtrl.clear();
-                            } else {
-                              redDirSelId = dir['id'] as int;
-                              precioSugerido = (dir['precio'] as num).toDouble();
-                              destinoCtrl.text =
-                                  dir['direccion'].toString().toUpperCase();
-                            }
-                          }),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: sel
-                                  ? Colors.indigo[700]
-                                  : const Color(0xFF252525),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                  color: sel
-                                      ? Colors.indigo[300]!
-                                      : Colors.white24),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  dir['nombre'].toString(),
-                                  style: TextStyle(
-                                    color: sel ? Colors.white : Colors.white70,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                Text(
-                                  '\$${_miles((dir['precio'] as num).toInt())}',
-                                  style: TextStyle(
-                                    color: sel
-                                        ? Colors.greenAccent
-                                        : Colors.white38,
-                                    fontSize: 11,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  ],
-
-                  // Banner precio sugerido
-                  if (precioSugerido != null) ...[
-                    const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.green[900]!.withValues(alpha: 0.3),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.flash_on,
-                              color: Colors.greenAccent, size: 14),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              '⚡ \$${_miles(precioSugerido!.toInt())} — se asigna directo al Móvil $movilNum sin cascada',
-                              style: const TextStyle(
-                                  color: Colors.greenAccent, fontSize: 11),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ] else ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      'Sin precio sugerido: la central cotizará. Al aprobar, irá directo al Móvil $movilNum.',
-                      style: const TextStyle(color: Colors.white38, fontSize: 11),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancelar',
-                  style: TextStyle(color: Colors.white54)),
-            ),
-            ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.indigo[700],
-                foregroundColor: Colors.white,
-              ),
-              icon: const Icon(Icons.send_rounded, size: 16),
-              label: Text(precioSugerido != null
-                  ? 'CREAR DIRECTO'
-                  : 'SOLICITAR COTIZACIÓN'),
-              onPressed: () async {
-                final destino = destinoCtrl.text.trim();
-                if (destino.isEmpty) {
-                  ScaffoldMessenger.of(ctx).showSnackBar(
-                    const SnackBar(content: Text('Ingresa el destino')));
-                  return;
-                }
-                Navigator.pop(ctx);
-                await _crearServicioConMovil(
-                  svActivo: svActivo,
-                  movilId: movilId,
-                  movilNum: movilNum,
-                  destino: destino,
-                  precioSugerido: precioSugerido,
-                );
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-    destinoCtrl.dispose();
-  }
-
-  // ── Crear servicio con móvil preseleccionado ────────────────────────────────
-  Future<void> _crearServicioConMovil({
-    required Map<String, dynamic> svActivo,
-    required String movilId,
-    required String movilNum,
-    required String destino,
-    double? precioSugerido,
-  }) async {
-    try {
-      final sedeId = widget.sede?['id'];
-      if (sedeId == null) return;
-
-      final sedeData = widget.sede!;
-      final nombreSede = _labelSede(svActivo);
-      final movilIdInt = int.tryParse(movilId);
-      final usaPrecio = precioSugerido != null;
-
-      // Consecutivo
-      final consec = await _db.rpc(
-          'fn_generar_consecutivo', params: {'p_sede_id': sedeId});
-
-      // Recogida mínima desde la sede solicitante
-      final recogidaSede = {
-        'id': sedeId,
-        'tipo': sedeData['tipo']?.toString() ?? 'FN',
-        'numero': sedeData['numero']?.toString() ?? '',
-        'nombre': sedeData['nombre']?.toString() ?? '',
-        'lat': sedeData['lat'],
-        'lng': sedeData['lng'],
-        'cobertura': sedeData['cobertura'] ?? 'dentro',
-        'es_sede_solicitante': true,
-      };
-
-      final insertedRow = await _db.from('servicios').insert({
-        'origen': nombreSede,
-        'destino': destino.toUpperCase(),
-        'estado': usaPrecio ? 'pendiente' : 'cotizacion',
-        'creador': 'FN-Sede',
-        'tipo_servicio': 'FARMANORTE',
-        'tipo_fn': true,
-        'fn_origen': 'sede',
-        'fn_sede_solicitante_id': sedeId,
-        'fn_sede_id': sedeId,
-        'recogidas': [recogidaSede],
-        'metodo_pago': 'Efectivo',
-        'fn_alta_demanda': false,
-        'fn_consecutivo': consec?.toString(),
-        'fn_recotizacion': 1,
-        'archivado': false,
-        if (usaPrecio) ...{
-          'tarifa': precioSugerido,
-          'tarifa_detalle': {
-            'total': precioSugerido,
-            'fuente': 'red_fn',
-            'precio_red': precioSugerido,
-          },
-          'movil_id': movilIdInt,
-          'fn_asignacion_tipo': 'directo',
-        },
-        if (!usaPrecio) 'fn_movil_preseleccionado_id': movilIdInt,
-        if (sedeData['lat'] != null)
-          'origen_lat': (sedeData['lat'] as num).toDouble(),
-        if (sedeData['lng'] != null)
-          'origen_lng': (sedeData['lng'] as num).toDouble(),
-        if (sedeData['telefono_whatsapp'] != null &&
-            (sedeData['telefono_whatsapp'] as String).trim().isNotEmpty)
-          'fn_whatsapp': (sedeData['telefono_whatsapp'] as String).trim(),
-      }).select('id').single();
-
-      final newId = insertedRow['id'] is int
-          ? insertedRow['id'] as int
-          : int.tryParse(insertedRow['id']?.toString() ?? '');
-
-      if (usaPrecio) {
-        // Asignar directo — notificar solo al móvil preseleccionado
-        await MotorNotificaciones.dispararMisil(
-          idDestino: movilId,
-          titulo: '🎯 SERVICIO FN DIRECTO',
-          mensaje: 'Nuevo servicio asignado · $destino'
-              ' · \$${_miles(precioSugerido.toInt())}',
-          urgente: true,
-          sonido: Sonidos.movilParadero,
-        );
-        await MotorNotificaciones.dispararACentral(
-          titulo: '🏥 Servicio FN directo — ${consec ?? '#$newId'}',
-          mensaje:
-              '✅ $destino · \$${_miles(precioSugerido.toInt())} (Móvil $movilNum asignado)',
-          urgente: true,
-          sonido: Sonidos.fnCotizacion,
-        );
-        _snack('✅ Servicio creado y asignado al Móvil $movilNum');
-      } else {
-        // Cotización — notificar a la central
-        await MotorNotificaciones.dispararACentral(
-          titulo: '🏥 Solicitud FN — ${consec ?? '#$newId'}',
-          mensaje: 'Cotizar para $destino (Móvil $movilNum preseleccionado)',
-          urgente: true,
-          sonido: Sonidos.fnCotizacion,
-        );
-        _snack('📤 Solicitud enviada a la central');
-      }
-    } catch (e) {
-      _snack('Error al crear servicio: $e');
-    }
   }
 
   // Distancia Haversine en metros (sin dependencia de latlong2)
@@ -2081,7 +1825,7 @@ class _ActivosTabState extends State<_ActivosTab> {
             final prev = activos[i - 1];
             final consec = prev['fn_consecutivo']?.toString() ??
                 '#${prev['id']}';
-            final numMov = prev['movil_id']?.toString() ?? '';
+            final numMov = prev['numero_movil']?.toString() ?? '';
             items.add(_ListItem.separator(
                 label: '🏍️ Móvil $numMov — Realizando servicio $consec'));
           }
@@ -2138,8 +1882,10 @@ class _ActivosTabState extends State<_ActivosTab> {
                 onRechazar: () => _rechazar(s),
                 onCancelar: _puedeCanselar(s) ? () => _cancelar(s) : null,
                 onReportarProblema: () => _reportarProblema(s),
-                onNuevoServicio: s['movil_id'] != null
-                    ? (mid, mnum) => _nuevoServicioConMovil(s, mid, mnum)
+                onNuevoServicio: s['movil_id'] != null &&
+                        widget.onIniciarConMovil != null
+                    ? (mid, mnum) =>
+                        widget.onIniciarConMovil!.call(mid, mnum)
                     : null,
               );
             },

@@ -1386,7 +1386,7 @@ mixin _CardsMixin on State<LocalScreen> {
   ) {
     final destinoCtrl = TextEditingController();
     final telefonoCtrl = TextEditingController();
-    final movilNombre = (moto['usuario'] ?? moto['nombre'] ?? '').toString().toUpperCase();
+    final movilNombre = movilLabel(moto).toUpperCase();
 
     showDialog(
       context: context,

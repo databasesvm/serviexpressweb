@@ -54,7 +54,7 @@ extension CentralScreenMonitor on _CentralScreenState {
                     stops: [0.0, 0.25, 0.5, 0.75, 1.0],
                   ).createShader(bounds),
                   child: Text(
-                    '👑 COTIZACIÓN VIP #$id',
+                    '👑 COTIZACIÓN VIP #${_consec(id)}',
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
                       color: Colors.white,
@@ -62,7 +62,7 @@ extension CentralScreenMonitor on _CentralScreenState {
                   ),
                 )
               : Text(
-                  'RESOLVER COTIZACIÓN #$id',
+                  'RESOLVER COTIZACIÓN #${_consec(id)}',
                   style: const TextStyle(
                     fontWeight: FontWeight.bold,
                     color: Colors.orange,
@@ -197,7 +197,7 @@ extension CentralScreenMonitor on _CentralScreenState {
             borderRadius: BorderRadius.circular(12),
           ),
           title: Text(
-            'COTIZACIÓN ENVIADA #$id',
+            'COTIZACIÓN ENVIADA #${_consec(id)}',
             style: const TextStyle(
               fontWeight: FontWeight.bold,
               color: Colors.blue,
@@ -269,7 +269,7 @@ extension CentralScreenMonitor on _CentralScreenState {
       context: context,
       builder: (context) => AlertDialog(
         title: Text(
-          'CONTROL DE ORDEN #$id',
+          'CONTROL DE ORDEN #${_consec(id)}',
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
         content: SingleChildScrollView(
@@ -944,7 +944,7 @@ extension CentralScreenMonitor on _CentralScreenState {
         builder: (ctx, setStateDialog) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           title: Text(
-            '✏️ EDITAR SERVICIO #$id',
+            '✏️ EDITAR SERVICIO #${_consec(id)}',
             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.orange),
           ),
           content: SingleChildScrollView(

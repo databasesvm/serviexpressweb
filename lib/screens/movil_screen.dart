@@ -20,7 +20,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:latlong2/latlong.dart' hide Path; // <--- MOTOR DE DISTANCIAS (hide Path evita conflicto con ui.Path)
 import 'package:image_picker/image_picker.dart';
 import 'dart:convert';
-import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:serviexpress_app/utils/auth_helper.dart'; // hashContrasena — cambio de contraseña
 import 'package:serviexpress_app/utils/widgets_compartidos.dart'; // PulsingPanicoButton y otros widgets compartidos
@@ -128,6 +127,9 @@ class _MovilScreenState extends State<MovilScreen>
   bool _reproduciendoAudio =
       false; // Compuerta anti-duplicados para nuevo_pedido
   int _cantidadPendientesAnterior = 0;
+  // Suprime el sonido in-app en el primer evento post-resume para evitar
+  // doble sonido: el push ya sonó mientras la app estaba en background.
+  bool _vieneDeBackground = false;
 
   bool _sonidoSoporteReproducido = false;
 
@@ -1386,6 +1388,9 @@ class _MovilScreenState extends State<MovilScreen>
 
       case AppLifecycleState.paused:
         // App va a segundo plano. Enviar ping inmediato.
+        // Marcamos que venimos de background para suprimir el doble sonido
+        // en el primer evento post-resume (el push ya sonó via OS).
+        _vieneDeBackground = true;
         // NO cancelamos el heartbeat: el isolate de Dart sigue vivo en background
         // y el Timer.periodic sigue disparando cada 60s → pings continuos aunque
         // el foreground service sea matado por Android.
@@ -3379,7 +3384,7 @@ class _MovilScreenState extends State<MovilScreen>
               MotorNotificaciones.dispararACentral(
                 titulo: '⚠️ SERVICIO DEMORADO',
                 mensaje:
-                    '${widget.usuario['nombre']} cerró el servicio #$servicioId con demora.',
+                    '${movilLabel(widget.usuario)} cerró el servicio #$servicioId con demora.',
                 urgente: true,
                 sonido: 'central_demora',
               );
@@ -3551,7 +3556,7 @@ class _MovilScreenState extends State<MovilScreen>
         MotorNotificaciones.dispararACentral(
           titulo: '🚨 SERVICIO CON PROBLEMA',
           mensaje:
-              '${widget.usuario['nombre']} cerró el servicio #$servicioId con PROBLEMA.',
+              '${movilLabel(widget.usuario)} cerró el servicio #$servicioId con PROBLEMA.',
           urgente: true,
           sonido: 'central_problema',
         );
@@ -4904,7 +4909,7 @@ class _MovilScreenState extends State<MovilScreen>
                   await Supabase.instance.client.from('notificaciones_push_pendientes').insert({
                     'destinatario_rol': 'central',
                     'titulo': '🏖️ Solicitud de descanso',
-                    'cuerpo': '${widget.usuario['nombre'] ?? ''} solicita $diasTotales día(s) de descanso. Revisa en Gestión.',
+                    'cuerpo': '${movilLabel(widget.usuario)} solicita $diasTotales día(s) de descanso. Revisa en Gestión.',
                     'tipo': 'descanso_solicitud',
                   });
                   if (mounted) {
@@ -6789,7 +6794,7 @@ class _MovilScreenState extends State<MovilScreen>
                                           builder: (context) => ChatScreen(
                                             salaId: 'servicio_${servicio['id']}',
                                             miId: widget.usuario['id'],
-                                            miNombre: widget.usuario['nombre'],
+                                            miNombre: movilLabel(widget.usuario),
                                             titulo: 'Chat $textoChat',
                                             servicioId: servicio['id'],
                                             alarmaLocal: 'chat_movil',
@@ -6961,11 +6966,8 @@ class _MovilScreenState extends State<MovilScreen>
 
   Future<void> _mostrarFormularioFactura(Map<String, dynamic> servicio) async {
     final facturaCtrl = TextEditingController();
-    // El móvil escribe la dirección real de entrega — no se toma de la central
-    final direccionCtrl = TextEditingController();
-    XFile? fotoFile;
 
-    // ── Recogidas: solo código "FN293" ──────────────────────────────────────
+    // ── Datos del servicio ───────────────────────────────────────────────────
     final recogidasRaw = servicio['recogidas'];
     final List<dynamic> recogidasList =
         recogidasRaw is List ? recogidasRaw : [];
@@ -6976,9 +6978,20 @@ class _MovilScreenState extends State<MovilScreen>
             final tipo = rMap['tipo'] as String? ?? '';
             final numero = rMap['numero'];
             if (tipo == 'FN' && numero != null) return 'FN$numero';
-            // Para otros tipos, solo código sin descripción
             return numero != null ? '$tipo$numero' : tipo;
           }).join(', ');
+
+    final String destino = servicio['destino']?.toString() ?? '—';
+    final String movilCodigo = widget.usuario['usuario']?.toString() ??
+        widget.usuario['nombre']?.toString() ?? '';
+    final String origenStr = servicio['origen']?.toString() ?? '';
+    final mSede = RegExp(r'FN #?(\d+)').firstMatch(origenStr);
+    final String sedeCodigo = mSede != null
+        ? 'FN${mSede.group(1)}'
+        : (servicio['zona_fn']?.toString() ?? origenStr);
+    final int tarifa = (servicio['tarifa'] as num?)?.toInt() ?? 0;
+    final String consec =
+        servicio['fn_consecutivo']?.toString() ?? '#${servicio['id']}';
 
     await showModalBottomSheet(
       context: context,
@@ -6995,191 +7008,117 @@ class _MovilScreenState extends State<MovilScreen>
             top: 20,
             bottom: MediaQuery.of(ctx).viewInsets.bottom + 28,
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Handle
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.grey[300],
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              // Título
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 4),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Handle
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
                     decoration: BoxDecoration(
-                      color: Colors.indigo[900],
-                      borderRadius: BorderRadius.circular(6),
+                      color: Colors.grey[300],
+                      borderRadius: BorderRadius.circular(2),
                     ),
-                    child: const Text('FN',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 11,
-                            letterSpacing: 1.2)),
-                  ),
-                  const SizedBox(width: 8),
-                  const Text('Reportar Factura',
-                      style: TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 16)),
-                ],
-              ),
-              const SizedBox(height: 20),
-
-              // NRO. FACTURA
-              const Text('NRO. FACTURA',
-                  style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.black54,
-                      letterSpacing: 0.5)),
-              const SizedBox(height: 6),
-              TextField(
-                controller: facturaCtrl,
-                keyboardType: TextInputType.number,
-                inputFormatters: [
-                  FilteringTextInputFormatter.digitsOnly,
-                ],
-                maxLength: 6,
-                decoration: InputDecoration(
-                  hintText: 'Ej: 123456',
-                  counterText: '',
-                  filled: true,
-                  fillColor: const Color(0xFFF0F2F5),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide.none,
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide(
-                        color: Colors.indigo[900]!, width: 1.5),
                   ),
                 ),
-              ),
-              const SizedBox(height: 16),
+                const SizedBox(height: 16),
 
-              // DIRECCIÓN DE ENTREGA
-              const Text('DIRECCIÓN DE ENTREGA',
-                  style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.black54,
-                      letterSpacing: 0.5)),
-              const SizedBox(height: 6),
-              TextField(
-                controller: direccionCtrl,
-                textCapitalization: TextCapitalization.characters,
-                decoration: InputDecoration(
-                  hintText: 'Barrio, dirección o referencia',
-                  filled: true,
-                  fillColor: const Color(0xFFF0F2F5),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide.none,
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide(
-                        color: Colors.indigo[900]!, width: 1.5),
-                  ),
+                // Título
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.indigo[900],
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Text('FN',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 11,
+                              letterSpacing: 1.2)),
+                    ),
+                    const SizedBox(width: 8),
+                    Text('Factura $consec',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 16)),
+                  ],
                 ),
-              ),
-              const SizedBox(height: 16),
+                const SizedBox(height: 20),
 
-              // FOTO DEL SOPORTE
-              const Text('FOTO DEL SOPORTE',
-                  style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.black54,
-                      letterSpacing: 0.5)),
-              const SizedBox(height: 8),
-
-              if (fotoFile == null)
-                SizedBox(
+                // ── Vista previa de la factura (solo lectura) ────────────────
+                Container(
                   width: double.infinity,
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      side: BorderSide(color: Colors.indigo[300]!),
-                      foregroundColor: Colors.indigo[700],
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10)),
-                    ),
-                    onPressed: () async {
-                      final picked = await ImagePicker().pickImage(
-                        source: ImageSource.camera,
-                        maxWidth: 1000,
-                        imageQuality: 70,
-                      );
-                      if (picked != null)
-                        setSheet(() => fotoFile = picked);
-                    },
-                    icon: const Icon(Icons.camera_alt_outlined, size: 20),
-                    label: const Text('Tomar foto',
-                        style: TextStyle(fontWeight: FontWeight.w600)),
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.indigo[50],
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.indigo[100]!),
                   ),
-                )
-              else
-                GestureDetector(
-                  onTap: () async {
-                    final picked = await ImagePicker().pickImage(
-                      source: ImageSource.camera,
-                      maxWidth: 1000,
-                      imageQuality: 70,
-                    );
-                    if (picked != null)
-                      setSheet(() => fotoFile = picked);
-                  },
-                  child: Stack(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxHeight: 200),
-                          child: Image.file(
-                            File(fotoFile!.path),
-                            width: double.infinity,
-                            fit: BoxFit.contain,
-                          ),
-                        ),
-                      ),
-                      Positioned(
-                        top: 8,
-                        right: 8,
-                        child: Container(
-                          padding: const EdgeInsets.all(6),
-                          decoration: BoxDecoration(
-                            color: Colors.black54,
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: const Icon(Icons.camera_alt,
-                              color: Colors.white, size: 16),
-                        ),
-                      ),
+                      const Text('VISTA PREVIA DE LA FACTURA',
+                          style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.black45,
+                              letterSpacing: 0.8)),
+                      const SizedBox(height: 12),
+                      _fnFacturaFila('Móvil', movilCodigo),
+                      _fnFacturaFila('Sede', sedeCodigo),
+                      _fnFacturaFila('Recogidas', recogidasStr),
+                      _fnFacturaFila('Destino', destino),
+                      _fnFacturaFila('Valor',
+                          '\$${_formatearMoneda(tarifa)}'),
+                      _fnFacturaFila('Nro. Factura', '— pendiente —',
+                          pendiente: true),
                     ],
                   ),
                 ),
+                const SizedBox(height: 20),
 
-              const SizedBox(height: 24),
+                // ── Único campo editable: número de factura ──────────────────
+                const Text('NRO. FACTURA',
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.black54,
+                        letterSpacing: 0.5)),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: facturaCtrl,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  maxLength: 8,
+                  decoration: InputDecoration(
+                    hintText: 'Ej: 123456',
+                    counterText: '',
+                    filled: true,
+                    fillColor: const Color(0xFFF0F2F5),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide.none,
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide:
+                          BorderSide(color: Colors.indigo[900]!, width: 1.5),
+                    ),
+                  ),
+                  onChanged: (_) => setSheet(() {}),
+                ),
+                const SizedBox(height: 24),
 
-              // ENVIAR REPORTE
-              SizedBox(
-                width: double.infinity,
-                child: StatefulBuilder(
-                  builder: (ctx2, setBtn) => ElevatedButton(
+                // ── Botón enviar ─────────────────────────────────────────────
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF00a650),
                       foregroundColor: Colors.white,
@@ -7199,60 +7138,72 @@ class _MovilScreenState extends State<MovilScreen>
                         );
                         return;
                       }
-                      final direccion = direccionCtrl.text.trim();
-                      if (direccion.isEmpty) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Ingresa la dirección de entrega'),
-                            backgroundColor: Colors.red,
-                          ),
-                        );
-                        return;
-                      }
-                      if (fotoFile == null) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Toma la foto del soporte físico'),
-                            backgroundColor: Colors.red,
-                          ),
-                        );
-                        return;
-                      }
-                      setBtn(() {});
                       Navigator.of(ctx).pop();
                       await _enviarReporteFN(
                         servicio: servicio,
                         factura: factura,
                         recogidasStr: recogidasStr,
-                        direccion: direccion,
-                        fotoFile: fotoFile!,
+                        movilCodigo: movilCodigo,
+                        sedeCodigo: sedeCodigo,
+                        destino: destino,
+                        tarifa: tarifa,
                       );
                     },
-                    child: const Text('ENVIAR REPORTE',
+                    child: const Text('REPORTAR FACTURA',
                         style: TextStyle(
                             fontWeight: FontWeight.w800,
                             fontSize: 15,
                             letterSpacing: 0.5)),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
     );
     facturaCtrl.dispose();
-    direccionCtrl.dispose();
   }
+
+  /// Fila de la vista previa de factura
+  Widget _fnFacturaFila(String label, String valor,
+      {bool pendiente = false}) =>
+      Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 90,
+              child: Text(label,
+                  style: const TextStyle(
+                      fontSize: 12,
+                      color: Colors.black45,
+                      fontWeight: FontWeight.w600)),
+            ),
+            Expanded(
+              child: Text(valor,
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: pendiente ? Colors.orange[700] : Colors.black87,
+                      fontStyle: pendiente
+                          ? FontStyle.italic
+                          : FontStyle.normal)),
+            ),
+          ],
+        ),
+      );
 
   Future<void> _enviarReporteFN({
     required Map<String, dynamic> servicio,
     required String factura,
     required String recogidasStr,
-    required String direccion,
-    required XFile fotoFile,
+    required String movilCodigo,
+    required String sedeCodigo,
+    required String destino,
+    required int tarifa,
   }) async {
-    // Mostrar loading
     if (!mounted) return;
     final overlayEntry = OverlayEntry(
       builder: (_) => const ColoredBox(
@@ -7263,7 +7214,7 @@ class _MovilScreenState extends State<MovilScreen>
             children: [
               CircularProgressIndicator(color: Color(0xFF3AF500)),
               SizedBox(height: 14),
-              Text('Enviando reporte...',
+              Text('Enviando factura...',
                   style: TextStyle(
                       color: Colors.black87,
                       fontWeight: FontWeight.w600,
@@ -7277,29 +7228,13 @@ class _MovilScreenState extends State<MovilScreen>
     Overlay.of(context).insert(overlayEntry);
 
     try {
-      // Móvil: campo 'usuario' = "movil12"
-      final String movilCodigo =
-          widget.usuario['usuario']?.toString() ?? widget.usuario['nombre']?.toString() ?? '';
-
-      // Sede: extraer "FN293" del origen "FN #293 – Trapiches"
-      final String origenStr = servicio['origen']?.toString() ?? '';
-      final mSede = RegExp(r'FN #?(\d+)').firstMatch(origenStr);
-      final String sedeCodigo = mSede != null
-          ? 'FN${mSede.group(1)}'
-          : (servicio['zona_fn']?.toString() ?? origenStr);
-
-      final bytes = await fotoFile.readAsBytes();
-      final base64Img =
-          'data:image/jpeg;base64,${base64Encode(bytes)}';
-
       final payload = jsonEncode({
         'movil': movilCodigo,
         'sede': sedeCodigo,
         'recogidas': recogidasStr,
         'factura': "'$factura", // comilla preserva ceros a la izq. en Sheets
-        'valor': (servicio['tarifa'] as num?)?.toInt().toString() ?? '0',
-        'direccion': direccion,
-        'imagen': base64Img,
+        'valor': tarifa.toString(),
+        'direccion': destino,
       });
 
       await http.post(
@@ -7312,7 +7247,7 @@ class _MovilScreenState extends State<MovilScreen>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('✅ Reporte enviado correctamente'),
+            content: Text('✅ Factura enviada correctamente'),
             backgroundColor: Color(0xFF00a650),
             duration: Duration(seconds: 3),
           ),
@@ -7323,7 +7258,7 @@ class _MovilScreenState extends State<MovilScreen>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error al enviar reporte: $e'),
+            content: Text('Error al enviar factura: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -9006,7 +8941,7 @@ class _MovilScreenState extends State<MovilScreen>
                   _notificarAlCreador(
                     servicio['creador'] ?? 'Central',
                     '🏍️ MÓVIL ASIGNADO',
-                    '${widget.usuario['nombre']} va en camino por la Orden #${servicio['id']}.',
+                    '${movilLabel(widget.usuario)} va en camino por la Orden #${servicio['id']}.',
                   );
                 }
               },
@@ -9104,7 +9039,7 @@ class _MovilScreenState extends State<MovilScreen>
       _notificarAlCreador(
         servicio['creador'] ?? 'Central',
         '🏍️ MÓVIL ASIGNADO',
-        '${widget.usuario['nombre']} va en camino por la Orden #${servicio['id']}.',
+        '${movilLabel(widget.usuario)} va en camino por la Orden #${servicio['id']}.',
       );
     }
   }
@@ -9184,9 +9119,10 @@ class _MovilScreenState extends State<MovilScreen>
                           color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
                     ),
                   ),
-                  title: Text(m['nombre'] ?? '—',
+                  title: Text(
+                      'Móvil ${RegExp(r'\d+').firstMatch(m['usuario']?.toString() ?? '')?.group(0) ?? '?'}',
                       style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                  subtitle: Text('@${m['usuario']} · $rango',
+                  subtitle: Text(rango,
                       style: const TextStyle(fontSize: 11)),
                   onTap: () => Navigator.pop(ctx, m),
                 );
@@ -9211,7 +9147,7 @@ class _MovilScreenState extends State<MovilScreen>
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           title: const Text('¿Solicitar transferencia?'),
           content: Text(
-            'Se enviará una solicitud a ${seleccionado['nombre']}.\n'
+            'Se enviará una solicitud a Móvil ${RegExp(r'\d+').firstMatch(seleccionado['usuario']?.toString() ?? '')?.group(0) ?? '?'}.\n'
             'Él debe aceptarla desde su teléfono para que se realice.',
           ),
           actions: [
@@ -9243,7 +9179,7 @@ class _MovilScreenState extends State<MovilScreen>
       await MotorNotificaciones.dispararMisil(
         idDestino: nuevoId.toString(),
         titulo: '📨 SOLICITUD DE TRANSFERENCIA',
-        mensaje: '${widget.usuario['nombre']} quiere transferirte un servicio',
+        mensaje: 'Móvil ${RegExp(r'\d+').firstMatch(widget.usuario['usuario']?.toString() ?? '')?.group(0) ?? '?'} quiere transferirte un servicio',
         urgente: true,
         sonido: Sonidos.movilParadero,
       );
@@ -9252,7 +9188,7 @@ class _MovilScreenState extends State<MovilScreen>
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-                'Solicitud enviada a ${seleccionado['nombre']}, esperando respuesta...'),
+                'Solicitud enviada a Móvil ${RegExp(r'\d+').firstMatch(seleccionado['usuario']?.toString() ?? '')?.group(0) ?? '?'}, esperando respuesta...'),
             backgroundColor: Colors.teal,
           ),
         );
@@ -9294,17 +9230,19 @@ class _MovilScreenState extends State<MovilScreen>
       return;
     }
 
-    // Buscar nombre del que envía
+    // Buscar Móvil## del que envía
     String deMovilNombre = 'otro móvil';
     final deMovilId = servicio['movil_id'];
     if (deMovilId != null) {
       try {
         final data = await Supabase.instance.client
             .from('usuarios')
-            .select('nombre')
+            .select('usuario')
             .eq('id', deMovilId)
             .maybeSingle();
-        deMovilNombre = data?['nombre'] ?? 'otro móvil';
+        final u = data?['usuario']?.toString() ?? '';
+        final num = RegExp(r'\d+').firstMatch(u)?.group(0);
+        deMovilNombre = num != null ? 'Móvil $num' : 'otro móvil';
       } catch (_) {}
     }
 
@@ -9358,7 +9296,7 @@ class _MovilScreenState extends State<MovilScreen>
         await MotorNotificaciones.dispararMisil(
           idDestino: deMovilId.toString(),
           titulo: '✅ Transferencia aceptada',
-          mensaje: '${widget.usuario['nombre']} aceptó tu servicio #${servicio['id']}',
+          mensaje: '${movilLabel(widget.usuario)} aceptó tu servicio #${servicio['id']}',
           urgente: false,
           sonido: 'alerta',
         );
@@ -9377,7 +9315,7 @@ class _MovilScreenState extends State<MovilScreen>
         await MotorNotificaciones.dispararMisil(
           idDestino: deMovilId.toString(),
           titulo: '❌ Transferencia rechazada',
-          mensaje: '${widget.usuario['nombre']} rechazó tu solicitud',
+          mensaje: '${movilLabel(widget.usuario)} rechazó tu solicitud',
           urgente: false,
           sonido: 'alerta',
         );
@@ -9468,8 +9406,8 @@ class _MovilScreenState extends State<MovilScreen>
                       style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
                     ),
                   ),
-                  title: Text(m['nombre'] ?? '—', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                  subtitle: Text('@${m['usuario']} · $rango', style: const TextStyle(fontSize: 11)),
+                  title: Text(movilLabel(m), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  subtitle: Text(rango, style: const TextStyle(fontSize: 11)),
                   onTap: () => Navigator.pop(ctx, m),
                 );
               },
@@ -10004,7 +9942,7 @@ class _MovilScreenState extends State<MovilScreen>
       _notificarAlCreador(
         servicio['creador'] ?? 'Central',
         '📍 MÓVIL EN LA PUERTA',
-        '${widget.usuario['nombre']} ha llegado a tu local por la Orden #${servicio['id']}.',
+        '${movilLabel(widget.usuario)} ha llegado a tu local por la Orden #${servicio['id']}.',
       );
       // -----------------------------------
 
@@ -10724,7 +10662,7 @@ class _MovilScreenState extends State<MovilScreen>
                   builder: (_) => ChatScreen(
                     salaId: 'soporte_${widget.usuario['id']}',
                     miId: widget.usuario['id'] as int,
-                    miNombre: widget.usuario['nombre'] as String? ?? 'Móvil',
+                    miNombre: movilLabel(widget.usuario, fallback: 'Móvil'),
                     titulo: 'Central',
                     usuarioId: widget.usuario['id'] as int?,
                     alarmaLocal: 'chat_central',    // limpia flag en usuarios al abrir
@@ -11160,16 +11098,16 @@ class _MovilScreenState extends State<MovilScreen>
                             //  FASE 3 (60–90s)  → No-masters en radio 2km (card + aceptar)
                             //  FASE 4 (90s+)    → Todos los FN habilitados (card + aceptar)
                             //
-                            // Filtro de capacidad aplica en TODAS las fases:
-                            // un móvil al límite de servicios simultáneos NO ve
-                            // el turno aunque le corresponda por fase/rango.
+                            // Para servicios FN el límite de capacidad NO aplica:
+                            // los móviles pueden recibir y ver todos los servicios
+                            // FN independientemente de sus servicios activos.
                             if (s['tipo_fn'] == true) {
                               // Permiso base: ser MASTER o tener tiene_fn habilitado
                               final bool tienePermFN = esMaster ||
                                   miPerfilEnVivo['tiene_fn'] == true;
 
-                              // Sin permiso o sin capacidad → invisible siempre
-                              if (!tienePermFN || !tieneCapacidad) {
+                              // Sin permiso FN → invisible
+                              if (!tienePermFN) {
                                 continue; // salta embudo estándar
                               }
 
@@ -11324,8 +11262,12 @@ class _MovilScreenState extends State<MovilScreen>
                                 if (!_reproduciendoAudio) {
                                   _reproduciendoAudio = true;
 
-                                  // 1. Disparo Auditivo
-                                  _sonidos.reproducir(Sonidos.alerta);
+                                  // 1. Disparo Auditivo — suprimido si venimos
+                                  // de background (el push ya sonó via OS).
+                                  if (!_vieneDeBackground) {
+                                    _sonidos.reproducir(Sonidos.alerta);
+                                  }
+                                  _vieneDeBackground = false;
 
                                   // 2. Disparo Visual (Notificación emergente tipo WhatsApp en el TECHO)
                                   ScaffoldMessenger.of(context).showSnackBar(
@@ -11394,6 +11336,8 @@ class _MovilScreenState extends State<MovilScreen>
                               }
                               // Actualizamos la memoria del radar
                               _cantidadPendientesAnterior = pendientes.length;
+                              // Si no hubo nuevos servicios, igual limpiamos el flag
+                              _vieneDeBackground = false;
                             }
                           });
 

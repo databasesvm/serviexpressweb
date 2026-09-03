@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../utils/widgets_compartidos.dart';
 
 class RankingScreen extends StatefulWidget {
   const RankingScreen({super.key});
@@ -288,7 +289,7 @@ class _RankingScreenState extends State<RankingScreen> {
                             children: [
                               Flexible(
                                 child: Text(
-                                  (item['usuario'] ?? item['nombre']).toString().toUpperCase(),
+                                  movilLabel(item).toUpperCase(),
                                   style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
                                   overflow: TextOverflow.ellipsis,
                                 ),

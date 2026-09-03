@@ -186,7 +186,7 @@ extension CentralScreenPanico on _CentralScreenState {
     // Carga lista de móviles una sola vez al abrir el diálogo
     final futureMoviles = Supabase.instance.client
         .from('usuarios')
-        .select('id, nombre, usuario, en_linea, paradero_actual')
+        .select('id, nombre, usuario, rol, en_linea, paradero_actual')
         .eq('rol', 'movil')
         .neq('suspendido', true)
         .order('nombre');
@@ -381,7 +381,7 @@ extension CentralScreenPanico on _CentralScreenState {
                                     const SizedBox(width: 8),
                                     Expanded(
                                       child: Text(
-                                        m['nombre'] ?? '—',
+                                        _formatearNombreCentral(m),
                                         style: TextStyle(
                                           color: seleccionado
                                               ? Colors.orange

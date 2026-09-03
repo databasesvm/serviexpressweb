@@ -183,7 +183,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                     ...movilesConectados.map((m) => DropdownMenuItem<String?>(
                       value: m['id'].toString(),
                       child: Text(
-                        '${m['nombre']} · ${m['rango_movil'] ?? ''}',
+                        '${_formatearNombreCentral(m)} · ${m['rango_movil'] ?? ''}',
                         style: const TextStyle(fontSize: 12),
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -193,9 +193,8 @@ extension CentralScreenFormularios on _CentralScreenState {
                     movilDirectoServimotoId = v;
                     movilDirectoServimotoNombre = v == null
                         ? null
-                        : movilesConectados
-                            .firstWhere((m) => m['id'].toString() == v, orElse: () => {'nombre': v})['nombre']
-                            ?.toString();
+                        : _formatearNombreCentral(movilesConectados
+                            .firstWhere((m) => m['id'].toString() == v, orElse: () => {}));
                   }),
                 ),
                 const SizedBox(height: 12),
@@ -1988,59 +1987,24 @@ extension CentralScreenFormularios on _CentralScreenState {
                                 .eq('tiene_fn', true)
                                 .not('suspendido', 'is', true);
 
-                            // 2. Contar servicios activos por móvil
-                            final serviciosActivos = await Supabase
-                                .instance.client
-                                .from('servicios')
-                                .select('movil_id')
-                                .inFilter('estado', [
-                                  'en_ruta_origen',
-                                  'en_origen',
-                                  'en_ruta_destino',
-                                  'problema',
-                                ])
-                                .not('movil_id', 'is', null);
 
-                            final Map<String, int> conteoActivos = {};
-                            for (final sv in serviciosActivos as List) {
-                              final sid = sv['movil_id'].toString();
-                              conteoActivos[sid] =
-                                  (conteoActivos[sid] ?? 0) + 1;
-                            }
+                            // FN: sin límite de capacidad — todos los móviles
+                            // FN habilitados reciben notificaciones.
 
-                            int limiteRango(String? r) {
-                              switch (r?.toUpperCase().trim()) {
-                                case 'PRO': return 1;
-                                case 'ELITE': return 2;
-                                case 'LEYENDA': return 3;
-                                case 'MASTER': return 999;
-                                default: return 1;
-                              }
-                            }
-
-                            bool tieneCapFn(Map m) {
-                              final sid = m['id'].toString();
-                              return (conteoActivos[sid] ?? 0) <
-                                  limiteRango(
-                                      m['rango_movil']?.toString());
-                            }
-
-                            // Separar masters de no-masters (solo con cupo)
+                            // Separar masters de no-masters (sin filtro de cupo)
                             final masters = (movilesData as List)
                                 .where((m) =>
                                     m['rango_movil']
                                             ?.toString()
                                             .toUpperCase() ==
-                                        'MASTER' &&
-                                    tieneCapFn(m))
+                                        'MASTER')
                                 .toList();
                             final noMasters = movilesData
                                 .where((m) =>
                                     m['rango_movil']
                                             ?.toString()
                                             .toUpperCase() !=
-                                        'MASTER' &&
-                                    tieneCapFn(m))
+                                        'MASTER')
                                 .toList();
 
                             final masterIds = masters
@@ -2378,7 +2342,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                         ),
                       ),
                       title: Text(
-                        movil['nombre'],
+                        _formatearNombreCentral(movil),
                         style: const TextStyle(fontWeight: FontWeight.bold),
                       ),
                       subtitle: Text(
@@ -2425,7 +2389,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                               'picked_up_at': null,
                               'extension_minutes': 0,
                               'observacion':
-                                  'Asignado a ${movil['nombre']} por Central',
+                                  'Asignado a ${_formatearNombreCentral(movil)} por Central',
                             })
                             .eq('id', servicioId);
 

@@ -51,7 +51,7 @@ extension CentralScreenGestion on _CentralScreenState {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          m['nombre'].toString().toUpperCase(),
+                          _formatearNombreCentral(m).toUpperCase(),
                           style: const TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 16,
@@ -114,7 +114,7 @@ extension CentralScreenGestion on _CentralScreenState {
                     segundos: 1.5,
                     icono: Icons.campaign_rounded,
                     colorAcento: Colors.orange,
-                    titulo: 'LLAMAR A ${m['nombre']}',
+                    titulo: 'LLAMAR A ${_formatearNombreCentral(m)}',
                     descripcion:
                         'Se enviará una alerta urgente a este móvil. Úsalo '
                         'cuando necesites su atención de inmediato.',
@@ -274,7 +274,7 @@ extension CentralScreenGestion on _CentralScreenState {
       builder: (ctxDialog) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         title: Text(
-          'Suspender a ${usuario['nombre']}',
+          'Suspender a ${_formatearNombreCentral(usuario)}',
           style: const TextStyle(fontSize: 16),
         ),
         content: Column(
@@ -356,7 +356,7 @@ extension CentralScreenGestion on _CentralScreenState {
       context: context,
       builder: (ctxM) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        title: Text('Duración manual — ${usuario['nombre']}',
+        title: Text('Duración manual — ${_formatearNombreCentral(usuario)}',
             style: const TextStyle(fontSize: 15)),
         content: Row(
           children: [
@@ -485,8 +485,8 @@ extension CentralScreenGestion on _CentralScreenState {
           SnackBar(
             content: Text(
               duracion == null
-                  ? '🛑 ${usuario['nombre']} suspendido indefinidamente.'
-                  : '🛑 ${usuario['nombre']} suspendido por $etiqueta.',
+                  ? '🛑 ${_formatearNombreCentral(usuario)} suspendido indefinidamente.'
+                  : '🛑 ${_formatearNombreCentral(usuario)} suspendido por $etiqueta.',
             ),
             backgroundColor: Colors.orange[800],
           ),
@@ -527,7 +527,7 @@ extension CentralScreenGestion on _CentralScreenState {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('✅ ${usuario['nombre']} fue rehabilitado.'),
+            content: Text('✅ ${_formatearNombreCentral(usuario)} fue rehabilitado.'),
             backgroundColor: Colors.green,
           ),
         );
@@ -548,7 +548,7 @@ extension CentralScreenGestion on _CentralScreenState {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         title: const Text('Expulsar del paradero'),
         content: Text(
-          '¿Sacar a ${movil['nombre']} de la fila?\n\n'
+          '¿Sacar a ${_formatearNombreCentral(movil)} de la fila?\n\n'
           'Sigue en línea — puede volver a registrarse cuando quiera.',
         ),
         actions: [
@@ -577,7 +577,7 @@ extension CentralScreenGestion on _CentralScreenState {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('${movil['nombre']} fue sacado de la fila.'),
+            content: Text('${_formatearNombreCentral(movil)} fue sacado de la fila.'),
             backgroundColor: Colors.black,
           ),
         );
@@ -2156,7 +2156,7 @@ extension CentralScreenGestion on _CentralScreenState {
                     child: Icon(Icons.warning, color: Colors.white, size: 20),
                   ),
                   title: Text(
-                    u['nombre'].toString().toUpperCase(),
+                    _formatearNombreCentral(u).toUpperCase(),
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                   subtitle: Text('Rol: ${u['rol'].toString().toUpperCase()}'),
@@ -2175,7 +2175,7 @@ extension CentralScreenGestion on _CentralScreenState {
                           salaId: 'soporte_${u['id']}',
                           miId: 0,
                           miNombre: 'Central',
-                          titulo: 'Soporte ➔ ${u['nombre']}',
+                          titulo: 'Soporte ➔ ${_formatearNombreCentral(u)}',
                           usuarioId: u['id'],
                           alarmaLocal: 'alarma_soporte',
                           alarmaDestino: 'chat_central',

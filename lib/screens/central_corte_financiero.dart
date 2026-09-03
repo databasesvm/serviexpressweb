@@ -112,7 +112,7 @@ class _CorteFinancieroDialogState extends State<_CorteFinancieroDialog> {
           future: Future.wait([
             Supabase.instance.client
                 .from('usuarios')
-                .select('id, nombre')
+                .select('id, nombre, usuario')
                 .eq('rol', 'movil'),
             Supabase.instance.client
                 .from('servicios')
@@ -144,7 +144,7 @@ class _CorteFinancieroDialogState extends State<_CorteFinancieroDialog> {
               );
               totalFlota += producido;
               estadisticas.add({
-                'nombre': movil['nombre'],
+                'nombre': movilLabel(movil as Map<String, dynamic>),
                 'cantidad': cantidad,
                 'producido': producido,
               });

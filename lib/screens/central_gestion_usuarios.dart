@@ -355,7 +355,7 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                   if (ctx.mounted) {
                     Navigator.pop(ctx);
                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                      content: Text('✓ Contraseña de ${usuario['nombre']} actualizada'),
+                      content: Text('✓ Contraseña de ${movilLabel(usuario)} actualizada'),
                       backgroundColor: Colors.green[700],
                     ));
                   }
@@ -388,7 +388,7 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
       if (idx >= 0 && mounted) {
         setState(() => _moviles[idx] = {..._moviles[idx], 'rango_movil': rango});
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('${u['nombre']} ascendido a $rango'),
+          content: Text('${movilLabel(u)} ascendido a $rango'),
           backgroundColor: const Color(0xFF3B82F6),
           duration: const Duration(seconds: 2),
         ));
@@ -1109,8 +1109,9 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
 
   Widget _cardDescanso(Map<String, dynamic> s, {required bool esPendiente}) {
     final usuario = s['usuarios'] as Map<String, dynamic>?;
-    final nombre  = usuario?['nombre']?.toString() ?? '—';
     final user    = usuario?['usuario']?.toString() ?? '—';
+    final numStr  = RegExp(r'\d+').firstMatch(user)?.group(0);
+    final nombre  = numStr != null ? 'Móvil $numStr' : (usuario?['nombre']?.toString() ?? '—');
     final estado  = s['estado']?.toString() ?? '';
     final Color estadoColor = estado == 'aprobado'
         ? const Color(0xFF10B981)
@@ -1211,7 +1212,7 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
   }
 
   Widget _cardEliminado(Map<String, dynamic> u) {
-    final nombre       = u['nombre']?.toString() ?? '—';
+    final nombre       = movilLabel(u);
     final usuario      = u['usuario']?.toString() ?? '—';
     final rol          = u['rol']?.toString() ?? '—';
     final tipoPlan     = u['tipo_plan']?.toString();
