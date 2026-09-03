@@ -482,7 +482,7 @@ class _RegistroScreenState extends State<RegistroScreen> {
             _fechaNacimiento!.toIso8601String().split('T').first;
         if (_rolSeleccionado == 'movil') {
           datosInsert['numero_movil'] = numMovilRegistro;
-          datosInsert['tipo_plan'] = _tipoMovil ?? 'suscripcion';
+          datosInsert['tipo_plan_movil'] = _tipoMovil ?? 'suscripcion';
         }
       }
 
