@@ -694,19 +694,24 @@ class _RegistroScreenState extends State<RegistroScreen> {
           );
         }
       }
-    } catch (e) {
+    } catch (e, st) {
+      debugPrint('ERROR REGISTRO: $e\n$st');
       if (mounted) {
         final eStr = e.toString();
         String mensaje;
         if (eStr.contains('duplicate') || eStr.contains('unique')) {
           mensaje = 'Ya existe una cuenta con ese teléfono, correo o usuario.';
         } else if (eStr.contains('violates') || eStr.contains('constraint')) {
-          mensaje = 'Error de validación en los datos. Revisa tu información.';
+          mensaje = 'Error de validación: $eStr';
         } else {
-          mensaje = 'No se pudo completar el registro. Intenta de nuevo.';
+          mensaje = 'Error: $eStr';
         }
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(mensaje), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text(mensaje),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 8),
+          ),
         );
       }
     } finally {
@@ -1119,6 +1124,15 @@ class _RegistroScreenState extends State<RegistroScreen> {
   // =========================================================================
   // PASO 3 — SELFIE (solo suscripcion) — verificación de identidad
   // =========================================================================
+  Future<void> _tomarSelfie() async {
+    final f = await _picker.pickImage(
+      source: ImageSource.camera,
+      preferredCameraDevice: CameraDevice.front,
+      imageQuality: 80,
+    );
+    if (f != null && mounted) setState(() => _fotoPerfil = f);
+  }
+
   Widget _pasoSelfie() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1129,18 +1143,14 @@ class _RegistroScreenState extends State<RegistroScreen> {
         ),
         const SizedBox(height: 8),
         const Text(
-          'Tómate una selfie clara con buena iluminación. '
+          'Tómate una selfie con la cámara frontal. '
           'La Central la usará para verificar tu identidad antes de activar tu cuenta.',
           style: TextStyle(fontSize: 13, color: Colors.black54),
         ),
         const SizedBox(height: 24),
         Center(
           child: GestureDetector(
-            onTap: () async {
-              final f = await _picker.pickImage(
-                  source: ImageSource.camera, imageQuality: 80);
-              if (f != null) setState(() => _fotoPerfil = f);
-            },
+            onTap: _tomarSelfie,
             child: _fotoPerfil == null
                 ? Container(
                     width: 180,
@@ -1153,7 +1163,7 @@ class _RegistroScreenState extends State<RegistroScreen> {
                     child: const Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.camera_alt, size: 48, color: Colors.black38),
+                        Icon(Icons.camera_front, size: 48, color: Colors.black38),
                         SizedBox(height: 8),
                         Text('Tomar selfie',
                             style: TextStyle(
@@ -1172,41 +1182,33 @@ class _RegistroScreenState extends State<RegistroScreen> {
           ),
         ),
         const SizedBox(height: 20),
-        if (_fotoPerfil != null)
-          Center(
-            child: Column(
-              children: [
-                const Text('✅ Selfie tomada',
-                    style: TextStyle(
-                        color: Colors.green, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
-                TextButton.icon(
-                  onPressed: () async {
-                    final f = await _picker.pickImage(
-                        source: ImageSource.camera, imageQuality: 80);
-                    if (f != null) setState(() => _fotoPerfil = f);
-                  },
-                  icon: const Icon(Icons.refresh, size: 16),
-                  label: const Text('Volver a tomar'),
+        Center(
+          child: _fotoPerfil != null
+              ? Column(
+                  children: [
+                    const Text('✅ Selfie tomada',
+                        style: TextStyle(
+                            color: Colors.green, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    TextButton.icon(
+                      onPressed: _tomarSelfie,
+                      icon: const Icon(Icons.refresh, size: 16),
+                      label: const Text('Volver a tomar'),
+                    ),
+                  ],
+                )
+              : ElevatedButton.icon(
+                  onPressed: _tomarSelfie,
+                  icon: const Icon(Icons.camera_front, size: 18),
+                  label: const Text('Abrir cámara frontal'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.black,
+                    foregroundColor: const Color(0xff3AF500),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 24, vertical: 12),
+                  ),
                 ),
-              ],
-            ),
-          )
-        else
-          Center(
-            child: OutlinedButton.icon(
-              onPressed: () async {
-                final f = await _picker.pickImage(
-                    source: ImageSource.gallery, imageQuality: 80);
-                if (f != null) setState(() => _fotoPerfil = f);
-              },
-              icon: const Icon(Icons.photo_library_outlined, size: 16),
-              label: const Text('Usar foto de galería'),
-              style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: Colors.black26),
-              ),
-            ),
-          ),
+        ),
         const SizedBox(height: 8),
       ],
     );
