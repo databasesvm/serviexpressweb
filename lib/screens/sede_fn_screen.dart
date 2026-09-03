@@ -381,10 +381,73 @@ class _FormularioTabState extends State<_FormularioTab> {
 
   static const int _recargoDaatafonoCOP = 2000;
 
-  /// Precio final = precio sugerido + recargo datáfono (si aplica)
-  double? get _tarifaEfectiva => _precioSugerido == null
-      ? null
-      : _precioSugerido! + (_conDatafono ? _recargoDaatafonoCOP : 0);
+  /// Distancia Haversine en km entre dos puntos
+  double _haversineKm(double lat1, double lng1, double lat2, double lng2) {
+    const r = 6371.0;
+    final dLat = (lat2 - lat1) * math.pi / 180;
+    final dLon = (lng2 - lng1) * math.pi / 180;
+    final a = math.sin(dLat / 2) * math.sin(dLat / 2) +
+        math.cos(lat1 * math.pi / 180) *
+            math.cos(lat2 * math.pi / 180) *
+            math.sin(dLon / 2) *
+            math.sin(dLon / 2);
+    return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
+  }
+
+  /// Recargo en COP según distancia sede solicitante → sede extra de recogida
+  double _recargoPorKm(double km) {
+    if (km < 2) return 3000;
+    if (km < 5) return 4000;
+    if (km < 6) return 6000;
+    if (km < 7) return 7000;
+    if (km < 8) return 8000;
+    if (km < 10) return 10000;
+    if (km < 11) return 12000;
+    if (km < 12) return 13000;
+    if (km < 13) return 14000;
+    if (km < 14) return 15000;
+    // >14 km: +$1.000 por cada km adicional
+    return 15000 + ((km - 13).floor() * 1000).toDouble();
+  }
+
+  /// Sedes FN de recogida adicionales (excluye la sede solicitante)
+  List<Map<String, dynamic>> get _sedesExtraRecogida {
+    final sedeId = widget.usuario['fn_sede_id']?.toString() ?? '';
+    return [
+      for (int i = 0; i < _recogidasSel.length; i++)
+        if (!_recogidasEsManual[i] &&
+            _recogidasSel[i] != null &&
+            _recogidasSel[i]!['id'].toString() != sedeId)
+          _recogidasSel[i]!,
+    ];
+  }
+
+  /// True si alguna sede extra no tiene lat/lng → fuerza cotización
+  bool get _haySedesExtraSinCoordenadas =>
+      _sedesExtraRecogida.any((r) => r['lat'] == null || r['lng'] == null);
+
+  /// Recargo total por todas las sedes extra que tienen coordenadas
+  double get _recargoSedesExtra {
+    final sLat = (widget.sede?['lat'] as num?)?.toDouble();
+    final sLng = (widget.sede?['lng'] as num?)?.toDouble();
+    if (sLat == null || sLng == null) return 0;
+    double total = 0;
+    for (final r in _sedesExtraRecogida) {
+      final rLat = (r['lat'] as num?)?.toDouble();
+      final rLng = (r['lng'] as num?)?.toDouble();
+      if (rLat == null || rLng == null) continue;
+      total += _recargoPorKm(_haversineKm(sLat, sLng, rLat, rLng));
+    }
+    return total;
+  }
+
+  /// Precio final = precio sugerido + recargo sedes extra + recargo datáfono
+  /// Retorna null si no hay precio sugerido O si hay sedes extra sin coordenadas
+  double? get _tarifaEfectiva {
+    if (_precioSugerido == null) return null;
+    if (_haySedesExtraSinCoordenadas) return null;
+    return _precioSugerido! + _recargoSedesExtra + (_conDatafono ? _recargoDaatafonoCOP : 0);
+  }
 
   // Sedes disponibles para seleccionar como recogida
   List<Map<String, dynamic>> _sedesDisponibles = [];
@@ -392,8 +455,11 @@ class _FormularioTabState extends State<_FormularioTab> {
 
   // Red de direcciones de esta sede
   List<Map<String, dynamic>> _redDirecciones = [];
+  Map<int, int> _tarifasSede = {}; // sector_id → precio (de fn_tarifas_sede)
   double? _precioSugerido; // precio de la dirección seleccionada de la red
   int? _redDireccionSelId; // id del registro seleccionado
+  // Sugerencias de autocomplete (filtradas al escribir)
+  List<Map<String, dynamic>> _sugerencias = [];
 
   // Móvil preseleccionado desde tab Activos
   String? _movilPreselId;
@@ -474,18 +540,57 @@ class _FormularioTabState extends State<_FormularioTab> {
     try {
       final data = await _db
           .from('fn_red_direcciones')
-          .select('id, nombre, direccion, precio')
+          .select('id, nombre, direccion, precio, sector_id')
           .eq('sede_id', sedeId)
           .eq('activo', true)
           .order('nombre');
+      final tarifas = await _db
+          .from('fn_tarifas_sede')
+          .select('sector_id, precio')
+          .eq('sede_id', sedeId);
       if (mounted) {
-        setState(() => _redDirecciones = List<Map<String, dynamic>>.from(data));
+        final mapa = <int, int>{};
+        for (final t in List<Map<String, dynamic>>.from(tarifas)) {
+          final sid = t['sector_id'] as int?;
+          final p = t['precio'] as int?;
+          if (sid != null && p != null) mapa[sid] = p;
+        }
+        setState(() {
+          _redDirecciones = List<Map<String, dynamic>>.from(data);
+          _tarifasSede = mapa;
+        });
       }
     } catch (_) {}
   }
 
+  /// Precio efectivo de una dirección: prioridad tarifa del sector, luego precio directo.
+  double _precioDeDir(Map<String, dynamic> dir) {
+    final sectorId = dir['sector_id'] as int?;
+    if (sectorId != null && _tarifasSede.containsKey(sectorId)) {
+      return _tarifasSede[sectorId]!.toDouble();
+    }
+    return (dir['precio'] as num).toDouble();
+  }
+
+  /// Filtra la red de direcciones por texto escrito.
+  List<Map<String, dynamic>> _filtrarDirecciones(String texto) {
+    if (texto.trim().isEmpty) return [];
+    final palabras = texto.toLowerCase().trim().split(RegExp(r'\s+'));
+    return _redDirecciones.where((dir) {
+      final haystack =
+          '${dir['nombre']} ${dir['direccion']}'.toLowerCase();
+      return palabras.every((p) => haystack.contains(p));
+    }).take(6).toList();
+  }
+
   // ── Cascada FN automática (precio sugerido de la red) ────────────────────
-  // 3 fases: FASE 1 (T=0) Masters · FASE 2 (T+31s) Más cercano · FASE 3 (T+61s) Todos
+  // 4 fases — alineada con Cascada 2 (cotización aprobada):
+  //   FASE 1 (T=0)    → Push a Masters. Deben aceptar manualmente. Sin auto-asignación.
+  //   FASE 2 (T+30s)  → pg_cron auto-asigna al no-Master más cercano a la sede.
+  //   FASE 3 (T+60s)  → Push a no-Masters dentro de 2km de la sede (excl. fase 2).
+  //   FASE 4 (T+90s)  → Push al resto global (excl. fase 2 y fase 3).
+  // Al guardar fn_radar_t0 + fn_fase2_movil_id en DB, el pg_cron puede
+  // auto-asignar en FASE 2 igual que en el flujo de cotización aprobada.
   Future<void> _lanzarCascadaFn({
     required int serviceId,
     required String consec,
@@ -508,7 +613,6 @@ class _FormularioTabState extends State<_FormularioTab> {
       // FN: sin límite de capacidad — todos los móviles FN reciben notificaciones
       // independientemente de cuántos servicios activos tengan.
       // Excepción: prediarios con saldo <= 0 no reciben nuevas alertas.
-
       final moviles = List<Map<String, dynamic>>.from(movilesData as List)
           .where((m) {
             final plan = m['tipo_plan_movil']?.toString() ?? '';
@@ -517,6 +621,7 @@ class _FormularioTabState extends State<_FormularioTab> {
             }
             return true;
           }).toList();
+
       final masters = moviles
           .where((m) => m['rango_movil']?.toString().toUpperCase() == 'MASTER')
           .toList();
@@ -525,10 +630,8 @@ class _FormularioTabState extends State<_FormularioTab> {
           .toList();
 
       final masterIds = masters.map<String>((m) => m['id'].toString()).toList();
-      final noMasterIds =
-          noMasters.map<String>((m) => m['id'].toString()).toList();
 
-      // 3. Calcular más cercano (haversine simple)
+      // 2. Haversine local (devuelve km)
       double _distKm(double lat1, double lon1, double lat2, double lon2) {
         const r = 6371.0;
         final dLat = (lat2 - lat1) * math.pi / 180;
@@ -541,6 +644,7 @@ class _FormularioTabState extends State<_FormularioTab> {
         return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
       }
 
+      // 3. Más cercano a la sede → FASE 2 (auto-asignación pg_cron)
       String? fase2Id;
       if (sLat != null && sLng != null && noMasters.isNotEmpty) {
         double minD = double.infinity;
@@ -558,12 +662,31 @@ class _FormularioTabState extends State<_FormularioTab> {
         fase2Id = noMasters.first['id'].toString();
       }
 
-      final fase3Ids = noMasterIds.where((id) => id != fase2Id).toList();
+      // 4. Fase 3: no-Masters dentro de 2km (excl. fase2)
+      //    Fase 4: resto global (excl. fase2 y fase3)
+      final fase3Ids = noMasters.map<String>((m) => m['id'].toString()).where((id) {
+        if (id == fase2Id) return false;
+        if (sLat == null || sLng == null) return false;
+        final mData = noMasters.firstWhere(
+          (m) => m['id'].toString() == id,
+          orElse: () => {},
+        );
+        if (mData.isEmpty) return false;
+        final uLat = (mData['latitud'] as num?)?.toDouble();
+        final uLng = (mData['longitud'] as num?)?.toDouble();
+        if (uLat == null || uLng == null) return false;
+        return _distKm(uLat, uLng, sLat, sLng) <= 2.0; // 2km
+      }).toList();
+
+      final fase4Ids = noMasters
+          .map<String>((m) => m['id'].toString())
+          .where((id) => id != fase2Id && !fase3Ids.contains(id))
+          .toList();
 
       final titulo = '🔵 FN $consec';
       final msg = '\$${_miles(tarifa)} → $destino';
 
-      // FASE 1 (inmediata): Masters
+      // ── FASE 1 (T=0): Masters — push inmediato, aceptan voluntariamente ────
       if (masterIds.isNotEmpty) {
         await MotorNotificaciones.programarMisilRetardado(
           externalIds: masterIds,
@@ -573,39 +696,62 @@ class _FormularioTabState extends State<_FormularioTab> {
         );
       }
 
-      // FASE 2 (31s): Más cercano
-      String? id31s;
-      if (fase2Id != null) {
-        id31s = await MotorNotificaciones.programarMisilRetardado(
-          externalIds: [fase2Id],
-          titulo: titulo,
-          mensaje: msg,
-          segundosRetardo: 31,
-          sonido: Sonidos.fnCotizacion,
-        );
-      }
+      // ── Guardar en DB: ancla de tiempo + fase2 para pg_cron ─────────────────
+      // Esto alinea esta cascada con la de cotización aprobada:
+      // el pg_cron fn-auto-asignar-fase2 leerá fn_fase2_movil_id a los 30s.
+      final ahora = DateTime.now().toUtc().toIso8601String();
+      await _db.from('servicios').update({
+        'fn_radar_t0': ahora,
+        'fn_asignacion_tipo': 'radar',
+        if (fase2Id != null) 'fn_fase2_movil_id': fase2Id,
+        if (masterIds.isNotEmpty) 'fn_notificados_fase1': masterIds,
+      }).eq('id', serviceId);
 
-      // FASE 3 (61s): Todos los restantes
-      String? id61s;
+      // ── FASE 3 (T+60s): zona 2km ────────────────────────────────────────────
+      String? id60s;
       if (fase3Ids.isNotEmpty) {
-        id61s = await MotorNotificaciones.programarMisilRetardado(
+        id60s = await MotorNotificaciones.programarMisilRetardado(
           externalIds: fase3Ids,
           titulo: titulo,
           mensaje: msg,
-          segundosRetardo: 61,
+          segundosRetardo: 60,
           sonido: Sonidos.fnCotizacion,
         );
       }
 
-      // Guardar IDs de misiles para cancelarlos cuando alguien acepte
+      // ── FASE 4 (T+90s): TODOS + Masters (SIN CUBRIR) ────────────────────────
+      // Push a absolutamente todos los conectados FN (incluidos los que ya
+      // recibieron FASE 3) + Masters como alerta crítica.
+      // Solo los Masters ven la card in-app con detalles y botón aceptar
+      // (el radar limita puedeVer = esMaster en FASE 4 — ver movil_screen.dart).
+      final fase4Todos = [
+        ...fase3Ids,   // re-notificar los de 2km con alerta SIN CUBRIR
+        ...fase4Ids,   // no-Masters fuera de 2km
+        ...masterIds,  // Masters re-alertados para que actúen
+      ];
+      String? id90s;
+      if (fase4Todos.isNotEmpty) {
+        id90s = await MotorNotificaciones.programarMisilRetardado(
+          externalIds: fase4Todos,
+          titulo: '🚨 FN SIN CUBRIR — $consec',
+          mensaje: msg,
+          segundosRetardo: 90,
+          sonido: Sonidos.fnCotizacion,
+        );
+      }
+
+      // Guardar IDs de notificaciones + arrays de notificados por fase
       final notifIds = <String, dynamic>{};
-      if (id31s != null) notifIds['fn_notif_fase2'] = id31s;
-      if (id61s != null) notifIds['fn_notif_fase3'] = id61s;
+      if (id60s != null) notifIds['fn_notif_fase3'] = id60s;
+      if (id90s != null) notifIds['fn_notif_fase4'] = id90s;
+      if (fase3Ids.isNotEmpty) notifIds['fn_notificados_fase3'] = fase3Ids;
+      // FASE 4 incluye todos (fase3 + fase4 + masters) — guardamos la lista completa
+      if (fase4Todos.isNotEmpty) notifIds['fn_notificados_fase4'] = fase4Todos;
       if (notifIds.isNotEmpty) {
         await _db.from('servicios').update(notifIds).eq('id', serviceId);
       }
     } catch (e) {
-      debugPrint('Error cascada FN precio sugerido: $e');
+      debugPrint('Error cascada FN: $e');
     }
   }
 
@@ -701,7 +847,8 @@ class _FormularioTabState extends State<_FormularioTab> {
 
       final altaDemanda = widget.altaDemanda;
 
-      final usaPrecioSugerido = _precioSugerido != null;
+      // _tarifaEfectiva es null cuando hay sedes extra sin coordenadas → cotización obligatoria
+      final usaPrecioSugerido = _tarifaEfectiva != null;
 
       final insertedRow = await _db
           .from('servicios')
@@ -779,7 +926,7 @@ class _FormularioTabState extends State<_FormularioTab> {
       // Si tiene precio sugerido → notificar o lanzar cascada
       if (usaPrecioSugerido && newServiceId != null) {
         if (_movilPreselId != null) {
-          // Asignación directa al móvil preseleccionado
+          // Asignación directa — solo notificar al móvil asignado (sin cascada a Masters)
           await MotorNotificaciones.dispararMisil(
             idDestino: _movilPreselId!,
             titulo: '🎯 SERVICIO FN DIRECTO',
@@ -837,6 +984,7 @@ class _FormularioTabState extends State<_FormularioTab> {
         _conDatafono = false;
         _precioSugerido = null;
         _redDireccionSelId = null;
+        _sugerencias = [];
         _movilPreselId = null;
         _movilPreselNum = null;
       });
@@ -883,33 +1031,61 @@ class _FormularioTabState extends State<_FormularioTab> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   decoration: BoxDecoration(
-                    color: Colors.indigo[900],
+                    color: Colors.orange[800],
                     borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.orange[300]!, width: 1.5),
                   ),
-                  child: Row(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(Icons.person_pin_rounded,
-                          color: Colors.white, size: 16),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Asignando a Móvil $_movilPreselNum',
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 13),
-                        ),
+                      Row(
+                        children: [
+                          const Icon(Icons.person_pin_rounded,
+                              color: Colors.white, size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              '🎯 DIRECTO A MÓVIL $_movilPreselNum',
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                  letterSpacing: 0.5),
+                            ),
+                          ),
+                        ],
                       ),
-                      GestureDetector(
-                        onTap: () {
-                          setState(() {
-                            _movilPreselId = null;
-                            _movilPreselNum = null;
-                          });
-                          widget.onPreselLimpiado?.call();
-                        },
-                        child: const Icon(Icons.close,
-                            color: Colors.white54, size: 18),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Este servicio irá solo a ese móvil, no a todos.\nSi quieres enviarlo a todos, toca el botón de abajo.',
+                        style: TextStyle(color: Colors.white70, fontSize: 11),
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            setState(() {
+                              _movilPreselId = null;
+                              _movilPreselNum = null;
+                            });
+                            widget.onPreselLimpiado?.call();
+                          },
+                          icon: const Icon(Icons.close,
+                              size: 14, color: Colors.white),
+                          label: const Text(
+                            'QUITAR — Crear Servicio General',
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: Colors.white54),
+                            padding:
+                                const EdgeInsets.symmetric(vertical: 6),
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -1093,127 +1269,222 @@ class _FormularioTabState extends State<_FormularioTab> {
                 style: const TextStyle(color: Colors.white),
                 decoration: _inputDeco('Dirección de entrega'),
                 autofillHints: const <String>[],
-                onChanged: (_) {
-                  // Si el usuario escribe manualmente, quita la selección de red
-                  if (_redDireccionSelId != null) {
-                    setState(() {
-                      _redDireccionSelId = null;
-                      _precioSugerido = null;
-                    });
-                  }
+                onChanged: (v) {
+                  setState(() {
+                    // Al escribir manualmente, limpia selección y recalcula sugerencias
+                    _redDireccionSelId = null;
+                    _precioSugerido = null;
+                    _sugerencias = _filtrarDirecciones(v);
+                  });
                 },
                 validator: (v) =>
                     (v == null || v.trim().isEmpty) ? 'Requerido' : null,
               ),
 
-              // ── Red de direcciones (chips) ───────────────────────────────────
-              if (_redDirecciones.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: _redDirecciones.map((dir) {
-                    final seleccionado = _redDireccionSelId == dir['id'];
-                    return GestureDetector(
-                      onTap: () {
-                        setState(() {
-                          if (seleccionado) {
-                            // Deseleccionar
-                            _redDireccionSelId = null;
-                            _precioSugerido = null;
-                            _destinoCtrl.clear();
-                          } else {
+              // ── Sugerencias de autocomplete ─────────────────────────────────
+              if (_sugerencias.isNotEmpty && _redDireccionSelId == null)
+                Container(
+                  margin: const EdgeInsets.only(top: 4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1A1A2E),
+                    borderRadius: BorderRadius.circular(8),
+                    border:
+                        Border.all(color: Colors.indigo.withValues(alpha: 0.5)),
+                  ),
+                  child: Column(
+                    children: _sugerencias.map((dir) {
+                      final precio = _precioDeDir(dir);
+                      return InkWell(
+                        onTap: () {
+                          setState(() {
                             _redDireccionSelId = dir['id'] as int;
-                            _precioSugerido = (dir['precio'] as num).toDouble();
+                            _precioSugerido = precio;
                             _destinoCtrl.text =
                                 dir['direccion'].toString().toUpperCase();
-                          }
-                        });
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: seleccionado
-                              ? Colors.indigo[700]
-                              : const Color(0xFF1E1E1E),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: seleccionado
-                                ? Colors.indigo[300]!
-                                : Colors.white24,
+                            _sugerencias = [];
+                          });
+                          // Mover cursor al final
+                          _destinoCtrl.selection = TextSelection.fromPosition(
+                              TextPosition(offset: _destinoCtrl.text.length));
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 10),
+                          decoration: const BoxDecoration(
+                            border: Border(
+                                bottom: BorderSide(color: Colors.white10)),
                           ),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              dir['nombre'].toString(),
-                              style: TextStyle(
-                                color: seleccionado
-                                    ? Colors.white
-                                    : Colors.white70,
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
+                          child: Row(children: [
+                            const Icon(Icons.location_on,
+                                color: Colors.indigo, size: 16),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    dir['nombre'].toString(),
+                                    style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.bold),
+                                  ),
+                                  Text(
+                                    dir['direccion'].toString(),
+                                    style: const TextStyle(
+                                        color: Colors.white54, fontSize: 11),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
                               ),
                             ),
                             Text(
-                              '\$${_miles((dir['precio'] as num).toInt())}',
-                              style: TextStyle(
-                                color: seleccionado
-                                    ? Colors.greenAccent
-                                    : Colors.white38,
-                                fontSize: 11,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-                if (_precioSugerido != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            const Icon(Icons.flash_on,
-                                color: Colors.greenAccent, size: 14),
-                            const SizedBox(width: 4),
-                            Text(
-                              'Precio sugerido: \$${_miles(_precioSugerido!.toInt())} — directo sin cotización',
+                              '\$${_miles(precio.toInt())}',
                               style: const TextStyle(
                                   color: Colors.greenAccent,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold),
+                            ),
+                          ]),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+
+              // ── Precio sugerido (tras seleccionar) ─────────────────────────
+              if (_precioSugerido != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Builder(builder: (_) {
+                    final extras = _sedesExtraRecogida;
+                    final sinCoords = _haySedesExtraSinCoordenadas;
+                    final sLat = (widget.sede?['lat'] as num?)?.toDouble();
+                    final sLng = (widget.sede?['lng'] as num?)?.toDouble();
+
+                    // ── Aviso: sede sin coordenadas → cotización obligatoria ──
+                    if (sinCoords) {
+                      return Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.orange[900]!.withValues(alpha: 0.3),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.orange[600]!),
+                        ),
+                        child: Row(children: [
+                          const Icon(Icons.warning_amber_rounded,
+                              color: Colors.orange, size: 16),
+                          const SizedBox(width: 8),
+                          const Expanded(
+                            child: Text(
+                              'Una o más sedes de recogida no tienen ubicación registrada — la central debe cotizar este servicio',
+                              style: TextStyle(
+                                  color: Colors.orange,
                                   fontSize: 11,
                                   fontWeight: FontWeight.bold),
                             ),
-                          ],
-                        ),
-                        if (_conDatafono) ...[
-                          const SizedBox(height: 4),
-                          Row(
-                            children: [
+                          ),
+                        ]),
+                      );
+                    }
+
+                    // ── Desglose normal ──────────────────────────────────────
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Precio base ruta
+                        Row(children: [
+                          const Icon(Icons.flash_on,
+                              color: Colors.greenAccent, size: 14),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Ruta: \$${_miles(_precioSugerido!.toInt())}',
+                            style: const TextStyle(
+                                color: Colors.greenAccent,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold),
+                          ),
+                        ]),
+                        // Recargo por cada sede extra
+                        ...extras.map((r) {
+                          final rLat = (r['lat'] as num?)?.toDouble();
+                          final rLng = (r['lng'] as num?)?.toDouble();
+                          double recargo = 0;
+                          String dist = '';
+                          if (sLat != null && sLng != null &&
+                              rLat != null && rLng != null) {
+                            final km = _haversineKm(sLat, sLng, rLat, rLng);
+                            recargo = _recargoPorKm(km);
+                            dist = ' (${km.toStringAsFixed(1)} km)';
+                          }
+                          final nombre = r['tipo'] == 'FN' && r['numero'] != null
+                              ? 'FN${r['numero']}'
+                              : r['nombre']?.toString() ?? 'Sede extra';
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 3),
+                            child: Row(children: [
+                              const Icon(Icons.add_location_alt_outlined,
+                                  color: Colors.indigoAccent, size: 14),
+                              const SizedBox(width: 4),
+                              Text(
+                                '+\$${_miles(recargo.toInt())} recogida $nombre$dist',
+                                style: const TextStyle(
+                                    color: Colors.indigoAccent,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold),
+                              ),
+                            ]),
+                          );
+                        }),
+                        // Datáfono
+                        if (_conDatafono)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 3),
+                            child: Row(children: [
                               const Icon(Icons.credit_card,
                                   color: Colors.amberAccent, size: 14),
                               const SizedBox(width: 4),
                               Text(
-                                '+\$${_miles(_recargoDaatafonoCOP)} datáfono → Total: \$${_miles(_tarifaEfectiva!.toInt())}',
+                                '+\$${_miles(_recargoDaatafonoCOP)} datáfono',
                                 style: const TextStyle(
                                     color: Colors.amberAccent,
                                     fontSize: 11,
                                     fontWeight: FontWeight.bold),
                               ),
-                            ],
+                            ]),
                           ),
-                        ],
+                        // Total si hay algo adicional
+                        if (extras.isNotEmpty || _conDatafono)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 5),
+                            child: Row(children: [
+                              const Icon(Icons.payments_outlined,
+                                  color: Colors.white, size: 14),
+                              const SizedBox(width: 4),
+                              Text(
+                                'Total: \$${_miles(_tarifaEfectiva!.toInt())} — directo sin cotización',
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold),
+                              ),
+                            ]),
+                          )
+                        else
+                          const Padding(
+                            padding: EdgeInsets.only(top: 3),
+                            child: Text(
+                              'Directo sin cotización',
+                              style: TextStyle(
+                                  color: Colors.greenAccent,
+                                  fontSize: 10),
+                            ),
+                          ),
                       ],
-                    ),
-                  ),
-              ],
+                    );
+                  }),
+                ),
 
               const SizedBox(height: 16),
 
@@ -1279,7 +1550,9 @@ class _FormularioTabState extends State<_FormularioTab> {
                         ? 'Enviando...'
                         : _movilPreselId != null
                             ? 'ENVIAR — MÓVIL $_movilPreselNum'
-                            : 'SOLICITAR COTIZACIÓN',
+                            : _tarifaEfectiva != null
+                                ? 'SOLICITAR SERVICIO'
+                                : 'SOLICITAR COTIZACIÓN',
                     style: const TextStyle(
                         fontWeight: FontWeight.bold, fontSize: 15),
                   ),
@@ -1564,25 +1837,35 @@ class _ActivosTabState extends State<_ActivosTab> {
         );
       }
 
-      // ── FASE 4 (T+90s): Global ──────────────────────────────────────────────
+      // ── FASE 4 (T+90s): TODOS + Masters (SIN CUBRIR) ────────────────────────
+      // Push a absolutamente todos los conectados FN (re-incluye FASE 3)
+      // + Masters como alerta crítica de servicio sin cubrir.
+      // Solo Masters ven la card con detalles y aceptar (radar: puedeVer = esMaster).
+      final fase4Todos = [
+        ...fase3Ids,  // re-notificar zona 2km con alerta SIN CUBRIR
+        ...fase4Ids,  // no-Masters fuera de 2km
+        ...masters,   // Masters re-alertados
+      ];
       String? notifF4;
-      if (fase4Ids.isNotEmpty) {
+      if (fase4Todos.isNotEmpty) {
         notifF4 = await MotorNotificaciones.programarMisilRetardado(
-          externalIds: fase4Ids,
-          titulo: '🔵 TURNO FN SIN TOMAR',
-          mensaje: 'Servicio sin tomar · $zona',
+          externalIds: fase4Todos,
+          titulo: '🚨 FN SIN CUBRIR — $consec',
+          mensaje: 'Servicio sin cubrir · $zona',
           segundosRetardo: 90,
           sonido: Sonidos.movilParadero,
         );
       }
 
-      // Guardar IDs de notificaciones programadas para cancelarlas si alguien acepta
-      // fn_notif_fase2 ya no se guarda — la fase2 es auto-asignada por pg_cron.
-      if (notifF3 != null || notifF4 != null) {
-        await _db.from('servicios').update({
-          if (notifF3 != null) 'fn_notif_fase3': notifF3,
-          if (notifF4 != null) 'fn_notif_fase4': notifF4,
-        }).eq('id', s['id']);
+      // Guardar IDs de notificaciones programadas + arrays de notificados por fase
+      final notifMap2 = <String, dynamic>{
+        if (notifF3 != null) 'fn_notif_fase3': notifF3,
+        if (notifF4 != null) 'fn_notif_fase4': notifF4,
+        if (fase3Ids.isNotEmpty) 'fn_notificados_fase3': fase3Ids,
+        if (fase4Todos.isNotEmpty) 'fn_notificados_fase4': fase4Todos,
+      };
+      if (notifMap2.isNotEmpty) {
+        await _db.from('servicios').update(notifMap2).eq('id', s['id']);
       }
 
       // Notificar a la central
@@ -1619,6 +1902,51 @@ class _ActivosTabState extends State<_ActivosTab> {
             math.sin(dLng / 2) *
             math.sin(dLng / 2);
     return 2 * r * math.asin(math.sqrt(a));
+  }
+
+  // ── Recargo estimado por sedes extra en recogidas ──────────────────────────
+  double _recargoRecogidas(Map<String, dynamic> s) {
+    final sLat = (widget.sede?['lat'] as num?)?.toDouble();
+    final sLng = (widget.sede?['lng'] as num?)?.toDouble();
+    if (sLat == null || sLng == null) return 0;
+    final raw = s['recogidas'];
+    if (raw == null) return 0;
+    final lista = raw is List ? raw : <dynamic>[];
+    final sedeId = widget.sede?['id']?.toString() ?? '';
+    double total = 0;
+    for (final r in lista) {
+      if (r is! Map) continue;
+      final rId = r['id']?.toString() ?? '';
+      if (rId.isEmpty || rId == sedeId) continue;
+      final rLat = (r['lat'] as num?)?.toDouble();
+      final rLng = (r['lng'] as num?)?.toDouble();
+      if (rLat == null || rLng == null) continue;
+      final km = _haversine(sLat, sLng, rLat, rLng) / 1000;
+      if (km < 2) {
+        total += 3000;
+      } else if (km < 5) {
+        total += 4000;
+      } else if (km < 6) {
+        total += 6000;
+      } else if (km < 7) {
+        total += 7000;
+      } else if (km < 8) {
+        total += 8000;
+      } else if (km < 10) {
+        total += 10000;
+      } else if (km < 11) {
+        total += 12000;
+      } else if (km < 12) {
+        total += 13000;
+      } else if (km < 13) {
+        total += 14000;
+      } else if (km < 14) {
+        total += 15000;
+      } else {
+        total += 15000 + ((km - 13).floor() * 1000);
+      }
+    }
+    return total;
   }
 
   // ── Rechazar cotización ─────────────────────────────────────────────────────
@@ -1664,12 +1992,59 @@ class _ActivosTabState extends State<_ActivosTab> {
                 ),
                 if (renegociar) ...[
                   const SizedBox(height: 8),
+                  Builder(builder: (_) {
+                    final recargo = _recargoRecogidas(s);
+                    final tarifa = (s['tarifa'] as num?)?.toInt() ?? 0;
+                    if (recargo == 0 && tarifa == 0) return const SizedBox.shrink();
+                    final base = tarifa > 0 && recargo > 0
+                        ? (tarifa - recargo.round()).clamp(0, tarifa)
+                        : 0;
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 7),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                            color: Colors.orange.withValues(alpha: 0.3)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('💡 Referencia de precio',
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.orange[300])),
+                          const SizedBox(height: 3),
+                          if (tarifa > 0)
+                            Text('Cotización central: \$${_miles(tarifa)}',
+                                style: const TextStyle(fontSize: 11)),
+                          if (recargo > 0 && base > 0) ...[
+                            Text(
+                                '  Tarifa destino: \$${_miles(base.round())}',
+                                style: const TextStyle(fontSize: 11)),
+                            Text(
+                                '  Recargo sedes extra: \$${_miles(recargo.round())}',
+                                style: const TextStyle(fontSize: 11)),
+                          ] else if (recargo > 0)
+                            Text(
+                                'Recargo sedes extra: \$${_miles(recargo.round())}',
+                                style: const TextStyle(fontSize: 11)),
+                        ],
+                      ),
+                    );
+                  }),
                   TextField(
                     controller: precioCtrl,
                     keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Precio sugerido (\$)',
-                      border: OutlineInputBorder(),
+                    decoration: InputDecoration(
+                      labelText: 'Tu precio sugerido (\$)',
+                      hintText: s['tarifa'] != null
+                          ? '\$${_miles((s['tarifa'] as num).toInt())}'
+                          : '',
+                      border: const OutlineInputBorder(),
                       isDense: true,
                     ),
                   ),
@@ -1914,74 +2289,26 @@ class _ActivosTabState extends State<_ActivosTab> {
           );
         }
 
-        // Construir lista plana con separadores entre cards del mismo móvil
-        final items = <_ListItem>[];
-        for (int i = 0; i < activos.length; i++) {
-          final s = activos[i];
-          final movId = s['movil_id']?.toString() ?? '';
-          if (i > 0 &&
-              movId.isNotEmpty &&
-              movId == (activos[i - 1]['movil_id']?.toString() ?? '')) {
-            final prev = activos[i - 1];
-            final consec =
-                prev['fn_consecutivo']?.toString() ?? '#${prev['id']}';
-            final numMov = prev['numero_movil']?.toString() ?? '';
-            items.add(_ListItem.separator(
-                label: '🏍️ Móvil $numMov — Realizando servicio $consec'));
-          }
-          items.add(_ListItem.card(s));
-        }
-
         return RefreshIndicator(
           color: Colors.indigo,
           onRefresh: () async {},
           child: ListView.builder(
             padding: const EdgeInsets.all(12),
-            itemCount: items.length,
+            itemCount: activos.length,
             itemBuilder: (ctx, i) {
-              final item = items[i];
-              if (item.isSeparator) {
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Container(
-                            height: 1,
-                            color: Colors.indigo.withValues(alpha: 0.4)),
-                      ),
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: Colors.indigo.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                              color: Colors.indigo.withValues(alpha: 0.5)),
-                        ),
-                        child: Text(
-                          item.label!,
-                          style: const TextStyle(
-                            color: Colors.indigoAccent,
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Container(
-                            height: 1,
-                            color: Colors.indigo.withValues(alpha: 0.4)),
-                      ),
-                    ],
-                  ),
-                );
-              }
-              final s = item.servicio!;
+              final s = activos[i];
+              final movId = s['movil_id']?.toString() ?? '';
+              // Otros servicios activos del mismo móvil (para footer en la card)
+              final otros = movId.isEmpty
+                  ? <Map<String, dynamic>>[]
+                  : activos
+                      .where((o) =>
+                          o['movil_id']?.toString() == movId &&
+                          o['id'] != s['id'])
+                      .toList();
               return _CardServicioActivo(
                 servicio: s,
+                otrosServiciosMismoMovil: otros,
                 onAprobar: () => _aprobar(s),
                 onRechazar: () => _rechazar(s),
                 onCancelar: _puedeCanselar(s) ? () => _cancelar(s) : null,
@@ -2000,28 +2327,12 @@ class _ActivosTabState extends State<_ActivosTab> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Item de lista: card o separador
-// ─────────────────────────────────────────────────────────────────────────────
-class _ListItem {
-  final bool isSeparator;
-  final Map<String, dynamic>? servicio;
-  final String? label;
-
-  const _ListItem._({required this.isSeparator, this.servicio, this.label});
-
-  factory _ListItem.card(Map<String, dynamic> s) =>
-      _ListItem._(isSeparator: false, servicio: s);
-
-  factory _ListItem.separator({required String label}) =>
-      _ListItem._(isSeparator: true, label: label);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Card de servicio activo para la sede FN
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _CardServicioActivo extends StatefulWidget {
   final Map<String, dynamic> servicio;
+  final List<Map<String, dynamic>> otrosServiciosMismoMovil;
   final VoidCallback onAprobar;
   final VoidCallback onRechazar;
   final VoidCallback? onCancelar;
@@ -2030,6 +2341,7 @@ class _CardServicioActivo extends StatefulWidget {
 
   const _CardServicioActivo({
     required this.servicio,
+    required this.otrosServiciosMismoMovil,
     required this.onAprobar,
     required this.onRechazar,
     required this.onCancelar,
@@ -2451,9 +2763,11 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
                     icon: const Icon(Icons.add_circle_outline,
                         size: 15, color: Colors.indigo),
                     label: Text(
-                      '➕ Nuevo servicio con Móvil ${numMovil ?? s['movil_id']}',
-                      style:
-                          const TextStyle(color: Colors.indigo, fontSize: 12),
+                      'Nuevo servicio con Móvil ${numMovil ?? s['movil_id']}',
+                      style: const TextStyle(
+                          color: Colors.indigo,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold),
                     ),
                     style: OutlinedButton.styleFrom(
                       side: const BorderSide(color: Colors.indigo),
@@ -2473,6 +2787,50 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
                           style: TextStyle(color: Colors.orange, fontSize: 12)),
                     ),
                 ],
+              ),
+            ],
+
+            // ── Otros servicios activos del mismo móvil ───────────────────
+            if (widget.otrosServiciosMismoMovil.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                decoration: BoxDecoration(
+                  color: Colors.indigo.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: Colors.indigo.withValues(alpha: 0.25)),
+                ),
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 3,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    const Text('🏍 También activo:',
+                        style: TextStyle(
+                            color: Colors.white38,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold)),
+                    ...widget.otrosServiciosMismoMovil.map((o) {
+                      final c = o['fn_consecutivo']?.toString() ?? '#${o['id']}';
+                      return Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.indigo.withValues(alpha: 0.18),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(
+                              color: Colors.indigo.withValues(alpha: 0.45)),
+                        ),
+                        child: Text(c,
+                            style: const TextStyle(
+                                color: Colors.indigoAccent,
+                                fontSize: 9,
+                                fontWeight: FontWeight.bold)),
+                      );
+                    }),
+                  ],
+                ),
               ),
             ],
           ],
@@ -2752,25 +3110,37 @@ class _HistorialTabState extends State<_HistorialTab> {
                   },
                 ),
               // ── Acceso a Facturación FN ──────────────────────────────────
-              IconButton(
-                icon: const Icon(Icons.receipt_long,
-                    color: Colors.indigo, size: 22),
-                tooltip: 'Facturación FN',
-                onPressed: () {
-                  final sedeId = widget.sede?['id'] is int
-                      ? widget.sede!['id'] as int
-                      : int.tryParse(widget.sede?['id']?.toString() ?? '');
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => FnFacturacionScreen(
-                        sedeId: sedeId,
-                        titulo:
-                            'Facturación — ${widget.sede?['nombre'] ?? 'Mi sede'}',
+              Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.receipt_long, size: 16),
+                  label: const Text('Facturación',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.indigo[700],
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onPressed: () {
+                    final sedeId = widget.sede?['id'] is int
+                        ? widget.sede!['id'] as int
+                        : int.tryParse(widget.sede?['id']?.toString() ?? '');
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => FnFacturacionScreen(
+                          sedeId: sedeId,
+                          titulo:
+                              'Facturación — ${widget.sede?['nombre'] ?? 'Mi sede'}',
+                        ),
                       ),
-                    ),
-                  );
-                },
+                    );
+                  },
+                ),
               ),
             ],
           ),

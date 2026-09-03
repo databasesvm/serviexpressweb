@@ -2557,6 +2557,63 @@ extension CentralScreenMonitor on _CentralScreenState {
                         ),
                       ],
 
+                      // ── FILA 👁: notificados por fase (FN radar · pendiente) ──
+                      if (servicio['tipo_fn'] == true &&
+                          servicio['fn_asignacion_tipo'] == 'radar' &&
+                          estado == 'pendiente' &&
+                          servicio['movil_id'] == null) ...[
+                        const SizedBox(height: 3),
+                        Builder(builder: (_) {
+                          String numeros(dynamic ids) {
+                            if (ids == null) return '';
+                            final list = (ids as List<dynamic>);
+                            if (list.isEmpty) return '';
+                            return list.map((id) {
+                              final entry = _movilesCache.firstWhere(
+                                (m) => m['id'].toString() == id.toString(),
+                                orElse: () => <String, dynamic>{},
+                              );
+                              final u = entry['usuario']?.toString() ?? '';
+                              final n = RegExp(r'\d+').firstMatch(u)?.group(0) ?? '?';
+                              return '#$n';
+                            }).join(' ');
+                          }
+
+                          final f1 = numeros(servicio['fn_notificados_fase1']);
+                          final f2Raw = servicio['fn_fase2_movil_id']?.toString();
+                          String f2 = '';
+                          if (f2Raw != null) {
+                            final entry = _movilesCache.firstWhere(
+                              (m) => m['id'].toString() == f2Raw,
+                              orElse: () => <String, dynamic>{},
+                            );
+                            final u = entry['usuario']?.toString() ?? '';
+                            final n = RegExp(r'\d+').firstMatch(u)?.group(0) ?? '?';
+                            f2 = '#$n';
+                          }
+                          final f3 = numeros(servicio['fn_notificados_fase3']);
+                          final f4List = (servicio['fn_notificados_fase4'] as List<dynamic>?) ?? [];
+                          final f4 = f4List.isEmpty ? '' : (f4List.length > 5
+                              ? '${numeros(f4List.take(4).toList())} +${f4List.length - 4}'
+                              : numeros(f4List));
+
+                          final partes = <String>[
+                            if (f1.isNotEmpty) 'F1: $f1',
+                            if (f2.isNotEmpty) 'F2→ $f2',
+                            if (f3.isNotEmpty) 'F3: $f3',
+                            if (f4.isNotEmpty) 'F4: $f4',
+                          ];
+                          if (partes.isEmpty) return const SizedBox.shrink();
+
+                          return Text(
+                            '👁 ${partes.join('  ·  ')}',
+                            style: TextStyle(fontSize: 8, color: Colors.indigo[400]),
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 2,
+                          );
+                        }),
+                      ],
+
                       // ── FILA 5: acciones rápidas (expandible al seleccionar) ──
                       ValueListenableBuilder<int?>(
                         valueListenable: _seleccionadoId,

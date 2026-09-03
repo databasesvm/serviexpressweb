@@ -78,7 +78,6 @@ class _CentralScreenState extends State<CentralScreen>
   // Secciones nuevas — colapsables
   bool _bloqueadosExpandidos  = false;
   bool _descansoExpandido     = false;
-  bool _pendientesExpandidos  = false;
 
   // Toggle bloqueo automático por inactividad (config_sistema)
   bool _bloqueoInactividadActivo = false;
@@ -405,7 +404,6 @@ class _CentralScreenState extends State<CentralScreen>
                 .eq('activo', false)
                 .not('rol', 'in', '("cliente")');
             final rol = doc['rol']?.toString() ?? '';
-            final userId = doc['id']?.toString() ?? '';
             // Identificador visible: MOVIL##, nunca el nombre real
             final usuarioField = doc['usuario']?.toString() ?? '';
             final numStr = usuarioField.replaceAll(RegExp(r'[^0-9]'), '');
@@ -413,26 +411,8 @@ class _CentralScreenState extends State<CentralScreen>
                 ? 'MOVIL$numStr'
                 : (rol == 'local' ? 'LOCAL' : 'MOVIL');
 
-            // ── Push a todos los centrales (incluye segundo plano) ────────
-            try {
-              final centrales = await Supabase.instance.client
-                  .from('usuarios')
-                  .select('id')
-                  .eq('rol', 'central');
-              final ids = centrales
-                  .map((u) => u['id'].toString())
-                  .toList();
-              if (ids.isNotEmpty) {
-                await MotorNotificaciones.dispararRafa(
-                  idsDestinos: ids,
-                  titulo: '👤 Nuevo registro por activar',
-                  mensaje: '$identificador — ve a Gestión → Activaciones',
-                  urgente: false,
-                  collapseId: 'activacion_$userId',
-                  data: {'tipo': 'activacion_pendiente', 'usuario_id': userId},
-                );
-              }
-            } catch (_) {}
+            // ── Push omitido aquí: ya lo envía registro_screen al crear la cuenta ──
+            // (evita que llegue doble a centrales con la app abierta)
 
             if (mounted) {
               setState(() => _usuariosPendientes = pendientes.length);

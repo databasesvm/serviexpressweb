@@ -175,15 +175,6 @@ extension CentralScreenPanelControl on _CentralScreenState {
                         .toList()
                       ..sort(sortAscMovil);
 
-                    // Pendientes de activación (activo=false, no suspendidos, no eliminados)
-                    final pendientesActivacion = moviles
-                        .where((m) =>
-                            m['activo'] == false &&
-                            m['suspendido'] != true &&
-                            (m['eliminado'] == null || m['eliminado'] == false))
-                        .toList()
-                      ..sort(sortAscMovil);
-
                     final desconectados = moviles
                         .where(
                           (m) =>
@@ -1116,58 +1107,6 @@ extension CentralScreenPanelControl on _CentralScreenState {
                             )),
 
                         // =====================================================
-                        // PENDIENTES DE ACTIVACIÓN — desplegable
-                        // =====================================================
-                        if (pendientesActivacion.isNotEmpty || _pendientesExpandidos)
-                          InkWell(
-                            onTap: () => setState(
-                              () => _pendientesExpandidos = !_pendientesExpandidos,
-                            ),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              color: const Color(0xFF1E3A5F),
-                              child: Row(children: [
-                                const Icon(Icons.hourglass_top, color: Colors.lightBlueAccent, size: 13),
-                                const SizedBox(width: 6),
-                                Expanded(
-                                  child: Text(
-                                    '⏳ PENDIENTES DE ACTIVACIÓN (${pendientesActivacion.length})',
-                                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.lightBlueAccent, fontSize: 11),
-                                  ),
-                                ),
-                                Icon(
-                                  _pendientesExpandidos ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
-                                  size: 16, color: Colors.lightBlueAccent,
-                                ),
-                              ]),
-                            ),
-                          ),
-                        if (_pendientesExpandidos)
-                          if (pendientesActivacion.isEmpty)
-                            const Padding(
-                              padding: EdgeInsets.all(8),
-                              child: Text('Sin pendientes', style: TextStyle(color: Colors.grey, fontSize: 11)),
-                            )
-                          else
-                            ...pendientesActivacion.map((movil) => Material(
-                              color: const Color(0xFF0D1B2A),
-                              child: ListTile(
-                                dense: true,
-                                leading: _paraderoMovilLeading(movil, Colors.blueGrey[400]!),
-                                title: Text(
-                                  movil['nombre'] ?? 'Desconocido',
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.lightBlueAccent),
-                                ),
-                                subtitle: Text(
-                                  '@${movil['usuario'] ?? '—'}  •  Nº ${movil['numero_movil'] ?? '—'}',
-                                  style: const TextStyle(color: Colors.blueGrey, fontSize: 10),
-                                ),
-                                trailing: _movilTrailing(movil),
-                                onTap: () => _abrirMenuAccionesMovil(context, movil),
-                              ),
-                            )),
-
-                        // =====================================================
                         // DESCONECTADOS — desplegable
                         // =====================================================
                         InkWell(
@@ -1668,7 +1607,14 @@ extension CentralScreenPanelControl on _CentralScreenState {
                 final cotizadas = _asc(todos.where((s) => s['estado'] == 'cotizada'));
                 final cotizacionesAprobadas = _asc(todos.where((s) => s['estado'] == 'cotizacion_aprobada'));
                 final finalizadosDemora = _asc(todos.where((s) => s['estado'] == 'finalizado_por_demora'));
-                final libres = _asc(todos.where((s) => s['estado'] == 'pendiente'));
+                // Asignados directo FN (esperando aceptación del móvil asignado)
+                final directosFnEsperando = _asc(todos.where((s) =>
+                    s['estado'] == 'pendiente' &&
+                    s['fn_asignacion_tipo'] == 'directo_presel'));
+                // Libres para el radar (pendiente sin asignación directa)
+                final libres = _asc(todos.where((s) =>
+                    s['estado'] == 'pendiente' &&
+                    s['fn_asignacion_tipo'] != 'directo_presel'));
                 // ---> INYECCIÓN: EXTRAER LOS PROGRAMADOS <---
                 final programados = _asc(todos.where((s) => s['estado'] == 'programado'));
                 final enCurso = _asc(todos.where((s) => [
@@ -1829,6 +1775,14 @@ extension CentralScreenPanelControl on _CentralScreenState {
                                 Colors.deepPurple[700]!,
                                 Icons.timer_off,
                                 visible: !_seccionesOcultasMonitor.contains('demorados'),
+                              ),
+                              _construirBloqueServicios(
+                                context,
+                                '🎯 FN DIRECTO · ESPERANDO ACEPTACIÓN',
+                                _filtrar(directosFnEsperando),
+                                Colors.indigo[400]!,
+                                Icons.assignment_ind_outlined,
+                                visible: !_seccionesOcultasMonitor.contains('fn_directos'),
                               ),
                               _construirBloqueServicios(
                                 context,

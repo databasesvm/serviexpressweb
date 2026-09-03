@@ -69,6 +69,8 @@ async function movilEstaOcupado(movilId: string): Promise<boolean> {
   return !!data;
 }
 
+// Auto-asignación para servicios NO-FN: cambia estado a en_ruta_origen
+// (el #1 del paradero queda activo de inmediato).
 async function autoAsignar(
   srvId: number,
   movilId: string,
@@ -98,6 +100,46 @@ async function autoAsignar(
   return true;
 }
 
+// Pre-asignación FN fase 2:
+//   - Libre  → set movil_id (mantiene estado=pendiente). El móvil confirma
+//              aceptando in-app. Cancela FASE 3/4 para no notificar a otros.
+//   - Ocupado → solo push. El servicio sigue en cascada abierta (FASE 3/4).
+async function preasignarFn(
+  srvId: number,
+  movilId: string,
+  notifCancelar: (string | null)[],
+): Promise<void> {
+  const ocupado = await movilEstaOcupado(movilId);
+
+  if (!ocupado) {
+    // Libre: marcar movil_id y cambiar fn_asignacion_tipo para que
+    // el radar del móvil lo muestre directamente (como directo_presel).
+    const { error } = await supabase
+      .from('servicios')
+      .update({
+        movil_id: parseInt(movilId),
+        fn_asignacion_tipo: 'directo_presel',
+      })
+      .eq('id', srvId)
+      .eq('estado', 'pendiente')
+      .is('movil_id', null); // guard anti-doble-asignación
+
+    if (error) {
+      console.error(`[fn-fase2] Error pre-asignando srv ${srvId}:`, error.message);
+      return;
+    }
+
+    // Cancelar notificaciones de fases siguientes (ya está pre-asignado)
+    for (const n of notifCancelar) await cancelarNotif(n);
+    await enviarHeadsup(movilId, '🎯 SERVICIO FN PARA TI', 'Un servicio FN quedó asignado a ti — confírmalo en la app');
+    console.log(`[fn-fase2] Srv ${srvId} pre-asignado libre → móvil ${movilId} ✓`);
+  } else {
+    // Ocupado: solo push. El servicio sigue en cascada y llega a FASE 3/4.
+    await enviarHeadsup(movilId, '🔵 SERVICIO FN CERCANO', 'Hay un servicio FN cerca — revisa si te conviene la ruta');
+    console.log(`[fn-fase2] Srv ${srvId} → móvil ${movilId} ocupado, solo push`);
+  }
+}
+
 Deno.serve(async () => {
   const umbral = new Date(Date.now() - 30_000).toISOString();
 
@@ -114,14 +156,10 @@ Deno.serve(async () => {
       .lte('fn_radar_t0', umbral);
 
     for (const srv of serviciosFN ?? []) {
-      const movilId = srv.fn_fase2_movil_id as string;
-      if (await movilEstaOcupado(movilId)) continue;
-      await autoAsignar(
+      await preasignarFn(
         srv.id,
-        movilId,
+        srv.fn_fase2_movil_id as string,
         [srv.fn_notif_fase3, srv.fn_notif_fase4],
-        '📍 TU TURNO EN EL PARADERO',
-        'Un servicio FN está esperando por ti',
       );
     }
   }

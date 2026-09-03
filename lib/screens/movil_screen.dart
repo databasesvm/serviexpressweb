@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'dart:async';
+import 'dart:io';
 import 'package:serviexpress_app/screens/ranking_screen.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:serviexpress_app/utils/motor_rutas.dart';
@@ -7141,8 +7142,289 @@ class _MovilScreenState extends State<MovilScreen>
   static const String _kFnWebAppUrl =
       'https://script.google.com/macros/s/AKfycbx0X01UtWvlZnIZaMltkSoeOovj4m_Fi_HfLlM-K1oMEbZ9DIe-kInUZ73dxPQfNxe88w/exec';
 
+  // ── Popup de factura al llegar a sede FN ────────────────────────────────────
+  Future<void> _mostrarDialogoFacturaSede(Map<String, dynamic> servicio) async {
+    final existingNum = servicio['fn_factura_numero']?.toString() ?? '';
+    final facturaCtrl = TextEditingController(text: existingNum);
+
+    final recogidasRaw = servicio['recogidas'];
+    final List<dynamic> recogidasList =
+        recogidasRaw is List ? recogidasRaw : [];
+    final String recogidasStr = recogidasList.isEmpty
+        ? 'Sin recogidas'
+        : recogidasList.map((r) {
+            final rMap = r as Map<String, dynamic>;
+            final tipo = rMap['tipo'] as String? ?? '';
+            final numero = rMap['numero'];
+            if (tipo == 'FN' && numero != null) return 'FN$numero';
+            return numero != null ? '$tipo$numero' : tipo;
+          }).join(', ');
+    final String destino = servicio['destino']?.toString() ?? '—';
+    final String movilCodigo = widget.usuario['usuario']?.toString() ??
+        widget.usuario['nombre']?.toString() ?? '';
+    final String origenStr = servicio['origen']?.toString() ?? '';
+    final mSede = RegExp(r'FN #?(\d+)').firstMatch(origenStr);
+    final String sedeCodigo = mSede != null
+        ? 'FN${mSede.group(1)}'
+        : (servicio['zona_fn']?.toString() ?? origenStr);
+    final int tarifa = (servicio['tarifa'] as num?)?.toInt() ?? 0;
+    final String consec =
+        servicio['fn_consecutivo']?.toString() ?? '#${servicio['id']}';
+    final bool pagarProducto = servicio['fn_pagar_producto'] == true;
+
+    XFile? _fotoSede;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => AlertDialog(
+          titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+          contentPadding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+          title: Row(
+            children: [
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.indigo[900],
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Text('FN',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 11,
+                        letterSpacing: 1.2)),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text('Factura $consec',
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 15)),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Vista previa
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.indigo[50],
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.indigo[100]!),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('VISTA PREVIA',
+                          style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.black45,
+                              letterSpacing: 0.8)),
+                      const SizedBox(height: 10),
+                      _fnFacturaFila('Móvil', movilCodigo),
+                      _fnFacturaFila('Sede', sedeCodigo),
+                      if (recogidasStr != 'Sin recogidas')
+                        _fnFacturaFila('Recogidas', recogidasStr),
+                      _fnFacturaFila('Destino', destino),
+                      _fnFacturaFila('Valor', '\$${_formatearMoneda(tarifa)}'),
+                      if (pagarProducto)
+                        _fnFacturaFila('⚠ Pagar', 'Producto en sede'),
+                      _fnFacturaFila(
+                        'Nro. Factura',
+                        existingNum.isNotEmpty ? existingNum : '— pendiente —',
+                        pendiente: existingNum.isEmpty,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // Campo número
+                if (existingNum.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Text(
+                      'La sede no registró el número. Ingrésalo si lo tienes.',
+                      style: TextStyle(fontSize: 11, color: Colors.orange[700]),
+                    ),
+                  ),
+                const Text('NRO. FACTURA',
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.black54,
+                        letterSpacing: 0.5)),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: facturaCtrl,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  maxLength: 8,
+                  autofocus: existingNum.isEmpty,
+                  decoration: InputDecoration(
+                    hintText: 'Ej: 123456',
+                    counterText: '',
+                    filled: true,
+                    fillColor: const Color(0xFFF0F2F5),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide.none,
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide:
+                          BorderSide(color: Colors.indigo[900]!, width: 1.5),
+                    ),
+                  ),
+                  onChanged: (_) => setS(() {}),
+                ),
+                const SizedBox(height: 14),
+
+                // ── Foto del soporte ─────────────────────────────────────
+                const Text('FOTO DEL SOPORTE',
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.black54,
+                        letterSpacing: 0.5)),
+                const SizedBox(height: 6),
+                GestureDetector(
+                  onTap: () async {
+                    final picker = ImagePicker();
+                    final img = await picker.pickImage(
+                      source: ImageSource.camera,
+                      imageQuality: 70,
+                      maxWidth: 1000,
+                    );
+                    if (img != null) setS(() => _fotoSede = img);
+                  },
+                  child: Container(
+                    height: _fotoSede == null ? 56 : 120,
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: _fotoSede == null
+                          ? const Color(0xFFF0F2F5)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: _fotoSede == null
+                            ? Colors.grey[400]!
+                            : const Color(0xFF00a650),
+                        width: 1.5,
+                      ),
+                    ),
+                    child: _fotoSede == null
+                        ? Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.camera_alt,
+                                  color: Colors.grey[600], size: 20),
+                              const SizedBox(width: 8),
+                              Text('Tomar foto de la factura',
+                                  style: TextStyle(
+                                      color: Colors.grey[700],
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 13)),
+                            ],
+                          )
+                        : ClipRRect(
+                            borderRadius: BorderRadius.circular(9),
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                Image.file(
+                                  File(_fotoSede!.path),
+                                  fit: BoxFit.cover,
+                                ),
+                                Positioned(
+                                  bottom: 4,
+                                  right: 4,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: Colors.black54,
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: const Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.refresh,
+                                            size: 12, color: Colors.white),
+                                        SizedBox(width: 3),
+                                        Text('Cambiar',
+                                            style: TextStyle(
+                                                fontSize: 10,
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.bold)),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text('OMITIR',
+                  style: TextStyle(
+                      color: Colors.grey[600], fontWeight: FontWeight.w600)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF00a650),
+                foregroundColor: Colors.white,
+              ),
+              onPressed: facturaCtrl.text.trim().isEmpty
+                  ? null
+                  : () async {
+                      String? imgB64;
+                      if (_fotoSede != null) {
+                        final bytes = await _fotoSede!.readAsBytes();
+                        imgB64 =
+                            'data:image/jpeg;base64,${base64Encode(bytes)}';
+                      }
+                      if (!ctx.mounted) return;
+                      Navigator.pop(ctx);
+                      await _enviarReporteFN(
+                        servicio: servicio,
+                        factura: facturaCtrl.text.trim(),
+                        recogidasStr: recogidasStr,
+                        movilCodigo: movilCodigo,
+                        sedeCodigo: sedeCodigo,
+                        destino: destino,
+                        tarifa: tarifa,
+                        imagenBase64: imgB64,
+                      );
+                    },
+              child: const Text('REPORTAR FACTURA',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+            ),
+          ],
+        ),
+      ),
+    );
+    facturaCtrl.dispose();
+  }
+
   Future<void> _mostrarFormularioFactura(Map<String, dynamic> servicio) async {
     final facturaCtrl = TextEditingController();
+    XFile? _fotoForm;
 
     // ── Datos del servicio ───────────────────────────────────────────────────
     final recogidasRaw = servicio['recogidas'];
@@ -7290,6 +7572,94 @@ class _MovilScreenState extends State<MovilScreen>
                   ),
                   onChanged: (_) => setSheet(() {}),
                 ),
+                const SizedBox(height: 20),
+
+                // ── Foto del soporte ─────────────────────────────────────────
+                const Text('FOTO DEL SOPORTE',
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.black54,
+                        letterSpacing: 0.5)),
+                const SizedBox(height: 8),
+                GestureDetector(
+                  onTap: () async {
+                    final picker = ImagePicker();
+                    final img = await picker.pickImage(
+                      source: ImageSource.camera,
+                      imageQuality: 70,
+                      maxWidth: 1000,
+                    );
+                    if (img != null) setSheet(() => _fotoForm = img);
+                  },
+                  child: Container(
+                    height: _fotoForm == null ? 64 : 160,
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: _fotoForm == null
+                          ? const Color(0xFFF0F2F5)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: _fotoForm == null
+                            ? Colors.grey[400]!
+                            : const Color(0xFF00a650),
+                        width: 1.5,
+                      ),
+                    ),
+                    child: _fotoForm == null
+                        ? Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.camera_alt,
+                                  color: Colors.grey[600], size: 22),
+                              const SizedBox(width: 10),
+                              Text('Tomar foto de la factura',
+                                  style: TextStyle(
+                                      color: Colors.grey[700],
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 14)),
+                            ],
+                          )
+                        : ClipRRect(
+                            borderRadius: BorderRadius.circular(11),
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                Image.file(
+                                  File(_fotoForm!.path),
+                                  fit: BoxFit.cover,
+                                ),
+                                Positioned(
+                                  bottom: 6,
+                                  right: 6,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: Colors.black54,
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: const Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.refresh,
+                                            size: 13, color: Colors.white),
+                                        SizedBox(width: 4),
+                                        Text('Cambiar foto',
+                                            style: TextStyle(
+                                                fontSize: 11,
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.bold)),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                  ),
+                ),
                 const SizedBox(height: 24),
 
                 // ── Botón enviar ─────────────────────────────────────────────
@@ -7315,6 +7685,12 @@ class _MovilScreenState extends State<MovilScreen>
                         );
                         return;
                       }
+                      String? imgB64;
+                      if (_fotoForm != null) {
+                        final bytes = await _fotoForm!.readAsBytes();
+                        imgB64 =
+                            'data:image/jpeg;base64,${base64Encode(bytes)}';
+                      }
                       Navigator.of(ctx).pop();
                       await _enviarReporteFN(
                         servicio: servicio,
@@ -7324,6 +7700,7 @@ class _MovilScreenState extends State<MovilScreen>
                         sedeCodigo: sedeCodigo,
                         destino: destino,
                         tarifa: tarifa,
+                        imagenBase64: imgB64,
                       );
                     },
                     child: const Text('REPORTAR FACTURA',
@@ -7380,6 +7757,7 @@ class _MovilScreenState extends State<MovilScreen>
     required String sedeCodigo,
     required String destino,
     required int tarifa,
+    String? imagenBase64,
   }) async {
     if (!mounted) return;
     final overlayEntry = OverlayEntry(
@@ -7405,20 +7783,28 @@ class _MovilScreenState extends State<MovilScreen>
     Overlay.of(context).insert(overlayEntry);
 
     try {
-      final payload = jsonEncode({
+      final payloadMap = <String, dynamic>{
         'movil': movilCodigo,
         'sede': sedeCodigo,
         'recogidas': recogidasStr,
         'factura': "'$factura", // comilla preserva ceros a la izq. en Sheets
         'valor': tarifa.toString(),
         'direccion': destino,
-      });
+      };
+      if (imagenBase64 != null) payloadMap['imagen'] = imagenBase64;
+      final payload = jsonEncode(payloadMap);
 
       await http.post(
         Uri.parse(_kFnWebAppUrl),
         headers: {'Content-Type': 'text/plain;charset=utf-8'},
         body: payload,
       );
+
+      // Guardar número de factura en Supabase para que aparezca en el card
+      await Supabase.instance.client
+          .from('servicios')
+          .update({'fn_factura_numero': factura})
+          .eq('id', servicio['id']);
 
       overlayEntry.remove();
       if (mounted) {
@@ -8147,26 +8533,40 @@ class _MovilScreenState extends State<MovilScreen>
             // ── Fila botones secundarios ──────────────────────────────────
             Row(
               children: [
-                // Reportar Factura (no aplica cuando la sede ya cargó la factura)
-                if (servicio['fn_origen']?.toString() != 'sede')
-                  Expanded(
-                    child: SizedBox(
-                      height: 36,
-                      child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.indigo[900],
-                          foregroundColor: Colors.white,
-                          padding: EdgeInsets.zero,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(7)),
-                        ),
-                        onPressed: () => _mostrarFormularioFactura(servicio),
-                        icon: const Icon(Icons.receipt_long, size: 14),
-                        label: const Text('Factura',
-                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                // Reportar / ver factura
+                Expanded(
+                  child: SizedBox(
+                    height: 36,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: servicio['fn_factura_numero'] != null
+                            ? Colors.blueGrey[700]
+                            : Colors.indigo[900],
+                        foregroundColor: Colors.white,
+                        padding: EdgeInsets.zero,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(7)),
+                      ),
+                      onPressed: () =>
+                          servicio['fn_origen']?.toString() == 'sede'
+                              ? _mostrarDialogoFacturaSede(servicio)
+                              : _mostrarFormularioFactura(servicio),
+                      icon: Icon(
+                        servicio['fn_factura_numero'] != null
+                            ? Icons.receipt_long
+                            : Icons.receipt_long_outlined,
+                        size: 14,
+                      ),
+                      label: Text(
+                        servicio['fn_factura_numero'] != null
+                            ? 'Fac. ${servicio['fn_factura_numero']}'
+                            : 'Factura',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 12),
                       ),
                     ),
                   ),
+                ),
 
                 // Navegar destino (solo en_ruta_destino)
                 if (estado == 'en_ruta_destino' && !tieneProblema) ...[
@@ -10079,40 +10479,9 @@ class _MovilScreenState extends State<MovilScreen>
           .update(updateData)
           .eq('id', servicio['id']);
 
-      // Banner de factura automática para el móvil
+      // Popup de factura al llegar a la sede
       if (esFnSede && mounted) {
-        final consec = servicio['fn_consecutivo']?.toString() ?? '';
-        final sedeLabel = (() {
-          final recog = servicio['recogidas'];
-          if (recog is List && recog.isNotEmpty) {
-            final r = recog.first as Map<String, dynamic>;
-            final tipo = r['tipo']?.toString() ?? '';
-            final num = r['numero']?.toString() ?? '';
-            return tipo == 'FN' && num.isNotEmpty ? 'FN$num' : (r['nombre'] ?? 'FN');
-          }
-          return 'FN';
-        })();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: Colors.indigo[900],
-            duration: const Duration(seconds: 4),
-            content: Row(
-              children: [
-                const Icon(Icons.receipt_long, color: Colors.white, size: 18),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    '✓ Factura${consec.isNotEmpty ? ' $consec' : ''} cargada automáticamente por $sedeLabel',
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
+        await _mostrarDialogoFacturaSede(servicio);
       }
 
       // --- INYECCIÓN: DISPARO AL LOCAL ---
@@ -11565,6 +11934,21 @@ class _MovilScreenState extends State<MovilScreen>
                             // los móviles pueden recibir y ver todos los servicios
                             // FN independientemente de sus servicios activos.
                             if (s['tipo_fn'] == true) {
+                              // ── ASIGNACIÓN DIRECTA (directo_presel) ─────────
+                              // Verificar PRIMERO si ya tiene movil_id asignado.
+                              // Si soy el asignado → mostrar sin importar rango ni fase.
+                              // Si es otro → invisible para mí (incluidos Masters).
+                              // Se evalúa antes de tienePermFN para que un Novato/Pro/Elite
+                              // directamente asignado siempre pueda ver y aceptar su servicio.
+                              final int? svcMovilId = s['movil_id'] as int?;
+                              if (svcMovilId != null) {
+                                if (svcMovilId == (widget.usuario['id'] as int)) {
+                                  pendientes.add(s); // soy el asignado directo
+                                }
+                                continue; // salta fases en todos los casos
+                              }
+
+                              // ── CASCADA ABIERTA ──────────────────────────────
                               // Permiso base: ser MASTER o tener tiene_fn habilitado
                               final bool tienePermFN = esMaster ||
                                   miPerfilEnVivo['tiene_fn'] == true;
@@ -11620,7 +12004,11 @@ class _MovilScreenState extends State<MovilScreen>
                                   }
                                 }
                               } else {
-                                // FASE 4 (90s+): global — todos con permiso FN
+                                // FASE 4 (90s+): SIN CUBRIR — todos ven la card y
+                                // pueden aceptar. Masters ven detalles completos
+                                // (igual que FASE 1). No-Masters ven card estándar.
+                                // El push ya llegó a todos — la card debe estar visible
+                                // para que no haya confusión "recibí push pero no veo nada".
                                 puedeVer = true;
                               }
 

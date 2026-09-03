@@ -588,7 +588,7 @@ class _RegistroScreenState extends State<RegistroScreen> {
                 idsDestinos: centralIds,
                 titulo: '👤 NUEVO $rolLabel POR ACTIVAR',
                 mensaje:
-                    '${filaInsertada['nombre'] ?? 'Nuevo usuario'} está esperando activación. Ve a Gestión → Usuarios.',
+                    '${filaInsertada['nombre'] ?? 'Nuevo usuario'} esperando activacion. Gestion > Usuarios.',
                 urgente: true,
                 sonido: Sonidos.centralRadar,
               );
