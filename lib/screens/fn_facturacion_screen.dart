@@ -279,6 +279,24 @@ class _FnFacturacionScreenState extends State<FnFacturacionScreen> {
     return m[e] ?? e;
   }
 
+  // ── Botón de exportación compacto ─────────────────────────────────────────
+  Widget _btnExport(String label, IconData icon, Color color, VoidCallback? onPressed) {
+    return ElevatedButton.icon(
+      style: ElevatedButton.styleFrom(
+        backgroundColor: onPressed == null ? Colors.grey[800] : color,
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
+        textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+      ),
+      icon: Icon(icon, size: 15),
+      label: Text(label),
+      onPressed: onPressed,
+    );
+  }
+
   // ── Exportar CSV ───────────────────────────────────────────────────────────
   Future<void> _exportarCSV() async {
     setState(() => _exportando = true);
@@ -600,39 +618,33 @@ Total entregados período: <strong>\$${_miles(totalDom)}</strong>
       ],
     );
 
-    // Modo embebido (tab): sin Scaffold propio, exportar en row superior
+    // Barra de exportación — compartida por modo embebido y standalone
+    Widget barraExportacion = Container(
+      color: const Color(0xFF111827),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: _exportando
+            ? [const SizedBox(width: 22, height: 22,
+                child: CircularProgressIndicator(color: Colors.white54, strokeWidth: 2))]
+            : [
+                _btnExport('CSV', Icons.grid_on, const Color(0xFF4B5563),
+                    filtrados.isEmpty ? null : _exportarCSV),
+                const SizedBox(width: 8),
+                _btnExport('Excel', Icons.table_chart, const Color(0xFF15803D),
+                    filtrados.isEmpty ? null : _exportarExcel),
+                const SizedBox(width: 8),
+                _btnExport('Relación PDF', Icons.picture_as_pdf_outlined, const Color(0xFFB91C1C),
+                    filtrados.isEmpty ? null : _exportarRelacion),
+              ],
+      ),
+    );
+
+    // Modo embebido (tab): sin Scaffold propio
     if (widget.embedded) {
       return Column(
         children: [
-          Container(
-            color: const Color(0xFF0F0F0F),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                if (_exportando)
-                  const SizedBox(width: 18, height: 18,
-                      child: CircularProgressIndicator(color: Colors.white54, strokeWidth: 2))
-                else ...[
-                  IconButton(
-                    tooltip: 'Exportar CSV',
-                    icon: const Icon(Icons.grid_on, color: Colors.white54, size: 20),
-                    onPressed: filtrados.isEmpty ? null : _exportarCSV,
-                  ),
-                  IconButton(
-                    tooltip: 'Exportar Excel (.xlsx)',
-                    icon: const Icon(Icons.table_chart, color: Colors.green, size: 20),
-                    onPressed: filtrados.isEmpty ? null : _exportarExcel,
-                  ),
-                  IconButton(
-                    tooltip: 'Relación de cobro (HTML → PDF)',
-                    icon: const Icon(Icons.picture_as_pdf_outlined, color: Colors.white54, size: 20),
-                    onPressed: filtrados.isEmpty ? null : _exportarRelacion,
-                  ),
-                ],
-              ],
-            ),
-          ),
+          barraExportacion,
           Expanded(child: body),
         ],
       );
@@ -645,33 +657,13 @@ Total entregados período: <strong>\$${_miles(totalDom)}</strong>
         iconTheme: const IconThemeData(color: Colors.white),
         title: Text(widget.titulo,
             style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
-        actions: [
-          if (_exportando)
-            const Padding(
-              padding: EdgeInsets.all(14),
-              child: SizedBox(width: 18, height: 18,
-                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)),
-            )
-          else ...[
-            IconButton(
-              tooltip: 'Exportar CSV',
-              icon: const Icon(Icons.grid_on, color: Colors.white70),
-              onPressed: filtrados.isEmpty ? null : _exportarCSV,
-            ),
-            IconButton(
-              tooltip: 'Exportar Excel (.xlsx)',
-              icon: const Icon(Icons.table_chart, color: Colors.greenAccent),
-              onPressed: filtrados.isEmpty ? null : _exportarExcel,
-            ),
-            IconButton(
-              tooltip: 'Relación de cobro (HTML → PDF)',
-              icon: const Icon(Icons.picture_as_pdf_outlined, color: Colors.white70),
-              onPressed: filtrados.isEmpty ? null : _exportarRelacion,
-            ),
-          ],
+      ),
+      body: Column(
+        children: [
+          barraExportacion,
+          Expanded(child: body),
         ],
       ),
-      body: body,
     );
   }
 

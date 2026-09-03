@@ -77,11 +77,8 @@ class _SedeFnScreenState extends State<SedeFnScreen>
     final sedeId = widget.usuario['fn_sede_id'];
     if (sedeId == null) return;
     try {
-      final data = await _db
-          .from('fn_sedes')
-          .select()
-          .eq('id', sedeId)
-          .maybeSingle();
+      final data =
+          await _db.from('fn_sedes').select().eq('id', sedeId).maybeSingle();
       if (mounted) setState(() => _sede = data);
     } catch (_) {}
   }
@@ -145,7 +142,8 @@ class _SedeFnScreenState extends State<SedeFnScreen>
             if (!mounted) return;
             final estadoNuevo = nuevo['estado']?.toString() ?? '';
             final estadoViejo = viejo['estado']?.toString() ?? '';
-            if (nuevo['fn_sede_solicitante_id']?.toString() != sedeId.toString()) return;
+            if (nuevo['fn_sede_solicitante_id']?.toString() !=
+                sedeId.toString()) return;
             if (estadoNuevo == estadoViejo) return;
             // Central respondió cotización → sonido especial FN
             if (estadoViejo == 'cotizacion' && estadoNuevo == 'cotizada') {
@@ -272,12 +270,16 @@ class _SedeFnScreenState extends State<SedeFnScreen>
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: const Row(
                 children: [
-                  Icon(Icons.warning_amber_rounded, color: Colors.white, size: 16),
+                  Icon(Icons.warning_amber_rounded,
+                      color: Colors.white, size: 16),
                   SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       '⚠ Alta demanda: habrá demora en asignar y realizar los servicios',
-                      style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold),
                     ),
                   ),
                 ],
@@ -355,9 +357,15 @@ class _FormularioTabState extends State<_FormularioTab> {
   // Modo por recogida: false=sede oficial, true=dirección libre
   final List<bool> _recogidasEsManual = [false];
   // Controladores para entradas manuales
-  final List<TextEditingController> _recogidasNombreCtrl = [TextEditingController()];
-  final List<TextEditingController> _recogidasDireccionCtrl = [TextEditingController()];
-  final List<TextEditingController> _recogidasGpsCtrl = [TextEditingController()];
+  final List<TextEditingController> _recogidasNombreCtrl = [
+    TextEditingController()
+  ];
+  final List<TextEditingController> _recogidasDireccionCtrl = [
+    TextEditingController()
+  ];
+  final List<TextEditingController> _recogidasGpsCtrl = [
+    TextEditingController()
+  ];
 
   // Destino
   final _destinoCtrl = TextEditingController();
@@ -417,9 +425,15 @@ class _FormularioTabState extends State<_FormularioTab> {
     _destinoCtrl.dispose();
     _facturaNumCtrl.dispose();
     _instruccionesCtrl.dispose();
-    for (final c in _recogidasNombreCtrl) { c.dispose(); }
-    for (final c in _recogidasDireccionCtrl) { c.dispose(); }
-    for (final c in _recogidasGpsCtrl) { c.dispose(); }
+    for (final c in _recogidasNombreCtrl) {
+      c.dispose();
+    }
+    for (final c in _recogidasDireccionCtrl) {
+      c.dispose();
+    }
+    for (final c in _recogidasGpsCtrl) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -503,7 +517,8 @@ class _FormularioTabState extends State<_FormularioTab> {
           .toList();
 
       final masterIds = masters.map<String>((m) => m['id'].toString()).toList();
-      final noMasterIds = noMasters.map<String>((m) => m['id'].toString()).toList();
+      final noMasterIds =
+          noMasters.map<String>((m) => m['id'].toString()).toList();
 
       // 3. Calcular más cercano (haversine simple)
       double _distKm(double lat1, double lon1, double lat2, double lon2) {
@@ -511,8 +526,10 @@ class _FormularioTabState extends State<_FormularioTab> {
         final dLat = (lat2 - lat1) * math.pi / 180;
         final dLon = (lon2 - lon1) * math.pi / 180;
         final a = math.sin(dLat / 2) * math.sin(dLat / 2) +
-            math.cos(lat1 * math.pi / 180) * math.cos(lat2 * math.pi / 180) *
-            math.sin(dLon / 2) * math.sin(dLon / 2);
+            math.cos(lat1 * math.pi / 180) *
+                math.cos(lat2 * math.pi / 180) *
+                math.sin(dLon / 2) *
+                math.sin(dLon / 2);
         return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
       }
 
@@ -524,7 +541,10 @@ class _FormularioTabState extends State<_FormularioTab> {
           final uLng = (m['longitud'] as num?)?.toDouble();
           if (uLat == null || uLng == null) continue;
           final d = _distKm(uLat, uLng, sLat, sLng);
-          if (d < minD) { minD = d; fase2Id = m['id'].toString(); }
+          if (d < minD) {
+            minD = d;
+            fase2Id = m['id'].toString();
+          }
         }
       } else if (noMasters.isNotEmpty) {
         fase2Id = noMasters.first['id'].toString();
@@ -592,7 +612,9 @@ class _FormularioTabState extends State<_FormularioTab> {
     for (int i = 0; i < _recogidasSel.length; i++) {
       // Manual con contenido = por evaluar
       if (_recogidasEsManual[i] &&
-          _recogidasNombreCtrl[i].text.trim().isNotEmpty) { return true; }
+          _recogidasNombreCtrl[i].text.trim().isNotEmpty) {
+        return true;
+      }
       final r = _recogidasSel[i];
       if (r != null && r['cobertura'] == 'fuera') return true;
       if (r != null && r['cobertura'] == 'por_evaluar') return true;
@@ -667,63 +689,66 @@ class _FormularioTabState extends State<_FormularioTab> {
 
       // Nombre de la sede solicitante
       final sedeData = widget.sede;
-      final nombreSede = sedeData != null
-          ? _labelSede(sedeData)
-          : 'Sede FN';
+      final nombreSede = sedeData != null ? _labelSede(sedeData) : 'Sede FN';
 
       final altaDemanda = widget.altaDemanda;
 
       final usaPrecioSugerido = _precioSugerido != null;
 
-      final insertedRow = await _db.from('servicios').insert({
-        'origen': nombreSede,
-        'destino': _destinoCtrl.text.trim().toUpperCase(),
-        'estado': usaPrecioSugerido ? 'pendiente' : 'cotizacion',
-        'creador': 'FN-Sede',
-        'tipo_servicio': 'FARMANORTE',
-        'tipo_fn': true,
-        'fn_origen': 'sede',
-        'fn_sede_solicitante_id': sedeId,
-        'fn_sede_id': primeraRecogida['es_manual'] == true
-            ? null
-            : (primeraRecogida['id'] ?? sedeId),
-        'recogidas': recogidasList,
-        'metodo_pago': _conDatafono ? 'Datafono' : 'Efectivo',
-        'fn_factura_numero': _facturaNumCtrl.text.trim().isEmpty
-            ? null
-            : _facturaNumCtrl.text.trim(),
-        'fn_alta_demanda': altaDemanda,
-        'fn_consecutivo': consec?.toString(),
-        'fn_recotizacion': 1,
-        'archivado': false,
-        if (usaPrecioSugerido) ...{
-          'tarifa': _tarifaEfectiva,
-          'tarifa_detalle': {
-            'total': _tarifaEfectiva,
-            'fuente': 'red_fn',
-            'precio_red': _precioSugerido,
-            if (_conDatafono) 'recargo_datafono': _recargoDaatafonoCOP,
-          },
-        },
-        // Móvil preseleccionado desde "Nuevo servicio con este móvil"
-        if (_movilPreselId != null && usaPrecioSugerido) ...{
-          'movil_id': int.tryParse(_movilPreselId!),
-          'fn_asignacion_tipo': 'directo_presel',
-        },
-        if (_movilPreselId != null && !usaPrecioSugerido)
-          'fn_movil_preseleccionado_id': int.tryParse(_movilPreselId!),
-        if (_instruccionesCtrl.text.trim().isNotEmpty)
-          'instrucciones_especiales': _instruccionesCtrl.text.trim(),
-        // Coordenadas de la primera sede de recogida como origen (solo si es sede oficial)
-        if (primeraRecogida['lat'] != null)
-          'origen_lat': (primeraRecogida['lat'] as num).toDouble(),
-        if (primeraRecogida['lng'] != null)
-          'origen_lng': (primeraRecogida['lng'] as num).toDouble(),
-        // WhatsApp de la sede solicitante para que el móvil pueda contactarla
-        if (widget.sede?['telefono_whatsapp'] != null &&
-            (widget.sede!['telefono_whatsapp'] as String).trim().isNotEmpty)
-          'fn_whatsapp': (widget.sede!['telefono_whatsapp'] as String).trim(),
-      }).select('id').single();
+      final insertedRow = await _db
+          .from('servicios')
+          .insert({
+            'origen': nombreSede,
+            'destino': _destinoCtrl.text.trim().toUpperCase(),
+            'estado': usaPrecioSugerido ? 'pendiente' : 'cotizacion',
+            'creador': 'FN-Sede',
+            'tipo_servicio': 'FARMANORTE',
+            'tipo_fn': true,
+            'fn_origen': 'sede',
+            'fn_sede_solicitante_id': sedeId,
+            'fn_sede_id': primeraRecogida['es_manual'] == true
+                ? null
+                : (primeraRecogida['id'] ?? sedeId),
+            'recogidas': recogidasList,
+            'metodo_pago': _conDatafono ? 'Datafono' : 'Efectivo',
+            'fn_factura_numero': _facturaNumCtrl.text.trim().isEmpty
+                ? null
+                : _facturaNumCtrl.text.trim(),
+            'fn_alta_demanda': altaDemanda,
+            'fn_consecutivo': consec?.toString(),
+            'fn_recotizacion': 1,
+            'archivado': false,
+            if (usaPrecioSugerido) ...{
+              'tarifa': _tarifaEfectiva,
+              'tarifa_detalle': {
+                'total': _tarifaEfectiva,
+                'fuente': 'red_fn',
+                'precio_red': _precioSugerido,
+                if (_conDatafono) 'recargo_datafono': _recargoDaatafonoCOP,
+              },
+            },
+            // Móvil preseleccionado desde "Nuevo servicio con este móvil"
+            if (_movilPreselId != null && usaPrecioSugerido) ...{
+              'movil_id': int.tryParse(_movilPreselId!),
+              'fn_asignacion_tipo': 'directo_presel',
+            },
+            if (_movilPreselId != null && !usaPrecioSugerido)
+              'fn_movil_preseleccionado_id': int.tryParse(_movilPreselId!),
+            if (_instruccionesCtrl.text.trim().isNotEmpty)
+              'instrucciones_especiales': _instruccionesCtrl.text.trim(),
+            // Coordenadas de la primera sede de recogida como origen (solo si es sede oficial)
+            if (primeraRecogida['lat'] != null)
+              'origen_lat': (primeraRecogida['lat'] as num).toDouble(),
+            if (primeraRecogida['lng'] != null)
+              'origen_lng': (primeraRecogida['lng'] as num).toDouble(),
+            // WhatsApp de la sede solicitante para que el móvil pueda contactarla
+            if (widget.sede?['telefono_whatsapp'] != null &&
+                (widget.sede!['telefono_whatsapp'] as String).trim().isNotEmpty)
+              'fn_whatsapp':
+                  (widget.sede!['telefono_whatsapp'] as String).trim(),
+          })
+          .select('id')
+          .single();
 
       final int? newServiceId = insertedRow['id'] is int
           ? insertedRow['id'] as int
@@ -777,14 +802,30 @@ class _FormularioTabState extends State<_FormularioTab> {
       if (!mounted) return;
       // Limpiar formulario
       setState(() {
-        _recogidasSel..clear()..add(null);
-        _recogidasEsManual..clear()..add(false);
-        for (final c in _recogidasNombreCtrl) { c.dispose(); }
-        _recogidasNombreCtrl..clear()..add(TextEditingController());
-        for (final c in _recogidasDireccionCtrl) { c.dispose(); }
-        _recogidasDireccionCtrl..clear()..add(TextEditingController());
-        for (final c in _recogidasGpsCtrl) { c.dispose(); }
-        _recogidasGpsCtrl..clear()..add(TextEditingController());
+        _recogidasSel
+          ..clear()
+          ..add(null);
+        _recogidasEsManual
+          ..clear()
+          ..add(false);
+        for (final c in _recogidasNombreCtrl) {
+          c.dispose();
+        }
+        _recogidasNombreCtrl
+          ..clear()
+          ..add(TextEditingController());
+        for (final c in _recogidasDireccionCtrl) {
+          c.dispose();
+        }
+        _recogidasDireccionCtrl
+          ..clear()
+          ..add(TextEditingController());
+        for (final c in _recogidasGpsCtrl) {
+          c.dispose();
+        }
+        _recogidasGpsCtrl
+          ..clear()
+          ..add(TextEditingController());
         _conDatafono = false;
         _precioSugerido = null;
         _redDireccionSelId = null;
@@ -798,7 +839,8 @@ class _FormularioTabState extends State<_FormularioTab> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('✅ Solicitud enviada — esperando cotización de la central'),
+          content:
+              Text('✅ Solicitud enviada — esperando cotización de la central'),
           backgroundColor: Colors.green,
         ),
       );
@@ -820,405 +862,427 @@ class _FormularioTabState extends State<_FormularioTab> {
     return AutofillGroup(
       onDisposeAction: AutofillContextAction.cancel,
       child: SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Form(
-        key: _formKey,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ── Banner móvil preseleccionado ────────────────────────────────
-            if (_movilPreselId != null)
-              Container(
-                margin: const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                decoration: BoxDecoration(
-                  color: Colors.indigo[900],
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.person_pin_rounded,
-                        color: Colors.white, size: 16),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Asignando a Móvil $_movilPreselNum',
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13),
-                      ),
-                    ),
-                    GestureDetector(
-                      onTap: () {
-                        setState(() {
-                          _movilPreselId = null;
-                          _movilPreselNum = null;
-                        });
-                        widget.onPreselLimpiado?.call();
-                      },
-                      child: const Icon(Icons.close,
-                          color: Colors.white54, size: 18),
-                    ),
-                  ],
-                ),
-              ),
-
-            // ── Aviso fuera de cobertura ────────────────────────────────────
-            if (_tieneRecogidaFueraDe())
-              Container(
-                margin: const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.orange[900]!.withValues(alpha: 0.25),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.orange[700]!),
-                ),
-                child: const Row(
-                  children: [
-                    Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 16),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Una o más recogidas están fuera de cobertura o sin validar. '
-                        'La cotización puede tener recargo, demorar más o ser rechazada.',
-                        style: TextStyle(color: Colors.orange, fontSize: 12),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-            // ── Sección: Recogidas ──────────────────────────────────────────
-            _seccionLabel('📦 Recogidas (opcional — si hay otra sede donde recoger)'),
-            const SizedBox(height: 8),
-
-            if (_cargandoSedes)
-              const Center(child: CircularProgressIndicator(color: Colors.indigo))
-            else ...[
-              ...List.generate(_recogidasSel.length, (i) {
-                final esManual = _recogidasEsManual[i];
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+        padding: const EdgeInsets.all(16),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ── Banner móvil preseleccionado ────────────────────────────────
+              if (_movilPreselId != null)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.indigo[900],
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
                     children: [
-                      // ── Toggle sede / manual ──────────────────────────────
-                      Row(
-                        children: [
-                          _modoChip('Sede FN', !esManual,
-                              () => setState(() => _recogidasEsManual[i] = false)),
-                          const SizedBox(width: 8),
-                          _modoChip('Dirección libre', esManual,
-                              () => setState(() => _recogidasEsManual[i] = true)),
-                          const Spacer(),
-                          if (_recogidasSel.length > 1)
-                            IconButton(
-                              icon: const Icon(Icons.remove_circle, color: Colors.red, size: 20),
-                              onPressed: () => setState(() {
-                                _recogidasSel.removeAt(i);
-                                _recogidasEsManual.removeAt(i);
-                                _recogidasNombreCtrl[i].dispose();
-                                _recogidasNombreCtrl.removeAt(i);
-                                _recogidasDireccionCtrl[i].dispose();
-                                _recogidasDireccionCtrl.removeAt(i);
-                                _recogidasGpsCtrl[i].dispose();
-                                _recogidasGpsCtrl.removeAt(i);
-                              }),
-                            ),
-                        ],
+                      const Icon(Icons.person_pin_rounded,
+                          color: Colors.white, size: 16),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Asignando a Móvil $_movilPreselNum',
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13),
+                        ),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        esManual
-                            ? 'Añade una recogida en cualquier otra dirección: una sede FN no registrada o una droguería/farmacia externa'
-                            : 'Selecciona una o más sedes de Farmanorte registradas como punto de recogida',
-                        style: const TextStyle(
-                            color: Colors.white54,
-                            fontSize: 11,
-                            fontStyle: FontStyle.italic),
+                      GestureDetector(
+                        onTap: () {
+                          setState(() {
+                            _movilPreselId = null;
+                            _movilPreselNum = null;
+                          });
+                          widget.onPreselLimpiado?.call();
+                        },
+                        child: const Icon(Icons.close,
+                            color: Colors.white54, size: 18),
                       ),
-                      const SizedBox(height: 6),
-                      // ── Contenido según modo ──────────────────────────────
-                      if (!esManual)
-                        DropdownButtonFormField<Map<String, dynamic>>(
-                          // ignore: deprecated_member_use
-                          value: _recogidasSel[i],
-                          decoration: _inputDeco('Recogida ${i + 1}'),
-                          dropdownColor: const Color(0xFF1E1E1E),
-                          style: const TextStyle(color: Colors.white, fontSize: 13),
-                          iconEnabledColor: Colors.white54,
-                          iconDisabledColor: Colors.white24,
-                          isExpanded: true,
-                          hint: const Text('Seleccionar sede FN',
-                              style: TextStyle(color: Colors.white54, fontSize: 12)),
-                          items: _sedesDisponibles.map((s) => DropdownMenuItem(
-                            value: s,
-                            child: Text(_labelSede(s),
-                                style: const TextStyle(color: Colors.white, fontSize: 13)),
-                          )).toList(),
-                          onChanged: (v) => setState(() => _recogidasSel[i] = v),
-                        )
-                      else ...[
-                        TextFormField(
-                          controller: _recogidasNombreCtrl[i],
-                          textCapitalization: TextCapitalization.words,
-                          style: const TextStyle(color: Colors.white),
-                          decoration: _inputDeco('Nombre / referencia del local'),
-                          autofillHints: const <String>[],
-                        ),
-                        const SizedBox(height: 6),
-                        TextFormField(
-                          controller: _recogidasDireccionCtrl[i],
-                          textCapitalization: TextCapitalization.characters,
-                          style: const TextStyle(color: Colors.white),
-                          decoration: _inputDeco('Dirección (opcional)'),
-                          autofillHints: const <String>[],
-                        ),
-                        const SizedBox(height: 6),
-                        TextFormField(
-                          controller: _recogidasGpsCtrl[i],
-                          style: const TextStyle(color: Colors.white),
-                          keyboardType: TextInputType.url,
-                          decoration: _inputDeco('Link GPS (opcional)',
-                              hint: 'https://maps.google.com/...'),
-                          autofillHints: const <String>[],
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.only(top: 4),
-                          child: Text(
-                            '⚠ La Central revisará y podrá añadir esta dirección oficialmente.',
-                            style: TextStyle(color: Colors.orange[400], fontSize: 10),
-                          ),
-                        ),
-                      ],
                     ],
                   ),
-                );
-              }),
-              TextButton.icon(
-                onPressed: () => setState(() {
-                  _recogidasSel.add(null);
-                  _recogidasEsManual.add(false);
-                  _recogidasNombreCtrl.add(TextEditingController());
-                  _recogidasDireccionCtrl.add(TextEditingController());
-                  _recogidasGpsCtrl.add(TextEditingController());
-                }),
-                icon: const Icon(Icons.add, size: 16),
-                label: const Text('Agregar recogida', style: TextStyle(fontSize: 13)),
-                style: TextButton.styleFrom(foregroundColor: Colors.indigo[300]),
-              ),
-            ],
+                ),
 
-            const SizedBox(height: 16),
-
-            // ── Destino ─────────────────────────────────────────────────────
-            _seccionLabel('🏁 Destino de entrega'),
-            const SizedBox(height: 8),
-            TextFormField(
-              controller: _destinoCtrl,
-              textCapitalization: TextCapitalization.characters,
-              style: const TextStyle(color: Colors.white),
-              decoration: _inputDeco('Dirección de entrega'),
-              autofillHints: const <String>[],
-              onChanged: (_) {
-                // Si el usuario escribe manualmente, quita la selección de red
-                if (_redDireccionSelId != null) {
-                  setState(() {
-                    _redDireccionSelId = null;
-                    _precioSugerido = null;
-                  });
-                }
-              },
-              validator: (v) =>
-                  (v == null || v.trim().isEmpty) ? 'Requerido' : null,
-            ),
-
-            // ── Red de direcciones (chips) ───────────────────────────────────
-            if (_redDirecciones.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: _redDirecciones.map((dir) {
-                  final seleccionado = _redDireccionSelId == dir['id'];
-                  return GestureDetector(
-                    onTap: () {
-                      setState(() {
-                        if (seleccionado) {
-                          // Deseleccionar
-                          _redDireccionSelId = null;
-                          _precioSugerido = null;
-                          _destinoCtrl.clear();
-                        } else {
-                          _redDireccionSelId = dir['id'] as int;
-                          _precioSugerido = (dir['precio'] as num).toDouble();
-                          _destinoCtrl.text =
-                              dir['direccion'].toString().toUpperCase();
-                        }
-                      });
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: seleccionado
-                            ? Colors.indigo[700]
-                            : const Color(0xFF1E1E1E),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: seleccionado
-                              ? Colors.indigo[300]!
-                              : Colors.white24,
+              // ── Aviso fuera de cobertura ────────────────────────────────────
+              if (_tieneRecogidaFueraDe())
+                Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.orange[900]!.withValues(alpha: 0.25),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.orange[700]!),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.warning_amber_rounded,
+                          color: Colors.orange, size: 16),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Una o más recogidas están fuera de cobertura o sin validar. '
+                          'La cotización puede tener recargo, demorar más o ser rechazada.',
+                          style: TextStyle(color: Colors.orange, fontSize: 12),
                         ),
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            dir['nombre'].toString(),
-                            style: TextStyle(
-                              color: seleccionado
-                                  ? Colors.white
-                                  : Colors.white70,
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          Text(
-                            '\$${_miles((dir['precio'] as num).toInt())}',
-                            style: TextStyle(
-                              color: seleccionado
-                                  ? Colors.greenAccent
-                                  : Colors.white38,
-                              fontSize: 11,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                }).toList(),
-              ),
-              if (_precioSugerido != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          const Icon(Icons.flash_on,
-                              color: Colors.greenAccent, size: 14),
-                          const SizedBox(width: 4),
-                          Text(
-                            'Precio sugerido: \$${_miles(_precioSugerido!.toInt())} — directo sin cotización',
-                            style: const TextStyle(
-                                color: Colors.greenAccent,
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold),
-                          ),
-                        ],
-                      ),
-                      if (_conDatafono) ...[
-                        const SizedBox(height: 4),
+                    ],
+                  ),
+                ),
+
+              // ── Sección: Recogidas ──────────────────────────────────────────
+              _seccionLabel(
+                  '📦 Recogidas (opcional — si hay otra sede donde recoger)'),
+              const SizedBox(height: 8),
+
+              if (_cargandoSedes)
+                const Center(
+                    child: CircularProgressIndicator(color: Colors.indigo))
+              else ...[
+                ...List.generate(_recogidasSel.length, (i) {
+                  final esManual = _recogidasEsManual[i];
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // ── Toggle sede / manual ──────────────────────────────
                         Row(
                           children: [
-                            const Icon(Icons.credit_card,
-                                color: Colors.amberAccent, size: 14),
+                            _modoChip(
+                                'Sede FN',
+                                !esManual,
+                                () => setState(
+                                    () => _recogidasEsManual[i] = false)),
+                            const SizedBox(width: 8),
+                            _modoChip(
+                                'Dirección libre',
+                                esManual,
+                                () => setState(
+                                    () => _recogidasEsManual[i] = true)),
+                            const Spacer(),
+                            if (_recogidasSel.length > 1)
+                              IconButton(
+                                icon: const Icon(Icons.remove_circle,
+                                    color: Colors.red, size: 20),
+                                onPressed: () => setState(() {
+                                  _recogidasSel.removeAt(i);
+                                  _recogidasEsManual.removeAt(i);
+                                  _recogidasNombreCtrl[i].dispose();
+                                  _recogidasNombreCtrl.removeAt(i);
+                                  _recogidasDireccionCtrl[i].dispose();
+                                  _recogidasDireccionCtrl.removeAt(i);
+                                  _recogidasGpsCtrl[i].dispose();
+                                  _recogidasGpsCtrl.removeAt(i);
+                                }),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          esManual
+                              ? 'Añade una recogida en cualquier otra dirección: una sede FN no registrada o una droguería/farmacia externa'
+                              : 'Selecciona una o más sedes de Farmanorte registradas como punto de recogida',
+                          style: const TextStyle(
+                              color: Colors.white54,
+                              fontSize: 11,
+                              fontStyle: FontStyle.italic),
+                        ),
+                        const SizedBox(height: 6),
+                        // ── Contenido según modo ──────────────────────────────
+                        if (!esManual)
+                          DropdownButtonFormField<Map<String, dynamic>>(
+                            // ignore: deprecated_member_use
+                            value: _recogidasSel[i],
+                            decoration: _inputDeco('Recogida ${i + 1}'),
+                            dropdownColor: const Color(0xFF1E1E1E),
+                            style: const TextStyle(
+                                color: Colors.white, fontSize: 13),
+                            iconEnabledColor: Colors.white54,
+                            iconDisabledColor: Colors.white24,
+                            isExpanded: true,
+                            hint: const Text('Seleccionar sede FN',
+                                style: TextStyle(
+                                    color: Colors.white54, fontSize: 12)),
+                            items: _sedesDisponibles
+                                .map((s) => DropdownMenuItem(
+                                      value: s,
+                                      child: Text(_labelSede(s),
+                                          style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 13)),
+                                    ))
+                                .toList(),
+                            onChanged: (v) =>
+                                setState(() => _recogidasSel[i] = v),
+                          )
+                        else ...[
+                          TextFormField(
+                            controller: _recogidasNombreCtrl[i],
+                            textCapitalization: TextCapitalization.words,
+                            style: const TextStyle(color: Colors.white),
+                            decoration:
+                                _inputDeco('Nombre / referencia del local'),
+                            autofillHints: const <String>[],
+                          ),
+                          const SizedBox(height: 6),
+                          TextFormField(
+                            controller: _recogidasDireccionCtrl[i],
+                            textCapitalization: TextCapitalization.characters,
+                            style: const TextStyle(color: Colors.white),
+                            decoration: _inputDeco('Dirección (opcional)'),
+                            autofillHints: const <String>[],
+                          ),
+                          const SizedBox(height: 6),
+                          TextFormField(
+                            controller: _recogidasGpsCtrl[i],
+                            style: const TextStyle(color: Colors.white),
+                            keyboardType: TextInputType.url,
+                            decoration: _inputDeco('Link GPS (opcional)',
+                                hint: 'https://maps.google.com/...'),
+                            autofillHints: const <String>[],
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Text(
+                              '⚠ La Central revisará y podrá añadir esta dirección oficialmente.',
+                              style: TextStyle(
+                                  color: Colors.orange[400], fontSize: 10),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  );
+                }),
+                TextButton.icon(
+                  onPressed: () => setState(() {
+                    _recogidasSel.add(null);
+                    _recogidasEsManual.add(false);
+                    _recogidasNombreCtrl.add(TextEditingController());
+                    _recogidasDireccionCtrl.add(TextEditingController());
+                    _recogidasGpsCtrl.add(TextEditingController());
+                  }),
+                  icon: const Icon(Icons.add, size: 16),
+                  label: const Text('Agregar recogida',
+                      style: TextStyle(fontSize: 13)),
+                  style:
+                      TextButton.styleFrom(foregroundColor: Colors.indigo[300]),
+                ),
+              ],
+
+              const SizedBox(height: 16),
+
+              // ── Destino ─────────────────────────────────────────────────────
+              _seccionLabel('🏁 Destino de entrega'),
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: _destinoCtrl,
+                textCapitalization: TextCapitalization.characters,
+                style: const TextStyle(color: Colors.white),
+                decoration: _inputDeco('Dirección de entrega'),
+                autofillHints: const <String>[],
+                onChanged: (_) {
+                  // Si el usuario escribe manualmente, quita la selección de red
+                  if (_redDireccionSelId != null) {
+                    setState(() {
+                      _redDireccionSelId = null;
+                      _precioSugerido = null;
+                    });
+                  }
+                },
+                validator: (v) =>
+                    (v == null || v.trim().isEmpty) ? 'Requerido' : null,
+              ),
+
+              // ── Red de direcciones (chips) ───────────────────────────────────
+              if (_redDirecciones.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: _redDirecciones.map((dir) {
+                    final seleccionado = _redDireccionSelId == dir['id'];
+                    return GestureDetector(
+                      onTap: () {
+                        setState(() {
+                          if (seleccionado) {
+                            // Deseleccionar
+                            _redDireccionSelId = null;
+                            _precioSugerido = null;
+                            _destinoCtrl.clear();
+                          } else {
+                            _redDireccionSelId = dir['id'] as int;
+                            _precioSugerido = (dir['precio'] as num).toDouble();
+                            _destinoCtrl.text =
+                                dir['direccion'].toString().toUpperCase();
+                          }
+                        });
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: seleccionado
+                              ? Colors.indigo[700]
+                              : const Color(0xFF1E1E1E),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: seleccionado
+                                ? Colors.indigo[300]!
+                                : Colors.white24,
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              dir['nombre'].toString(),
+                              style: TextStyle(
+                                color: seleccionado
+                                    ? Colors.white
+                                    : Colors.white70,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            Text(
+                              '\$${_miles((dir['precio'] as num).toInt())}',
+                              style: TextStyle(
+                                color: seleccionado
+                                    ? Colors.greenAccent
+                                    : Colors.white38,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+                if (_precioSugerido != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.flash_on,
+                                color: Colors.greenAccent, size: 14),
                             const SizedBox(width: 4),
                             Text(
-                              '+\$${_miles(_recargoDaatafonoCOP)} datáfono → Total: \$${_miles(_tarifaEfectiva!.toInt())}',
+                              'Precio sugerido: \$${_miles(_precioSugerido!.toInt())} — directo sin cotización',
                               style: const TextStyle(
-                                  color: Colors.amberAccent,
+                                  color: Colors.greenAccent,
                                   fontSize: 11,
                                   fontWeight: FontWeight.bold),
                             ),
                           ],
                         ),
+                        if (_conDatafono) ...[
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              const Icon(Icons.credit_card,
+                                  color: Colors.amberAccent, size: 14),
+                              const SizedBox(width: 4),
+                              Text(
+                                '+\$${_miles(_recargoDaatafonoCOP)} datáfono → Total: \$${_miles(_tarifaEfectiva!.toInt())}',
+                                style: const TextStyle(
+                                    color: Colors.amberAccent,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold),
+                              ),
+                            ],
+                          ),
+                        ],
                       ],
-                    ],
+                    ),
+                  ),
+              ],
+
+              const SizedBox(height: 16),
+
+              // ── Condiciones de pago ─────────────────────────────────────────
+              _seccionLabel('💳 Pago'),
+              const SizedBox(height: 8),
+              _switchTile(
+                '¿Va con datáfono?',
+                _conDatafono,
+                (v) => setState(() => _conDatafono = v),
+              ),
+
+              const SizedBox(height: 16),
+
+              // ── Factura ─────────────────────────────────────────────────────
+              _seccionLabel('🧾 Datos de la factura (opcional)'),
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: _facturaNumCtrl,
+                style: const TextStyle(color: Colors.white),
+                decoration: _inputDeco('N° factura'),
+                keyboardType: TextInputType.text,
+                autofillHints: const <String>[],
+              ),
+
+              const SizedBox(height: 16),
+
+              // ── Instrucciones ───────────────────────────────────────────────
+              _seccionLabel('📝 Instrucciones adicionales'),
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: _instruccionesCtrl,
+                maxLines: 3,
+                style: const TextStyle(color: Colors.white),
+                decoration:
+                    _inputDeco('Ej: Tocar timbre, dejar con el portero, etc.'),
+                autofillHints: const <String>[],
+              ),
+
+              const SizedBox(height: 24),
+
+              // ── Botón enviar ────────────────────────────────────────────────
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF1A237E),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: _enviando ? null : _enviar,
+                  icon: _enviando
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                              color: Colors.white, strokeWidth: 2))
+                      : const Icon(Icons.send_rounded),
+                  label: Text(
+                    _enviando
+                        ? 'Enviando...'
+                        : _movilPreselId != null
+                            ? 'ENVIAR — MÓVIL $_movilPreselNum'
+                            : 'SOLICITAR COTIZACIÓN',
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 15),
                   ),
                 ),
-            ],
-
-            const SizedBox(height: 16),
-
-            // ── Condiciones de pago ─────────────────────────────────────────
-            _seccionLabel('💳 Pago'),
-            const SizedBox(height: 8),
-            _switchTile(
-              '¿Va con datáfono?',
-              _conDatafono,
-              (v) => setState(() => _conDatafono = v),
-            ),
-
-            const SizedBox(height: 16),
-
-            // ── Factura ─────────────────────────────────────────────────────
-            _seccionLabel('🧾 Datos de la factura (opcional)'),
-            const SizedBox(height: 8),
-            TextFormField(
-              controller: _facturaNumCtrl,
-              style: const TextStyle(color: Colors.white),
-              decoration: _inputDeco('N° factura'),
-              keyboardType: TextInputType.text,
-              autofillHints: const <String>[],
-            ),
-
-            const SizedBox(height: 16),
-
-            // ── Instrucciones ───────────────────────────────────────────────
-            _seccionLabel('📝 Instrucciones adicionales'),
-            const SizedBox(height: 8),
-            TextFormField(
-              controller: _instruccionesCtrl,
-              maxLines: 3,
-              style: const TextStyle(color: Colors.white),
-              decoration: _inputDeco(
-                  'Ej: Tocar timbre, dejar con el portero, etc.'),
-              autofillHints: const <String>[],
-            ),
-
-            const SizedBox(height: 24),
-
-            // ── Botón enviar ────────────────────────────────────────────────
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF1A237E),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10)),
-                ),
-                onPressed: _enviando ? null : _enviar,
-                icon: _enviando
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                            color: Colors.white, strokeWidth: 2))
-                    : const Icon(Icons.send_rounded),
-                label: Text(
-                  _enviando
-                      ? 'Enviando...'
-                      : _movilPreselId != null
-                          ? 'ENVIAR — MÓVIL $_movilPreselNum'
-                          : 'SOLICITAR COTIZACIÓN',
-                  style: const TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 15),
-                ),
               ),
-            ),
-            const SizedBox(height: 40),
-          ],
+              const SizedBox(height: 40),
+            ],
+          ),
         ),
-      ),
-    ),   // SingleChildScrollView
-    );   // AutofillGroup
+      ), // SingleChildScrollView
+    ); // AutofillGroup
   }
 
   Widget _seccionLabel(String texto) => Text(
@@ -1230,7 +1294,8 @@ class _FormularioTabState extends State<_FormularioTab> {
             letterSpacing: 0.5),
       );
 
-  Widget _modoChip(String label, bool activo, VoidCallback onTap) => GestureDetector(
+  Widget _modoChip(String label, bool activo, VoidCallback onTap) =>
+      GestureDetector(
         onTap: onTap,
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -1238,7 +1303,9 @@ class _FormularioTabState extends State<_FormularioTab> {
             color: activo ? Colors.indigo[700] : const Color(0xFF1A1A1A),
             borderRadius: BorderRadius.circular(6),
             border: Border.all(
-              color: activo ? Colors.indigo[300]! : Colors.white.withValues(alpha: 0.15),
+              color: activo
+                  ? Colors.indigo[300]!
+                  : Colors.white.withValues(alpha: 0.15),
             ),
           ),
           child: Text(
@@ -1317,8 +1384,13 @@ class _ActivosTabState extends State<_ActivosTab> {
   final _db = Supabase.instance.client;
 
   static const _estadosActivos = [
-    'cotizacion', 'cotizada', 'pendiente', 'en_ruta_origen',
-    'en_origen', 'en_ruta_destino', 'fn_renegociando',
+    'cotizacion',
+    'cotizada',
+    'pendiente',
+    'en_ruta_origen',
+    'en_origen',
+    'en_ruta_destino',
+    'fn_renegociando',
   ];
 
   static const _prioEstado = {
@@ -1331,7 +1403,8 @@ class _ActivosTabState extends State<_ActivosTab> {
     'cotizacion': 6,
   };
 
-  List<Map<String, dynamic>> _filtrarActivos(List<Map<String, dynamic>> todos) =>
+  List<Map<String, dynamic>> _filtrarActivos(
+          List<Map<String, dynamic>> todos) =>
       todos.where((s) => _estadosActivos.contains(s['estado'])).toList();
 
   // ── Aprobar cotización + lanzar cascada FN ────────────────────────────────
@@ -1404,14 +1477,18 @@ class _ActivosTabState extends State<_ActivosTab> {
           final uLng = (m['longitud'] as num?)?.toDouble();
           if (uLat == null || uLng == null) continue;
           final d = _haversine(sLat, sLng, uLat, uLng);
-          if (d < minD) { minD = d; fase2Id = m['id'].toString(); }
+          if (d < minD) {
+            minD = d;
+            fase2Id = m['id'].toString();
+          }
         }
       } else if (noMasters.isNotEmpty) {
         fase2Id = noMasters.first['id'].toString();
       }
 
       // fase3Ids: no-masters dentro de 2km de la sede (excl. fase2)
-      final fase3Ids = noMasters.map<String>((m) => m['id'].toString()).where((id) {
+      final fase3Ids =
+          noMasters.map<String>((m) => m['id'].toString()).where((id) {
         if (id == fase2Id) return false;
         if (sLat == null || sLng == null) return false;
         final mData = noMasters.firstWhere(
@@ -1431,7 +1508,7 @@ class _ActivosTabState extends State<_ActivosTab> {
           .where((id) => id != fase2Id && !fase3Ids.contains(id))
           .toList();
 
-      final zona   = s['zona_fn']?.toString() ?? 'FN';
+      final zona = s['zona_fn']?.toString() ?? 'FN';
       final consec = s['fn_consecutivo']?.toString() ?? '#${s['id']}';
 
       // ── FASE 1 (T=0): Masters ────────────────────────────────────────────────
@@ -1521,8 +1598,10 @@ class _ActivosTabState extends State<_ActivosTab> {
     final dLat = (lat2 - lat1) * math.pi / 180;
     final dLng = (lng2 - lng1) * math.pi / 180;
     final a = math.sin(dLat / 2) * math.sin(dLat / 2) +
-        math.cos(lat1 * math.pi / 180) * math.cos(lat2 * math.pi / 180) *
-        math.sin(dLng / 2) * math.sin(dLng / 2);
+        math.cos(lat1 * math.pi / 180) *
+            math.cos(lat2 * math.pi / 180) *
+            math.sin(dLng / 2) *
+            math.sin(dLng / 2);
     return 2 * r * math.asin(math.sqrt(a));
   }
 
@@ -1551,7 +1630,8 @@ class _ActivosTabState extends State<_ActivosTab> {
                 // ignore: deprecated_member_use
                 ...motivos.entries.map((e) => RadioListTile<String>(
                       dense: true,
-                      title: Text(e.value, style: const TextStyle(fontSize: 13)),
+                      title:
+                          Text(e.value, style: const TextStyle(fontSize: 13)),
                       value: e.key,
                       // ignore: deprecated_member_use
                       groupValue: motivoSel,
@@ -1599,7 +1679,8 @@ class _ActivosTabState extends State<_ActivosTab> {
                       'fn_precio_sugerido_sede': precio,
                     }).eq('id', s['id']);
                     await MotorNotificaciones.dispararACentral(
-                      titulo: '🔄 Renegociación FN — ${s['fn_consecutivo'] ?? '#${s['id']}'}',
+                      titulo:
+                          '🔄 Renegociación FN — ${s['fn_consecutivo'] ?? '#${s['id']}'}',
                       mensaje: '${_labelSede(s)} propone \$${precioCtrl.text}',
                       urgente: false,
                       sonido: Sonidos.fnCotizacion,
@@ -1758,7 +1839,9 @@ class _ActivosTabState extends State<_ActivosTab> {
     if (sede == null) return 'Sede FN';
     final tipo = sede['tipo']?.toString() ?? '';
     final num = sede['numero']?.toString() ?? '';
-    return tipo == 'FN' && num.isNotEmpty ? 'FN$num' : (sede['nombre'] ?? 'Sede');
+    return tipo == 'FN' && num.isNotEmpty
+        ? 'FN$num'
+        : (sede['nombre'] ?? 'Sede');
   }
 
   void _snack(String msg) {
@@ -1820,11 +1903,12 @@ class _ActivosTabState extends State<_ActivosTab> {
         for (int i = 0; i < activos.length; i++) {
           final s = activos[i];
           final movId = s['movil_id']?.toString() ?? '';
-          if (i > 0 && movId.isNotEmpty &&
+          if (i > 0 &&
+              movId.isNotEmpty &&
               movId == (activos[i - 1]['movil_id']?.toString() ?? '')) {
             final prev = activos[i - 1];
-            final consec = prev['fn_consecutivo']?.toString() ??
-                '#${prev['id']}';
+            final consec =
+                prev['fn_consecutivo']?.toString() ?? '#${prev['id']}';
             final numMov = prev['numero_movil']?.toString() ?? '';
             items.add(_ListItem.separator(
                 label: '🏍️ Móvil $numMov — Realizando servicio $consec'));
@@ -1846,7 +1930,9 @@ class _ActivosTabState extends State<_ActivosTab> {
                   child: Row(
                     children: [
                       Expanded(
-                        child: Container(height: 1, color: Colors.indigo.withValues(alpha: 0.4)),
+                        child: Container(
+                            height: 1,
+                            color: Colors.indigo.withValues(alpha: 0.4)),
                       ),
                       const SizedBox(width: 8),
                       Container(
@@ -1869,7 +1955,9 @@ class _ActivosTabState extends State<_ActivosTab> {
                       ),
                       const SizedBox(width: 8),
                       Expanded(
-                        child: Container(height: 1, color: Colors.indigo.withValues(alpha: 0.4)),
+                        child: Container(
+                            height: 1,
+                            color: Colors.indigo.withValues(alpha: 0.4)),
                       ),
                     ],
                   ),
@@ -1884,8 +1972,7 @@ class _ActivosTabState extends State<_ActivosTab> {
                 onReportarProblema: () => _reportarProblema(s),
                 onNuevoServicio: s['movil_id'] != null &&
                         widget.onIniciarConMovil != null
-                    ? (mid, mnum) =>
-                        widget.onIniciarConMovil!.call(mid, mnum)
+                    ? (mid, mnum) => widget.onIniciarConMovil!.call(mid, mnum)
                     : null,
               );
             },
@@ -1979,7 +2066,6 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
     } catch (_) {}
   }
 
-
   @override
   void dispose() {
     super.dispose();
@@ -2024,7 +2110,8 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
                         letterSpacing: 0.5)),
                 const SizedBox(width: 8),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
                     color: color.withValues(alpha: 0.18),
                     borderRadius: BorderRadius.circular(5),
@@ -2039,7 +2126,8 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
                 if (s['fn_alta_demanda'] == true) ...[
                   const SizedBox(width: 6),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
                       color: Colors.orange[900],
                       borderRadius: BorderRadius.circular(4),
@@ -2065,41 +2153,42 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
 
             // ── Recogidas ─────────────────────────────────────────────────
             ...recogidas.map((r) => Padding(
-              padding: const EdgeInsets.only(bottom: 3),
-              child: Row(
-                children: [
-                  Icon(Icons.local_pharmacy,
-                      size: 13, color: Colors.indigo[300]),
-                  const SizedBox(width: 5),
-                  Expanded(
-                    child: Text(
-                      _labelRecogida(r),
-                      style: const TextStyle(color: Colors.white70, fontSize: 12),
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                  padding: const EdgeInsets.only(bottom: 3),
+                  child: Row(
+                    children: [
+                      Icon(Icons.local_pharmacy,
+                          size: 13, color: Colors.indigo[300]),
+                      const SizedBox(width: 5),
+                      Expanded(
+                        child: Text(
+                          _labelRecogida(r),
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 12),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (r['cobertura'] == 'fuera' ||
+                          r['cobertura'] == 'por_evaluar')
+                        const Padding(
+                          padding: EdgeInsets.only(left: 4),
+                          child: Text('⚠', style: TextStyle(fontSize: 11)),
+                        ),
+                    ],
                   ),
-                  if (r['cobertura'] == 'fuera' || r['cobertura'] == 'por_evaluar')
-                    const Padding(
-                      padding: EdgeInsets.only(left: 4),
-                      child: Text('⚠',
-                          style: TextStyle(fontSize: 11)),
-                    ),
-                ],
-              ),
-            )),
+                )),
 
             // ── Destino ───────────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.only(top: 3),
               child: Row(
                 children: [
-                  const Icon(Icons.place,
-                      size: 13, color: Colors.white38),
+                  const Icon(Icons.place, size: 13, color: Colors.white38),
                   const SizedBox(width: 5),
                   Expanded(
                     child: Text(destino,
                         style: const TextStyle(
-                            color: Colors.white, fontSize: 13,
+                            color: Colors.white,
+                            fontSize: 13,
                             fontWeight: FontWeight.bold),
                         overflow: TextOverflow.ellipsis),
                   ),
@@ -2108,7 +2197,8 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
             ),
 
             // ── Detalles factura ──────────────────────────────────────────
-            if (s['fn_factura_numero'] != null || s['fn_pagar_producto'] == true) ...[
+            if (s['fn_factura_numero'] != null ||
+                s['fn_pagar_producto'] == true) ...[
               const SizedBox(height: 6),
               Wrap(
                 spacing: 8,
@@ -2116,7 +2206,8 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
                   if (s['fn_factura_numero'] != null)
                     _chip('Fac. ${s['fn_factura_numero']}', Colors.blueGrey),
                   if (s['fn_factura_valor'] != null)
-                    _chip('\$${_miles((s['fn_factura_valor'] as num).toInt())}', Colors.blueGrey),
+                    _chip('\$${_miles((s['fn_factura_valor'] as num).toInt())}',
+                        Colors.blueGrey),
                   if (s['fn_pagar_producto'] == true)
                     _chip('PAGAR PRODUCTO', Colors.red[800]!),
                   if (s['metodo_pago'] == 'Datafono')
@@ -2126,11 +2217,14 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
             ],
 
             // ── Móvil asignado + WA ───────────────────────────────────────
-            if (numMovil != null && estado != 'cotizacion' && estado != 'cotizada') ...[
+            if (numMovil != null &&
+                estado != 'cotizacion' &&
+                estado != 'cotizada') ...[
               const SizedBox(height: 8),
               Row(
                 children: [
-                  const Icon(Icons.two_wheeler, size: 14, color: Colors.white54),
+                  const Icon(Icons.two_wheeler,
+                      size: 14, color: Colors.white54),
                   const SizedBox(width: 5),
                   Text('Móvil $numMovil',
                       style: const TextStyle(
@@ -2142,22 +2236,27 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
                   if (_movilTelefono != null && _movilTelefono!.isNotEmpty)
                     GestureDetector(
                       onTap: () {
-                        final tel = _movilTelefono!.replaceAll(RegExp(r'\D'), '');
+                        final tel =
+                            _movilTelefono!.replaceAll(RegExp(r'\D'), '');
                         launchUrl(Uri.parse('https://wa.me/57$tel'),
                             mode: LaunchMode.externalApplication);
                       },
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF25D366).withValues(alpha: 0.15),
+                          color:
+                              const Color(0xFF25D366).withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(6),
                           border: Border.all(
-                              color: const Color(0xFF25D366).withValues(alpha: 0.5)),
+                              color: const Color(0xFF25D366)
+                                  .withValues(alpha: 0.5)),
                         ),
                         child: const Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.chat, size: 13, color: Color(0xFF25D366)),
+                            Icon(Icons.chat,
+                                size: 13, color: Color(0xFF25D366)),
                             SizedBox(width: 4),
                             Text('WA Móvil',
                                 style: TextStyle(
@@ -2185,10 +2284,12 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(children: [
-                          const Icon(Icons.schedule, size: 12, color: Colors.orange),
+                          const Icon(Icons.schedule,
+                              size: 12, color: Colors.orange),
                           const SizedBox(width: 4),
                           const Text('Llegada a sede: ~15 min',
-                              style: TextStyle(color: Colors.orange, fontSize: 11)),
+                              style: TextStyle(
+                                  color: Colors.orange, fontSize: 11)),
                         ]),
                         if (extraRec > 0) ...[
                           const SizedBox(height: 2),
@@ -2213,7 +2314,8 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
                   return Padding(
                     padding: const EdgeInsets.only(top: 5),
                     child: Row(children: [
-                      const Icon(Icons.schedule, size: 12, color: Colors.greenAccent),
+                      const Icon(Icons.schedule,
+                          size: 12, color: Colors.greenAccent),
                       const SizedBox(width: 4),
                       const Text('Entrega: ~15 min',
                           style: TextStyle(
@@ -2227,7 +2329,8 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
             ],
 
             // ── Renegociación: cotización aceptada por central ────────────
-            if (estado == 'fn_renegociando' && s['fn_precio_sugerido_sede'] != null) ...[
+            if (estado == 'fn_renegociando' &&
+                s['fn_precio_sugerido_sede'] != null) ...[
               const SizedBox(height: 6),
               Container(
                 padding: const EdgeInsets.all(8),
@@ -2258,7 +2361,8 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
                     Text(
                       'La central cotizó este servicio en \$${_miles(tarifa)}',
                       style: const TextStyle(
-                          color: Colors.white, fontSize: 13,
+                          color: Colors.white,
+                          fontSize: 13,
                           fontWeight: FontWeight.bold),
                       textAlign: TextAlign.center,
                     ),
@@ -2301,7 +2405,8 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
                 width: double.infinity,
                 child: OutlinedButton.icon(
                   onPressed: widget.onCancelar,
-                  icon: const Icon(Icons.cancel_outlined, size: 15, color: Colors.red),
+                  icon: const Icon(Icons.cancel_outlined,
+                      size: 15, color: Colors.red),
                   label: const Text('Cancelar servicio',
                       style: TextStyle(color: Colors.red, fontSize: 13)),
                   style: OutlinedButton.styleFrom(
@@ -2318,7 +2423,8 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
               // Botón "Nuevo servicio con este móvil"
               if (s['movil_id'] != null &&
                   widget.onNuevoServicio != null &&
-                  !['cotizada', 'fn_renegociando', 'cotizacion'].contains(estado)) ...[
+                  !['cotizada', 'fn_renegociando', 'cotizacion']
+                      .contains(estado)) ...[
                 SizedBox(
                   width: double.infinity,
                   child: OutlinedButton.icon(
@@ -2326,10 +2432,12 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
                       s['movil_id'].toString(),
                       numMovil ?? s['movil_id'].toString(),
                     ),
-                    icon: const Icon(Icons.add_circle_outline, size: 15, color: Colors.indigo),
+                    icon: const Icon(Icons.add_circle_outline,
+                        size: 15, color: Colors.indigo),
                     label: Text(
                       '➕ Nuevo servicio con Móvil ${numMovil ?? s['movil_id']}',
-                      style: const TextStyle(color: Colors.indigo, fontSize: 12),
+                      style:
+                          const TextStyle(color: Colors.indigo, fontSize: 12),
                     ),
                     style: OutlinedButton.styleFrom(
                       side: const BorderSide(color: Colors.indigo),
@@ -2361,7 +2469,11 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
     if (r['es_manual'] == true) {
       final dir = r['direccion']?.toString() ?? '';
       final nom = r['nombre']?.toString() ?? '';
-      return dir.isNotEmpty ? '$nom · $dir' : nom.isNotEmpty ? nom : 'Dirección libre';
+      return dir.isNotEmpty
+          ? '$nom · $dir'
+          : nom.isNotEmpty
+              ? nom
+              : 'Dirección libre';
     }
     final tipo = r['tipo']?.toString() ?? '';
     final num = r['numero']?.toString() ?? '';
@@ -2378,7 +2490,9 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
         ),
         child: Text(label,
             style: TextStyle(
-                color: color == Colors.blueGrey ? Colors.blueGrey[200] : Colors.white,
+                color: color == Colors.blueGrey
+                    ? Colors.blueGrey[200]
+                    : Colors.white,
                 fontSize: 10,
                 fontWeight: FontWeight.bold)),
       );
@@ -2448,7 +2562,11 @@ class _HistorialTabState extends State<_HistorialTab> {
     if (r['es_manual'] == true) {
       final dir = r['direccion']?.toString() ?? '';
       final nom = r['nombre']?.toString() ?? '';
-      return dir.isNotEmpty ? '$nom · $dir' : nom.isNotEmpty ? nom : 'Dirección libre';
+      return dir.isNotEmpty
+          ? '$nom · $dir'
+          : nom.isNotEmpty
+              ? nom
+              : 'Dirección libre';
     }
     final tipo = r['tipo']?.toString() ?? '';
     final num = r['numero']?.toString() ?? '';
@@ -2491,9 +2609,12 @@ class _HistorialTabState extends State<_HistorialTab> {
               'instrucciones_especiales, fn_rechazo_motivo, '
               'movil_data:usuarios!servicios_movil_id_fkey(usuario)')
           .eq('fn_sede_solicitante_id', sedeId)
-          .not('estado', 'in', '("cotizacion","cotizada","pendiente","en_ruta_origen","en_origen","en_ruta_destino","fn_renegociando")')
-          .gte('created_at', _rango?.start.toUtc().toIso8601String() ?? '2000-01-01T00:00:00Z')
-          .lte('created_at', _rango?.end.toUtc().toIso8601String() ?? '2100-01-01T00:00:00Z')
+          .not('estado', 'in',
+              '("cotizacion","cotizada","pendiente","en_ruta_origen","en_origen","en_ruta_destino","fn_renegociando")')
+          .gte('created_at',
+              _rango?.start.toUtc().toIso8601String() ?? '2000-01-01T00:00:00Z')
+          .lte('created_at',
+              _rango?.end.toUtc().toIso8601String() ?? '2100-01-01T00:00:00Z')
           .order('id', ascending: false)
           .limit(100);
 
@@ -2607,7 +2728,8 @@ class _HistorialTabState extends State<_HistorialTab> {
               ),
               if (_rango != null)
                 IconButton(
-                  icon: const Icon(Icons.close, color: Colors.white38, size: 18),
+                  icon:
+                      const Icon(Icons.close, color: Colors.white38, size: 18),
                   onPressed: () {
                     setState(() => _rango = null);
                     _cargar();
@@ -2615,7 +2737,8 @@ class _HistorialTabState extends State<_HistorialTab> {
                 ),
               // ── Acceso a Facturación FN ──────────────────────────────────
               IconButton(
-                icon: const Icon(Icons.receipt_long, color: Colors.indigo, size: 22),
+                icon: const Icon(Icons.receipt_long,
+                    color: Colors.indigo, size: 22),
                 tooltip: 'Facturación FN',
                 onPressed: () {
                   final sedeId = widget.sede?['id'] is int
@@ -2626,7 +2749,8 @@ class _HistorialTabState extends State<_HistorialTab> {
                     MaterialPageRoute(
                       builder: (_) => FnFacturacionScreen(
                         sedeId: sedeId,
-                        titulo: 'Facturación — ${widget.sede?['nombre'] ?? 'Mi sede'}',
+                        titulo:
+                            'Facturación — ${widget.sede?['nombre'] ?? 'Mi sede'}',
                       ),
                     ),
                   );
@@ -2657,9 +2781,13 @@ class _HistorialTabState extends State<_HistorialTab> {
                           final consecutivo = s['fn_consecutivo']?.toString();
                           final tarifa = (s['tarifa'] as num?)?.toInt();
                           // Número real del móvil desde usuarios.usuario (ej: "movil05" → "05")
-                          final movilUsuario = s['movil_data']?['usuario']?.toString();
+                          final movilUsuario =
+                              s['movil_data']?['usuario']?.toString();
                           final numMovil = movilUsuario != null
-                              ? (RegExp(r'\d+').firstMatch(movilUsuario)?.group(0) ?? movilUsuario)
+                              ? (RegExp(r'\d+')
+                                      .firstMatch(movilUsuario)
+                                      ?.group(0) ??
+                                  movilUsuario)
                               : null;
                           final facturaNum = s['fn_factura_numero']?.toString();
                           final recogidas = s['recogidas'];
@@ -2667,18 +2795,30 @@ class _HistorialTabState extends State<_HistorialTab> {
 
                           Color color = estado == 'finalizado'
                               ? Colors.green[700]!
-                              : estado == 'cancelado' || estado == 'fn_rechazado'
+                              : estado == 'cancelado' ||
+                                      estado == 'fn_rechazado'
                                   ? Colors.red[800]!
                                   : Colors.grey[600]!;
 
                           String labelEstado;
                           switch (estado) {
-                            case 'finalizado': labelEstado = 'ENTREGADO'; break;
-                            case 'cancelado': labelEstado = 'CANCELADO'; break;
-                            case 'fn_rechazado': labelEstado = 'RECHAZADO'; break;
-                            case 'caducado': labelEstado = 'CADUCADO'; break;
-                            case 'finalizado_con_problema': labelEstado = 'FIN+PROB'; break;
-                            default: labelEstado = estado.toUpperCase();
+                            case 'finalizado':
+                              labelEstado = 'ENTREGADO';
+                              break;
+                            case 'cancelado':
+                              labelEstado = 'CANCELADO';
+                              break;
+                            case 'fn_rechazado':
+                              labelEstado = 'RECHAZADO';
+                              break;
+                            case 'caducado':
+                              labelEstado = 'CADUCADO';
+                              break;
+                            case 'finalizado_con_problema':
+                              labelEstado = 'FIN+PROB';
+                              break;
+                            default:
+                              labelEstado = estado.toUpperCase();
                           }
 
                           return GestureDetector(
@@ -2688,45 +2828,67 @@ class _HistorialTabState extends State<_HistorialTab> {
                               margin: const EdgeInsets.only(bottom: 8),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(10),
-                                side: BorderSide(color: color.withValues(alpha: 0.3)),
+                                side: BorderSide(
+                                    color: color.withValues(alpha: 0.3)),
                               ),
                               child: Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 10),
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Row(
                                       children: [
                                         Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 6, vertical: 2),
                                           decoration: BoxDecoration(
-                                            color: color.withValues(alpha: 0.15),
-                                            borderRadius: BorderRadius.circular(4),
-                                            border: Border.all(color: color.withValues(alpha: 0.5), width: 0.8),
+                                            color:
+                                                color.withValues(alpha: 0.15),
+                                            borderRadius:
+                                                BorderRadius.circular(4),
+                                            border: Border.all(
+                                                color: color.withValues(
+                                                    alpha: 0.5),
+                                                width: 0.8),
                                           ),
                                           child: Text(labelEstado,
-                                              style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: color)),
+                                              style: TextStyle(
+                                                  fontSize: 9,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: color)),
                                         ),
                                         const SizedBox(width: 8),
                                         Text(
-                                          consecutivo != null ? 'FN-$consecutivo' : '#${s["id"]}',
+                                          consecutivo != null
+                                              ? 'FN-$consecutivo'
+                                              : '#${s["id"]}',
                                           style: const TextStyle(
-                                              color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                                              color: Colors.white,
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 13),
                                         ),
                                         if (altaDemanda) ...[
                                           const SizedBox(width: 6),
-                                          const Text('\u{1F525}', style: TextStyle(fontSize: 11)),
+                                          const Text('\u{1F525}',
+                                              style: TextStyle(fontSize: 11)),
                                         ],
                                         const Spacer(),
-                                        Text(_formatFecha(s['created_at']?.toString()),
-                                            style: const TextStyle(color: Colors.white38, fontSize: 10)),
+                                        Text(
+                                            _formatFecha(
+                                                s['created_at']?.toString()),
+                                            style: const TextStyle(
+                                                color: Colors.white38,
+                                                fontSize: 10)),
                                       ],
                                     ),
                                     if (s['destino'] != null) ...[
                                       const SizedBox(height: 5),
                                       Text(
                                         s['destino'].toString(),
-                                        style: const TextStyle(color: Colors.white60, fontSize: 11),
+                                        style: const TextStyle(
+                                            color: Colors.white60,
+                                            fontSize: 11),
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
                                       ),
@@ -2736,42 +2898,60 @@ class _HistorialTabState extends State<_HistorialTab> {
                                       children: [
                                         if (numMovil != null) ...[
                                           Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 5, vertical: 2),
                                             decoration: BoxDecoration(
                                               color: Colors.indigo[900],
-                                              borderRadius: BorderRadius.circular(4),
+                                              borderRadius:
+                                                  BorderRadius.circular(4),
                                             ),
-                                            child: Text('\u{1F343} M\u00F3vil $numMovil',
+                                            child: Text(
+                                                '\u{1F343} M\u00F3vil $numMovil',
                                                 style: const TextStyle(
-                                                    color: Colors.white70, fontSize: 9, fontWeight: FontWeight.bold)),
+                                                    color: Colors.white70,
+                                                    fontSize: 9,
+                                                    fontWeight:
+                                                        FontWeight.bold)),
                                           ),
                                           const SizedBox(width: 8),
                                         ],
                                         if (tarifa != null && tarifa > 0)
                                           Text('\$${_miles(tarifa)}',
                                               style: const TextStyle(
-                                                  color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 12)),
                                         if (facturaNum != null) ...[
                                           const SizedBox(width: 8),
                                           Text('Fact. $facturaNum',
-                                              style: TextStyle(color: Colors.indigo[300], fontSize: 10)),
+                                              style: TextStyle(
+                                                  color: Colors.indigo[300],
+                                                  fontSize: 10)),
                                         ],
-                                        if (s['fn_factura_valor'] != null && (s['fn_factura_valor'] as num) > 0) ...[
+                                        if (s['fn_factura_valor'] != null &&
+                                            (s['fn_factura_valor'] as num) >
+                                                0) ...[
                                           const SizedBox(width: 8),
                                           Text(
                                             '\$${_miles((s['fn_factura_valor'] as num).toInt())} prod.',
-                                            style: TextStyle(color: Colors.indigo[200], fontSize: 10),
+                                            style: TextStyle(
+                                                color: Colors.indigo[200],
+                                                fontSize: 10),
                                           ),
                                         ],
                                         const Spacer(),
-                                        if (recogidas is List && recogidas.isNotEmpty)
+                                        if (recogidas is List &&
+                                            recogidas.isNotEmpty)
                                           Flexible(
                                             child: Text(
                                               recogidas
                                                   .cast<Map<String, dynamic>>()
-                                                  .map((r) => _labelRecogidaCorto(r))
+                                                  .map((r) =>
+                                                      _labelRecogidaCorto(r))
                                                   .join(' · '),
-                                              style: const TextStyle(color: Colors.white38, fontSize: 10),
+                                              style: const TextStyle(
+                                                  color: Colors.white38,
+                                                  fontSize: 10),
                                               overflow: TextOverflow.ellipsis,
                                             ),
                                           ),
@@ -2785,9 +2965,9 @@ class _HistorialTabState extends State<_HistorialTab> {
                         },
                       ),
                     ),
-                  ),
-              ],
-            );
+        ),
+      ],
+    );
   }
 
   void _mostrarDetalle(BuildContext context, Map<String, dynamic> s) {
@@ -2805,7 +2985,8 @@ class _HistorialTabState extends State<_HistorialTab> {
     // Número real del móvil desde join usuarios.usuario
     final movilUsuarioDetalle = s['movil_data']?['usuario']?.toString();
     final numMovilDetalle = movilUsuarioDetalle != null
-        ? (RegExp(r'\d+').firstMatch(movilUsuarioDetalle)?.group(0) ?? movilUsuarioDetalle)
+        ? (RegExp(r'\d+').firstMatch(movilUsuarioDetalle)?.group(0) ??
+            movilUsuarioDetalle)
         : null;
 
     showModalBottomSheet(
@@ -2824,27 +3005,39 @@ class _HistorialTabState extends State<_HistorialTab> {
           child: Column(
             children: [
               Container(
-                width: 36, height: 4,
+                width: 36,
+                height: 4,
                 margin: const EdgeInsets.symmetric(vertical: 10),
-                decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+                decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(2)),
               ),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Row(
                   children: [
                     Text(
-                      consecutivo != null ? 'FN-$consecutivo' : 'Servicio #${s["id"]}',
-                      style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                      consecutivo != null
+                          ? 'FN-$consecutivo'
+                          : 'Servicio #${s["id"]}',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold),
                     ),
                     const Spacer(),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
                       decoration: BoxDecoration(
                         color: Colors.indigo.withValues(alpha: 0.2),
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(estado.toUpperCase(),
-                          style: const TextStyle(color: Colors.indigo, fontSize: 10, fontWeight: FontWeight.bold)),
+                          style: const TextStyle(
+                              color: Colors.indigo,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold)),
                     ),
                   ],
                 ),
@@ -2855,15 +3048,20 @@ class _HistorialTabState extends State<_HistorialTab> {
                   controller: ctrl,
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   children: [
-                    if (s['destino'] != null) _filaDetalle('Destino', fmt(s['destino'])),
+                    if (s['destino'] != null)
+                      _filaDetalle('Destino', fmt(s['destino'])),
                     _filaDetalle('Tarifa', fmtPeso(s['tarifa'])),
                     if (s['fn_factura_numero'] != null)
-                      _filaDetalle('N\u00B0 Factura', fmt(s['fn_factura_numero'])),
+                      _filaDetalle(
+                          'N\u00B0 Factura', fmt(s['fn_factura_numero'])),
                     if (s['fn_factura_valor'] != null)
-                      _filaDetalle('Valor factura', fmtPeso(s['fn_factura_valor'])),
+                      _filaDetalle(
+                          'Valor factura', fmtPeso(s['fn_factura_valor'])),
                     if (s['fn_pagar_producto'] == true ||
-                        (s['fn_pagar_producto'] is num && (s['fn_pagar_producto'] as num) > 0))
-                      _filaDetalle('Pagar producto',
+                        (s['fn_pagar_producto'] is num &&
+                            (s['fn_pagar_producto'] as num) > 0))
+                      _filaDetalle(
+                          'Pagar producto',
                           s['fn_pagar_producto'] is num
                               ? fmtPeso(s['fn_pagar_producto'])
                               : 'Sí'),
@@ -2877,30 +3075,40 @@ class _HistorialTabState extends State<_HistorialTab> {
                       ),
                     ],
                     if (numMovilDetalle != null)
-                      _filaDetalle('M\u00F3vil asignado', 'M\u00F3vil $numMovilDetalle'),
+                      _filaDetalle(
+                          'M\u00F3vil asignado', 'M\u00F3vil $numMovilDetalle'),
                     if (s['metodo_pago'] != null)
-                      _filaDetalle('M\u00E9todo de pago', fmt(s['metodo_pago'])),
+                      _filaDetalle(
+                          'M\u00E9todo de pago', fmt(s['metodo_pago'])),
                     if (s['fn_alta_demanda'] == true)
                       _filaDetalle('Alta demanda', '\u{1F525} S\u00ED'),
-                    _filaDetalle('Creado', _formatFecha(s['created_at']?.toString())),
+                    _filaDetalle(
+                        'Creado', _formatFecha(s['created_at']?.toString())),
                     if (s['accepted_at'] != null)
-                      _filaDetalle('Aceptado', _formatFecha(s['accepted_at']?.toString())),
+                      _filaDetalle('Aceptado',
+                          _formatFecha(s['accepted_at']?.toString())),
                     if (s['fn_movil_asignado_at'] != null)
-                      _filaDetalle('Llegada a sede', _formatFecha(s['fn_movil_asignado_at']?.toString())),
+                      _filaDetalle('Llegada a sede',
+                          _formatFecha(s['fn_movil_asignado_at']?.toString())),
                     if (s['fn_rechazo_motivo'] != null)
-                      _filaDetalle('Motivo rechazo', s['fn_rechazo_motivo'].toString()),
+                      _filaDetalle(
+                          'Motivo rechazo', s['fn_rechazo_motivo'].toString()),
                     if (s['instrucciones_especiales'] != null &&
                         s['instrucciones_especiales'].toString().isNotEmpty)
-                      _filaDetalle('Instrucciones', s['instrucciones_especiales'].toString()),
+                      _filaDetalle('Instrucciones',
+                          s['instrucciones_especiales'].toString()),
                     const SizedBox(height: 12),
                     // ── Editar factura (sec. 7 de la especificación) ─────────
-                    if (['finalizado', 'finalizado_con_problema'].contains(estado))
+                    if (['finalizado', 'finalizado_con_problema']
+                        .contains(estado))
                       SizedBox(
                         width: double.infinity,
                         child: OutlinedButton.icon(
-                          icon: const Icon(Icons.edit_note, size: 16, color: Colors.indigo),
+                          icon: const Icon(Icons.edit_note,
+                              size: 16, color: Colors.indigo),
                           label: const Text('Editar datos de factura',
-                              style: TextStyle(color: Colors.indigo, fontSize: 13)),
+                              style: TextStyle(
+                                  color: Colors.indigo, fontSize: 13)),
                           style: OutlinedButton.styleFrom(
                             side: const BorderSide(color: Colors.indigo),
                             padding: const EdgeInsets.symmetric(vertical: 10),
@@ -2915,7 +3123,8 @@ class _HistorialTabState extends State<_HistorialTab> {
                     FutureBuilder<List<Map<String, dynamic>>>(
                       future: _db
                           .from('fn_auditorias_factura')
-                          .select('campo, valor_anterior, valor_nuevo, editor_tipo, created_at')
+                          .select(
+                              'campo, valor_anterior, valor_nuevo, editor_tipo, created_at')
                           .eq('servicio_id', s['id'])
                           .order('created_at', ascending: false),
                       builder: (_, snap) {
@@ -2926,18 +3135,21 @@ class _HistorialTabState extends State<_HistorialTab> {
                           children: [
                             const SizedBox(height: 12),
                             const Text('Historial de ediciones',
-                                style: TextStyle(color: Colors.white38, fontSize: 11,
+                                style: TextStyle(
+                                    color: Colors.white38,
+                                    fontSize: 11,
                                     fontWeight: FontWeight.w600)),
                             const SizedBox(height: 6),
                             ...audits.map((a) => Padding(
-                              padding: const EdgeInsets.only(bottom: 4),
-                              child: Text(
-                                '${_formatFecha(a['created_at']?.toString())} · '
-                                '${a['editor_tipo']} cambió ${a['campo']}: '
-                                '${a['valor_anterior'] ?? '—'} → ${a['valor_nuevo'] ?? '—'}',
-                                style: const TextStyle(color: Colors.white30, fontSize: 10),
-                              ),
-                            )),
+                                  padding: const EdgeInsets.only(bottom: 4),
+                                  child: Text(
+                                    '${_formatFecha(a['created_at']?.toString())} · '
+                                    '${a['editor_tipo']} cambió ${a['campo']}: '
+                                    '${a['valor_anterior'] ?? '—'} → ${a['valor_nuevo'] ?? '—'}',
+                                    style: const TextStyle(
+                                        color: Colors.white30, fontSize: 10),
+                                  ),
+                                )),
                           ],
                         );
                       },
@@ -2955,14 +3167,18 @@ class _HistorialTabState extends State<_HistorialTab> {
 
   // ── Editar N° factura con auditoría ────────────────────────────────────────
   Future<void> _editarFactura(Map<String, dynamic> s) async {
-    final numCtrl = TextEditingController(text: s['fn_factura_numero']?.toString() ?? '');
+    final numCtrl =
+        TextEditingController(text: s['fn_factura_numero']?.toString() ?? '');
 
     final confirmar = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1A1A2E),
         title: const Text('Editar N° de factura',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+            style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 15)),
         content: TextField(
           controller: numCtrl,
           style: const TextStyle(color: Colors.white),
@@ -2976,7 +3192,8 @@ class _HistorialTabState extends State<_HistorialTab> {
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar', style: TextStyle(color: Colors.white54))),
+              child: const Text('Cancelar',
+                  style: TextStyle(color: Colors.white54))),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo),
             onPressed: () => Navigator.pop(ctx, true),
@@ -3026,7 +3243,8 @@ class _HistorialTabState extends State<_HistorialTab> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('✅ N° de factura actualizado y registrado en auditoría'),
+            content:
+                Text('✅ N° de factura actualizado y registrado en auditoría'),
             backgroundColor: Colors.green,
           ),
         );
@@ -3047,10 +3265,14 @@ class _HistorialTabState extends State<_HistorialTab> {
             SizedBox(
               width: 130,
               child: Text(label,
-                  style: const TextStyle(color: Colors.white38, fontSize: 12, fontWeight: FontWeight.w600)),
+                  style: const TextStyle(
+                      color: Colors.white38,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600)),
             ),
             Expanded(
-              child: Text(valor, style: const TextStyle(color: Colors.white, fontSize: 12)),
+              child: Text(valor,
+                  style: const TextStyle(color: Colors.white, fontSize: 12)),
             ),
           ],
         ),
