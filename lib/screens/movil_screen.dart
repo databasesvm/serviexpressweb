@@ -3132,6 +3132,52 @@ class _MovilScreenState extends State<MovilScreen>
     setState(() => _procesando = true);
     try {
       final nuevoEstado = !_estaEnLinea;
+
+      // ── WALLET CHECK: prediario/postdia deben tener saldo suficiente ─────
+      if (nuevoEstado) {
+        final tipoPlan = widget.usuario['tipo_plan_movil']?.toString() ?? '';
+        if (tipoPlan == 'prediario' || tipoPlan == 'postdia') {
+          try {
+            final walletData = await Supabase.instance.client
+                .from('usuarios')
+                .select('saldo_wallet')
+                .eq('id', widget.usuario['id'])
+                .single();
+            final saldo = (walletData['saldo_wallet'] as num?)?.toDouble() ?? 0.0;
+            final bloqueado = tipoPlan == 'prediario' ? saldo <= 0 : saldo < 0;
+            if (bloqueado && mounted) {
+              setState(() => _procesando = false);
+              final deuda = saldo.abs().toStringAsFixed(0);
+              showDialog(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  backgroundColor: const Color(0xFF1A1A1A),
+                  title: const Text('💳 Wallet insuficiente',
+                      style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 16)),
+                  content: Text(
+                    tipoPlan == 'prediario'
+                        ? 'Tu saldo actual es \$${saldo.toStringAsFixed(0)}. Recarga tu wallet antes de conectarte.'
+                        : 'Tienes una deuda de \$$deuda del día anterior. Comunícate con central para ponerte al día.',
+                    style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
+                  ),
+                  actions: [
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xff3AF500), foregroundColor: Colors.black),
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('ENTENDIDO', style: TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                  ],
+                ),
+              );
+              return;
+            }
+          } catch (_) {}
+        }
+      }
+      // ─────────────────────────────────────────────────────────────────────
+
       await Supabase.instance.client
           .from('usuarios')
           .update({
@@ -3944,6 +3990,137 @@ class _MovilScreenState extends State<MovilScreen>
               ),
 
               const SizedBox(height: 16),
+
+              // ── WALLET (solo prediario / postdia) ─────────────────────────
+              Builder(builder: (_) {
+                final tipoPlan = miPerfil['tipo_plan_movil']?.toString() ?? '';
+                if (tipoPlan != 'prediario' && tipoPlan != 'postdia') return const SizedBox.shrink();
+                final saldo = (miPerfil['saldo_wallet'] as num?)?.toDouble() ?? 0.0;
+                final positivo = tipoPlan == 'postdia' ? saldo >= 0 : saldo > 0;
+                final colorSaldo = positivo ? const Color(0xFF22C55E) : Colors.redAccent;
+                final planLabel = tipoPlan == 'prediario' ? 'PREDIARIO' : 'POSTDIA';
+                return FutureBuilder<List<dynamic>>(
+                  future: Supabase.instance.client
+                      .from('solicitudes_recarga_wallet')
+                      .select('monto_solicitado, estado, created_at')
+                      .eq('movil_id', miPerfil['id'])
+                      .eq('estado', 'pendiente')
+                      .order('created_at', ascending: false)
+                      .limit(1),
+                  builder: (_, snapRec) {
+                    final pendiente = snapRec.hasData && snapRec.data!.isNotEmpty
+                        ? snapRec.data!.first as Map<String, dynamic>
+                        : null;
+                    final montoPend = pendiente != null
+                        ? (pendiente['monto_solicitado'] as num?)?.toDouble() ?? 0.0
+                        : 0.0;
+
+                    return Container(
+                      margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                      decoration: BoxDecoration(
+                        color: Colors.black,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: positivo ? const Color(0xFF22C55E).withValues(alpha: 0.4) : Colors.redAccent.withValues(alpha: 0.5),
+                        ),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Row(children: [
+                            const Icon(Icons.account_balance_wallet_rounded, color: Colors.white54, size: 16),
+                            const SizedBox(width: 8),
+                            Text('MI WALLET · $planLabel',
+                                style: const TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                            const Spacer(),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: positivo ? const Color(0xFF22C55E).withValues(alpha: 0.15) : Colors.red.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Text(positivo ? 'AL DÍA' : 'DEUDA',
+                                  style: TextStyle(color: colorSaldo, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.8)),
+                            ),
+                          ]),
+                          const SizedBox(height: 12),
+                          Text(
+                            '\$${saldo.toStringAsFixed(0).replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]}.')}',
+                            style: TextStyle(color: colorSaldo, fontSize: 28, fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            tipoPlan == 'prediario'
+                                ? 'Saldo disponible para trabajar hoy'
+                                : saldo < 0
+                                    ? 'Deuda pendiente — comunícate con central'
+                                    : 'Sin deuda — puedes conectarte hoy',
+                            style: const TextStyle(color: Colors.white38, fontSize: 11),
+                          ),
+                          // Banner de recarga en verificación
+                          if (pendiente != null) ...[
+                            const SizedBox(height: 10),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: Colors.amber[900]!.withValues(alpha: 0.2),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.amber[700]!.withValues(alpha: 0.5)),
+                              ),
+                              child: Row(children: [
+                                const SizedBox(
+                                  width: 14, height: 14,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.amber),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(child: Text(
+                                  'Recarga de \$${montoPend.toStringAsFixed(0)} en verificación...',
+                                  style: const TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.w600),
+                                )),
+                              ]),
+                            ),
+                          ],
+                          const SizedBox(height: 14),
+                          Row(children: [
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                icon: const Icon(Icons.history_rounded, size: 13),
+                                label: const Text('Historial', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.white70,
+                                  side: const BorderSide(color: Colors.white24),
+                                  padding: const EdgeInsets.symmetric(vertical: 8),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                ),
+                                onPressed: () => _mostrarHistorialWallet(miPerfil['id']),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: ElevatedButton.icon(
+                                icon: const Icon(Icons.add_card_rounded, size: 13),
+                                label: const Text('Recargar', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: pendiente != null
+                                      ? Colors.grey[700]
+                                      : const Color(0xFF818CF8),
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(vertical: 8),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                ),
+                                onPressed: pendiente != null
+                                    ? null
+                                    : () => _solicitarRecargaWallet(miPerfil['id'], tipoPlan),
+                              ),
+                            ),
+                          ]),
+                        ]),
+                      ),
+                    );
+                  },
+                );
+              }),
+              // ─────────────────────────────────────────────────────────────
 
               // 1. PRODUCCIÓN — cargado en initState, sin parpadeo
               // Serviexpress (no-FN) y FN se muestran separados.
@@ -9971,6 +10148,292 @@ class _MovilScreenState extends State<MovilScreen>
       if (mounted) setState(() => _procesando = false);
     }
   }
+
+  // ── WALLET: solicitud de recarga con comprobante ─────────────────────────
+  Future<void> _solicitarRecargaWallet(dynamic movilId, String tipoPlan) async {
+    final montoCtrl = TextEditingController();
+    final notaCtrl = TextEditingController();
+    Uint8List? _imgBytes;
+    bool _subiendo = false;
+
+    await showDialog(
+      context: context,
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setDs) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A1A),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          title: Row(children: [
+            const Icon(Icons.add_card_rounded, color: Color(0xFF818CF8), size: 20),
+            const SizedBox(width: 8),
+            Text(tipoPlan == 'prediario' ? 'Recargar Saldo' : 'Pagar Deuda',
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+          ]),
+          content: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              // ── Datos de pago configurados por Central ─────────────────
+              FutureBuilder<Map<String, dynamic>?>(
+                future: Supabase.instance.client
+                    .from('config_sistema')
+                    .select('info_recarga_wallet')
+                    .eq('id', 1)
+                    .maybeSingle(),
+                builder: (_, snapCfg) {
+                  final info = snapCfg.data?['info_recarga_wallet']?.toString();
+                  if (info == null || info.isEmpty) return const SizedBox.shrink();
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 14),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF818CF8).withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xFF818CF8).withValues(alpha: 0.4)),
+                    ),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      const Row(children: [
+                        Icon(Icons.account_balance_rounded, color: Color(0xFF818CF8), size: 14),
+                        SizedBox(width: 6),
+                        Text('TRANSFERIR A:', style: TextStyle(color: Color(0xFF818CF8), fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.8)),
+                      ]),
+                      const SizedBox(height: 6),
+                      SelectableText(info, style: const TextStyle(color: Colors.white, fontSize: 12, height: 1.5)),
+                    ]),
+                  );
+                },
+              ),
+              const Text(
+                'Ingresa el monto y adjunta el comprobante de transferencia. Tu saldo se actualizará automáticamente.',
+                style: TextStyle(color: Colors.white54, fontSize: 11, height: 1.4),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: montoCtrl,
+                keyboardType: TextInputType.number,
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+                decoration: InputDecoration(
+                  labelText: 'Monto a recargar (\$)',
+                  labelStyle: const TextStyle(color: Colors.white54, fontSize: 12),
+                  prefixText: '\$ ',
+                  prefixStyle: const TextStyle(color: Colors.white54),
+                  filled: true, fillColor: Colors.white.withValues(alpha: 0.06),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: notaCtrl,
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+                decoration: InputDecoration(
+                  labelText: 'Nota (opcional)',
+                  labelStyle: const TextStyle(color: Colors.white54, fontSize: 12),
+                  filled: true, fillColor: Colors.white.withValues(alpha: 0.06),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                ),
+              ),
+              const SizedBox(height: 12),
+              // Comprobante
+              InkWell(
+                onTap: () async {
+                  final picker = ImagePicker();
+                  final img = await picker.pickImage(source: ImageSource.gallery, imageQuality: 70);
+                  if (img == null) return;
+                  final bytes = await img.readAsBytes();
+                  setDs(() {
+                    _imgBytes = bytes;
+                  });
+                },
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.04),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.white24),
+                  ),
+                  child: _imgBytes != null
+                      ? Column(children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.memory(_imgBytes!, height: 120, fit: BoxFit.cover),
+                          ),
+                          const SizedBox(height: 6),
+                          const Text('Toca para cambiar', style: TextStyle(color: Colors.white38, fontSize: 10)),
+                        ])
+                      : const Column(children: [
+                          Icon(Icons.upload_rounded, color: Colors.white38, size: 24),
+                          SizedBox(height: 4),
+                          Text('Adjuntar comprobante', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                        ]),
+                ),
+              ),
+            ]),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('CANCELAR', style: TextStyle(color: Colors.white38)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF818CF8), foregroundColor: Colors.white),
+              onPressed: _subiendo ? null : () async {
+                final monto = double.tryParse(montoCtrl.text.replaceAll(',', '.').trim());
+                if (monto == null || monto <= 0) return;
+                setDs(() => _subiendo = true);
+                try {
+                  String? urlComprobante;
+                  if (_imgBytes != null) {
+                    final nombreArch = 'recarga_${movilId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+                    await Supabase.instance.client.storage
+                        .from('documentos')
+                        .uploadBinary(nombreArch, _imgBytes!,
+                            fileOptions: const FileOptions(contentType: 'image/jpeg', upsert: true));
+                    urlComprobante = Supabase.instance.client.storage
+                        .from('documentos')
+                        .getPublicUrl(nombreArch);
+                  }
+                  await Supabase.instance.client.from('solicitudes_recarga_wallet').insert({
+                    'movil_id': movilId,
+                    'monto_solicitado': monto,
+                    'nota': notaCtrl.text.trim().isNotEmpty ? notaCtrl.text.trim() : null,
+                    'comprobante_url': urlComprobante,
+                    'estado': 'pendiente',
+                  });
+                  if (mounted) {
+                    Navigator.pop(ctx);
+                    showDialog(
+                      context: context,
+                      builder: (dCtx) => AlertDialog(
+                        backgroundColor: const Color(0xFF1A1A1A),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                        title: const Row(children: [
+                          Icon(Icons.hourglass_top_rounded, color: Colors.amber, size: 22),
+                          SizedBox(width: 10),
+                          Text('En verificación', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                        ]),
+                        content: Text(
+                          'Tu recarga de \$${monto.toStringAsFixed(0)} está siendo revisada por el equipo.\n\nTu saldo se actualizará automáticamente en cuanto sea aprobada.',
+                          style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
+                        ),
+                        actions: [
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF818CF8), foregroundColor: Colors.white),
+                            onPressed: () => Navigator.pop(dCtx),
+                            child: const Text('ENTENDIDO', style: TextStyle(fontWeight: FontWeight.bold)),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  setDs(() => _subiendo = false);
+                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text('Error: $e'),
+                    backgroundColor: Colors.red,
+                    behavior: SnackBarBehavior.floating,
+                  ));
+                }
+              },
+              child: _subiendo
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Text('ENVIAR', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // ── WALLET: historial de movimientos del móvil ──────────────────────────
+  void _mostrarHistorialWallet(dynamic movilId) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF0D0D0D),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        minChildSize: 0.4,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (ctx2, scroll) => Column(children: [
+          const SizedBox(height: 8),
+          Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
+          const SizedBox(height: 14),
+          const Text('HISTORIAL DE WALLET', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14, letterSpacing: 1)),
+          const SizedBox(height: 12),
+          Expanded(
+            child: FutureBuilder<List<dynamic>>(
+              future: Supabase.instance.client
+                  .from('wallet_movimientos')
+                  .select('tipo, monto, concepto, created_at')
+                  .eq('movil_id', movilId)
+                  .order('created_at', ascending: false)
+                  .limit(50),
+              builder: (ctx3, snap) {
+                if (snap.connectionState == ConnectionState.waiting)
+                  return const Center(child: CircularProgressIndicator(color: Color(0xff3AF500)));
+                if (!snap.hasData || snap.data!.isEmpty)
+                  return const Center(child: Text('Sin movimientos registrados', style: TextStyle(color: Colors.white38)));
+                final items = snap.data!;
+                return ListView.builder(
+                  controller: scroll,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: items.length,
+                  itemBuilder: (_, i) {
+                    final item = items[i] as Map<String, dynamic>;
+                    final monto = (item['monto'] as num?)?.toDouble() ?? 0.0;
+                    final positivo = monto > 0;
+                    final tipo = item['tipo']?.toString() ?? '';
+                    final concepto = item['concepto']?.toString() ?? tipo;
+                    final fecha = item['created_at'] != null
+                        ? DateTime.tryParse(item['created_at'].toString())?.toLocal()
+                        : null;
+                    final fechaStr = fecha != null
+                        ? '${fecha.day.toString().padLeft(2,'0')}/${fecha.month.toString().padLeft(2,'0')} ${fecha.hour.toString().padLeft(2,'0')}:${fecha.minute.toString().padLeft(2,'0')}'
+                        : '';
+                    final IconData icono = tipo == 'recarga' ? Icons.add_circle_outline
+                        : tipo == 'comision' ? Icons.remove_circle_outline
+                        : tipo == 'pago_postdia' ? Icons.check_circle_outline
+                        : Icons.tune_rounded;
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.05),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(children: [
+                        Icon(icono, size: 18, color: positivo ? const Color(0xFF22C55E) : Colors.redAccent),
+                        const SizedBox(width: 12),
+                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(concepto, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500)),
+                          if (fechaStr.isNotEmpty)
+                            Text(fechaStr, style: const TextStyle(color: Colors.white38, fontSize: 10)),
+                        ])),
+                        Text(
+                          '${positivo ? '+' : ''}\$${monto.toStringAsFixed(0)}',
+                          style: TextStyle(color: positivo ? const Color(0xFF22C55E) : Colors.redAccent,
+                              fontWeight: FontWeight.bold, fontSize: 14),
+                        ),
+                      ]),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 16),
+        ]),
+      ),
+    );
+  }
+  // ─────────────────────────────────────────────────────────────────────────
 
   void _mostrarMiHistorial(BuildContext context) {
     // Rango de fechas seleccionado — null = sin filtro (comportamiento

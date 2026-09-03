@@ -498,7 +498,7 @@ class _FormularioTabState extends State<_FormularioTab> {
       // 1. Móviles FN online
       final movilesData = await _db
           .from('usuarios')
-          .select('id, rango_movil, latitud, longitud')
+          .select('id, rango_movil, latitud, longitud, tipo_plan_movil, saldo_wallet')
           .eq('rol', 'movil')
           .eq('en_linea', true)
           .eq('activo', true)
@@ -507,8 +507,16 @@ class _FormularioTabState extends State<_FormularioTab> {
 
       // FN: sin límite de capacidad — todos los móviles FN reciben notificaciones
       // independientemente de cuántos servicios activos tengan.
+      // Excepción: prediarios con saldo <= 0 no reciben nuevas alertas.
 
-      final moviles = List<Map<String, dynamic>>.from(movilesData as List);
+      final moviles = List<Map<String, dynamic>>.from(movilesData as List)
+          .where((m) {
+            final plan = m['tipo_plan_movil']?.toString() ?? '';
+            if (plan == 'prediario') {
+              return ((m['saldo_wallet'] as num?)?.toDouble() ?? 0.0) > 0;
+            }
+            return true;
+          }).toList();
       final masters = moviles
           .where((m) => m['rango_movil']?.toString().toUpperCase() == 'MASTER')
           .toList();
@@ -1448,15 +1456,23 @@ class _ActivosTabState extends State<_ActivosTab> {
       // 1. Móviles FN disponibles en línea
       final movilesRaw = await _db
           .from('usuarios')
-          .select('id, rango_movil, latitud, longitud')
+          .select('id, rango_movil, latitud, longitud, tipo_plan_movil, saldo_wallet')
           .eq('rol', 'movil')
           .eq('en_linea', true)
           .eq('activo', true)
           .eq('tiene_fn', true)
           .neq('suspendido', true);
 
-      // FN: sin límite de capacidad — todos reciben la cascada
-      final moviles = List<Map<String, dynamic>>.from(movilesRaw as List);
+      // FN: sin límite de capacidad — todos reciben la cascada.
+      // Prediarios con saldo <= 0 quedan excluidos.
+      final moviles = List<Map<String, dynamic>>.from(movilesRaw as List)
+          .where((m) {
+            final plan = m['tipo_plan_movil']?.toString() ?? '';
+            if (plan == 'prediario') {
+              return ((m['saldo_wallet'] as num?)?.toDouble() ?? 0.0) > 0;
+            }
+            return true;
+          }).toList();
 
       final masters = moviles
           .where((m) => m['rango_movil']?.toString().toUpperCase() == 'MASTER')

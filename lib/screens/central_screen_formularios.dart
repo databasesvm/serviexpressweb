@@ -1980,26 +1980,34 @@ extension CentralScreenFormularios on _CentralScreenState {
                             final movilesData = await Supabase.instance
                                 .client
                                 .from('usuarios')
-                                .select('id, rango_movil, latitud, longitud')
+                                .select('id, rango_movil, latitud, longitud, tipo_plan_movil, saldo_wallet')
                                 .eq('rol', 'movil')
                                 .eq('en_linea', true)
                                 .eq('activo', true)
                                 .eq('tiene_fn', true)
                                 .not('suspendido', 'is', true);
 
-
                             // FN: sin límite de capacidad — todos los móviles
                             // FN habilitados reciben notificaciones.
+                            // Prediarios con saldo <= 0 quedan excluidos.
+                            final movilesAll = (movilesData as List)
+                                .where((m) {
+                                  final plan = m['tipo_plan_movil']?.toString() ?? '';
+                                  if (plan == 'prediario') {
+                                    return ((m['saldo_wallet'] as num?)?.toDouble() ?? 0.0) > 0;
+                                  }
+                                  return true;
+                                }).toList();
 
                             // Separar masters de no-masters (sin filtro de cupo)
-                            final masters = (movilesData as List)
+                            final masters = movilesAll
                                 .where((m) =>
                                     m['rango_movil']
                                             ?.toString()
                                             .toUpperCase() ==
                                         'MASTER')
                                 .toList();
-                            final noMasters = movilesData
+                            final noMasters = movilesAll
                                 .where((m) =>
                                     m['rango_movil']
                                             ?.toString()
