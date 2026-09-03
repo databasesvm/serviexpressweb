@@ -346,6 +346,13 @@ class _FormularioTabState extends State<_FormularioTab> {
   bool _conDatafono = false;
   bool _enviando = false;
 
+  static const int _recargoDaatafonoCOP = 2000;
+
+  /// Precio final = precio sugerido + recargo datáfono (si aplica)
+  double? get _tarifaEfectiva => _precioSugerido == null
+      ? null
+      : _precioSugerido! + (_conDatafono ? _recargoDaatafonoCOP : 0);
+
   // Sedes disponibles para seleccionar como recogida
   List<Map<String, dynamic>> _sedesDisponibles = [];
   bool _cargandoSedes = true;
@@ -672,11 +679,12 @@ class _FormularioTabState extends State<_FormularioTab> {
         'fn_recotizacion': 1,
         'archivado': false,
         if (usaPrecioSugerido) ...{
-          'tarifa': _precioSugerido,
+          'tarifa': _tarifaEfectiva,
           'tarifa_detalle': {
-            'total': _precioSugerido,
+            'total': _tarifaEfectiva,
             'fuente': 'red_fn',
             'precio_red': _precioSugerido,
+            if (_conDatafono) 'recargo_datafono': _recargoDaatafonoCOP,
           },
         },
         if (_instruccionesCtrl.text.trim().isNotEmpty)
@@ -702,7 +710,7 @@ class _FormularioTabState extends State<_FormularioTab> {
             ? '🏥 Servicio FN directo — ${consec ?? nombreSede}'
             : '🏥 Solicitud FN — ${consec ?? nombreSede}',
         mensaje: usaPrecioSugerido
-            ? '✅ ${_destinoCtrl.text.trim()} · \$${_miles(_precioSugerido!.toInt())} (precio sugerido)'
+            ? '✅ ${_destinoCtrl.text.trim()} · \$${_miles(_tarifaEfectiva!.toInt())}${_conDatafono ? ' (incl. +\$${_miles(_recargoDaatafonoCOP)} datáfono)' : ' (precio sugerido)'}'
             : _tieneRecogidaFueraDe()
                 ? '⚠ Recogida fuera de cobertura · ${_destinoCtrl.text.trim()}'
                 : 'Cotizar para ${_destinoCtrl.text.trim()}',
@@ -722,7 +730,7 @@ class _FormularioTabState extends State<_FormularioTab> {
           serviceId: newServiceId,
           consec: consec?.toString() ?? '#$newServiceId',
           destino: _destinoCtrl.text.trim(),
-          tarifa: _precioSugerido!.toInt(),
+          tarifa: _tarifaEfectiva!.toInt(),
           sLat: sLatF,
           sLng: sLngF,
         );
@@ -1017,18 +1025,40 @@ class _FormularioTabState extends State<_FormularioTab> {
               if (_precioSugerido != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
-                  child: Row(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(Icons.flash_on,
-                          color: Colors.greenAccent, size: 14),
-                      const SizedBox(width: 4),
-                      Text(
-                        'Precio sugerido: \$${_miles(_precioSugerido!.toInt())} — servicio directo sin cotización',
-                        style: const TextStyle(
-                            color: Colors.greenAccent,
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold),
+                      Row(
+                        children: [
+                          const Icon(Icons.flash_on,
+                              color: Colors.greenAccent, size: 14),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Precio sugerido: \$${_miles(_precioSugerido!.toInt())} — directo sin cotización',
+                            style: const TextStyle(
+                                color: Colors.greenAccent,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold),
+                          ),
+                        ],
                       ),
+                      if (_conDatafono) ...[
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            const Icon(Icons.credit_card,
+                                color: Colors.amberAccent, size: 14),
+                            const SizedBox(width: 4),
+                            Text(
+                              '+\$${_miles(_recargoDaatafonoCOP)} datáfono → Total: \$${_miles(_tarifaEfectiva!.toInt())}',
+                              style: const TextStyle(
+                                  color: Colors.amberAccent,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -1205,6 +1235,16 @@ class _ActivosTabState extends State<_ActivosTab> {
     'cotizacion', 'cotizada', 'pendiente', 'en_ruta_origen',
     'en_origen', 'en_ruta_destino', 'fn_renegociando',
   ];
+
+  static const _prioEstado = {
+    'en_ruta_destino': 0,
+    'en_ruta_origen': 1,
+    'en_origen': 2,
+    'pendiente': 3,
+    'cotizada': 4,
+    'fn_renegociando': 5,
+    'cotizacion': 6,
+  };
 
   List<Map<String, dynamic>> _filtrarActivos(List<Map<String, dynamic>> todos) =>
       todos.where((s) => _estadosActivos.contains(s['estado'])).toList();
@@ -2002,7 +2042,20 @@ class _ActivosTabState extends State<_ActivosTab> {
       initialData: widget.cache,
       builder: (context, snap) {
         final todos = snap.data ?? [];
-        final activos = _filtrarActivos(todos);
+        // Ordenar: servicios con movil asignado primero (agrupados por movil),
+        // sin movil al final. Dentro de cada grupo: estado más avanzado primero.
+        final activos = _filtrarActivos(todos)
+          ..sort((a, b) {
+            final aMov = a['movil_id']?.toString() ?? '';
+            final bMov = b['movil_id']?.toString() ?? '';
+            if (aMov.isEmpty && bMov.isNotEmpty) return 1;
+            if (aMov.isNotEmpty && bMov.isEmpty) return -1;
+            final cmpMov = aMov.compareTo(bMov);
+            if (cmpMov != 0) return cmpMov;
+            final pA = _prioEstado[a['estado'] ?? ''] ?? 99;
+            final pB = _prioEstado[b['estado'] ?? ''] ?? 99;
+            return pA.compareTo(pB);
+          });
 
         if (activos.isEmpty) {
           return const Center(
@@ -2018,29 +2071,100 @@ class _ActivosTabState extends State<_ActivosTab> {
           );
         }
 
+        // Construir lista plana con separadores entre cards del mismo móvil
+        final items = <_ListItem>[];
+        for (int i = 0; i < activos.length; i++) {
+          final s = activos[i];
+          final movId = s['movil_id']?.toString() ?? '';
+          if (i > 0 && movId.isNotEmpty &&
+              movId == (activos[i - 1]['movil_id']?.toString() ?? '')) {
+            final prev = activos[i - 1];
+            final consec = prev['fn_consecutivo']?.toString() ??
+                '#${prev['id']}';
+            final numMov = prev['movil_id']?.toString() ?? '';
+            items.add(_ListItem.separator(
+                label: '🏍️ Móvil $numMov — Realizando servicio $consec'));
+          }
+          items.add(_ListItem.card(s));
+        }
+
         return RefreshIndicator(
           color: Colors.indigo,
           onRefresh: () async {},
           child: ListView.builder(
             padding: const EdgeInsets.all(12),
-            itemCount: activos.length,
-            itemBuilder: (ctx, i) => _CardServicioActivo(
-              servicio: activos[i],
-              onAprobar: () => _aprobar(activos[i]),
-              onRechazar: () => _rechazar(activos[i]),
-              onCancelar: _puedeCanselar(activos[i])
-                  ? () => _cancelar(activos[i])
-                  : null,
-              onReportarProblema: () => _reportarProblema(activos[i]),
-              onNuevoServicio: activos[i]['movil_id'] != null
-                  ? (mid, mnum) => _nuevoServicioConMovil(activos[i], mid, mnum)
-                  : null,
-            ),
+            itemCount: items.length,
+            itemBuilder: (ctx, i) {
+              final item = items[i];
+              if (item.isSeparator) {
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Container(height: 1, color: Colors.indigo.withValues(alpha: 0.4)),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.indigo.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                              color: Colors.indigo.withValues(alpha: 0.5)),
+                        ),
+                        child: Text(
+                          item.label!,
+                          style: const TextStyle(
+                            color: Colors.indigoAccent,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Container(height: 1, color: Colors.indigo.withValues(alpha: 0.4)),
+                      ),
+                    ],
+                  ),
+                );
+              }
+              final s = item.servicio!;
+              return _CardServicioActivo(
+                servicio: s,
+                onAprobar: () => _aprobar(s),
+                onRechazar: () => _rechazar(s),
+                onCancelar: _puedeCanselar(s) ? () => _cancelar(s) : null,
+                onReportarProblema: () => _reportarProblema(s),
+                onNuevoServicio: s['movil_id'] != null
+                    ? (mid, mnum) => _nuevoServicioConMovil(s, mid, mnum)
+                    : null,
+              );
+            },
           ),
         );
       },
     );
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Item de lista: card o separador
+// ─────────────────────────────────────────────────────────────────────────────
+class _ListItem {
+  final bool isSeparator;
+  final Map<String, dynamic>? servicio;
+  final String? label;
+
+  const _ListItem._({required this.isSeparator, this.servicio, this.label});
+
+  factory _ListItem.card(Map<String, dynamic> s) =>
+      _ListItem._(isSeparator: false, servicio: s);
+
+  factory _ListItem.separator({required String label}) =>
+      _ListItem._(isSeparator: true, label: label);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
