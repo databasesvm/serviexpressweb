@@ -18,7 +18,7 @@
 // quedan condicionales según disponibilidad real del repartidor).
 
 import 'dart:convert';
-import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/gestures.dart';
@@ -697,20 +697,24 @@ class _RegistroScreenState extends State<RegistroScreen> {
     } catch (e, st) {
       debugPrint('ERROR REGISTRO: $e\n$st');
       if (mounted) {
-        final eStr = e.toString();
-        String mensaje;
-        if (eStr.contains('duplicate') || eStr.contains('unique')) {
-          mensaje = 'Ya existe una cuenta con ese teléfono, correo o usuario.';
-        } else if (eStr.contains('violates') || eStr.contains('constraint')) {
-          mensaje = 'Error de validación: $eStr';
+        final String mensaje;
+        if (e is PostgrestException) {
+          // Error de Supabase — muestra código + mensaje para diagnóstico
+          mensaje = '[${e.code}] ${e.message}'
+              '${e.details != null ? '\n${e.details}' : ''}';
         } else {
-          mensaje = 'Error: $eStr';
+          final eStr = e.toString();
+          if (eStr.contains('duplicate') || eStr.contains('unique')) {
+            mensaje = 'Ya existe una cuenta con ese teléfono, correo o usuario.';
+          } else {
+            mensaje = eStr.length > 200 ? eStr.substring(0, 200) : eStr;
+          }
         }
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(mensaje),
             backgroundColor: Colors.red,
-            duration: const Duration(seconds: 8),
+            duration: const Duration(seconds: 10),
           ),
         );
       }
@@ -1172,11 +1176,19 @@ class _RegistroScreenState extends State<RegistroScreen> {
                     ),
                   )
                 : ClipOval(
-                    child: Image.file(
-                      File(_fotoPerfil!.path),
-                      width: 180,
-                      height: 180,
-                      fit: BoxFit.cover,
+                    child: FutureBuilder<Uint8List>(
+                      future: _fotoPerfil!.readAsBytes(),
+                      builder: (ctx, snap) {
+                        if (!snap.hasData) {
+                          return const SizedBox(
+                            width: 180,
+                            height: 180,
+                            child: Center(child: CircularProgressIndicator()),
+                          );
+                        }
+                        return Image.memory(snap.data!,
+                            width: 180, height: 180, fit: BoxFit.cover);
+                      },
                     ),
                   ),
           ),
@@ -1345,11 +1357,17 @@ class _RegistroScreenState extends State<RegistroScreen> {
               padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(8),
-                child: Image.file(
-                  File(archivo.path),
-                  height: 100,
-                  width: double.infinity,
-                  fit: BoxFit.cover,
+                child: FutureBuilder<Uint8List>(
+                  future: archivo.readAsBytes(),
+                  builder: (ctx, snap) {
+                    if (!snap.hasData) {
+                      return const SizedBox(
+                          height: 100,
+                          child: Center(child: CircularProgressIndicator()));
+                    }
+                    return Image.memory(snap.data!,
+                        height: 100, width: double.infinity, fit: BoxFit.cover);
+                  },
                 ),
               ),
             ),
