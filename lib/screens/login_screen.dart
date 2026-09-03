@@ -190,11 +190,13 @@ class _LoginScreenState extends State<LoginScreen>
       final claveHash = hashContrasena(claveTexto);
 
       // --- PASO 1: Intentamos con hash (flujo normal para cuentas nuevas/migradas) ---
+      // Excluimos cuentas eliminadas para que re-registros no choquen con historial
       var respuesta = await Supabase.instance.client
           .from('usuarios')
           .select()
           .or('telefono.eq."$identificador",usuario.ilike."$identificador"')
           .eq('contrasena', claveHash)
+          .or('eliminado.is.null,eliminado.eq.false')
           .timeout(const Duration(seconds: 8));
 
       // --- PASO 2: MIGRACIÓN SILENCIOSA para cuentas con contraseña en texto plano ---
@@ -205,6 +207,7 @@ class _LoginScreenState extends State<LoginScreen>
             .select()
             .or('telefono.eq."$identificador",usuario.ilike."$identificador"')
             .eq('contrasena', claveTexto) // Comparación legacy con texto plano
+            .or('eliminado.is.null,eliminado.eq.false')
             .timeout(const Duration(seconds: 8));
 
         if (respuestaLegacy.isNotEmpty) {
@@ -308,21 +311,22 @@ class _LoginScreenState extends State<LoginScreen>
   // HELPERS — Filtro de rol y enrutador central
   // =========================================================================
 
-  /// Devuelve el primer usuario válido según las reglas de acceso por rol:
-  /// - Clientes: pueden entrar con teléfono o usuario.
-  /// - Personal (movil, local, central, master): SOLO con su campo 'usuario'.
+  /// Devuelve el primer usuario válido según las reglas de acceso por rol.
+  /// Todos los roles aceptan: número de teléfono O campo 'usuario' (ej: movil205).
   Map<String, dynamic>? _filtrarUsuarioValido(
     List<dynamic> lista,
     String identificador,
   ) {
     for (var u in lista) {
-      final rol = u['rol'];
       final loginUsuario = u['usuario']?.toString().toLowerCase() ?? '';
+      final loginTelefono = u['telefono']?.toString() ?? '';
 
-      if (rol == 'cliente') return u; // Clientes: cualquier identificador
-      if (loginUsuario == identificador.toLowerCase()) {
-        return u; // Personal: solo usuario exacto
-      }
+      // Coincidencia por usuario exacto
+      if (loginUsuario == identificador.toLowerCase()) return u;
+      // Coincidencia por número de teléfono (todos los roles)
+      if (loginTelefono.isNotEmpty && loginTelefono == identificador) return u;
+      // Clientes: aceptan cualquier identificador (ya cubierto por la query)
+      if (u['rol'] == 'cliente') return u;
     }
     return null;
   }
@@ -525,6 +529,106 @@ class _LoginScreenState extends State<LoginScreen>
   // =========================================================================
 
   // =========================================================================
+  // SELECTOR DE ROL — primera vez con Google
+  // =========================================================================
+  Future<String?> _seleccionarTipoCuentaGoogle() {
+    return showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(ctx).viewInsets.bottom,
+        ),
+        child: Container(
+          margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '¿Qué tipo de cuenta eres?',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 17,
+                  color: Colors.black87,
+                ),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Selecciona para crear tu cuenta correctamente',
+                style: TextStyle(color: Colors.black45, fontSize: 13),
+              ),
+              const SizedBox(height: 20),
+              _opcionRolGoogle(ctx, 'movil', '🏍️', 'Móvil',
+                  'Conductor o domiciliario'),
+              const SizedBox(height: 10),
+              _opcionRolGoogle(ctx, 'local', '🏪', 'Local',
+                  'Negocio, sede o punto de venta'),
+              const SizedBox(height: 10),
+              _opcionRolGoogle(ctx, 'cliente', '👤', 'Cliente',
+                  'Quiero pedir servicios y domicilios'),
+              const SizedBox(height: 4),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _opcionRolGoogle(
+    BuildContext ctx,
+    String rol,
+    String emoji,
+    String titulo,
+    String subtitulo,
+  ) {
+    return GestureDetector(
+      onTap: () => Navigator.of(ctx).pop(rol),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.black12),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Text(emoji, style: const TextStyle(fontSize: 22)),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    titulo,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                      color: Colors.black87,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitulo,
+                    style: const TextStyle(color: Colors.black45, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: Colors.black26),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // =========================================================================
   // GOOGLE SIGN-IN
   // =========================================================================
   Future<void> _loginConGoogle() async {
@@ -544,20 +648,45 @@ class _LoginScreenState extends State<LoginScreen>
 
       final db = Supabase.instance.client;
 
-      // Buscar usuario existente por correo
+      // Buscar usuario existente por correo (excluye eliminados)
       final res = await db
           .from('usuarios')
           .select()
           .eq('correo', correo)
+          .or('eliminado.is.null,eliminado.eq.false')
           .maybeSingle();
 
       Map<String, dynamic> usuario;
 
       if (res != null) {
-        // Ya existe → login directo
+        // Cuenta existente → login con su rol real (móvil, local, central, etc.)
         usuario = Map<String, dynamic>.from(res);
       } else {
-        // No existe → crear cuenta cliente automáticamente
+        // No existe → preguntar qué tipo de cuenta quiere crear
+        if (!mounted) return;
+        final tipo = await _seleccionarTipoCuentaGoogle();
+        if (!mounted || tipo == null) return; // canceló
+
+        if (tipo == 'movil') {
+          // Redirigir al registro normal donde elige su número
+          Navigator.push(context, MaterialPageRoute(builder: (_) => const RegistroScreen()));
+          return;
+        }
+
+        if (tipo == 'local') {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Las cuentas de Local son creadas por la Central Operativa. Comunícate con ellos para activar tu acceso.',
+              ),
+              backgroundColor: Color(0xFF1A1A1A),
+              duration: Duration(seconds: 5),
+            ),
+          );
+          return;
+        }
+
+        // tipo == 'cliente' → crear cuenta nueva
         final usuarioGen =
             nombre.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '') +
             DateTime.now().millisecondsSinceEpoch.toString().substring(8);
@@ -569,9 +698,7 @@ class _LoginScreenState extends State<LoginScreen>
               'usuario': usuarioGen,
               'rol': 'cliente',
               'telefono': '',
-              'contrasena': hashContrasena(
-                'google_\$correo',
-              ), // no se usa para login
+              'contrasena': hashContrasena('google_$correo'),
               'activo': true,
               'foto_perfil': foto,
               'google_auth': true,
@@ -585,7 +712,7 @@ class _LoginScreenState extends State<LoginScreen>
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Tu cuenta está desactivada. Contacta a soporte.'),
+              content: Text('Tu cuenta está desactivada. Contacta a la Central.'),
               backgroundColor: Colors.red,
             ),
           );
@@ -1077,11 +1204,23 @@ class _LoginScreenState extends State<LoginScreen>
                                   color: Colors.black87,
                                 ),
                               ),
-                              const SizedBox(height: 18),
+                              const SizedBox(height: 4),
+                              const Text(
+                                'Ingresa tu número de celular o tu usuario',
+                                style: TextStyle(
+                                  color: Colors.black45,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              // ── CAMPO TELÉFONO (estilo Rappi) ──────────────
                               TextField(
                                 controller: _telefonoController,
                                 decoration: InputDecoration(
-                                  labelText: 'Usuario',
+                                  labelText: 'Celular o usuario',
+                                  hintText: '3001234567  ó  sedefn01',
+                                  helperText: 'Móviles y clientes: usa tu número de celular',
+                                  helperStyle: const TextStyle(fontSize: 11, color: Colors.black45),
                                   filled: true,
                                   fillColor: Colors.grey[50],
                                   border: OutlineInputBorder(
@@ -1099,7 +1238,36 @@ class _LoginScreenState extends State<LoginScreen>
                                       width: 1.5,
                                     ),
                                   ),
-                                  prefixIcon: const Icon(Icons.person_outline),
+                                  prefixIcon: IntrinsicWidth(
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Text('🇨🇴', style: TextStyle(fontSize: 17)),
+                                          const SizedBox(width: 6),
+                                          const Text(
+                                            '+57',
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 14,
+                                              color: Colors.black87,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Container(
+                                            width: 1,
+                                            height: 20,
+                                            color: Colors.black26,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  prefixIconConstraints: const BoxConstraints(
+                                    minWidth: 0,
+                                    minHeight: 0,
+                                  ),
                                 ),
                                 keyboardType: TextInputType.text,
                                 textInputAction: TextInputAction.next,
@@ -1107,13 +1275,8 @@ class _LoginScreenState extends State<LoginScreen>
                                   context,
                                 ).requestFocus(_passwordFocus),
                                 inputFormatters: [
-                                  // Rechaza espacios y caracteres con acento/diacrítico
-                                  FilteringTextInputFormatter.deny(
-                                    RegExp(r'[^\x00-\x7F]'),
-                                  ),
-                                  FilteringTextInputFormatter.deny(
-                                    RegExp(r'\s'),
-                                  ),
+                                  FilteringTextInputFormatter.deny(RegExp(r'[^\x00-\x7F]')),
+                                  FilteringTextInputFormatter.deny(RegExp(r'\s')),
                                 ],
                               ),
                               const SizedBox(height: 14),
@@ -1250,6 +1413,18 @@ class _LoginScreenState extends State<LoginScreen>
                                 ),
                               ),
                               const SizedBox(height: 6),
+                              // Nota para roles con usuario (locales, central, master)
+                              Center(
+                                child: Text(
+                                  'Locales, Central o Administrador: usa tu nombre de usuario',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    color: Colors.black38,
+                                    fontSize: 10.5,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 2),
                               Center(
                                 child: TextButton(
                                   onPressed: _mostrarRecuperarContrasena,

@@ -71,13 +71,18 @@ class _MonitorPedidosScreenState extends State<MonitorPedidosScreen>
           .select('id, nombre, usuario')
           .eq('rol', 'movil')
           .eq('activo', true)
-          .order('nombre');
+          .order('usuario', ascending: true);
 
       if (!mounted) return;
       setState(() {
         _pedidos = List<Map<String, dynamic>>.from(pedidos);
         _locales = List<Map<String, dynamic>>.from(locales);
-        _moviles = List<Map<String, dynamic>>.from(moviles);
+        _moviles = List<Map<String, dynamic>>.from(moviles)
+          ..sort((a, b) {
+            final na = int.tryParse(RegExp(r'\d+').firstMatch(a['usuario']?.toString() ?? '')?.group(0) ?? '') ?? 9999;
+            final nb = int.tryParse(RegExp(r'\d+').firstMatch(b['usuario']?.toString() ?? '')?.group(0) ?? '') ?? 9999;
+            return na.compareTo(nb);
+          });
         _cargando = false;
       });
     } catch (e) {

@@ -88,6 +88,10 @@ class _MovilScreenState extends State<MovilScreen>
   Position? _ultimaPosicionConocida;
   // ------------------------------------
 
+  // --- DESCANSO Y DÍA FIJO SEMANAL ---
+  List<Map<String, dynamic>> _solicitudesDescanso = [];
+  bool _cargandoSolicitudesDescanso = false;
+
   // --- COMPARTIDO DE UBICACIÓN POR PÁNICO (24H) ---
   int? _eventoPanicoActivoId;
   DateTime? _panicoUbicacionExpiraAt;
@@ -4576,6 +4580,9 @@ class _MovilScreenState extends State<MovilScreen>
               ),
               const SizedBox(height: 8),
 
+              // --- DESCANSO ---
+              _seccionDescansoMovil(miPerfil),
+
               // --- ACCIONES ---
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -4694,6 +4701,406 @@ class _MovilScreenState extends State<MovilScreen>
     } catch (e) {
       debugPrint('[PRODUCCION] Error al cargar producción del móvil ${widget.usuario['id']}: $e');
     }
+  }
+
+  // =========================================================================
+  // DESCANSO — métodos
+  // =========================================================================
+
+  Future<void> _cargarSolicitudesDescanso() async {
+    if (_cargandoSolicitudesDescanso) return;
+    setState(() => _cargandoSolicitudesDescanso = true);
+    try {
+      final data = await Supabase.instance.client
+          .from('solicitudes_descanso')
+          .select('id, fecha_inicio, fecha_fin, dias_solicitados, razon, estado, aprobado_por, rechazado_motivo, created_at')
+          .eq('movil_id', widget.usuario['id'])
+          .order('created_at', ascending: false)
+          .limit(5);
+      if (mounted) setState(() => _solicitudesDescanso = List<Map<String, dynamic>>.from(data));
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _cargandoSolicitudesDescanso = false);
+    }
+  }
+
+  Future<void> _guardarDiaDescansoFijo(int? dia) async {
+    try {
+      await Supabase.instance.client
+          .from('usuarios')
+          .update({'dia_descanso_semanal': dia})
+          .eq('id', widget.usuario['id']);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(dia == null ? '✅ Día de descanso fijo eliminado' : '✅ Día de descanso fijo guardado'),
+            backgroundColor: Colors.green[700],
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Error al guardar. Intenta de nuevo.'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<void> _mostrarDialogoSolicitarDescanso(BuildContext ctx) async {
+    final inicioCtrl = TextEditingController();
+    final finCtrl    = TextEditingController();
+    final razonCtrl  = TextEditingController();
+    DateTime? fechaInicio;
+    DateTime? fechaFin;
+    bool enviando = false;
+
+
+    Future<void> pickDate(bool esInicio, StateSetter setSt) async {
+      final now = DateTime.now();
+      final picked = await showDatePicker(
+        context: ctx,
+        initialDate: now.add(const Duration(days: 1)),
+        firstDate: now,
+        lastDate: now.add(const Duration(days: 90)),
+        helpText: esInicio ? 'FECHA DE INICIO' : 'FECHA FIN',
+        builder: (c, child) => Theme(
+          data: Theme.of(c).copyWith(
+            colorScheme: const ColorScheme.dark(primary: Color(0xff3AF500), onPrimary: Colors.black),
+          ),
+          child: child!,
+        ),
+      );
+      if (picked == null) return;
+      setSt(() {
+        if (esInicio) {
+          fechaInicio = picked;
+          inicioCtrl.text = '${picked.day.toString().padLeft(2,'0')}/${picked.month.toString().padLeft(2,'0')}/${picked.year}';
+          if (fechaFin != null && fechaFin!.isBefore(picked)) {
+            fechaFin = null;
+            finCtrl.clear();
+          }
+        } else {
+          fechaFin = picked;
+          finCtrl.text = '${picked.day.toString().padLeft(2,'0')}/${picked.month.toString().padLeft(2,'0')}/${picked.year}';
+        }
+      });
+    }
+
+    await showDialog(
+      context: ctx,
+      barrierDismissible: false,
+      builder: (dCtx) => StatefulBuilder(builder: (dCtx, setSt) {
+        final dias = fechaInicio != null && fechaFin != null
+            ? fechaFin!.difference(fechaInicio!).inDays + 1
+            : 0;
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1A1A1A),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(children: [
+            Icon(Icons.beach_access, color: Color(0xff3AF500), size: 18),
+            SizedBox(width: 8),
+            Text('Solicitar días de descanso', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+          ]),
+          content: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const Text(
+                'La solicitud pasa por Central. Si no responden antes de la fecha de inicio, se aprueba automáticamente.',
+                style: TextStyle(color: Colors.white54, fontSize: 11, height: 1.4),
+              ),
+              const SizedBox(height: 14),
+              Row(children: [
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => pickDate(true, setSt),
+                    child: AbsorbPointer(
+                      child: TextField(
+                        controller: inicioCtrl,
+                        style: const TextStyle(color: Colors.white, fontSize: 13),
+                        decoration: InputDecoration(
+                          labelText: 'Desde',
+                          labelStyle: const TextStyle(color: Colors.white38, fontSize: 11),
+                          filled: true,
+                          fillColor: Colors.white10,
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                          suffixIcon: const Icon(Icons.calendar_today, color: Colors.white38, size: 14),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => pickDate(false, setSt),
+                    child: AbsorbPointer(
+                      child: TextField(
+                        controller: finCtrl,
+                        style: const TextStyle(color: Colors.white, fontSize: 13),
+                        decoration: InputDecoration(
+                          labelText: 'Hasta',
+                          labelStyle: const TextStyle(color: Colors.white38, fontSize: 11),
+                          filled: true,
+                          fillColor: Colors.white10,
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                          suffixIcon: const Icon(Icons.calendar_today, color: Colors.white38, size: 14),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ]),
+              if (dias > 0) ...[
+                const SizedBox(height: 8),
+                Text('$dias día(s) solicitado(s)', style: const TextStyle(color: Color(0xff3AF500), fontSize: 12, fontWeight: FontWeight.bold)),
+              ],
+              const SizedBox(height: 12),
+              TextField(
+                controller: razonCtrl,
+                maxLines: 3,
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+                decoration: InputDecoration(
+                  labelText: 'Motivo del descanso',
+                  labelStyle: const TextStyle(color: Colors.white38, fontSize: 11),
+                  filled: true,
+                  fillColor: Colors.white10,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                ),
+              ),
+            ]),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dCtx),
+              child: const Text('CANCELAR', style: TextStyle(color: Colors.white38)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xff3AF500), foregroundColor: Colors.black),
+              onPressed: enviando ? null : () async {
+                if (fechaInicio == null || fechaFin == null) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Selecciona las fechas'), backgroundColor: Colors.orange));
+                  return;
+                }
+                if (razonCtrl.text.trim().isEmpty) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Escribe el motivo'), backgroundColor: Colors.orange));
+                  return;
+                }
+                if (fechaFin!.isBefore(fechaInicio!)) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('La fecha fin debe ser posterior al inicio'), backgroundColor: Colors.orange));
+                  return;
+                }
+                setSt(() => enviando = true);
+                try {
+                  final diasTotales = fechaFin!.difference(fechaInicio!).inDays + 1;
+                  await Supabase.instance.client.from('solicitudes_descanso').insert({
+                    'movil_id':        widget.usuario['id'],
+                    'fecha_inicio':    fechaInicio!.toIso8601String().split('T').first,
+                    'fecha_fin':       fechaFin!.toIso8601String().split('T').first,
+                    'dias_solicitados': diasTotales,
+                    'razon':           razonCtrl.text.trim(),
+                    'estado':          'pendiente',
+                  });
+                  // Notificar a Central
+                  await Supabase.instance.client.from('notificaciones_push_pendientes').insert({
+                    'destinatario_rol': 'central',
+                    'titulo': '🏖️ Solicitud de descanso',
+                    'cuerpo': '${widget.usuario['nombre'] ?? ''} solicita $diasTotales día(s) de descanso. Revisa en Gestión.',
+                    'tipo': 'descanso_solicitud',
+                  });
+                  if (mounted) {
+                    Navigator.pop(dCtx);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('✅ Solicitud enviada. Central revisará tu pedido.'), backgroundColor: Colors.green),
+                    );
+                    _cargarSolicitudesDescanso();
+                  }
+                } catch (e) {
+                  setSt(() => enviando = false);
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    const SnackBar(content: Text('Error al enviar. Intenta de nuevo.'), backgroundColor: Colors.red),
+                  );
+                }
+              },
+              child: enviando
+                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
+                  : const Text('ENVIAR SOLICITUD', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+            ),
+          ],
+        );
+      }),
+    );
+
+    inicioCtrl.dispose();
+    finCtrl.dispose();
+    razonCtrl.dispose();
+  }
+
+  // Sección de descanso dentro del tab de Perfil
+  Widget _seccionDescansoMovil(Map<String, dynamic> miPerfil) {
+    final diasNombres = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+    final bloqueado   = miPerfil['bloqueado_inactividad'] == true;
+    final diasInactivos = (miPerfil['dias_inactivos_acumulados'] as int?) ?? 0;
+    final diaFijo     = miPerfil['dia_descanso_semanal'] as int?;
+    int? diaSeleccionado = diaFijo;
+
+    return _seccionPerfilDesplegable(
+      titulo: 'DESCANSO Y DÍAS LIBRES',
+      icono: Icons.beach_access,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+          child: StatefulBuilder(builder: (ctx, setSt) {
+            return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              // ── Estado de inactividad ──────────────────────────────────
+              if (bloqueado)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.red[50],
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.red[200]!),
+                  ),
+                  child: Row(children: [
+                    Icon(Icons.lock_outline, color: Colors.red[700], size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '🔒 Tu cuenta está bloqueada por $diasInactivos día(s) sin actividad. Contacta a Central para reactivarla.',
+                        style: TextStyle(color: Colors.red[800], fontSize: 12, height: 1.4),
+                      ),
+                    ),
+                  ]),
+                )
+              else if (diasInactivos > 0)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.orange[50],
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.orange[200]!),
+                  ),
+                  child: Text(
+                    '⚠️ Llevas $diasInactivos día(s) sin completar servicios.',
+                    style: TextStyle(color: Colors.orange[800], fontSize: 12),
+                  ),
+                ),
+
+              // ── Día de descanso fijo semanal ──────────────────────────
+              const Text('Día de descanso fijo cada semana', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.black87)),
+              const SizedBox(height: 6),
+              const Text('Este día no se te cuenta como inactividad y Central lo verá en el panel.',
+                  style: TextStyle(fontSize: 11, color: Colors.black45, height: 1.4)),
+              const SizedBox(height: 10),
+              DropdownButtonFormField<int?>(
+                value: diaSeleccionado,
+                decoration: InputDecoration(
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  isDense: true,
+                ),
+                hint: const Text('Sin día fijo', style: TextStyle(fontSize: 13)),
+                items: [
+                  const DropdownMenuItem<int?>(value: null, child: Text('Sin día fijo', style: TextStyle(fontSize: 13))),
+                  ...List.generate(7, (i) => DropdownMenuItem<int?>(
+                    value: i,
+                    child: Text(diasNombres[i], style: const TextStyle(fontSize: 13)),
+                  )),
+                ],
+                onChanged: (val) => setSt(() => diaSeleccionado = val),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.black,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onPressed: () => _guardarDiaDescansoFijo(diaSeleccionado),
+                  child: const Text('GUARDAR DÍA FIJO', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                ),
+              ),
+
+              const Divider(height: 28),
+
+              // ── Solicitar días de descanso ────────────────────────────
+              const Text('Solicitar días de descanso', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.black87)),
+              const SizedBox(height: 6),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.send, size: 16),
+                  label: const Text('Nueva solicitud', style: TextStyle(fontSize: 13)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.black87,
+                    side: const BorderSide(color: Colors.black26),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    padding: const EdgeInsets.symmetric(vertical: 11),
+                  ),
+                  onPressed: () {
+                    _cargarSolicitudesDescanso();
+                    _mostrarDialogoSolicitarDescanso(context);
+                  },
+                ),
+              ),
+
+              const SizedBox(height: 14),
+
+              // ── Historial de solicitudes ──────────────────────────────
+              Row(children: [
+                const Text('Mis solicitudes', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.black87)),
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: _cargarSolicitudesDescanso,
+                  child: const Icon(Icons.refresh, size: 14, color: Colors.black38),
+                ),
+              ]),
+              const SizedBox(height: 8),
+              if (_cargandoSolicitudesDescanso)
+                const Center(child: SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2)))
+              else if (_solicitudesDescanso.isEmpty)
+                const Text('Sin solicitudes recientes.', style: TextStyle(fontSize: 12, color: Colors.black38))
+              else
+                ..._solicitudesDescanso.map((s) {
+                  final estado = s['estado']?.toString() ?? '';
+                  final color = estado == 'aprobado'
+                      ? Colors.green[700]!
+                      : estado == 'rechazado'
+                          ? Colors.red[700]!
+                          : Colors.orange[700]!;
+                  final emoji = estado == 'aprobado' ? '✅' : estado == 'rechazado' ? '❌' : '⏳';
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[50],
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: color.withValues(alpha: 0.3)),
+                    ),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Row(children: [
+                        Text('$emoji ${estado.toUpperCase()}', style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.bold)),
+                        const Spacer(),
+                        Text('${s['dias_solicitados']} día(s)', style: const TextStyle(fontSize: 11, color: Colors.black54)),
+                      ]),
+                      const SizedBox(height: 4),
+                      Text('${s['fecha_inicio']} → ${s['fecha_fin']}', style: const TextStyle(fontSize: 11, color: Colors.black54)),
+                      if (s['razon'] != null)
+                        Text(s['razon'].toString(), style: const TextStyle(fontSize: 11, color: Colors.black45), maxLines: 2, overflow: TextOverflow.ellipsis),
+                      if (estado == 'rechazado' && s['rechazado_motivo'] != null)
+                        Text('Motivo: ${s['rechazado_motivo']}', style: TextStyle(fontSize: 11, color: Colors.red[600], fontStyle: FontStyle.italic)),
+                    ]),
+                  );
+                }),
+            ]);
+          }),
+        ),
+      ],
+    );
   }
 
   // Tarjeta de sección desplegable — misma estructura que _seccionPerfil

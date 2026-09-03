@@ -19,12 +19,14 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
   List<Map<String, dynamic>> _activaciones = [];
   List<Map<String, dynamic>> _moviles = [];
   List<Map<String, dynamic>> _registros = [];
+  List<Map<String, dynamic>> _solicitudesDescansoList = [];
+  List<Map<String, dynamic>> _eliminados = [];
   bool _cargando = true;
 
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: 4, vsync: this, initialIndex: widget.tabInicial);
+    _tabCtrl = TabController(length: 6, vsync: this, initialIndex: widget.tabInicial);
     _cargar();
   }
 
@@ -44,21 +46,31 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
             .select('id, nombre, usuario, correo, telefono, direccion_local, tipo_negocio, zona_cobertura, created_at')
             .eq('rol', 'local').eq('estado_local', 'pendiente').order('created_at'),
         _db.from('usuarios')
-            .select('id, nombre, usuario, rol, telefono, correo, activo, suspendido, created_at')
+            .select('id, nombre, usuario, rol, telefono, correo, activo, suspendido, created_at, numero_movil')
             .eq('activo', false).neq('suspendido', true).order('created_at'),
         _db.from('usuarios')
-            .select('id, nombre, usuario, rango_movil, puntuacion, activo')
+            .select('id, nombre, usuario, rango_movil, puntuacion, activo, tipo_plan, numero_movil')
             .eq('rol', 'movil').order('usuario', ascending: true),
         _db.from('usuarios')
             .select('id, nombre, usuario, rol, estado_local, activo, suspendido, created_at')
             .gte('created_at', hace30).order('created_at', ascending: false),
+        _db.from('solicitudes_descanso')
+            .select('id, movil_id, fecha_inicio, fecha_fin, dias_solicitados, razon, estado, aprobado_por, rechazado_motivo, created_at, usuarios(nombre, usuario)')
+            .order('created_at', ascending: false)
+            .limit(50),
+        _db.from('usuarios')
+            .select('id, nombre, usuario, rol, correo, telefono, tipo_plan, rango_movil, numero_movil, eliminado_at, eliminado_por, created_at')
+            .eq('eliminado', true)
+            .order('eliminado_at', ascending: false),
       ]);
       if (!mounted) return;
       setState(() {
-        _solicitudes = List<Map<String, dynamic>>.from(results[0]);
-        _activaciones = List<Map<String, dynamic>>.from(results[1]);
-        _moviles     = List<Map<String, dynamic>>.from(results[2]);
-        _registros   = List<Map<String, dynamic>>.from(results[3]);
+        _solicitudes              = List<Map<String, dynamic>>.from(results[0]);
+        _activaciones             = List<Map<String, dynamic>>.from(results[1]);
+        _moviles                  = List<Map<String, dynamic>>.from(results[2]);
+        _registros                = List<Map<String, dynamic>>.from(results[3]);
+        _solicitudesDescansoList  = List<Map<String, dynamic>>.from(results[4]);
+        _eliminados               = List<Map<String, dynamic>>.from(results[5]);
         _cargando = false;
       });
     } catch (_) {
@@ -180,11 +192,65 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
   }
 
   Future<void> _activarUsuario(Map<String, dynamic> u) async {
+    final esMovil = u['rol']?.toString() == 'movil';
+    final numMovilRaw = u['numero_movil'];
+    final identificador = esMovil && numMovilRaw != null
+        ? 'MOVIL$numMovilRaw'
+        : (u['usuario']?.toString().toUpperCase() ?? '—');
+
+    // ── Verificar conflicto de número antes de activar ───────────────────
+    if (esMovil && numMovilRaw != null) {
+      final conflicto = await _db
+          .from('usuarios')
+          .select('id, nombre, usuario')
+          .eq('numero_movil', numMovilRaw)
+          .or('eliminado.is.null,eliminado.eq.false')
+          .eq('activo', true)
+          .neq('id', u['id'])
+          .limit(1);
+
+      if (!mounted) return;
+
+      if (conflicto.isNotEmpty) {
+        final otro = conflicto.first;
+        final otroNombre = otro['nombre']?.toString() ?? '—';
+        final otroUser   = otro['usuario']?.toString() ?? '—';
+        final continuar = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: const Color(0xFF1A1A1A),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: const Row(children: [
+              Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 22),
+              SizedBox(width: 8),
+              Text('Número duplicado', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
+            ]),
+            content: Text(
+              'El número $numMovilRaw ya está en uso por:\n\n'
+              '• $otroNombre  (@$otroUser)\n\n'
+              'Desactiva ese móvil primero o pídele al solicitante que cambie su número.',
+              style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('CANCELAR', style: TextStyle(color: Colors.white38)),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.orange[700]),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('ACTIVAR DE TODAS FORMAS', style: TextStyle(color: Colors.white, fontSize: 12)),
+              ),
+            ],
+          ),
+        );
+        if (continuar != true) return;
+      }
+    }
+
+    // ── Activar ──────────────────────────────────────────────────────────
     await _db.from('usuarios').update({'activo': true}).eq('id', u['id']);
     if (!mounted) return;
-    final usuarioField = u['usuario']?.toString() ?? '';
-    final numStr = usuarioField.replaceAll(RegExp(r'[^0-9]'), '');
-    final identificador = numStr.isNotEmpty ? 'MOVIL$numStr' : usuarioField.toUpperCase();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('✅ $identificador activado'), backgroundColor: Colors.green[700]),
     );
@@ -458,18 +524,31 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
         body: _cargando
           ? const Center(child: CircularProgressIndicator(color: Color(0xff3AF500)))
           : Column(children: [
-              // ── Stat boxes ─────────────────────────────────────────────
-              Padding(
-                padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
-                child: Row(children: [
-                  _statBox('${_solicitudes.length}', 'Solicitudes', const Color(0xFFF59E0B), onTap: () => _tabCtrl.animateTo(0)),
-                  const SizedBox(width: 8),
-                  _statBox('${_activaciones.length}', 'Por activar', const Color(0xFF3B82F6), onTap: () => _tabCtrl.animateTo(1)),
-                  const SizedBox(width: 8),
-                  _statBox('${_moviles.length}', 'Móviles', const Color(0xff3AF500), onTap: () => _tabCtrl.animateTo(2)),
-                  const SizedBox(width: 8),
-                  _statBox('${_registros.length}', 'Recientes', const Color(0xFFA855F7), onTap: () => _tabCtrl.animateTo(3)),
-                ]),
+              // ── Stat boxes (scroll horizontal para 5 tabs) ─────────────
+              SizedBox(
+                height: 56,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+                  children: [
+                    _statBox('${_solicitudes.length}', 'Solicitudes', const Color(0xFFF59E0B), onTap: () => _tabCtrl.animateTo(0)),
+                    const SizedBox(width: 8),
+                    _statBox('${_activaciones.length}', 'Por activar', const Color(0xFF3B82F6), onTap: () => _tabCtrl.animateTo(1)),
+                    const SizedBox(width: 8),
+                    _statBox('${_moviles.length}', 'Móviles', const Color(0xff3AF500), onTap: () => _tabCtrl.animateTo(2)),
+                    const SizedBox(width: 8),
+                    _statBox('${_registros.length}', 'Recientes', const Color(0xFFA855F7), onTap: () => _tabCtrl.animateTo(3)),
+                    const SizedBox(width: 8),
+                    _statBox(
+                      '${_solicitudesDescansoList.where((s) => s['estado'] == 'pendiente').length}',
+                      'Descansos',
+                      const Color(0xFF10B981),
+                      onTap: () => _tabCtrl.animateTo(4),
+                    ),
+                    const SizedBox(width: 8),
+                    _statBox('${_eliminados.length}', 'Eliminados', Colors.red[400]!, onTap: () => _tabCtrl.animateTo(5)),
+                  ],
+                ),
               ),
               // ── Búsqueda ───────────────────────────────────────────────
               Padding(
@@ -499,6 +578,8 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                 _tabActivaciones(),
                 _tabAscensos(),
                 _tabRecientes(),
+                _tabDescansos(),
+                _tabEliminados(),
               ])),
             ]),
       ),
@@ -642,7 +723,17 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
         final u = lista[i];
         final rol = u['rol']?.toString() ?? '';
         final color = _colorRol(rol);
-        final numMovil = rol == 'movil' ? _numMovil(u['usuario']?.toString()) : '';
+        final numMovilInt = u['numero_movil'] as int?;
+        final numMovilStr = numMovilInt?.toString() ?? '';
+        // Etiqueta de rango de plan según número
+        String? planLabel;
+        if (numMovilInt != null) {
+          if (numMovilInt >= 1 && numMovilInt <= 100) {
+            planLabel = 'SUSCRIPCIÓN';
+          } else if (numMovilInt >= 200 && numMovilInt <= 299) {
+            planLabel = 'PREDIARIO / POSTDIA';
+          }
+        }
         return Container(
           margin: const EdgeInsets.only(bottom: 10),
           decoration: BoxDecoration(
@@ -654,15 +745,18 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
             contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             leading: CircleAvatar(
               radius: 20,
-              backgroundColor: numMovil.isNotEmpty ? color : color.withValues(alpha: 0.15),
-              child: numMovil.isNotEmpty
-                  ? Text(numMovil, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 10))
+              backgroundColor: numMovilStr.isNotEmpty ? color : color.withValues(alpha: 0.15),
+              child: numMovilStr.isNotEmpty
+                  ? Text(numMovilStr, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 10))
                   : Text(_iniciales(u['nombre']), style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 13)),
             ),
             title: Text(u['nombre'] ?? '—', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
             subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               if ((u['usuario'] ?? '').toString().isNotEmpty)
                 Text('@${u['usuario']}', style: const TextStyle(color: Colors.white54, fontSize: 11)),
+              if (numMovilStr.isNotEmpty)
+                Text('Número solicitado: #$numMovilStr${planLabel != null ? ' · $planLabel' : ''}',
+                    style: const TextStyle(color: Color(0xFF3B82F6), fontSize: 11, fontWeight: FontWeight.w600)),
               _chip(rol.toUpperCase(), color),
             ]),
             trailing: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -727,7 +821,23 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                 const SizedBox(width: 10),
                 Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text(u['nombre'] ?? '—', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
-                  Text('@${u['usuario'] ?? ''}', style: const TextStyle(color: Colors.white38, fontSize: 11)),
+                  Row(children: [
+                    Text('@${u['usuario'] ?? ''}', style: const TextStyle(color: Colors.white38, fontSize: 11)),
+                    if (u['tipo_plan'] != null) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: u['tipo_plan'] == 'prediario' ? Colors.orange[700] : Colors.green[700],
+                          borderRadius: BorderRadius.circular(3),
+                        ),
+                        child: Text(
+                          u['tipo_plan'] == 'prediario' ? 'PREDIA' : 'SUSCR',
+                          style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ],
+                  ]),
                 ])),
                 IconButton(
                   tooltip: 'Cambiar contraseña',
@@ -855,4 +965,474 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
       ),
     ]);
   }
+
+  // ── Tab 4: Solicitudes de descanso ────────────────────────────────────────
+  Widget _tabDescansos() {
+    final pendientes = _solicitudesDescansoList.where((s) => s['estado'] == 'pendiente').toList();
+    final historial  = _solicitudesDescansoList.where((s) => s['estado'] != 'pendiente').toList();
+
+    if (_solicitudesDescansoList.isEmpty) {
+      return _empty(Icons.beach_access_rounded, 'Sin solicitudes de descanso');
+    }
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(14, 8, 14, 24),
+      children: [
+        if (pendientes.isNotEmpty) ...[
+          _encabezadoSeccion('⏳ PENDIENTES (${pendientes.length})', const Color(0xFFF59E0B)),
+          ...pendientes.map((s) => _cardDescanso(s, esPendiente: true)),
+        ],
+        if (historial.isNotEmpty) ...[
+          _encabezadoSeccion('📋 HISTORIAL', Colors.white24),
+          ...historial.map((s) => _cardDescanso(s, esPendiente: false)),
+        ],
+      ],
+    );
+  }
+
+  Widget _encabezadoSeccion(String texto, Color color) => Padding(
+    padding: const EdgeInsets.fromLTRB(0, 8, 0, 6),
+    child: Text(texto, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.8)),
+  );
+
+  Widget _cardDescanso(Map<String, dynamic> s, {required bool esPendiente}) {
+    final usuario = s['usuarios'] as Map<String, dynamic>?;
+    final nombre  = usuario?['nombre']?.toString() ?? '—';
+    final user    = usuario?['usuario']?.toString() ?? '—';
+    final estado  = s['estado']?.toString() ?? '';
+    final Color estadoColor = estado == 'aprobado'
+        ? const Color(0xFF10B981)
+        : estado == 'rechazado'
+            ? Colors.red[400]!
+            : const Color(0xFFF59E0B);
+    final String estadoEmoji = estado == 'aprobado' ? '✅' : estado == 'rechazado' ? '❌' : '⏳';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF141414),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: estadoColor.withValues(alpha: 0.3)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            CircleAvatar(
+              radius: 16,
+              backgroundColor: const Color(0xFF10B981).withValues(alpha: 0.2),
+              child: Text(_iniciales(nombre), style: const TextStyle(color: Color(0xFF10B981), fontSize: 11, fontWeight: FontWeight.bold)),
+            ),
+            const SizedBox(width: 10),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(nombre, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+              Text('@$user', style: const TextStyle(color: Colors.white54, fontSize: 11)),
+            ])),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(color: estadoColor.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(20)),
+              child: Text('$estadoEmoji ${estado.toUpperCase()}', style: TextStyle(color: estadoColor, fontSize: 10, fontWeight: FontWeight.bold)),
+            ),
+          ]),
+          const SizedBox(height: 10),
+          Row(children: [
+            const Icon(Icons.calendar_month, size: 13, color: Colors.white38),
+            const SizedBox(width: 4),
+            Text('${s['fecha_inicio']} → ${s['fecha_fin']}', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+            const SizedBox(width: 8),
+            Text('(${s['dias_solicitados']} día(s))', style: const TextStyle(color: Colors.white38, fontSize: 11)),
+          ]),
+          if (s['razon'] != null) ...[
+            const SizedBox(height: 4),
+            Text(s['razon'].toString(), style: const TextStyle(color: Colors.white54, fontSize: 12, fontStyle: FontStyle.italic)),
+          ],
+          if (estado == 'rechazado' && s['rechazado_motivo'] != null) ...[
+            const SizedBox(height: 4),
+            Text('Motivo rechazo: ${s['rechazado_motivo']}', style: TextStyle(color: Colors.red[300], fontSize: 11)),
+          ],
+          if (esPendiente) ...[
+            const SizedBox(height: 12),
+            Row(children: [
+              Expanded(
+                child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red[300],
+                    side: BorderSide(color: Colors.red[800]!),
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onPressed: () => _rechazarDescanso(s),
+                  child: const Text('RECHAZAR', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF10B981),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onPressed: () => _aprobarDescanso(s),
+                  child: const Text('APROBAR', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ]),
+          ],
+        ]),
+      ),
+    );
+  }
+
+  // ── Tab 5: Cuentas eliminadas ──────────────────────────────────────────────
+  Widget _tabEliminados() {
+    final lista = _filtrar(_eliminados);
+    if (_eliminados.isEmpty) {
+      return _empty(Icons.delete_sweep_rounded, 'No hay cuentas eliminadas');
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(14, 8, 14, 24),
+      itemCount: lista.length,
+      itemBuilder: (_, i) => _cardEliminado(lista[i]),
+    );
+  }
+
+  Widget _cardEliminado(Map<String, dynamic> u) {
+    final nombre       = u['nombre']?.toString() ?? '—';
+    final usuario      = u['usuario']?.toString() ?? '—';
+    final rol          = u['rol']?.toString() ?? '—';
+    final tipoPlan     = u['tipo_plan']?.toString();
+    final eliminadoPor = u['eliminado_por']?.toString() ?? 'Desconocido';
+    final eliminadoAt  = u['eliminado_at'] != null
+        ? DateTime.tryParse(u['eliminado_at'].toString())?.toLocal()
+        : null;
+    final registradoAt = u['created_at'] != null
+        ? DateTime.tryParse(u['created_at'].toString())?.toLocal()
+        : null;
+
+    String _fmt(DateTime? dt) {
+      if (dt == null) return '—';
+      return '${dt.day.toString().padLeft(2,'0')}/${dt.month.toString().padLeft(2,'0')}/${dt.year} ${dt.hour.toString().padLeft(2,'0')}:${dt.minute.toString().padLeft(2,'0')}';
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF141414),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.red.withValues(alpha: 0.25)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            CircleAvatar(
+              radius: 18,
+              backgroundColor: Colors.red.withValues(alpha: 0.15),
+              child: Text(_iniciales(nombre),
+                  style: const TextStyle(color: Colors.redAccent, fontSize: 12, fontWeight: FontWeight.bold)),
+            ),
+            const SizedBox(width: 10),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(nombre, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+              Text('@$usuario', style: const TextStyle(color: Colors.white54, fontSize: 11)),
+            ])),
+            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+              _chip(rol.toUpperCase(), _colorRol(rol)),
+              if (tipoPlan != null) ...[
+                const SizedBox(height: 4),
+                _chip(tipoPlan == 'prediario' ? 'PREDIA' : 'SUSCR',
+                    tipoPlan == 'prediario' ? Colors.orange[700]! : Colors.green[700]!),
+              ],
+            ]),
+          ]),
+          const SizedBox(height: 10),
+          const Divider(color: Colors.white10, height: 1),
+          const SizedBox(height: 8),
+          _filaInfo(Icons.person_off_rounded, 'Eliminado por', eliminadoPor, Colors.redAccent),
+          const SizedBox(height: 4),
+          _filaInfo(Icons.calendar_today_rounded, 'Fecha eliminación', _fmt(eliminadoAt), Colors.red[300]!),
+          const SizedBox(height: 4),
+          _filaInfo(Icons.app_registration_rounded, 'Registrado el', _fmt(registradoAt), Colors.white38),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              icon: const Icon(Icons.history_rounded, size: 15),
+              label: const Text('VER HISTORIAL DE SERVICIOS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.white70,
+                side: const BorderSide(color: Colors.white24),
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              onPressed: () => _verHistorialEliminado(u),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Widget _filaInfo(IconData icon, String label, String valor, Color color) => Row(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Icon(icon, size: 13, color: color),
+      const SizedBox(width: 6),
+      Text('$label: ', style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w600)),
+      Expanded(child: Text(valor, style: const TextStyle(color: Colors.white70, fontSize: 11))),
+    ],
+  );
+
+  Future<void> _verHistorialEliminado(Map<String, dynamic> u) async {
+    final uid    = u['id'];
+    final nombre = u['nombre']?.toString() ?? '—';
+    final rol    = u['rol']?.toString() ?? '';
+
+    showDialog(
+      context: context,
+      builder: (_) => _DialogHistorialEliminado(uid: uid, nombre: nombre, rol: rol, db: _db),
+    );
+  }
+
+  Future<void> _aprobarDescanso(Map<String, dynamic> s) async {
+    try {
+      await _db.from('solicitudes_descanso').update({
+        'estado':      'aprobado',
+        'aprobado_por': 'central',
+        'aprobado_at':  DateTime.now().toUtc().toIso8601String(),
+      }).eq('id', s['id']);
+
+      // Notificar al móvil
+      await _db.from('notificaciones_push_pendientes').insert({
+        'destinatario_id': s['movil_id'],
+        'titulo': '✅ Descanso aprobado',
+        'cuerpo': 'Tu solicitud de descanso del ${s['fecha_inicio']} al ${s['fecha_fin']} fue aprobada.',
+        'tipo': 'descanso_aprobado',
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('✅ Descanso aprobado'), backgroundColor: Colors.green),
+        );
+        _cargar();
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+    }
+  }
+
+  Future<void> _rechazarDescanso(Map<String, dynamic> s) async {
+    final motivoCtrl = TextEditingController();
+
+    final confirmado = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Rechazar solicitud', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
+        content: TextField(
+          controller: motivoCtrl,
+          style: const TextStyle(color: Colors.white, fontSize: 13),
+          maxLines: 3,
+          decoration: InputDecoration(
+            labelText: 'Motivo del rechazo (opcional)',
+            labelStyle: const TextStyle(color: Colors.white38, fontSize: 12),
+            filled: true,
+            fillColor: Colors.white10,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('CANCELAR', style: TextStyle(color: Colors.white38))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red[800], foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('RECHAZAR', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+    if (confirmado != true || !mounted) return;
+
+    try {
+      await _db.from('solicitudes_descanso').update({
+        'estado':            'rechazado',
+        'rechazado_motivo':  motivoCtrl.text.trim().isEmpty ? null : motivoCtrl.text.trim(),
+      }).eq('id', s['id']);
+
+      // Notificar al móvil
+      await _db.from('notificaciones_push_pendientes').insert({
+        'destinatario_id': s['movil_id'],
+        'titulo': '❌ Descanso rechazado',
+        'cuerpo': 'Tu solicitud del ${s['fecha_inicio']} al ${s['fecha_fin']} fue rechazada.${motivoCtrl.text.trim().isNotEmpty ? ' Motivo: ${motivoCtrl.text.trim()}' : ''}',
+        'tipo': 'descanso_rechazado',
+      });
+
+      motivoCtrl.dispose();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Solicitud rechazada'), backgroundColor: Colors.red),
+        );
+        _cargar();
+      }
+    } catch (e) {
+      motivoCtrl.dispose();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+    }
+  }
+}
+
+// ── Diálogo: historial de servicios de cuenta eliminada ─────────────────────
+class _DialogHistorialEliminado extends StatefulWidget {
+  final dynamic uid;
+  final String nombre;
+  final String rol;
+  final dynamic db;
+  const _DialogHistorialEliminado({required this.uid, required this.nombre, required this.rol, required this.db});
+  @override
+  State<_DialogHistorialEliminado> createState() => _DialogHistorialEliminadoState();
+}
+
+class _DialogHistorialEliminadoState extends State<_DialogHistorialEliminado> {
+  List<Map<String, dynamic>> _servicios = [];
+  bool _cargando = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargarHistorial();
+  }
+
+  Future<void> _cargarHistorial() async {
+    try {
+      // Para móviles: servicios donde fue el conductor
+      // Para clientes: servicios donde fue el solicitante
+      // Para locales: servicios donde fue la sede
+      final db = Supabase.instance.client;
+      List<dynamic> resp = [];
+
+      if (widget.rol == 'movil') {
+        resp = await db.from('servicios')
+            .select('id, estado, origen, destino, tarifa, created_at, tipo_servicio')
+            .eq('movil_id', widget.uid)
+            .order('created_at', ascending: false)
+            .limit(100);
+      } else if (widget.rol == 'cliente') {
+        resp = await db.from('servicios')
+            .select('id, estado, origen, destino, tarifa, created_at, tipo_servicio')
+            .eq('cliente_id', widget.uid)
+            .order('created_at', ascending: false)
+            .limit(100);
+      } else {
+        resp = await db.from('servicios')
+            .select('id, estado, origen, destino, tarifa, created_at, tipo_servicio')
+            .eq('local_id', widget.uid)
+            .order('created_at', ascending: false)
+            .limit(100);
+      }
+
+      if (mounted) setState(() { _servicios = List<Map<String, dynamic>>.from(resp); _cargando = false; });
+    } catch (_) {
+      if (mounted) setState(() => _cargando = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final total = _servicios.fold<double>(0, (s, e) => s + ((e['tarifa'] as num?)?.toDouble() ?? 0));
+    final completados = _servicios.where((s) => s['estado'] == 'completado').length;
+
+    return AlertDialog(
+      backgroundColor: const Color(0xFF1A1A1A),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('📋 ${widget.nombre}', style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
+        Text('Historial de servicios', style: TextStyle(color: Colors.white38, fontSize: 12)),
+      ]),
+      content: SizedBox(
+        width: 360,
+        height: 420,
+        child: _cargando
+            ? const Center(child: CircularProgressIndicator(color: Color(0xff3AF500)))
+            : _servicios.isEmpty
+                ? const Center(child: Text('Sin servicios registrados', style: TextStyle(color: Colors.white38)))
+                : Column(children: [
+                    // Resumen
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      margin: const EdgeInsets.only(bottom: 10),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.05),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
+                        _resumenItem('${_servicios.length}', 'Total'),
+                        _resumenItem('$completados', 'Completados'),
+                        _resumenItem('\$${total.toStringAsFixed(0)}', 'Facturado'),
+                      ]),
+                    ),
+                    // Lista
+                    Expanded(child: ListView.builder(
+                      itemCount: _servicios.length,
+                      itemBuilder: (_, i) {
+                        final s = _servicios[i];
+                        final estado = s['estado']?.toString() ?? '';
+                        final Color ec = estado == 'completado'
+                            ? Colors.green
+                            : estado == 'cancelado'
+                                ? Colors.red
+                                : Colors.orange;
+                        final fecha = s['created_at'] != null
+                            ? DateTime.tryParse(s['created_at'].toString())?.toLocal()
+                            : null;
+                        final fechaStr = fecha != null
+                            ? '${fecha.day.toString().padLeft(2,'0')}/${fecha.month.toString().padLeft(2,'0')}/${fecha.year}'
+                            : '—';
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 6),
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.04),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: ec.withValues(alpha: 0.2)),
+                          ),
+                          child: Row(children: [
+                            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Text(s['origen']?.toString() ?? '—', style: const TextStyle(color: Colors.white70, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
+                              Text('→ ${s['destino']?.toString() ?? '—'}', style: const TextStyle(color: Colors.white38, fontSize: 10), maxLines: 1, overflow: TextOverflow.ellipsis),
+                              Text(fechaStr, style: const TextStyle(color: Colors.white24, fontSize: 10)),
+                            ])),
+                            const SizedBox(width: 8),
+                            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(color: ec.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(6)),
+                                child: Text(estado.toUpperCase(), style: TextStyle(color: ec, fontSize: 9, fontWeight: FontWeight.bold)),
+                              ),
+                              const SizedBox(height: 3),
+                              Text('\$${(s['tarifa'] as num?)?.toStringAsFixed(0) ?? '0'}', style: const TextStyle(color: Colors.white60, fontSize: 11, fontWeight: FontWeight.bold)),
+                            ]),
+                          ]),
+                        );
+                      },
+                    )),
+                  ]),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('CERRAR', style: TextStyle(color: Color(0xff3AF500), fontWeight: FontWeight.bold)),
+        ),
+      ],
+    );
+  }
+
+  Widget _resumenItem(String val, String label) => Column(children: [
+    Text(val, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
+    Text(label, style: const TextStyle(color: Colors.white38, fontSize: 10)),
+  ]);
 }

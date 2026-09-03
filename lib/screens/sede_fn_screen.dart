@@ -350,10 +350,16 @@ class _FormularioTabState extends State<_FormularioTab> {
   List<Map<String, dynamic>> _sedesDisponibles = [];
   bool _cargandoSedes = true;
 
+  // Red de direcciones de esta sede
+  List<Map<String, dynamic>> _redDirecciones = [];
+  double? _precioSugerido; // precio de la dirección seleccionada de la red
+  int? _redDireccionSelId; // id del registro seleccionado
+
   @override
   void initState() {
     super.initState();
     _cargarSedes();
+    _cargarRedDirecciones();
   }
 
   @override
@@ -365,6 +371,16 @@ class _FormularioTabState extends State<_FormularioTab> {
     for (final c in _recogidasDireccionCtrl) { c.dispose(); }
     for (final c in _recogidasGpsCtrl) { c.dispose(); }
     super.dispose();
+  }
+
+  String _miles(int v) {
+    final s = v.toString();
+    final buf = StringBuffer();
+    for (int i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) buf.write('.');
+      buf.write(s[i]);
+    }
+    return buf.toString();
   }
 
   Future<void> _cargarSedes() async {
@@ -385,6 +401,158 @@ class _FormularioTabState extends State<_FormularioTab> {
       });
     } catch (_) {
       setState(() => _cargandoSedes = false);
+    }
+  }
+
+  Future<void> _cargarRedDirecciones() async {
+    final sedeId = widget.sede?['id'];
+    if (sedeId == null) return;
+    try {
+      final data = await _db
+          .from('fn_red_direcciones')
+          .select('id, nombre, direccion, precio')
+          .eq('sede_id', sedeId)
+          .eq('activo', true)
+          .order('nombre');
+      if (mounted) {
+        setState(() => _redDirecciones = List<Map<String, dynamic>>.from(data));
+      }
+    } catch (_) {}
+  }
+
+  // ── Cascada FN automática (precio sugerido de la red) ────────────────────
+  // 3 fases: FASE 1 (T=0) Masters · FASE 2 (T+31s) Más cercano · FASE 3 (T+61s) Todos
+  Future<void> _lanzarCascadaFn({
+    required int serviceId,
+    required String consec,
+    required String destino,
+    required int tarifa,
+    double? sLat,
+    double? sLng,
+  }) async {
+    try {
+      // 1. Móviles FN online
+      final movilesData = await _db
+          .from('usuarios')
+          .select('id, rango_movil, latitud, longitud')
+          .eq('rol', 'movil')
+          .eq('en_linea', true)
+          .eq('activo', true)
+          .eq('tiene_fn', true)
+          .not('suspendido', 'is', true);
+
+      // 2. Conteo de servicios activos
+      final serviciosActivos = await _db
+          .from('servicios')
+          .select('movil_id')
+          .inFilter('estado', ['en_ruta_origen','en_origen','en_ruta_destino','problema'])
+          .not('movil_id', 'is', null);
+
+      final Map<String, int> conteoActivos = {};
+      for (final sv in serviciosActivos as List) {
+        final sid = sv['movil_id'].toString();
+        conteoActivos[sid] = (conteoActivos[sid] ?? 0) + 1;
+      }
+
+      int limiteRango(String? r) {
+        switch (r?.toUpperCase().trim()) {
+          case 'PRO': return 1;
+          case 'ELITE': return 2;
+          case 'LEYENDA': return 3;
+          case 'MASTER': return 999;
+          default: return 1;
+        }
+      }
+
+      bool tieneCapFn(Map m) {
+        final sid = m['id'].toString();
+        return (conteoActivos[sid] ?? 0) < limiteRango(m['rango_movil']?.toString());
+      }
+
+      final moviles = List<Map<String, dynamic>>.from(movilesData as List);
+      final masters = moviles
+          .where((m) => m['rango_movil']?.toString().toUpperCase() == 'MASTER' && tieneCapFn(m))
+          .toList();
+      final noMasters = moviles
+          .where((m) => m['rango_movil']?.toString().toUpperCase() != 'MASTER' && tieneCapFn(m))
+          .toList();
+
+      final masterIds = masters.map<String>((m) => m['id'].toString()).toList();
+      final noMasterIds = noMasters.map<String>((m) => m['id'].toString()).toList();
+
+      // 3. Calcular más cercano (haversine simple)
+      double _distKm(double lat1, double lon1, double lat2, double lon2) {
+        const r = 6371.0;
+        final dLat = (lat2 - lat1) * math.pi / 180;
+        final dLon = (lon2 - lon1) * math.pi / 180;
+        final a = math.sin(dLat / 2) * math.sin(dLat / 2) +
+            math.cos(lat1 * math.pi / 180) * math.cos(lat2 * math.pi / 180) *
+            math.sin(dLon / 2) * math.sin(dLon / 2);
+        return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
+      }
+
+      String? fase2Id;
+      if (sLat != null && sLng != null && noMasters.isNotEmpty) {
+        double minD = double.infinity;
+        for (final m in noMasters) {
+          final uLat = (m['latitud'] as num?)?.toDouble();
+          final uLng = (m['longitud'] as num?)?.toDouble();
+          if (uLat == null || uLng == null) continue;
+          final d = _distKm(uLat, uLng, sLat, sLng);
+          if (d < minD) { minD = d; fase2Id = m['id'].toString(); }
+        }
+      } else if (noMasters.isNotEmpty) {
+        fase2Id = noMasters.first['id'].toString();
+      }
+
+      final fase3Ids = noMasterIds.where((id) => id != fase2Id).toList();
+
+      final titulo = '🏥 FN $consec';
+      final msg = '\$${_miles(tarifa)} → $destino';
+
+      // FASE 1 (inmediata): Masters
+      if (masterIds.isNotEmpty) {
+        await MotorNotificaciones.programarMisilRetardado(
+          externalIds: masterIds,
+          titulo: titulo,
+          mensaje: msg,
+          sonido: Sonidos.fnCotizacion,
+        );
+      }
+
+      // FASE 2 (31s): Más cercano
+      String? id31s;
+      if (fase2Id != null) {
+        id31s = await MotorNotificaciones.programarMisilRetardado(
+          externalIds: [fase2Id],
+          titulo: titulo,
+          mensaje: msg,
+          segundosRetardo: 31,
+          sonido: Sonidos.fnCotizacion,
+        );
+      }
+
+      // FASE 3 (61s): Todos los restantes
+      String? id61s;
+      if (fase3Ids.isNotEmpty) {
+        id61s = await MotorNotificaciones.programarMisilRetardado(
+          externalIds: fase3Ids,
+          titulo: titulo,
+          mensaje: msg,
+          segundosRetardo: 61,
+          sonido: Sonidos.fnCotizacion,
+        );
+      }
+
+      // Guardar IDs de misiles para cancelarlos cuando alguien acepte
+      final notifIds = <String, dynamic>{};
+      if (id31s != null) notifIds['fn_notif_fase2'] = id31s;
+      if (id61s != null) notifIds['fn_notif_fase3'] = id61s;
+      if (notifIds.isNotEmpty) {
+        await _db.from('servicios').update(notifIds).eq('id', serviceId);
+      }
+    } catch (e) {
+      debugPrint('Error cascada FN precio sugerido: $e');
     }
   }
 
@@ -480,10 +648,12 @@ class _FormularioTabState extends State<_FormularioTab> {
 
       final altaDemanda = widget.altaDemanda;
 
-      await _db.from('servicios').insert({
+      final usaPrecioSugerido = _precioSugerido != null;
+
+      final insertedRow = await _db.from('servicios').insert({
         'origen': nombreSede,
         'destino': _destinoCtrl.text.trim().toUpperCase(),
-        'estado': 'cotizacion',
+        'estado': usaPrecioSugerido ? 'pendiente' : 'cotizacion',
         'creador': 'FN-Sede',
         'tipo_servicio': 'FARMANORTE',
         'tipo_fn': true,
@@ -501,6 +671,14 @@ class _FormularioTabState extends State<_FormularioTab> {
         'fn_consecutivo': consec?.toString(),
         'fn_recotizacion': 1,
         'archivado': false,
+        if (usaPrecioSugerido) ...{
+          'tarifa': _precioSugerido,
+          'tarifa_detalle': {
+            'total': _precioSugerido,
+            'fuente': 'red_fn',
+            'precio_red': _precioSugerido,
+          },
+        },
         if (_instruccionesCtrl.text.trim().isNotEmpty)
           'instrucciones_especiales': _instruccionesCtrl.text.trim(),
         // Coordenadas de la primera sede de recogida como origen (solo si es sede oficial)
@@ -512,17 +690,43 @@ class _FormularioTabState extends State<_FormularioTab> {
         if (widget.sede?['telefono_whatsapp'] != null &&
             (widget.sede!['telefono_whatsapp'] as String).trim().isNotEmpty)
           'fn_whatsapp': (widget.sede!['telefono_whatsapp'] as String).trim(),
-      });
+      }).select('id').single();
 
-      // Notificar a la central con sonido especial FN
+      final int? newServiceId = insertedRow['id'] is int
+          ? insertedRow['id'] as int
+          : int.tryParse(insertedRow['id']?.toString() ?? '');
+
+      // Notificar a la central
       await MotorNotificaciones.dispararACentral(
-        titulo: '🏥 Solicitud FN — ${consec ?? nombreSede}',
-        mensaje: _tieneRecogidaFueraDe()
-            ? '⚠ Recogida fuera de cobertura · ${_destinoCtrl.text.trim()}'
-            : 'Cotizar para ${_destinoCtrl.text.trim()}',
+        titulo: usaPrecioSugerido
+            ? '🏥 Servicio FN directo — ${consec ?? nombreSede}'
+            : '🏥 Solicitud FN — ${consec ?? nombreSede}',
+        mensaje: usaPrecioSugerido
+            ? '✅ ${_destinoCtrl.text.trim()} · \$${_miles(_precioSugerido!.toInt())} (precio sugerido)'
+            : _tieneRecogidaFueraDe()
+                ? '⚠ Recogida fuera de cobertura · ${_destinoCtrl.text.trim()}'
+                : 'Cotizar para ${_destinoCtrl.text.trim()}',
         urgente: true,
         sonido: Sonidos.fnCotizacion,
       );
+
+      // Si tiene precio sugerido → lanzar cascada FN automáticamente
+      if (usaPrecioSugerido && newServiceId != null) {
+        final sLatF = primeraRecogida['lat'] != null
+            ? (primeraRecogida['lat'] as num).toDouble()
+            : null;
+        final sLngF = primeraRecogida['lng'] != null
+            ? (primeraRecogida['lng'] as num).toDouble()
+            : null;
+        await _lanzarCascadaFn(
+          serviceId: newServiceId,
+          consec: consec?.toString() ?? '#$newServiceId',
+          destino: _destinoCtrl.text.trim(),
+          tarifa: _precioSugerido!.toInt(),
+          sLat: sLatF,
+          sLng: sLngF,
+        );
+      }
 
       if (!mounted) return;
       // Limpiar formulario
@@ -536,6 +740,8 @@ class _FormularioTabState extends State<_FormularioTab> {
         for (final c in _recogidasGpsCtrl) { c.dispose(); }
         _recogidasGpsCtrl..clear()..add(TextEditingController());
         _conDatafono = false;
+        _precioSugerido = null;
+        _redDireccionSelId = null;
       });
       _destinoCtrl.clear();
       _facturaNumCtrl.clear();
@@ -728,9 +934,105 @@ class _FormularioTabState extends State<_FormularioTab> {
               style: const TextStyle(color: Colors.white),
               decoration: _inputDeco('Dirección de entrega'),
               autofillHints: const <String>[],
+              onChanged: (_) {
+                // Si el usuario escribe manualmente, quita la selección de red
+                if (_redDireccionSelId != null) {
+                  setState(() {
+                    _redDireccionSelId = null;
+                    _precioSugerido = null;
+                  });
+                }
+              },
               validator: (v) =>
                   (v == null || v.trim().isEmpty) ? 'Requerido' : null,
             ),
+
+            // ── Red de direcciones (chips) ───────────────────────────────────
+            if (_redDirecciones.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: _redDirecciones.map((dir) {
+                  final seleccionado = _redDireccionSelId == dir['id'];
+                  return GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        if (seleccionado) {
+                          // Deseleccionar
+                          _redDireccionSelId = null;
+                          _precioSugerido = null;
+                          _destinoCtrl.clear();
+                        } else {
+                          _redDireccionSelId = dir['id'] as int;
+                          _precioSugerido = (dir['precio'] as num).toDouble();
+                          _destinoCtrl.text =
+                              dir['direccion'].toString().toUpperCase();
+                        }
+                      });
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: seleccionado
+                            ? Colors.indigo[700]
+                            : const Color(0xFF1E1E1E),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: seleccionado
+                              ? Colors.indigo[300]!
+                              : Colors.white24,
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            dir['nombre'].toString(),
+                            style: TextStyle(
+                              color: seleccionado
+                                  ? Colors.white
+                                  : Colors.white70,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Text(
+                            '\$${_miles((dir['precio'] as num).toInt())}',
+                            style: TextStyle(
+                              color: seleccionado
+                                  ? Colors.greenAccent
+                                  : Colors.white38,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+              if (_precioSugerido != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.flash_on,
+                          color: Colors.greenAccent, size: 14),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Precio sugerido: \$${_miles(_precioSugerido!.toInt())} — servicio directo sin cotización',
+                        style: const TextStyle(
+                            color: Colors.greenAccent,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
 
             const SizedBox(height: 16),
 

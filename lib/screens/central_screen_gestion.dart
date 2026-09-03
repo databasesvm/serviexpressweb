@@ -870,12 +870,31 @@ extension CentralScreenGestion on _CentralScreenState {
     final horasSuffix = mins == 0
         ? ''
         : ' · ${h > 0 ? '${h}h ${min.toString().padLeft(2, '0')}m' : '${min}m'}';
+
+    // Etiqueta de plan
+    final plan = m['tipo_plan']?.toString();
+    Widget? planChip;
+    if (plan == 'prediario') {
+      planChip = Container(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+        decoration: BoxDecoration(color: Colors.orange[700], borderRadius: BorderRadius.circular(3)),
+        child: const Text('PREDIA', style: TextStyle(color: Colors.white, fontSize: 7, fontWeight: FontWeight.bold)),
+      );
+    } else if (plan == 'suscripcion') {
+      planChip = Container(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+        decoration: BoxDecoration(color: Colors.green[700], borderRadius: BorderRadius.circular(3)),
+        child: const Text('SUSCR', style: TextStyle(color: Colors.white, fontSize: 7, fontWeight: FontWeight.bold)),
+      );
+    }
+
     return Row(
       children: [
         if (m['ticket_prioridad'] == true) ...[
           const Icon(Icons.local_activity, color: Colors.amber, size: 12),
           const SizedBox(width: 4),
         ],
+        if (planChip != null) ...[planChip, const SizedBox(width: 5)],
         Text(
           '${m['rango_movil'] ?? 'NOVATO'} | ${_formatCalificacion(m['puntuacion'])}',
           style: const TextStyle(
@@ -1103,6 +1122,81 @@ extension CentralScreenGestion on _CentralScreenState {
                           ? '$_reportesSinLeer sin leer — quejas de clientes y sedes'
                           : 'Quejas de clientes y sedes activas',
                       onTap: () => _abrirPanelReportes(context),
+                    ),
+
+                    // ── Toggle: bloqueo automático por inactividad ──────────
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF141414),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: _bloqueoInactividadActivo
+                              ? Colors.orange.withValues(alpha: 0.5)
+                              : Colors.white12,
+                        ),
+                      ),
+                      child: SwitchListTile(
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                        secondary: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: (_bloqueoInactividadActivo ? Colors.orange : Colors.white24).withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(
+                            Icons.lock_clock,
+                            color: _bloqueoInactividadActivo ? Colors.orange : Colors.white38,
+                            size: 22,
+                          ),
+                        ),
+                        title: const Text(
+                          'Bloqueo automático por inactividad',
+                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                        ),
+                        subtitle: Text(
+                          _bloqueoInactividadActivo
+                              ? '🔴 Activo — el cron bloqueará y eliminará móviles inactivos'
+                              : '⚪ Desactivado — el cron corre pero no toma acciones',
+                          style: TextStyle(
+                            color: _bloqueoInactividadActivo ? Colors.orange[300] : Colors.white38,
+                            fontSize: 11,
+                          ),
+                        ),
+                        value: _bloqueoInactividadActivo,
+                        activeColor: Colors.orange,
+                        onChanged: (val) async {
+                          final confirmado = await showDialog<bool>(
+                            context: context,
+                            builder: (ctx) => AlertDialog(
+                              backgroundColor: const Color(0xFF1A1A1A),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                              title: Text(
+                                val ? '⚠️ Activar bloqueo automático' : '⚪ Desactivar bloqueo automático',
+                                style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+                              ),
+                              content: Text(
+                                val
+                                    ? 'El cron diario comenzará a bloquear móviles con 3+ días sin actividad y a eliminar cuentas según el plan. ¿Confirmar?'
+                                    : 'El cron seguirá corriendo pero no tomará acciones sobre móviles inactivos. ¿Confirmar?',
+                                style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
+                              ),
+                              actions: [
+                                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('CANCELAR', style: TextStyle(color: Colors.white38))),
+                                ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: val ? Colors.orange[800] : Colors.grey[700],
+                                    foregroundColor: Colors.white,
+                                  ),
+                                  onPressed: () => Navigator.pop(ctx, true),
+                                  child: Text(val ? 'ACTIVAR' : 'DESACTIVAR', style: const TextStyle(fontWeight: FontWeight.bold)),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (confirmado == true) _toggleBloqueoInactividad(val);
+                        },
+                      ),
                     ),
 
                   ]),

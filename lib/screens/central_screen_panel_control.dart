@@ -61,29 +61,20 @@ extension CentralScreenPanelControl on _CentralScreenState {
                     final movilesEnServicioIds = serviciosEnCurso
                         .map((s) => s['movil_id'])
                         .toSet();
+                    // Helper: orden ascendente por número extraído de 'usuario' (ej: movil05 → 5)
+                    int numMovil(Map<String, dynamic> m) =>
+                        int.tryParse(RegExp(r'\d+').firstMatch(m['usuario']?.toString() ?? '')?.group(0) ?? '') ?? 9999;
+                    int sortAscMovil(Map<String, dynamic> a, Map<String, dynamic> b) =>
+                        numMovil(a).compareTo(numMovil(b));
+
                     final movilesEnServicio = moviles
                         .where(
                           (m) =>
                               movilesEnServicioIds.contains(m['id']) &&
                               m['en_linea'] == true,
                         )
-                        .toList();
-                    // Orden fijo: más reciente arriba — usa created_at del servicio
-                    movilesEnServicio.sort((a, b) {
-                      final sa = serviciosEnCurso.firstWhere(
-                          (s) => s['movil_id'] == a['id'],
-                          orElse: () => <String, dynamic>{});
-                      final sb = serviciosEnCurso.firstWhere(
-                          (s) => s['movil_id'] == b['id'],
-                          orElse: () => <String, dynamic>{});
-                      final dateA = sa['created_at'] != null
-                          ? DateTime.tryParse(sa['created_at'].toString()) ?? DateTime(0)
-                          : DateTime(0);
-                      final dateB = sb['created_at'] != null
-                          ? DateTime.tryParse(sb['created_at'].toString()) ?? DateTime(0)
-                          : DateTime(0);
-                      return dateB.compareTo(dateA); // más reciente primero
-                    });
+                        .toList()
+                      ..sort(sortAscMovil);
 
                     // --- MOTOR DE ORDENAMIENTO TÁCTICO (VIP > HORA) ---
                     int ordenarPorPrioridadYHora(
@@ -160,18 +151,54 @@ extension CentralScreenPanelControl on _CentralScreenState {
                               m['suspendido'] != true &&
                               !movilesEnServicioIds.contains(m['id']),
                         )
-                        .toList();
+                        .toList()
+                      ..sort(sortAscMovil);
+                    // Bloqueados por inactividad
+                    final bloqueados = moviles
+                        .where((m) =>
+                            m['bloqueado_inactividad'] == true &&
+                            m['activo'] == true &&
+                            m['suspendido'] != true)
+                        .toList()
+                      ..sort(sortAscMovil);
+
+                    // De descanso: día fijo semanal == hoy
+                    // 0=Dom, 1=Lun, 2=Mar, 3=Mié, 4=Jue, 5=Vie, 6=Sáb
+                    final hoyDow = DateTime.now().weekday % 7;
+                    final enDescanso = moviles
+                        .where((m) =>
+                            m['activo'] == true &&
+                            m['suspendido'] != true &&
+                            m['bloqueado_inactividad'] != true &&
+                            m['dia_descanso_semanal'] != null &&
+                            m['dia_descanso_semanal'] == hoyDow)
+                        .toList()
+                      ..sort(sortAscMovil);
+
+                    // Pendientes de activación (activo=false, no suspendidos, no eliminados)
+                    final pendientesActivacion = moviles
+                        .where((m) =>
+                            m['activo'] == false &&
+                            m['suspendido'] != true &&
+                            (m['eliminado'] == null || m['eliminado'] == false))
+                        .toList()
+                      ..sort(sortAscMovil);
+
                     final desconectados = moviles
                         .where(
                           (m) =>
                               m['en_linea'] != true &&
                               m['suspendido'] != true &&
-                              m['activo'] == true,
+                              m['activo'] == true &&
+                              m['bloqueado_inactividad'] != true &&
+                              m['dia_descanso_semanal'] != hoyDow,
                         )
-                        .toList();
+                        .toList()
+                      ..sort(sortAscMovil);
                     final suspendidos = moviles
                         .where((m) => m['suspendido'] == true)
-                        .toList();
+                        .toList()
+                      ..sort(sortAscMovil);
 
                     // ── MOTOS FN FARMANORTE ─────────────────────────────────
                     // Solo aparecen si están conectados y no suspendidos.
@@ -182,7 +209,8 @@ extension CentralScreenPanelControl on _CentralScreenState {
                             m['activo'] == true &&
                             m['en_linea'] == true &&
                             m['suspendido'] != true)
-                        .toList();
+                        .toList()
+                      ..sort(sortAscMovil);
 
                     return ListView(
                       children: [
@@ -496,6 +524,90 @@ extension CentralScreenPanelControl on _CentralScreenState {
                             }),
                         ],
 
+                        // ── PARADERO BOCONO (posición 3, entre Memos y Nocturno) ──
+                        GestureDetector(
+                          onTap: () => setState(() {
+                            if (_seccionesOcultasFlota.contains('bocono')) {
+                              _seccionesOcultasFlota.remove('bocono');
+                            } else {
+                              _seccionesOcultasFlota.add('bocono');
+                            }
+                          }),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            color: Colors.brown[700],
+                            child: Row(
+                              children: [
+                                const Expanded(
+                                  child: Text(
+                                    '📍 PARADERO BOCONO',
+                                    style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 11),
+                                  ),
+                                ),
+                                AnimatedSwitcher(
+                                  duration: const Duration(milliseconds: 220),
+                                  child: Container(
+                                    key: ValueKey('boc_cnt_${filaBocono.length}'),
+                                    margin: const EdgeInsets.only(right: 6),
+                                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: filaBocono.isNotEmpty ? Colors.brown[300] : Colors.brown[500],
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: Text('${filaBocono.length}',
+                                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                                  ),
+                                ),
+                                if (filaBocono.isNotEmpty)
+                                  TextButton.icon(
+                                    onPressed: () => _vaciarParadero('Bocono', filaBocono),
+                                    icon: const Icon(Icons.delete_sweep, size: 14, color: Colors.orangeAccent),
+                                    label: const Text('Vaciar', style: TextStyle(fontSize: 10, color: Colors.orangeAccent)),
+                                    style: TextButton.styleFrom(
+                                      padding: EdgeInsets.zero,
+                                      minimumSize: Size.zero,
+                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                    ),
+                                  ),
+                                Icon(
+                                  _seccionesOcultasFlota.contains('bocono') ? Icons.expand_more : Icons.expand_less,
+                                  size: 16,
+                                  color: Colors.brown[200],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        if (!_seccionesOcultasFlota.contains('bocono')) ...[
+                          if (filaBocono.isEmpty)
+                            const Padding(
+                              padding: EdgeInsets.all(8),
+                              child: Text(
+                                'Sin móviles en cola',
+                                style: TextStyle(color: Colors.grey, fontSize: 11),
+                              ),
+                            )
+                          else
+                            ...filaBocono.asMap().entries.map((e) {
+                              int idx = e.key + 1;
+                              var m = e.value;
+                              return FadeSlideIn(
+                                key: ValueKey('boc_${m['id']}'),
+                                child: ListTile(
+                                  dense: true,
+                                  leading: _paraderoMovilLeading(m, Colors.brown[600]!),
+                                  title: Text(
+                                    '#$idx. ${m['nombre'].toString().toUpperCase()}',
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                                  ),
+                                  subtitle: _subtituloMovilFlota(m),
+                                  trailing: _movilTrailing(m),
+                                  onTap: () => _abrirMenuAccionesMovil(context, m),
+                                ),
+                              );
+                            }),
+                        ],
+
                         GestureDetector(
                           onTap: () => setState(() {
                             if (_seccionesOcultasFlota.contains('nocturno')) {
@@ -582,89 +694,6 @@ extension CentralScreenPanelControl on _CentralScreenState {
                                   onTap: () => _abrirMenuAccionesMovil(context, m),
                                 ),  // ListTile
                               );    // FadeSlideIn
-                            }),
-                        ],
-
-                        GestureDetector(
-                          onTap: () => setState(() {
-                            if (_seccionesOcultasFlota.contains('bocono')) {
-                              _seccionesOcultasFlota.remove('bocono');
-                            } else {
-                              _seccionesOcultasFlota.add('bocono');
-                            }
-                          }),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            color: Colors.teal[800],
-                            child: Row(
-                              children: [
-                                const Expanded(
-                                  child: Text(
-                                    '🏙️ PARADERO BOCONO',
-                                    style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 11),
-                                  ),
-                                ),
-                                AnimatedSwitcher(
-                                  duration: const Duration(milliseconds: 220),
-                                  child: Container(
-                                    key: ValueKey('boc_cnt_${filaBocono.length}'),
-                                    margin: const EdgeInsets.only(right: 6),
-                                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: filaBocono.isNotEmpty ? Colors.teal[300] : Colors.teal[700],
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    child: Text('${filaBocono.length}',
-                                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-                                  ),
-                                ),
-                                if (filaBocono.isNotEmpty)
-                                  TextButton.icon(
-                                    onPressed: () => _vaciarParadero('Bocono', filaBocono),
-                                    icon: const Icon(Icons.delete_sweep, size: 14, color: Colors.orangeAccent),
-                                    label: const Text('Vaciar', style: TextStyle(fontSize: 10, color: Colors.orangeAccent)),
-                                    style: TextButton.styleFrom(
-                                      padding: EdgeInsets.zero,
-                                      minimumSize: Size.zero,
-                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                    ),
-                                  ),
-                                Icon(
-                                  _seccionesOcultasFlota.contains('bocono') ? Icons.expand_more : Icons.expand_less,
-                                  size: 16,
-                                  color: Colors.teal[200],
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        if (!_seccionesOcultasFlota.contains('bocono')) ...[
-                          if (filaBocono.isEmpty)
-                            const Padding(
-                              padding: EdgeInsets.all(8),
-                              child: Text(
-                                'Sin móviles en cola',
-                                style: TextStyle(color: Colors.grey, fontSize: 11),
-                              ),
-                            )
-                          else
-                            ...filaBocono.asMap().entries.map((e) {
-                              int idx = e.key + 1;
-                              var m = e.value;
-                              return FadeSlideIn(
-                                key: ValueKey('boc_${m['id']}'),
-                                child: ListTile(
-                                  dense: true,
-                                  leading: _paraderoMovilLeading(m, Colors.teal[600]!),
-                                  title: Text(
-                                    '#$idx. ${m['nombre'].toString().toUpperCase()}',
-                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                                  ),
-                                  subtitle: _subtituloMovilFlota(m),
-                                  trailing: _movilTrailing(m),
-                                  onTap: () => _abrirMenuAccionesMovil(context, m),
-                                ),
-                              );
                             }),
                         ],
 
@@ -984,6 +1013,159 @@ extension CentralScreenPanelControl on _CentralScreenState {
                             ),
                           );
                         }),
+
+                        // =====================================================
+                        // BLOQUEADOS POR INACTIVIDAD — desplegable
+                        // =====================================================
+                        if (bloqueados.isNotEmpty || _bloqueadosExpandidos)
+                          InkWell(
+                            onTap: () => setState(
+                              () => _bloqueadosExpandidos = !_bloqueadosExpandidos,
+                            ),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              color: const Color(0xFF7C2D12),
+                              child: Row(children: [
+                                const Icon(Icons.lock_outline, color: Colors.orange, size: 13),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    '🔒 BLOQUEADOS POR INACTIVIDAD (${bloqueados.length})',
+                                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.orange, fontSize: 11),
+                                  ),
+                                ),
+                                Icon(
+                                  _bloqueadosExpandidos ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                                  size: 16, color: Colors.orange,
+                                ),
+                              ]),
+                            ),
+                          ),
+                        if (_bloqueadosExpandidos)
+                          if (bloqueados.isEmpty)
+                            const Padding(
+                              padding: EdgeInsets.all(8),
+                              child: Text('Sin bloqueados', style: TextStyle(color: Colors.grey, fontSize: 11)),
+                            )
+                          else
+                            ...bloqueados.map((movil) => Material(
+                              color: const Color(0xFF1C0A00),
+                              child: ListTile(
+                                dense: true,
+                                leading: _paraderoMovilLeading(movil, Colors.orange[800]!),
+                                title: Text(
+                                  movil['nombre'] ?? 'Desconocido',
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.orange),
+                                ),
+                                subtitle: Text(
+                                  'Inactivo ${movil['dias_inactivos_acumulados'] ?? 0} día(s)',
+                                  style: const TextStyle(color: Colors.orange, fontSize: 10),
+                                ),
+                                trailing: _movilTrailing(movil),
+                                onTap: () => _abrirMenuAccionesMovil(context, movil),
+                              ),
+                            )),
+
+                        // =====================================================
+                        // DE DESCANSO HOY — desplegable
+                        // =====================================================
+                        if (enDescanso.isNotEmpty || _descansoExpandido)
+                          InkWell(
+                            onTap: () => setState(
+                              () => _descansoExpandido = !_descansoExpandido,
+                            ),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              color: const Color(0xFF064E3B),
+                              child: Row(children: [
+                                const Icon(Icons.beach_access, color: Colors.greenAccent, size: 13),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    '🏖️ DE DESCANSO HOY (${enDescanso.length})',
+                                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.greenAccent, fontSize: 11),
+                                  ),
+                                ),
+                                Icon(
+                                  _descansoExpandido ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                                  size: 16, color: Colors.greenAccent,
+                                ),
+                              ]),
+                            ),
+                          ),
+                        if (_descansoExpandido)
+                          if (enDescanso.isEmpty)
+                            const Padding(
+                              padding: EdgeInsets.all(8),
+                              child: Text('Sin móviles de descanso', style: TextStyle(color: Colors.grey, fontSize: 11)),
+                            )
+                          else
+                            ...enDescanso.map((movil) => Material(
+                              color: const Color(0xFF022C22),
+                              child: ListTile(
+                                dense: true,
+                                leading: _paraderoMovilLeading(movil, Colors.green[700]!),
+                                title: Text(
+                                  movil['nombre'] ?? 'Desconocido',
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.greenAccent),
+                                ),
+                                subtitle: const Text('Día de descanso fijo', style: TextStyle(color: Colors.green, fontSize: 10)),
+                                trailing: _movilTrailing(movil),
+                                onTap: () => _abrirMenuAccionesMovil(context, movil),
+                              ),
+                            )),
+
+                        // =====================================================
+                        // PENDIENTES DE ACTIVACIÓN — desplegable
+                        // =====================================================
+                        if (pendientesActivacion.isNotEmpty || _pendientesExpandidos)
+                          InkWell(
+                            onTap: () => setState(
+                              () => _pendientesExpandidos = !_pendientesExpandidos,
+                            ),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              color: const Color(0xFF1E3A5F),
+                              child: Row(children: [
+                                const Icon(Icons.hourglass_top, color: Colors.lightBlueAccent, size: 13),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    '⏳ PENDIENTES DE ACTIVACIÓN (${pendientesActivacion.length})',
+                                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.lightBlueAccent, fontSize: 11),
+                                  ),
+                                ),
+                                Icon(
+                                  _pendientesExpandidos ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                                  size: 16, color: Colors.lightBlueAccent,
+                                ),
+                              ]),
+                            ),
+                          ),
+                        if (_pendientesExpandidos)
+                          if (pendientesActivacion.isEmpty)
+                            const Padding(
+                              padding: EdgeInsets.all(8),
+                              child: Text('Sin pendientes', style: TextStyle(color: Colors.grey, fontSize: 11)),
+                            )
+                          else
+                            ...pendientesActivacion.map((movil) => Material(
+                              color: const Color(0xFF0D1B2A),
+                              child: ListTile(
+                                dense: true,
+                                leading: _paraderoMovilLeading(movil, Colors.blueGrey[400]!),
+                                title: Text(
+                                  movil['nombre'] ?? 'Desconocido',
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.lightBlueAccent),
+                                ),
+                                subtitle: Text(
+                                  '@${movil['usuario'] ?? '—'}  •  Nº ${movil['numero_movil'] ?? '—'}',
+                                  style: const TextStyle(color: Colors.blueGrey, fontSize: 10),
+                                ),
+                                trailing: _movilTrailing(movil),
+                                onTap: () => _abrirMenuAccionesMovil(context, movil),
+                              ),
+                            )),
 
                         // =====================================================
                         // DESCONECTADOS — desplegable
@@ -1477,49 +1659,27 @@ extension CentralScreenPanelControl on _CentralScreenState {
                 }
                 final todos = snapshot.data ?? [];
 
-                final problemas = todos
-                    .where((s) => s['estado'] == 'problema')
-                    .toList();
-                final cotizaciones = todos
-                    .where((s) => s['estado'] == 'cotizacion')
-                    .toList();
-                final cotizadas = todos
-                    .where((s) => s['estado'] == 'cotizada')
-                    .toList();
-                final cotizacionesAprobadas = todos
-                    .where((s) => s['estado'] == 'cotizacion_aprobada')
-                    .toList();
-                final finalizadosDemora = todos
-                    .where((s) => s['estado'] == 'finalizado_por_demora')
-                    .toList();
-                final libres = todos
-                    .where((s) => s['estado'] == 'pendiente')
-                    .toList();
+                // Orden ascendente por ID en todas las listas (#16)
+                List<Map<String, dynamic>> _asc(Iterable<Map<String, dynamic>> it) =>
+                    it.toList()..sort((a, b) => ((a['id'] as int?) ?? 0).compareTo((b['id'] as int?) ?? 0));
+
+                final problemas = _asc(todos.where((s) => s['estado'] == 'problema'));
+                final cotizaciones = _asc(todos.where((s) => s['estado'] == 'cotizacion'));
+                final cotizadas = _asc(todos.where((s) => s['estado'] == 'cotizada'));
+                final cotizacionesAprobadas = _asc(todos.where((s) => s['estado'] == 'cotizacion_aprobada'));
+                final finalizadosDemora = _asc(todos.where((s) => s['estado'] == 'finalizado_por_demora'));
+                final libres = _asc(todos.where((s) => s['estado'] == 'pendiente'));
                 // ---> INYECCIÓN: EXTRAER LOS PROGRAMADOS <---
-                final programados = todos
-                    .where((s) => s['estado'] == 'programado')
-                    .toList();
-                final enCurso = todos
-                    .where(
-                      (s) => [
-                        'en_ruta_origen',
-                        'en_origen',
-                        'en_ruta_destino',
-                      ].contains(s['estado']),
-                    )
-                    .toList();
-                final finalizadosProblema = todos
-                    .where((s) => s['estado'] == 'finalizado_con_problema')
-                    .toList();
-                final finalizados = todos
-                    .where((s) => s['estado'] == 'finalizado')
-                    .toList();
-                final cancelados = todos
-                    .where((s) => s['estado'] == 'cancelado')
-                    .toList();
-                final caducados = todos
-                    .where((s) => s['estado'] == 'caducado')
-                    .toList();
+                final programados = _asc(todos.where((s) => s['estado'] == 'programado'));
+                final enCurso = _asc(todos.where((s) => [
+                      'en_ruta_origen',
+                      'en_origen',
+                      'en_ruta_destino',
+                    ].contains(s['estado'])));
+                final finalizadosProblema = _asc(todos.where((s) => s['estado'] == 'finalizado_con_problema'));
+                final finalizados = _asc(todos.where((s) => s['estado'] == 'finalizado'));
+                final cancelados = _asc(todos.where((s) => s['estado'] == 'cancelado'));
+                final caducados = _asc(todos.where((s) => s['estado'] == 'caducado'));
 
                 // Sonidos de estado manejados por radar_central_bg channel
 

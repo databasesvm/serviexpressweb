@@ -789,6 +789,30 @@ extension CentralScreenMonitor on _CentralScreenState {
                     ),
                   ),
                 ),
+              if (!['finalizado', 'finalizado_por_demora',
+                    'finalizado_con_problema', 'cancelado', 'caducado']
+                  .contains(estado))
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.orange[800],
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 0,
+                    ),
+                  ),
+                  onPressed: () {
+                    Navigator.pop(context);
+                    _editarServicio(context, servicio);
+                  },
+                  child: const Text(
+                    'EDITAR',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.blue[800],
@@ -885,6 +909,197 @@ extension CentralScreenMonitor on _CentralScreenState {
           ),
         ],
       ),
+    );
+  }
+
+  // ── EDITAR SERVICIO ──────────────────────────────────────────────────────
+
+  Future<void> _editarServicio(BuildContext context, Map<String, dynamic> servicio) async {
+    final int id = servicio['id'];
+
+    final origenCtrl      = TextEditingController(text: servicio['origen']?.toString() ?? '');
+    final destinoCtrl     = TextEditingController(text: servicio['destino']?.toString() ?? '');
+    final telefonoCtrl    = TextEditingController(text: servicio['telefono_receptor']?.toString() ?? '');
+    final instrucCtrl     = TextEditingController(text: servicio['instrucciones']?.toString() ?? '');
+    final instrEspCtrl    = TextEditingController(text: servicio['instrucciones_especiales']?.toString() ?? '');
+    final obsCtrl         = TextEditingController(text: servicio['observacion']?.toString() ?? '');
+    final tiempoCtrl      = TextEditingController(
+      text: servicio['tiempo_estimado_minutos'] != null
+          ? servicio['tiempo_estimado_minutos'].toString()
+          : '',
+    );
+
+    String metodoPago  = servicio['metodo_pago']?.toString() ?? 'Efectivo';
+    String tipoServicio = servicio['tipo_servicio']?.toString() ?? 'domicilio';
+
+    const metodosPago  = ['Efectivo', 'Datafono', 'Nequi', 'Daviplata', 'Transferencia'];
+    const tiposServicio = [
+      'domicilio', 'mototaxi', 'PAQUETERÍA', 'COMIDA',
+      'FARMANORTE', 'RECOGIDA LOCAL',
+    ];
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setStateDialog) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          title: Text(
+            '✏️ EDITAR SERVICIO #$id',
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.orange),
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Origen
+                _campoEdicion('Origen 📍', origenCtrl, maxLines: 2),
+                const SizedBox(height: 10),
+                // Destino
+                _campoEdicion('Destino 🏁', destinoCtrl, maxLines: 2),
+                const SizedBox(height: 10),
+                // Teléfono receptor
+                _campoEdicion('Teléfono receptor 📞', telefonoCtrl,
+                    tipo: TextInputType.phone),
+                const SizedBox(height: 10),
+                // Método de pago
+                const Text('Método de pago 💳',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black54)),
+                const SizedBox(height: 4),
+                DropdownButtonFormField<String>(
+                  value: metodosPago.contains(metodoPago) ? metodoPago : metodosPago.first,
+                  decoration: InputDecoration(
+                    border: const OutlineInputBorder(),
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                    filled: true,
+                    fillColor: Colors.blue[50],
+                  ),
+                  items: metodosPago
+                      .map((m) => DropdownMenuItem(value: m, child: Text(m)))
+                      .toList(),
+                  onChanged: (v) => setStateDialog(() => metodoPago = v ?? metodoPago),
+                ),
+                const SizedBox(height: 10),
+                // Tipo de servicio
+                const Text('Tipo de servicio 🏷️',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black54)),
+                const SizedBox(height: 4),
+                DropdownButtonFormField<String>(
+                  value: tiposServicio.contains(tipoServicio) ? tipoServicio : null,
+                  decoration: InputDecoration(
+                    border: const OutlineInputBorder(),
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                    filled: true,
+                    fillColor: Colors.purple[50],
+                  ),
+                  hint: Text(tiposServicio.contains(tipoServicio) ? tipoServicio : tipoServicio),
+                  items: tiposServicio
+                      .map((t) => DropdownMenuItem(value: t, child: Text(t)))
+                      .toList(),
+                  onChanged: (v) => setStateDialog(() => tipoServicio = v ?? tipoServicio),
+                ),
+                const SizedBox(height: 10),
+                // Tiempo estimado
+                _campoEdicion('Tiempo estimado (min) ⏱️', tiempoCtrl,
+                    tipo: TextInputType.number),
+                const SizedBox(height: 10),
+                // Instrucciones
+                _campoEdicion('Instrucciones 📝', instrucCtrl, maxLines: 3),
+                const SizedBox(height: 10),
+                // Instrucciones especiales
+                _campoEdicion('Instrucciones especiales ⚡', instrEspCtrl, maxLines: 2),
+                const SizedBox(height: 10),
+                // Observación
+                _campoEdicion('Observación ⚠️', obsCtrl, maxLines: 2),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('CANCELAR',
+                  style: TextStyle(color: Colors.black54, fontWeight: FontWeight.bold, fontSize: 11)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orange[800],
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 0),
+              ),
+              onPressed: () async {
+                final Map<String, dynamic> cambios = {};
+
+                final newOrigen  = origenCtrl.text.trim();
+                final newDestino = destinoCtrl.text.trim();
+                final newTel     = telefonoCtrl.text.trim();
+                final newInstruc = instrucCtrl.text.trim();
+                final newInstrEsp = instrEspCtrl.text.trim();
+                final newObs     = obsCtrl.text.trim();
+                final newTiempo  = int.tryParse(tiempoCtrl.text.trim());
+
+                if (newOrigen.isNotEmpty)   cambios['origen']   = newOrigen;
+                if (newDestino.isNotEmpty)  cambios['destino']  = newDestino;
+                cambios['telefono_receptor']           = newTel.isEmpty ? null : newTel;
+                cambios['instrucciones']               = newInstruc.isEmpty ? null : newInstruc;
+                cambios['instrucciones_especiales']    = newInstrEsp.isEmpty ? null : newInstrEsp;
+                cambios['observacion']                 = newObs.isEmpty ? null : newObs;
+                cambios['metodo_pago']                 = metodoPago;
+                cambios['tipo_servicio']               = tipoServicio;
+                if (newTiempo != null) cambios['tiempo_estimado_minutos'] = newTiempo;
+
+                if (cambios.isNotEmpty) {
+                  await Supabase.instance.client
+                      .from('servicios')
+                      .update(cambios)
+                      .eq('id', id);
+                }
+
+                if (ctx.mounted) {
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('✅ Servicio actualizado'),
+                      backgroundColor: Colors.orange,
+                    ),
+                  );
+                }
+              },
+              child: const Text(
+                'GUARDAR',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _campoEdicion(
+    String label,
+    TextEditingController ctrl, {
+    int maxLines = 1,
+    TextInputType tipo = TextInputType.text,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label,
+            style: const TextStyle(
+                fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black54)),
+        const SizedBox(height: 4),
+        TextField(
+          controller: ctrl,
+          maxLines: maxLines,
+          keyboardType: tipo,
+          decoration: const InputDecoration(
+            border: OutlineInputBorder(),
+            isDense: true,
+            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+          ),
+        ),
+      ],
     );
   }
 
@@ -2049,15 +2264,6 @@ extension CentralScreenMonitor on _CentralScreenState {
                             ),
                           const SizedBox(width: 4),
                           Icon(icono, color: colorBase, size: 14),
-                          const SizedBox(width: 2),
-                          GestureDetector(
-                            onTap: () => _abrirMenuGestion(context, servicio),
-                            child: const Padding(
-                              padding: EdgeInsets.all(4),
-                              child: Icon(Icons.more_vert,
-                                  size: 22, color: Colors.black54),
-                            ),
-                          ),
                         ],
                       ),
                       const SizedBox(height: 3),
@@ -2101,6 +2307,19 @@ extension CentralScreenMonitor on _CentralScreenState {
                                     fontWeight: FontWeight.bold),
                               ),
                             ),
+                            // Etiqueta de plan del móvil asignado
+                            Builder(builder: (_) {
+                              final plan = movCacheEntry['tipo_plan']?.toString();
+                              if (plan == null) return const SizedBox.shrink();
+                              final color = plan == 'prediario' ? Colors.orange[700]! : Colors.green[700]!;
+                              final label = plan == 'prediario' ? 'PREDIA' : 'SUSCR';
+                              return Container(
+                                margin: const EdgeInsets.only(left: 4),
+                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(3)),
+                                child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 7, fontWeight: FontWeight.bold)),
+                              );
+                            }),
                           ] else if (servicio['numero_cliente'] != null ||
                               servicio['numero_local'] != null) ...[
                             const SizedBox(width: 6),
@@ -2349,13 +2568,43 @@ extension CentralScreenMonitor on _CentralScreenState {
                           return AnimatedSize(
                             duration: const Duration(milliseconds: 180),
                             curve: Curves.easeInOut,
-                            child: seleccionado && btns.isNotEmpty
+                            child: seleccionado
                                 ? Padding(
                                     padding: const EdgeInsets.only(top: 6),
-                                    child: Wrap(
-                                      spacing: 5,
-                                      runSpacing: 5,
-                                      children: btns,
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        if (btns.isNotEmpty)
+                                          Wrap(
+                                            spacing: 5,
+                                            runSpacing: 5,
+                                            children: btns,
+                                          ),
+                                        const SizedBox(height: 6),
+                                        SizedBox(
+                                          width: double.infinity,
+                                          child: OutlinedButton.icon(
+                                            onPressed: () => _abrirMenuGestion(context, servicio),
+                                            icon: const Icon(Icons.open_in_new, size: 14),
+                                            label: const Text(
+                                              'MÁS DETALLES',
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.bold,
+                                                letterSpacing: 0.5,
+                                              ),
+                                            ),
+                                            style: OutlinedButton.styleFrom(
+                                              foregroundColor: Colors.black87,
+                                              side: const BorderSide(color: Colors.black38),
+                                              padding: const EdgeInsets.symmetric(vertical: 6),
+                                              shape: RoundedRectangleBorder(
+                                                borderRadius: BorderRadius.circular(5),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   )
                                 : const SizedBox.shrink(),

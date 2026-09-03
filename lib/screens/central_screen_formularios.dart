@@ -52,12 +52,17 @@ extension CentralScreenFormularios on _CentralScreenState {
     List<Map<String, dynamic>> movilesConectados = [];
     Supabase.instance.client
         .from('usuarios')
-        .select('id, nombre, rango_movil')
+        .select('id, nombre, usuario, rango_movil')
         .eq('rol', 'movil')
         .eq('en_linea', true)
-        .order('nombre', ascending: true)
+        .order('usuario', ascending: true)
         .then((data) {
-      movilesConectados = List<Map<String, dynamic>>.from(data);
+      movilesConectados = List<Map<String, dynamic>>.from(data)
+        ..sort((a, b) {
+          final na = int.tryParse(RegExp(r'\d+').firstMatch(a['usuario']?.toString() ?? '')?.group(0) ?? '') ?? 9999;
+          final nb = int.tryParse(RegExp(r'\d+').firstMatch(b['usuario']?.toString() ?? '')?.group(0) ?? '') ?? 9999;
+          return na.compareTo(nb);
+        });
     });
 
     showDialog(
@@ -143,7 +148,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                 Wrap(
                   spacing: 6,
                   runSpacing: 6,
-                  children: ['EXPUENTE', 'MEMOS', 'NOCTURNO', 'BOCONO'].map((p) {
+                  children: ['EXPUENTE', 'MEMOS', 'BOCONO', 'NOCTURNO'].map((p) {
                     final bool sel = paraderoOrigen == p;
                     return ChoiceChip(
                       label: Text(p, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: sel ? Colors.white : Colors.black87)),
@@ -579,9 +584,10 @@ extension CentralScreenFormularios on _CentralScreenState {
                                   'p_solo_master': false,
                                   // T=0: el #1 de paradero debe estar
                                   // completamente libre — el cupo de 2/3
-                                  // pedidos no aplica al turno inicial,
-                                  // solo a partir de +2min/+5min.
+                                  // pedidos no aplica al turno inicial.
                                   'p_solo_completamente_libres': true,
+                                  // Solo suscripción — prediarios/postdia son FN exclusivo
+                                  'p_tipo_plan': 'suscripcion',
                                 },
                               );
                           idsElegiblesPorCapacidad = (elegibles as List)
@@ -807,6 +813,9 @@ extension CentralScreenFormularios on _CentralScreenState {
                           }
 
                           // --- FASE 1 (T=0): MASTERS ---
+                          // Solo suscripción. Master no tiene tope de servicios activos
+                          // — el tope de 10 es de notificaciones simultáneas (anti-saturación),
+                          // no de cuántos servicios puede llevar.
                           var idsMasters = <String>[];
                           try {
                             final mastersResp = await Supabase.instance.client
@@ -814,7 +823,8 @@ extension CentralScreenFormularios on _CentralScreenState {
                                   'moviles_elegibles_notificacion',
                                   params: {
                                     'p_solo_master': true,
-                                    'p_solo_completamente_libres': true,
+                                    'p_solo_completamente_libres': false,
+                                    'p_tipo_plan': 'suscripcion',
                                   },
                                 );
                             idsMasters = (mastersResp as List)
@@ -837,11 +847,15 @@ extension CentralScreenFormularios on _CentralScreenState {
                           // guardado arriba.
 
                           // --- FASE 3 (T+60s) y FASE 4 (T+90s) ---
+                          // Ambas fases usan la RPC moviles_elegibles_notificacion
+                          // para respetar el cupo por rango (NOVATO/PRO=1, ELITE=2,
+                          // LEYENDA=3, MASTER=sin tope) y excluir prediarios/postdia
+                          // que son FN exclusivo.
                           {
                             final int svcId = nuevoServicioId;
                             final String msg = 'Nuevo servicio disponible en el radar';
                             final List<String> masterSnap = List<String>.from(idsMasters);
-                            // Excluir al #1 del paradero (será auto-asignado por cron)
+                            // Excluir Masters y #1 del paradero (auto-asignado por cron)
                             final List<String> excluidos = [
                               ...masterSnap,
                               if (paraderoAutoMovilId != null) paraderoAutoMovilId,
@@ -849,34 +863,43 @@ extension CentralScreenFormularios on _CentralScreenState {
 
                             final double? oLat = origenLatCapturada;
                             final double? oLng = origenLngCapturada;
-                            final movilesC = await Supabase.instance.client
-                                .from('usuarios')
-                                .select('id, latitud, longitud')
-                                .eq('rol', 'movil')
-                                .eq('en_linea', true)
-                                .neq('suspendido', true)
-                                .not('rango_movil', 'in', '("MASTER")');
 
-                            // Zona 2km desde el origen del servicio
-                            final idsZonaC = movilesC.where((u) {
-                              final id = u['id'].toString();
-                              if (excluidos.contains(id)) return false;
-                              if (oLat == null || oLng == null) return true;
-                              final uLat = (u['latitud'] as num?)?.toDouble();
-                              final uLng = (u['longitud'] as num?)?.toDouble();
-                              if (uLat == null || uLng == null) return false;
-                              return const Distance().as(
-                                    LengthUnit.Meter,
-                                    LatLng(uLat, uLng),
-                                    LatLng(oLat, oLng),
-                                  ) <= 2000;
-                            }).map((u) => u['id'].toString()).toList();
+                            // FASE 3: zona 2km — solo suscripción, respeta cupo por rango
+                            // (Novato/Pro: 0 activos; Elite: <2; Leyenda: <3; Master: <10)
+                            List<String> idsZonaC = [];
+                            try {
+                              final params3 = <String, dynamic>{
+                                'p_solo_master': false,
+                                'p_solo_completamente_libres': false,
+                                'p_radio_metros': 2000.0,
+                                'p_tipo_plan': 'suscripcion',
+                              };
+                              if (oLat != null) params3['p_origen_lat'] = oLat;
+                              if (oLng != null) params3['p_origen_lng'] = oLng;
+                              final resp3 = await Supabase.instance.client
+                                  .rpc('moviles_elegibles_notificacion', params: params3);
+                              idsZonaC = (resp3 as List)
+                                  .map((m) => m['id'].toString())
+                                  .where((id) => !excluidos.contains(id))
+                                  .toList();
+                            } catch (_) {}
 
-                            // Global: todos los no-masters no excluidos
-                            final idsTodosC = movilesC
-                                .map((u) => u['id'].toString())
-                                .where((id) => !masterSnap.contains(id))
-                                .toList();
+                            // FASE 4: todos los conectados — solo suscripción, respeta cupo
+                            List<String> idsTodosC = [];
+                            try {
+                              final resp4 = await Supabase.instance.client.rpc(
+                                'moviles_elegibles_notificacion',
+                                params: {
+                                  'p_solo_master': false,
+                                  'p_solo_completamente_libres': false,
+                                  'p_tipo_plan': 'suscripcion',
+                                },
+                              );
+                              idsTodosC = (resp4 as List)
+                                  .map((m) => m['id'].toString())
+                                  .where((id) => !masterSnap.contains(id))
+                                  .toList();
+                            } catch (_) {}
 
                             String? id60sC;
                             String? id90sC;
@@ -1630,7 +1653,12 @@ extension CentralScreenFormularios on _CentralScreenState {
                                             ...Map<String, dynamic>.from(m),
                                             'sobre_limite': sobreLimite,
                                           };
-                                        }).toList();
+                                        }).toList()
+                                          ..sort((a, b) {
+                                            final na = int.tryParse(RegExp(r'\d+').firstMatch(a['usuario']?.toString() ?? '')?.group(0) ?? '') ?? 9999;
+                                            final nb = int.tryParse(RegExp(r'\d+').firstMatch(b['usuario']?.toString() ?? '')?.group(0) ?? '') ?? 9999;
+                                            return na.compareTo(nb);
+                                          });
                                         setDialogState(() {
                                           movilesDirectaCache = lista;
                                           cargandoMovilesDirecta = false;
@@ -2305,16 +2333,10 @@ extension CentralScreenFormularios on _CentralScreenState {
                     .length;
               }
 
-              // Ordenamiento táctico: Primero libres, luego por nombre
-              moviles.sort((a, b) {
-                int cmp = (a['carga'] as int).compareTo(b['carga'] as int);
-                if (cmp == 0) {
-                  return a['nombre'].toString().compareTo(
-                    b['nombre'].toString(),
-                  );
-                }
-                return cmp;
-              });
+              // Orden ascendente por número de móvil (parte numérica de 'usuario')
+              int _numMovilForm(Map<String, dynamic> m) =>
+                  int.tryParse(RegExp(r'\d+').firstMatch(m['usuario']?.toString() ?? '')?.group(0) ?? '') ?? 9999;
+              moviles.sort((a, b) => _numMovilForm(a).compareTo(_numMovilForm(b)));
 
               return ListView.builder(
                 itemCount: moviles.length,

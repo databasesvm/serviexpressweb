@@ -66,10 +66,12 @@ extension CentralScreenFn on _CentralScreenState {
       tarifaCtrl.text = precioSugerido.toString();
     }
 
+    bool guardarEnRed = false;
+
     await showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setD) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         title: Row(
           children: [
@@ -217,6 +219,23 @@ extension CentralScreenFn on _CentralScreenState {
                     isDense: true,
                   ),
                 ),
+
+                // Toggle: guardar en red de direcciones
+                const SizedBox(height: 10),
+                SwitchListTile(
+                  value: guardarEnRed,
+                  onChanged: (v) => setD(() => guardarEnRed = v),
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text(
+                    '💾 Guardar dirección en red de esta sede',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                  subtitle: const Text(
+                    'La próxima vez la sede verá el precio sugerido automáticamente',
+                    style: TextStyle(fontSize: 10, color: Colors.black54),
+                  ),
+                ),
               ],
             ),
           ),
@@ -243,12 +262,62 @@ extension CentralScreenFn on _CentralScreenState {
               if (tarifa == null || tarifa <= 0) return;
               Navigator.pop(ctx);
               await _enviarCotizacionFn(serviceId, tarifa);
+
+              // Guardar en red de direcciones si el toggle está activo
+              if (guardarEnRed) {
+                await _guardarEnRedFn(
+                  sedeId: servicio['fn_sede_solicitante_id'],
+                  destino: destino,
+                  tarifa: tarifa,
+                );
+              }
             },
           ),
         ],
-      ),
+      )),
     );
     tarifaCtrl.dispose();
+  }
+
+  // ── Guardar dirección en fn_red_direcciones ──────────────────────────────
+  Future<void> _guardarEnRedFn({
+    required dynamic sedeId,
+    required String destino,
+    required int tarifa,
+  }) async {
+    if (sedeId == null || destino.isEmpty) return;
+    final sid = sedeId is int ? sedeId : int.tryParse(sedeId.toString());
+    if (sid == null) return;
+    try {
+      // Verificar si ya existe una entrada con ese destino para esa sede
+      final existing = await Supabase.instance.client
+          .from('fn_red_direcciones')
+          .select('id')
+          .eq('sede_id', sid)
+          .ilike('direccion', destino.trim())
+          .maybeSingle();
+
+      if (existing != null) {
+        // Actualizar precio si ya existe
+        await Supabase.instance.client
+            .from('fn_red_direcciones')
+            .update({'precio': tarifa, 'activo': true})
+            .eq('id', existing['id']);
+      } else {
+        // Crear nueva entrada usando el destino como nombre y dirección
+        await Supabase.instance.client.from('fn_red_direcciones').insert({
+          'sede_id': sid,
+          'nombre': destino.trim().length > 30
+              ? '${destino.trim().substring(0, 30)}…'
+              : destino.trim(),
+          'direccion': destino.trim().toUpperCase(),
+          'precio': tarifa,
+          'activo': true,
+        });
+      }
+    } catch (e) {
+      debugPrint('Error guardando en red FN: $e');
+    }
   }
 
   // ── Enviar cotización a la sede ─────────────────────────────────────────

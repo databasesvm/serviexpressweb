@@ -21,6 +21,7 @@ import 'package:serviexpress_app/utils/campo_tarifa_inteligente.dart'; // Motor 
 import 'package:serviexpress_app/services/ota_updater.dart'; // OTA updates
 import 'package:serviexpress_app/screens/fn_panel_screen.dart'; // Panel FN Farmanorte
 import 'package:serviexpress_app/screens/fn_facturacion_screen.dart'; // Facturación FN
+import 'package:serviexpress_app/screens/fn_red_direcciones_screen.dart'; // Red de direcciones FN
 import 'package:serviexpress_app/utils/auth_helper.dart'; // hashContrasena
 import 'package:serviexpress_app/screens/historial_servicios_screen.dart'; // Historial de servicios
 part 'central_panel_precios.dart';
@@ -74,6 +75,13 @@ class _CentralScreenState extends State<CentralScreen>
 
   // Sección desconectados — colapsable
   bool _desconectadosExpandidos = false;
+  // Secciones nuevas — colapsables
+  bool _bloqueadosExpandidos  = false;
+  bool _descansoExpandido     = false;
+  bool _pendientesExpandidos  = false;
+
+  // Toggle bloqueo automático por inactividad (config_sistema)
+  bool _bloqueoInactividadActivo = false;
 
   final Set<int> _demorasAlertadas =
       {}; // IDs ya alertados por demora (no repetir)
@@ -207,6 +215,7 @@ class _CentralScreenState extends State<CentralScreen>
     _construirCanalFn(); // Canal Realtime para solicitudes FN desde sedes
     Future.delayed(const Duration(milliseconds: 700), _cargarReportesSinLeer);
     Future.delayed(const Duration(milliseconds: 900), _cargarMinutosHoyMoviles);
+    Future.delayed(const Duration(milliseconds: 1100), _cargarBloqueoInactividad);
 
     // OTA: cubre sesión persistente (solo Android/iOS, no web)
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -542,6 +551,35 @@ class _CentralScreenState extends State<CentralScreen>
     } catch (_) {}
   }
 
+  Future<void> _cargarBloqueoInactividad() async {
+    try {
+      final row = await Supabase.instance.client
+          .from('config_sistema')
+          .select('bloqueo_inactividad_activo')
+          .eq('id', 1)
+          .single();
+      if (mounted) setState(() => _bloqueoInactividadActivo = row['bloqueo_inactividad_activo'] as bool? ?? false);
+    } catch (_) {}
+  }
+
+  Future<void> _toggleBloqueoInactividad(bool nuevoValor) async {
+    setState(() => _bloqueoInactividadActivo = nuevoValor);
+    try {
+      await Supabase.instance.client
+          .from('config_sistema')
+          .update({'bloqueo_inactividad_activo': nuevoValor})
+          .eq('id', 1);
+    } catch (e) {
+      // Revertir si falla
+      if (mounted) setState(() => _bloqueoInactividadActivo = !nuevoValor);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al actualizar: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
   Future<void> _abrirPanelReportes(BuildContext context) async {
     // Marcar todos como leídos
     await Supabase.instance.client
@@ -848,6 +886,16 @@ class _CentralScreenState extends State<CentralScreen>
                     context,
                     MaterialPageRoute(
                       builder: (_) => const FnFacturacionScreen(titulo: 'Facturación FN — Central'),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.location_on, color: Colors.teal, size: 22),
+                  tooltip: 'Red de direcciones FN',
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const FnRedDireccionesScreen(),
                     ),
                   ),
                 ),

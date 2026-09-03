@@ -175,10 +175,16 @@ class _RegistroScreenState extends State<RegistroScreen> {
     return null;
   }
 
+  // Rangos válidos: 1-100 (suscripción) | 200-299 (prediario / postdia)
+  bool _rangoNumeroMovilValido(int n) => (n >= 1 && n <= 100) || (n >= 200 && n <= 299);
+
   String? _errorPasoCuenta() {
     if (_rolSeleccionado == 'movil') {
-      if (_numeroMovilCtrl.text.trim().isEmpty) {
-        return 'Escribe tu número de móvil asignado por Central.';
+      final raw = _numeroMovilCtrl.text.trim();
+      if (raw.isEmpty) return 'Escribe el número que quieres usar.';
+      final n = int.tryParse(raw);
+      if (n == null || !_rangoNumeroMovilValido(n)) {
+        return 'El número debe estar entre 1-100 (suscripción) o 200-299 (prediario/postdia).';
       }
     } else {
       if (_usuarioCtrl.text.trim().isEmpty) return 'Escribe un usuario.';
@@ -267,6 +273,7 @@ class _RegistroScreenState extends State<RegistroScreen> {
           .from('usuarios')
           .select('id')
           .eq('telefono', telefono)
+          .or('eliminado.is.null,eliminado.eq.false')
           .limit(1);
       if (existeTel.isNotEmpty) {
         if (mounted) {
@@ -278,30 +285,52 @@ class _RegistroScreenState extends State<RegistroScreen> {
         return;
       }
 
-      final existeUsuario = await Supabase.instance.client
-          .from('usuarios')
-          .select('id')
-          .eq('usuario', usuarioText)
-          .limit(1);
-      if (existeUsuario.isNotEmpty) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(_rolSeleccionado == 'movil'
-                  ? 'Ese número de móvil ya está en uso. Pregúntale a Central cuál te corresponde.'
-                  : 'El usuario "$usuarioText" ya está en uso. Por favor, elige otro.'),
-              backgroundColor: Colors.orange,
-            ),
-          );
+      // Verificar unicidad de número de móvil (solo entre cuentas activas/no eliminadas)
+      if (_rolSeleccionado == 'movil') {
+        final numMovil = int.parse(_numeroMovilCtrl.text.trim());
+        final existeNumero = await Supabase.instance.client
+            .from('usuarios')
+            .select('id')
+            .eq('numero_movil', numMovil)
+            .or('eliminado.is.null,eliminado.eq.false')
+            .limit(1);
+        if (existeNumero.isNotEmpty) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Ese número ya está en uso. Elige otro dentro del rango permitido.'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+          setState(() => _procesando = false);
+          return;
         }
-        setState(() => _procesando = false);
-        return;
+      } else {
+        final existeUsuario = await Supabase.instance.client
+            .from('usuarios')
+            .select('id')
+            .eq('usuario', usuarioText)
+            .limit(1);
+        if (existeUsuario.isNotEmpty) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('El usuario "$usuarioText" ya está en uso. Por favor, elige otro.'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+          setState(() => _procesando = false);
+          return;
+        }
       }
 
       final existeCorreo = await Supabase.instance.client
           .from('usuarios')
           .select('id')
           .eq('correo', correo)
+          .or('eliminado.is.null,eliminado.eq.false')
           .limit(1);
       if (existeCorreo.isNotEmpty) {
         if (mounted) {
@@ -313,6 +342,12 @@ class _RegistroScreenState extends State<RegistroScreen> {
         return;
       }
 
+      // Identificar plan del móvil según rango de número
+      final int numMovilRegistro = _rolSeleccionado == 'movil'
+          ? (int.tryParse(_numeroMovilCtrl.text.trim()) ?? 0)
+          : 0;
+      final bool esPrediario = numMovilRegistro >= 200 && numMovilRegistro <= 299;
+      // Clientes activos de inmediato; móviles (todos) requieren verificación de Central
       final bool entraActivo = _rolSeleccionado == 'cliente';
       final passwordHash = hashContrasena(password);
 
@@ -339,6 +374,10 @@ class _RegistroScreenState extends State<RegistroScreen> {
       } else {
         datosInsert['fecha_nacimiento'] =
             _fechaNacimiento!.toIso8601String().split('T').first;
+        if (_rolSeleccionado == 'movil') {
+          datosInsert['numero_movil'] = numMovilRegistro;
+          datosInsert['tipo_plan'] = esPrediario ? 'prediario' : 'suscripcion';
+        }
       }
 
       final filaInsertada = await Supabase.instance.client
@@ -463,8 +502,8 @@ class _RegistroScreenState extends State<RegistroScreen> {
                   ),
                   const SizedBox(height: 12),
                   const Text(
-                    '⚠️ Guarda tu usuario y contraseña. No uses tu correo para ingresar.',
-                    style: TextStyle(fontSize: 12, color: Colors.red, fontWeight: FontWeight.w600),
+                    '💡 Para ingresar usa tu número de teléfono o tu usuario. No uses el correo.',
+                    style: TextStyle(fontSize: 12, color: Colors.orange, fontWeight: FontWeight.w600),
                   ),
                 ],
               ),
@@ -1127,7 +1166,7 @@ class _RegistroScreenState extends State<RegistroScreen> {
                   decoration: _decoracion(
                     'Tu número',
                     Icons.tag,
-                    helper: 'Pregúntale a Central tu número asignado',
+                    helper: '1-100 suscripción · 200-299 prediario/postdia',
                   ),
                   inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                 ),
@@ -1143,6 +1182,46 @@ class _RegistroScreenState extends State<RegistroScreen> {
               helper: 'Solo letras sin tilde, números y guión bajo',
             ),
             inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9_]'))],
+          ),
+        // Info card plan Prediario/Postdia (200-299) — aparece al escribir el número
+        if (_rolSeleccionado == 'movil')
+          ValueListenableBuilder<TextEditingValue>(
+            valueListenable: _numeroMovilCtrl,
+            builder: (context, val, _) {
+              final n = int.tryParse(val.text) ?? -1;
+              final esPrediario = n >= 200 && n <= 299;
+              if (!esPrediario) return const SizedBox.shrink();
+              return Container(
+                margin: const EdgeInsets.only(top: 10),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.orange[50],
+                  border: Border.all(color: Colors.orange[300]!),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      Icon(Icons.info_outline, color: Colors.orange[700], size: 15),
+                      const SizedBox(width: 6),
+                      Text(
+                        'PLAN PREDIARIO / POSTDIA',
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.orange[800]),
+                      ),
+                    ]),
+                    const SizedBox(height: 4),
+                    Text(
+                      '• Tu cuenta se activa de inmediato — sin esperar a Central.\n'
+                      '• Número asignado: #$n\n'
+                      '• Rango exclusivo: 200-299\n'
+                      '• Puedes recibir servicios desde el momento en que inicies sesión.',
+                      style: TextStyle(fontSize: 10, color: Colors.orange[900], height: 1.5),
+                    ),
+                  ],
+                ),
+              );
+            },
           ),
         const SizedBox(height: 15),
         TextField(
