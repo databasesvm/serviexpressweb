@@ -3,10 +3,16 @@ import 'dart:io';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:excel/excel.dart' hide Border;
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
+import '../utils/web_downloader.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FnFacturacionScreen
@@ -342,16 +348,22 @@ class _FnFacturacionScreenState extends State<FnFacturacionScreen> {
           .map((r) => r.map((c) => '"${c.replaceAll('"', '""')}"').join(';'))
           .join('\n');
 
-      final dir = await getTemporaryDirectory();
       final fecha = _fecha(DateTime.now().toIso8601String(), corta: true)
           .replaceAll('/', '-');
-      final file = File('${dir.path}/facturacion_fn_$fecha.csv');
-      await file.writeAsString('﻿$csv', encoding: utf8); // BOM para Excel
+      final csvBytes = utf8.encode('﻿$csv'); // BOM para Excel
+      final nombreArchivo = 'facturacion_fn_$fecha.csv';
 
-      await Share.shareXFiles(
-        [XFile(file.path, mimeType: 'text/csv')],
-        subject: 'Facturación FN — $fecha',
-      );
+      if (kIsWeb) {
+        descargarArchivosWeb(csvBytes, nombreArchivo, 'text/csv');
+      } else {
+        final dir = await getTemporaryDirectory();
+        final file = File('${dir.path}/$nombreArchivo');
+        await file.writeAsBytes(csvBytes);
+        await Share.shareXFiles(
+          [XFile(file.path, mimeType: 'text/csv')],
+          subject: 'Facturación FN — $fecha',
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -450,16 +462,22 @@ class _FnFacturacionScreenState extends State<FnFacturacionScreen> {
       }
 
       final Uint8List bytes = Uint8List.fromList(excel.encode()!);
-      final dir = await getTemporaryDirectory();
       final fecha = _fecha(DateTime.now().toIso8601String(), corta: true)
           .replaceAll('/', '-');
-      final file = File('${dir.path}/facturacion_fn_$fecha.xlsx');
-      await file.writeAsBytes(bytes);
+      const mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      final nombreArchivo = 'facturacion_fn_$fecha.xlsx';
 
-      await Share.shareXFiles(
-        [XFile(file.path, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')],
-        subject: 'Facturación FN — $fecha',
-      );
+      if (kIsWeb) {
+        descargarArchivosWeb(bytes, nombreArchivo, mime);
+      } else {
+        final dir = await getTemporaryDirectory();
+        final file = File('${dir.path}/$nombreArchivo');
+        await file.writeAsBytes(bytes);
+        await Share.shareXFiles(
+          [XFile(file.path, mimeType: mime)],
+          subject: 'Facturación FN — $fecha',
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -557,16 +575,22 @@ Total entregados período: <strong>\$${_miles(totalDom)}</strong>
 </div>
 </body></html>''');
 
-      final dir = await getTemporaryDirectory();
       final fecha = _fecha(DateTime.now().toIso8601String(), corta: true)
           .replaceAll('/', '-');
-      final file = File('${dir.path}/relacion_cobro_fn_$fecha.html');
-      await file.writeAsString(buf.toString());
+      final htmlBytes = utf8.encode(buf.toString());
+      final nombreArchivo = 'relacion_cobro_fn_$fecha.html';
 
-      await Share.shareXFiles(
-        [XFile(file.path, mimeType: 'text/html')],
-        subject: 'Relación de cobro FN — $fecha',
-      );
+      if (kIsWeb) {
+        descargarArchivosWeb(htmlBytes, nombreArchivo, 'text/html');
+      } else {
+        final dir = await getTemporaryDirectory();
+        final file = File('${dir.path}/$nombreArchivo');
+        await file.writeAsBytes(htmlBytes);
+        await Share.shareXFiles(
+          [XFile(file.path, mimeType: 'text/html')],
+          subject: 'Relación de cobro FN — $fecha',
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -574,6 +598,214 @@ Total entregados período: <strong>\$${_miles(totalDom)}</strong>
       }
     } finally {
       if (mounted) setState(() => _exportando = false);
+    }
+  }
+
+  // ── Exportar Tirillas (PDF) ────────────────────────────────────────────────
+  Future<void> _exportarTirillas() async {
+    setState(() => _exportando = true);
+    try {
+      final fecha = _fecha(DateTime.now().toIso8601String(), corta: true);
+      final fechaArchivo = fecha.replaceAll('/', '-');
+
+      // Logo de la empresa
+      final logoData = await rootBundle.load('assets/logo.png');
+      final logoImg = pw.MemoryImage(logoData.buffer.asUint8List());
+
+      // Formato tirilla: 80 mm × 200 mm
+      const pageFormat = PdfPageFormat(
+        226.77,  // 80 mm en puntos
+        566.93,  // 200 mm en puntos
+        marginAll: 8.50, // 3 mm
+      );
+
+      final pdfDoc = pw.Document(
+        theme: pw.ThemeData.withFont(
+          base: await PdfGoogleFonts.robotoRegular(),
+          bold: await PdfGoogleFonts.robotoBold(),
+        ),
+      );
+
+      const dasher = '- - - - - - - - - - - - - - -';
+      const cuerpo = 7.5;
+      const chico = 6.5;
+      const titulo = 9.5;
+
+      for (final s in _filtrados) {
+        final consecutivo = s['fn_consecutivo']?.toString() ?? '#${s['id']}';
+        final facturaNum = s['fn_factura_numero']?.toString() ?? '—';
+        final movil = _movilNumero(s);
+        final destino = s['destino']?.toString() ?? '—';
+        final tarifa = (s['tarifa'] as num?)?.toInt() ?? 0;
+        final metodo = _labelMetodo(s['metodo_pago']?.toString() ?? '');
+        final fechaTirilla = _fecha(s['created_at']?.toString(), corta: true);
+
+        // Sede
+        final sede = _sedes.firstWhere(
+          (sd) => sd['id'].toString() == s['fn_sede_solicitante_id']?.toString(),
+          orElse: () => <String, dynamic>{},
+        );
+        final sedeNombre = sede['nombre']?.toString() ?? '';
+        final sedeCodigo = _codigoSede(s['fn_sede_solicitante_id']);
+
+        pdfDoc.addPage(pw.Page(
+          pageFormat: pageFormat,
+          build: (ctx) => pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.center,
+            children: [
+              // ─ Fecha
+              pw.Text(fechaTirilla,
+                  style: pw.TextStyle(fontSize: chico, color: PdfColors.grey600)),
+              pw.SizedBox(height: 3),
+
+              // ─ Cabecera empresa
+              pw.Text('SERVIMOTO EXPRESS 24/7',
+                  style: pw.TextStyle(fontSize: titulo, fontWeight: pw.FontWeight.bold),
+                  textAlign: pw.TextAlign.center),
+              pw.Text('Logística de Última Milla y Mensajería Continua',
+                  style: pw.TextStyle(fontSize: chico), textAlign: pw.TextAlign.center),
+              pw.Text('Cúcuta, Los Patios y V. del Rosario',
+                  style: pw.TextStyle(fontSize: chico), textAlign: pw.TextAlign.center),
+              pw.Text('NIT / RUT: 700449117-3',
+                  style: pw.TextStyle(fontSize: chico), textAlign: pw.TextAlign.center),
+              pw.Text('servimotoexpress247@gmail.com',
+                  style: pw.TextStyle(fontSize: chico), textAlign: pw.TextAlign.center),
+              pw.Text('3025901085',
+                  style: pw.TextStyle(fontSize: chico), textAlign: pw.TextAlign.center),
+              pw.SizedBox(height: 4),
+
+              pw.Text(dasher,
+                  style: pw.TextStyle(fontSize: chico, color: PdfColors.grey500)),
+              pw.SizedBox(height: 4),
+
+              // ─ Consecutivo + Factura
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text(consecutivo,
+                      style: pw.TextStyle(fontSize: cuerpo, fontWeight: pw.FontWeight.bold)),
+                  pw.Text('Factura #:  $facturaNum',
+                      style: pw.TextStyle(fontSize: cuerpo, fontWeight: pw.FontWeight.bold)),
+                ],
+              ),
+              pw.SizedBox(height: 4),
+
+              pw.Text(dasher,
+                  style: pw.TextStyle(fontSize: chico, color: PdfColors.grey500)),
+              pw.SizedBox(height: 4),
+
+              // ─ Móvil
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text('Móvil Asignado:',
+                      style: pw.TextStyle(fontSize: cuerpo, fontWeight: pw.FontWeight.bold)),
+                  pw.Text(movil, style: pw.TextStyle(fontSize: cuerpo)),
+                ],
+              ),
+              pw.SizedBox(height: 4),
+
+              pw.Text(dasher,
+                  style: pw.TextStyle(fontSize: chico, color: PdfColors.grey500)),
+              pw.SizedBox(height: 4),
+
+              // ─ Punto de recogida
+              pw.Text('Punto de Recogida:',
+                  style: pw.TextStyle(fontSize: cuerpo, fontWeight: pw.FontWeight.bold),
+                  textAlign: pw.TextAlign.center),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text(sedeNombre.isNotEmpty ? sedeNombre : sedeCodigo,
+                      style: pw.TextStyle(fontSize: cuerpo)),
+                  pw.Text(sedeCodigo,
+                      style: pw.TextStyle(fontSize: cuerpo)),
+                ],
+              ),
+              if (metodo.isNotEmpty)
+                pw.Text(metodo,
+                    style: pw.TextStyle(fontSize: cuerpo),
+                    textAlign: pw.TextAlign.center),
+              pw.SizedBox(height: 4),
+
+              pw.Text(dasher,
+                  style: pw.TextStyle(fontSize: chico, color: PdfColors.grey500)),
+              pw.SizedBox(height: 4),
+
+              // ─ Dirección de entrega
+              pw.Text('Dirección de Entrega:',
+                  style: pw.TextStyle(fontSize: cuerpo, fontWeight: pw.FontWeight.bold),
+                  textAlign: pw.TextAlign.center),
+              pw.Text(destino,
+                  style: pw.TextStyle(fontSize: cuerpo),
+                  textAlign: pw.TextAlign.center),
+              pw.SizedBox(height: 4),
+
+              pw.Text(dasher,
+                  style: pw.TextStyle(fontSize: chico, color: PdfColors.grey500)),
+              pw.SizedBox(height: 4),
+
+              // ─ Total
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text('[FOTO]',
+                      style: pw.TextStyle(fontSize: cuerpo, color: PdfColors.blue800)),
+                  pw.Text('Total:  \$ ${_miles(tarifa)}',
+                      style: pw.TextStyle(
+                          fontSize: cuerpo + 1, fontWeight: pw.FontWeight.bold)),
+                ],
+              ),
+              pw.SizedBox(height: 4),
+
+              pw.Text(dasher,
+                  style: pw.TextStyle(fontSize: chico, color: PdfColors.grey500)),
+              pw.SizedBox(height: 6),
+
+              // ─ Footer
+              pw.Text('SERVIMOTOEXPRESS',
+                  style: pw.TextStyle(fontSize: cuerpo, fontWeight: pw.FontWeight.bold),
+                  textAlign: pw.TextAlign.center),
+              pw.Text('DOMICILIOS 24/7',
+                  style: pw.TextStyle(fontSize: cuerpo, fontWeight: pw.FontWeight.bold),
+                  textAlign: pw.TextAlign.center),
+              pw.Text('Nit: 700449173-3',
+                  style: pw.TextStyle(fontSize: chico, color: PdfColors.grey600),
+                  textAlign: pw.TextAlign.center),
+              pw.SizedBox(height: 6),
+              pw.Image(logoImg, width: 55),
+            ],
+          ),
+        ));
+      }
+
+      final pdfBytes = await pdfDoc.save();
+
+      if (kIsWeb) {
+        descargarArchivosWeb(pdfBytes, 'tirillas_fn_$fechaArchivo.pdf', 'application/pdf');
+      } else {
+        await Printing.sharePdf(
+          bytes: pdfBytes,
+          filename: 'tirillas_fn_$fechaArchivo.pdf',
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Error generando tirillas: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _exportando = false);
+    }
+  }
+
+  String _labelMetodo(String m) {
+    switch (m.toLowerCase()) {
+      case 'datafono':
+      case 'datáfono': return 'Datáfono';
+      case 'efectivo':  return 'Efectivo';
+      case 'transferencia': return 'Transferencia';
+      default: return m;
     }
   }
 
@@ -634,8 +866,11 @@ Total entregados período: <strong>\$${_miles(totalDom)}</strong>
                 _btnExport('Excel', Icons.table_chart, const Color(0xFF15803D),
                     filtrados.isEmpty ? null : _exportarExcel),
                 const SizedBox(width: 8),
-                _btnExport('Relación PDF', Icons.picture_as_pdf_outlined, const Color(0xFFB91C1C),
+                _btnExport('Relación', Icons.picture_as_pdf_outlined, const Color(0xFFB91C1C),
                     filtrados.isEmpty ? null : _exportarRelacion),
+                const SizedBox(width: 8),
+                _btnExport('Tirillas PDF', Icons.receipt_long, const Color(0xFF7C3AED),
+                    filtrados.isEmpty ? null : _exportarTirillas),
               ],
       ),
     );

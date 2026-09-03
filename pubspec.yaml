@@ -34,6 +34,8 @@ dependencies:
   google_sign_in: ^6.2.1
   flutter_foreground_task: ^8.0.0
   excel: ^4.0.6
+  pdf: ^3.10.8
+  printing: ^5.13.1
 
 dev_dependencies:
   flutter_test:
