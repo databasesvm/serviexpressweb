@@ -62,7 +62,7 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
             .order('created_at', ascending: false)
             .limit(50),
         _db.from('usuarios')
-            .select('id, nombre, usuario, rol, correo, telefono, tipo_plan, rango_movil, numero_movil, eliminado_at, eliminado_por, created_at')
+            .select('id, nombre, usuario, rol, correo, telefono, tipo_plan_movil, rango_movil, numero_movil, eliminado_at, eliminado_por, created_at')
             .eq('eliminado', true)
             .order('eliminado_at', ascending: false),
       ]);
@@ -76,7 +76,8 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
         _eliminados               = List<Map<String, dynamic>>.from(results[5]);
         _cargando = false;
       });
-    } catch (_) {
+    } catch (e) {
+      debugPrint('ERROR _cargar gestion usuarios: $e');
       if (mounted) setState(() => _cargando = false);
     }
   }
