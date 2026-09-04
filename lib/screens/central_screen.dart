@@ -1208,6 +1208,50 @@ class _CentralScreenState extends State<CentralScreen>
       ),
     );
   }
+
+  // ---> BUZÓN DE SOPORTE: lista de móviles que necesitan atención <---
+  void _abrirBuzonSoporte(BuildContext context, List<Map<String, dynamic>> lista) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1A1A1A),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Row(children: [
+              Icon(Icons.support_agent, color: Colors.redAccent, size: 20),
+              SizedBox(width: 8),
+              Text('Soporte — mensajes pendientes',
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+            ]),
+          ),
+          const Divider(color: Colors.white12, height: 1),
+          ...lista.map((movil) {
+            final usr = movil['usuario']?.toString() ?? '';
+            final num = usr.replaceAll(RegExp(r'[^0-9]'), '');
+            final etiqueta = num.isNotEmpty ? 'Móvil $num' : (movil['nombre'] ?? 'Móvil');
+            return ListTile(
+              leading: const CircleAvatar(
+                backgroundColor: Colors.redAccent,
+                child: Icon(Icons.chat_bubble_outline, color: Colors.white, size: 18),
+              ),
+              title: Text(etiqueta, style: const TextStyle(color: Colors.white)),
+              trailing: const Icon(Icons.chevron_right, color: Colors.white54),
+              onTap: () {
+                Navigator.pop(ctx);
+                _abrirChatDirectoMovil(movil);
+              },
+            );
+          }),
+          const SizedBox(height: 12),
+        ],
+      ),
+    );
+  }
 }
 
 // ============================================================

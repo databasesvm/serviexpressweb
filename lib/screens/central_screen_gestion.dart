@@ -1057,18 +1057,11 @@ extension CentralScreenGestion on _CentralScreenState {
                       ),
                     ),
                     _tarjetaGestion(
-                      icono: Icons.grid_view_rounded,
-                      color: Colors.indigo[400]!,
-                      titulo: 'Sectores',
-                      subtitulo: 'Catálogo de barrios y zonas de cobertura',
-                      onTap: () => _abrirGestorSectores(),
-                    ),
-                    _tarjetaGestion(
-                      icono: Icons.map,
-                      color: Colors.indigo[700]!,
-                      titulo: 'Red de Direcciones',
-                      subtitulo: 'Direcciones compartidas con locales',
-                      onTap: () => _abrirRedDirecciones(context),
+                      icono: Icons.map_outlined,
+                      color: Colors.indigo[600]!,
+                      titulo: 'Red & Sectores',
+                      subtitulo: 'Direcciones, barrios y precios globales',
+                      onTap: () => _abrirGestorRedYSectores(context),
                     ),
                     _tarjetaGestion(
                       icono: Icons.price_change,
@@ -1679,121 +1672,638 @@ extension CentralScreenGestion on _CentralScreenState {
   }
 
   // ─────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────
+  // GESTOR: LISTAS DE PRECIOS (tarifas_locales)
+  // ─────────────────────────────────────────────────────────────
+  void _abrirListasPrecios(BuildContext context) {
+    final nomCtrl    = TextEditingController();
+    final clavCtrl   = TextEditingController();
+    final tarifaCtrl = TextEditingController();
+    bool recarga     = false;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setLocal) {
+        Future<List<Map<String, dynamic>>> cargar() =>
+            Supabase.instance.client
+                .from('tarifas_locales')
+                .select()
+                .order('local_nombre')
+                .then((d) => List<Map<String, dynamic>>.from(d));
+
+        Future<void> guardar() async {
+          final nom   = nomCtrl.text.trim();
+          final clav  = clavCtrl.text.trim();
+          final tar   = int.tryParse(tarifaCtrl.text.trim());
+          if (nom.isEmpty || tar == null) return;
+          await Supabase.instance.client.from('tarifas_locales').insert({
+            'local_nombre': nom,
+            'palabra_clave': clav.isEmpty ? null : clav,
+            'tarifa': tar,
+          });
+          nomCtrl.clear(); clavCtrl.clear(); tarifaCtrl.clear();
+          setLocal(() => recarga = !recarga);
+        }
+
+        Future<void> eliminar(int id) async {
+          await Supabase.instance.client.from('tarifas_locales').delete().eq('id', id);
+          setLocal(() => recarga = !recarga);
+        }
+
+        Future<void> actualizarTarifa(int id, String val) async {
+          final tar = int.tryParse(val);
+          if (tar == null) return;
+          await Supabase.instance.client.from('tarifas_locales').update({'tarifa': tar}).eq('id', id);
+        }
+
+        return Dialog(
+          backgroundColor: const Color(0xFF1A1A1A),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: SizedBox(
+            width: 480,
+            height: 520,
+            child: Column(children: [
+              // Header
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 12, 0),
+                child: Row(children: [
+                  const Icon(Icons.price_change, color: Colors.orange, size: 20),
+                  const SizedBox(width: 8),
+                  const Expanded(child: Text('Listas de Precios',
+                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15))),
+                  IconButton(icon: const Icon(Icons.close, color: Colors.white54, size: 18),
+                      onPressed: () => Navigator.pop(ctx), padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(minWidth: 24, minHeight: 24)),
+                ]),
+              ),
+              const Divider(color: Colors.white12),
+
+              // Formulario agregar
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Row(children: [
+                  Expanded(child: TextField(
+                    controller: nomCtrl,
+                    style: const TextStyle(color: Colors.white, fontSize: 12),
+                    decoration: const InputDecoration(
+                      labelText: 'Local', labelStyle: TextStyle(color: Colors.white54, fontSize: 11),
+                      isDense: true, border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                    ),
+                  )),
+                  const SizedBox(width: 6),
+                  Expanded(child: TextField(
+                    controller: clavCtrl,
+                    style: const TextStyle(color: Colors.white, fontSize: 12),
+                    decoration: const InputDecoration(
+                      labelText: 'Palabra clave', labelStyle: TextStyle(color: Colors.white54, fontSize: 11),
+                      isDense: true, border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                    ),
+                  )),
+                  const SizedBox(width: 6),
+                  SizedBox(width: 80, child: TextField(
+                    controller: tarifaCtrl,
+                    keyboardType: TextInputType.number,
+                    style: const TextStyle(color: Colors.white, fontSize: 12),
+                    decoration: const InputDecoration(
+                      labelText: '\$ Tarifa', labelStyle: TextStyle(color: Colors.white54, fontSize: 11),
+                      isDense: true, border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                    ),
+                  )),
+                  const SizedBox(width: 6),
+                  IconButton(
+                    icon: const Icon(Icons.add_circle, color: Colors.green, size: 22),
+                    onPressed: guardar,
+                    tooltip: 'Agregar',
+                  ),
+                ]),
+              ),
+              const Divider(color: Colors.white12, height: 1),
+
+              // Lista
+              Expanded(
+                child: FutureBuilder<List<Map<String, dynamic>>>(
+                  key: ValueKey(recarga),
+                  future: cargar(),
+                  builder: (_, snap) {
+                    if (snap.connectionState == ConnectionState.waiting)
+                      return const Center(child: CircularProgressIndicator(color: Colors.orange));
+                    final items = snap.data ?? [];
+                    if (items.isEmpty)
+                      return const Center(child: Text('Sin tarifas registradas',
+                          style: TextStyle(color: Colors.white38, fontSize: 12)));
+                    return ListView.builder(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      itemCount: items.length,
+                      itemBuilder: (_, i) {
+                        final it = items[i];
+                        final ctrl = TextEditingController(text: it['tarifa']?.toString() ?? '');
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: Row(children: [
+                            Expanded(child: Text(it['local_nombre']?.toString() ?? '—',
+                                style: const TextStyle(color: Colors.white70, fontSize: 12))),
+                            Expanded(child: Text(it['palabra_clave']?.toString() ?? '—',
+                                style: const TextStyle(color: Colors.white38, fontSize: 11))),
+                            SizedBox(width: 80, child: TextField(
+                              controller: ctrl,
+                              keyboardType: TextInputType.number,
+                              style: const TextStyle(fontSize: 12),
+                              onSubmitted: (v) => actualizarTarifa(it['id'] as int, v),
+                              decoration: const InputDecoration(
+                                isDense: true, border: OutlineInputBorder(),
+                                contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                                filled: true, fillColor: Colors.white,
+                              ),
+                            )),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline, color: Colors.red, size: 18),
+                              onPressed: () => eliminar(it['id'] as int),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                            ),
+                          ]),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ]),
+          ),
+        );
+      }),
+    );
+  }
+
   // GESTOR DE SECTORES
   // ─────────────────────────────────────────────────────────────
-  void _abrirGestorSectores() {
-    final nombreCtrl = TextEditingController();
-    String filtro = 'Cúcuta';
-    String municipioNuevo = 'Cúcuta';
+  // ─────────────────────────────────────────────────────────────
+  // GESTOR UNIFICADO: RED DE DIRECCIONES + SECTORES
+  // ─────────────────────────────────────────────────────────────
+  void _abrirGestorRedYSectores(BuildContext context) {
+    // ── Sectores ──
+    final sNombreCtrl  = TextEditingController();
+    final sPrecioCtrl  = TextEditingController();
+    String sFiltro     = 'Cúcuta';
+    String sMunicipio  = 'Cúcuta';
+
+    // ── Direcciones ──
+    final dNombreCtrl  = TextEditingController();
+    final dPrecioCtrl  = TextEditingController();
+    String dMunicipio  = 'Cúcuta';
+    String dFiltro     = 'Cúcuta';
+    int? dSectorSel;
 
     Future<List<Map<String, dynamic>>> sectorsFuture =
-        Supabase.instance.client.from('sectores').select().order('municipio').order('nombre');
+        Supabase.instance.client.from('sectores')
+            .select('id, nombre, municipio, activo, precio_global')
+            .order('municipio').order('nombre');
 
-    void recargar(StateSetter setSt) {
-      sectorsFuture = Supabase.instance.client.from('sectores').select().order('municipio').order('nombre');
+    final sectoresParaDropFuture = Supabase.instance.client
+        .from('sectores').select('id, nombre, municipio')
+        .eq('activo', true).order('nombre');
+
+    Future<List<Map<String, dynamic>>> dirsFuture =
+        Supabase.instance.client.from('red_direcciones')
+            .select('id, nombre, municipio, activo, precio, sector_id, sectores(nombre)')
+            .order('municipio').order('nombre');
+
+    void recargarS(StateSetter setSt) {
+      sectorsFuture = Supabase.instance.client.from('sectores')
+          .select('id, nombre, municipio, activo, precio_global')
+          .order('municipio').order('nombre');
       setSt(() {});
+    }
+
+    void recargarD(StateSetter setSt) {
+      dirsFuture = Supabase.instance.client.from('red_direcciones')
+          .select('id, nombre, municipio, activo, precio, sector_id, sectores(nombre)')
+          .order('municipio').order('nombre');
+      setSt(() {});
+    }
+
+    String _milesStr(int v) {
+      final s = v.toString();
+      final buf = StringBuffer();
+      for (int i = 0; i < s.length; i++) {
+        if (i > 0 && (s.length - i) % 3 == 0) buf.write('.');
+        buf.write(s[i]);
+      }
+      return buf.toString();
     }
 
     showDialog(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSt) {
-          return AlertDialog(
+      builder: (ctx) => DefaultTabController(
+        length: 2,
+        child: StatefulBuilder(
+          builder: (ctx, setSt) => AlertDialog(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            title: const Row(children: [
-              Icon(Icons.grid_view_rounded, color: Colors.indigo),
-              SizedBox(width: 8),
-              Text('SECTORES / BARRIOS', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            titlePadding: EdgeInsets.zero,
+            title: Column(mainAxisSize: MainAxisSize.min, children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+                child: Row(children: [
+                  Icon(Icons.map_outlined, color: Colors.indigo),
+                  SizedBox(width: 8),
+                  Text('RED & SECTORES', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                ]),
+              ),
+              TabBar(
+                labelColor: Colors.indigo,
+                unselectedLabelColor: Colors.black54,
+                indicatorColor: Colors.indigo,
+                tabs: const [
+                  Tab(icon: Icon(Icons.place, size: 16), text: 'Direcciones'),
+                  Tab(icon: Icon(Icons.grid_view_rounded, size: 16), text: 'Sectores'),
+                ],
+              ),
             ]),
             content: SizedBox(
               width: double.maxFinite,
-              height: MediaQuery.of(context).size.height * 0.65,
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                // ── Agregar ──────────────────────────────────────────────
-                Row(children: [
-                  Expanded(
-                    child: TextField(
-                      controller: nombreCtrl,
-                      textCapitalization: TextCapitalization.words,
-                      decoration: const InputDecoration(
-                        labelText: 'Nombre del sector / barrio',
-                        isDense: true,
-                        border: OutlineInputBorder(),
+              height: MediaQuery.of(context).size.height * 0.72,
+              child: TabBarView(children: [
+
+                // ══════════════════════════════════════════════════════
+                // TAB 1: DIRECCIONES
+                // ══════════════════════════════════════════════════════
+                FutureBuilder<List<Map<String, dynamic>>>(
+                  future: sectoresParaDropFuture,
+                  builder: (_, snapS) {
+                    final sectores = snapS.data ?? [];
+                    return Column(children: [
+                      // Filtro municipio
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(children: ['Cúcuta', 'Los Patios', 'V. Rosario'].map((m) {
+                          final sel = dFiltro == m;
+                          return Padding(
+                            padding: const EdgeInsets.fromLTRB(0, 8, 6, 8),
+                            child: ChoiceChip(
+                              label: Text(m, style: TextStyle(fontSize: 11, color: sel ? Colors.white : Colors.black87)),
+                              selected: sel, selectedColor: Colors.indigo, backgroundColor: Colors.grey[200],
+                              onSelected: (_) => setSt(() => dFiltro = m),
+                            ),
+                          );
+                        }).toList()),
                       ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  DropdownButton<String>(
-                    value: municipioNuevo,
-                    isDense: true,
-                    items: ['Cúcuta', 'Los Patios', 'V. Rosario']
-                        .map((m) => DropdownMenuItem(value: m, child: Text(m, style: const TextStyle(fontSize: 12))))
-                        .toList(),
-                    onChanged: (v) => setSt(() => municipioNuevo = v ?? 'Cúcuta'),
-                  ),
-                  const SizedBox(width: 8),
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.black,
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                    ),
-                    onPressed: () async {
-                      final n = nombreCtrl.text.trim();
-                      if (n.isEmpty) return;
-                      try {
-                        await Supabase.instance.client.from('sectores')
-                            .insert({'nombre': n, 'municipio': municipioNuevo});
-                        nombreCtrl.clear();
-                        recargar(setSt);
-                      } catch (e) {
-                        if (ctx.mounted) {
-                          ScaffoldMessenger.of(ctx).showSnackBar(
-                            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red[800]));
-                        }
-                      }
-                    },
-                    child: const Icon(Icons.add, color: Color(0xff3AF500), size: 18),
-                  ),
-                ]),
-                const SizedBox(height: 12),
-                // ── Filtros por municipio ─────────────────────────────────
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(children: ['Cúcuta', 'Los Patios', 'V. Rosario'].map((m) {
-                    final sel = filtro == m;
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 6),
-                      child: ChoiceChip(
-                        label: Text(m, style: TextStyle(fontSize: 11, color: sel ? Colors.white : Colors.black87)),
-                        selected: sel,
-                        selectedColor: Colors.indigo,
-                        backgroundColor: Colors.grey[200],
-                        onSelected: (_) => setSt(() => filtro = m),
-                      ),
-                    );
-                  }).toList()),
+                      // Formulario agregar
+                      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Row(children: [
+                          Expanded(child: TextField(
+                            controller: dNombreCtrl,
+                            textCapitalization: TextCapitalization.words,
+                            decoration: const InputDecoration(labelText: 'Nombre/dirección', isDense: true, border: OutlineInputBorder()),
+                          )),
+                          const SizedBox(width: 6),
+                          SizedBox(width: 90, child: TextField(
+                            controller: dPrecioCtrl,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(labelText: 'Precio \$', isDense: true, border: OutlineInputBorder()),
+                          )),
+                          const SizedBox(width: 6),
+                          DropdownButton<String>(
+                            value: dMunicipio, isDense: true,
+                            items: ['Cúcuta', 'Los Patios', 'V. Rosario']
+                                .map((m) => DropdownMenuItem(value: m, child: Text(m, style: const TextStyle(fontSize: 11))))
+                                .toList(),
+                            onChanged: (v) => setSt(() => dMunicipio = v ?? 'Cúcuta'),
+                          ),
+                        ]),
+                        const SizedBox(height: 6),
+                        Row(children: [
+                          const Text('Sector: ', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                          const SizedBox(width: 6),
+                          Expanded(child: DropdownButton<int?>(
+                            value: dSectorSel, isDense: true, isExpanded: true,
+                            hint: const Text('Sin sector', style: TextStyle(fontSize: 12)),
+                            items: [
+                              const DropdownMenuItem<int?>(value: null, child: Text('Sin sector', style: TextStyle(fontSize: 12))),
+                              ...sectores.map((s) => DropdownMenuItem<int?>(
+                                value: s['id'] as int,
+                                child: Text('${s['nombre']} (${s['municipio']})', style: const TextStyle(fontSize: 12)),
+                              )),
+                            ],
+                            onChanged: (v) => setSt(() => dSectorSel = v),
+                          )),
+                          const SizedBox(width: 6),
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(backgroundColor: Colors.black, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12)),
+                            onPressed: () async {
+                              final n = dNombreCtrl.text.trim();
+                              if (n.isEmpty) return;
+                              final precio = int.tryParse(dPrecioCtrl.text.trim());
+                              try {
+                                await Supabase.instance.client.from('red_direcciones').insert({
+                                  'nombre': n, 'municipio': dMunicipio,
+                                  'zona_lluvia': 'general', 'activo': true,
+                                  if (dSectorSel != null) 'sector_id': dSectorSel,
+                                  if (precio != null) 'precio': precio,
+                                });
+                                dNombreCtrl.clear(); dPrecioCtrl.clear();
+                                recargarD(setSt);
+                              } catch (e) {
+                                if (ctx.mounted) ScaffoldMessenger.of(ctx).showSnackBar(
+                                  SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+                              }
+                            },
+                            child: const Icon(Icons.add, color: Color(0xff3AF500), size: 18),
+                          ),
+                        ]),
+                      ]),
+                      const Divider(height: 16),
+                      // Lista de direcciones
+                      Expanded(child: FutureBuilder<List<Map<String, dynamic>>>(
+                        future: dirsFuture,
+                        builder: (_, snap) {
+                          if (snap.connectionState == ConnectionState.waiting)
+                            return const Center(child: CircularProgressIndicator(color: Colors.indigo));
+                          final dirs = (snap.data ?? [])
+                              .where((d) => d['municipio'].toString() == dFiltro).toList();
+                          if (dirs.isEmpty) return Center(child: Text('Sin direcciones en $dFiltro.'));
+                          return ListView.builder(
+                            itemCount: dirs.length,
+                            itemBuilder: (_, i) {
+                              final d = dirs[i];
+                              final activo = d['activo'] as bool? ?? true;
+                              final sectorNombre = (d['sectores'] as Map?)?['nombre'];
+                              final precio = d['precio'] as int?;
+                              return ListTile(
+                                dense: true,
+                                leading: Icon(Icons.place, color: activo ? Colors.indigo : Colors.grey, size: 18),
+                                title: Text(d['nombre'].toString(),
+                                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13,
+                                        color: activo ? Colors.black : Colors.grey)),
+                                subtitle: Text(
+                                  '${d['municipio']}${sectorNombre != null ? ' · $sectorNombre' : ''}'
+                                  '${precio != null ? ' · \$${_milesStr(precio)}' : ''}',
+                                  style: const TextStyle(fontSize: 11),
+                                ),
+                                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                                  // Botón editar precio global + por local
+                                  GestureDetector(
+                                    onTap: () async {
+                                      final globalCtrl = TextEditingController(text: precio?.toString() ?? '');
+                                      final dirId = d['id'] as int;
+                                      bool recargaPrecios = false;
+
+                                      await showDialog<void>(
+                                        context: ctx,
+                                        builder: (ctx2) => StatefulBuilder(
+                                          builder: (ctx2, setLocal) => AlertDialog(
+                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                            titlePadding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                                            title: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                                              Text('💰 ${d['nombre']}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                                            ]),
+                                            content: SizedBox(
+                                              width: double.maxFinite,
+                                              height: 380,
+                                              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                                // ── Precio global ──────────────────────────
+                                                const Text('Precio global (todos los locales):', style: TextStyle(fontSize: 12, color: Colors.black54, fontWeight: FontWeight.bold)),
+                                                const SizedBox(height: 6),
+                                                Row(children: [
+                                                  Expanded(child: TextField(
+                                                    controller: globalCtrl,
+                                                    keyboardType: TextInputType.number,
+                                                    autofocus: true,
+                                                    decoration: const InputDecoration(labelText: 'Precio \$', isDense: true, border: OutlineInputBorder()),
+                                                  )),
+                                                  const SizedBox(width: 8),
+                                                  ElevatedButton(
+                                                    style: ElevatedButton.styleFrom(backgroundColor: Colors.black, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14)),
+                                                    onPressed: () async {
+                                                      final n = int.tryParse(globalCtrl.text.trim());
+                                                      if (n == null) return;
+                                                      await Supabase.instance.client.from('red_direcciones')
+                                                          .update({'precio': n}).eq('id', dirId);
+                                                      recargarD(setSt);
+                                                    },
+                                                    child: const Icon(Icons.save, color: Color(0xff3AF500), size: 18),
+                                                  ),
+                                                ]),
+                                                const SizedBox(height: 12),
+                                                const Divider(height: 1),
+                                                const SizedBox(height: 8),
+                                                // ── Precios por local ──────────────────────
+                                                const Text('Precios por local (sobrescriben el global):', style: TextStyle(fontSize: 12, color: Colors.black54, fontWeight: FontWeight.bold)),
+                                                const SizedBox(height: 6),
+                                                Expanded(child: FutureBuilder<List<dynamic>>(
+                                                  key: ValueKey(recargaPrecios),
+                                                  future: Future.wait([
+                                                    Supabase.instance.client.from('usuarios')
+                                                        .select('id, nombre')
+                                                        .eq('rol', 'local')
+                                                        .eq('activo', true)
+                                                        .order('nombre'),
+                                                    Supabase.instance.client.from('red_dir_precios_local')
+                                                        .select('local_id, precio')
+                                                        .eq('direccion_id', dirId),
+                                                  ]),
+                                                  builder: (_, snap) {
+                                                    if (snap.connectionState == ConnectionState.waiting)
+                                                      return const Center(child: CircularProgressIndicator(color: Colors.indigo));
+                                                    final locales = List<Map<String, dynamic>>.from(snap.data![0] as List);
+                                                    final rawPrecios = List<Map<String, dynamic>>.from(snap.data![1] as List);
+                                                    final Map<int, int> pm = { for (final p in rawPrecios) p['local_id'] as int: p['precio'] as int };
+                                                    return ListView.builder(
+                                                      itemCount: locales.length,
+                                                      itemBuilder: (_, i) {
+                                                        final loc = locales[i];
+                                                        final lid = loc['id'] as int;
+                                                        final precioLocal = pm[lid];
+                                                        final lCtrl = TextEditingController(text: precioLocal?.toString() ?? '');
+                                                        return Padding(
+                                                          padding: const EdgeInsets.only(bottom: 6),
+                                                          child: Row(children: [
+                                                            Expanded(child: Text(loc['nombre'].toString(),
+                                                                style: TextStyle(fontSize: 12, color: precioLocal != null ? Colors.black87 : Colors.black38))),
+                                                            SizedBox(width: 72, child: TextField(
+                                                              controller: lCtrl,
+                                                              keyboardType: TextInputType.number,
+                                                              decoration: InputDecoration(
+                                                                isDense: true,
+                                                                hintText: '\$—',
+                                                                border: const OutlineInputBorder(),
+                                                                contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                                                                fillColor: precioLocal != null ? Colors.green[50] : null,
+                                                                filled: precioLocal != null,
+                                                              ),
+                                                            )),
+                                                            const SizedBox(width: 4),
+                                                            InkWell(
+                                                              onTap: () async {
+                                                                final np = int.tryParse(lCtrl.text.trim());
+                                                                if (np != null) {
+                                                                  await Supabase.instance.client.from('red_dir_precios_local').upsert({
+                                                                    'direccion_id': dirId,
+                                                                    'local_id': lid,
+                                                                    'precio': np,
+                                                                  }, onConflict: 'direccion_id, local_id');
+                                                                } else if (precioLocal != null) {
+                                                                  await Supabase.instance.client.from('red_dir_precios_local')
+                                                                      .delete().eq('direccion_id', dirId).eq('local_id', lid);
+                                                                }
+                                                                setLocal(() => recargaPrecios = !recargaPrecios);
+                                                              },
+                                                              child: Container(
+                                                                padding: const EdgeInsets.all(6),
+                                                                decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(6)),
+                                                                child: const Icon(Icons.save, color: Color(0xff3AF500), size: 14),
+                                                              ),
+                                                            ),
+                                                          ]),
+                                                        );
+                                                      },
+                                                    );
+                                                  },
+                                                )),
+                                              ]),
+                                            ),
+                                            actions: [TextButton(
+                                              onPressed: () => Navigator.pop(ctx2),
+                                              child: const Text('CERRAR', style: TextStyle(fontWeight: FontWeight.bold)),
+                                            )],
+                                          ),
+                                        ),
+                                      );
+                                      recargarD(setSt);
+                                    },
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color: precio != null ? Colors.green[50] : Colors.grey[100],
+                                        border: Border.all(color: precio != null ? Colors.green[300]! : Colors.grey[300]!),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Text(
+                                        precio != null ? '\$${_milesStr(precio)}' : '\$—',
+                                        style: TextStyle(fontSize: 11, color: precio != null ? Colors.green[800] : Colors.grey),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  GestureDetector(
+                                    onTap: () async {
+                                      await Supabase.instance.client.from('red_direcciones')
+                                          .update({'activo': !activo}).eq('id', d['id']);
+                                      recargarD(setSt);
+                                    },
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color: activo ? Colors.indigo : Colors.grey[200],
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: Text(activo ? 'ON' : 'OFF',
+                                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold,
+                                              color: activo ? Colors.white : Colors.grey)),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  IconButton(
+                                    icon: const Icon(Icons.delete, color: Colors.red, size: 18),
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                                    onPressed: () async {
+                                      await Supabase.instance.client.from('red_direcciones')
+                                          .delete().eq('id', d['id']);
+                                      recargarD(setSt);
+                                    },
+                                  ),
+                                ]),
+                              );
+                            },
+                          );
+                        },
+                      )),
+                    ]);
+                  },
                 ),
-                const SizedBox(height: 10),
-                // ── Lista ────────────────────────────────────────────────
-                Expanded(
-                  child: FutureBuilder<List<Map<String, dynamic>>>(
+
+                // ══════════════════════════════════════════════════════
+                // TAB 2: SECTORES
+                // ══════════════════════════════════════════════════════
+                Column(children: [
+                  // Formulario agregar
+                  Row(children: [
+                    Expanded(child: TextField(
+                      controller: sNombreCtrl,
+                      textCapitalization: TextCapitalization.words,
+                      decoration: const InputDecoration(labelText: 'Nombre del sector/barrio', isDense: true, border: OutlineInputBorder()),
+                    )),
+                    const SizedBox(width: 6),
+                    SizedBox(width: 90, child: TextField(
+                      controller: sPrecioCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: 'Precio \$', isDense: true, border: OutlineInputBorder()),
+                    )),
+                    const SizedBox(width: 6),
+                    DropdownButton<String>(
+                      value: sMunicipio, isDense: true,
+                      items: ['Cúcuta', 'Los Patios', 'V. Rosario']
+                          .map((m) => DropdownMenuItem(value: m, child: Text(m, style: const TextStyle(fontSize: 11))))
+                          .toList(),
+                      onChanged: (v) => setSt(() => sMunicipio = v ?? 'Cúcuta'),
+                    ),
+                    const SizedBox(width: 6),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.black, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12)),
+                      onPressed: () async {
+                        final n = sNombreCtrl.text.trim();
+                        if (n.isEmpty) return;
+                        final precio = int.tryParse(sPrecioCtrl.text.trim());
+                        try {
+                          await Supabase.instance.client.from('sectores').insert({
+                            'nombre': n, 'municipio': sMunicipio,
+                            if (precio != null) 'precio_global': precio,
+                          });
+                          sNombreCtrl.clear(); sPrecioCtrl.clear();
+                          recargarS(setSt);
+                        } catch (e) {
+                          if (ctx.mounted) ScaffoldMessenger.of(ctx).showSnackBar(
+                            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+                        }
+                      },
+                      child: const Icon(Icons.add, color: Color(0xff3AF500), size: 18),
+                    ),
+                  ]),
+                  const SizedBox(height: 10),
+                  // Filtro municipio
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(children: ['Cúcuta', 'Los Patios', 'V. Rosario'].map((m) {
+                      final sel = sFiltro == m;
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: ChoiceChip(
+                          label: Text(m, style: TextStyle(fontSize: 11, color: sel ? Colors.white : Colors.black87)),
+                          selected: sel, selectedColor: Colors.indigo, backgroundColor: Colors.grey[200],
+                          onSelected: (_) => setSt(() => sFiltro = m),
+                        ),
+                      );
+                    }).toList()),
+                  ),
+                  const SizedBox(height: 10),
+                  // Lista sectores
+                  Expanded(child: FutureBuilder<List<Map<String, dynamic>>>(
                     future: sectorsFuture,
                     builder: (_, snap) {
-                      if (snap.connectionState == ConnectionState.waiting) {
+                      if (snap.connectionState == ConnectionState.waiting)
                         return const Center(child: CircularProgressIndicator(color: Colors.indigo));
-                      }
                       final lista = (snap.data ?? [])
-                          .where((s) => s['municipio'].toString() == filtro)
-                          .toList();
-                      if (lista.isEmpty) {
-                        return Center(child: Text('Sin sectores en $filtro.',
-                            style: const TextStyle(color: Colors.black54)));
-                      }
+                          .where((s) => s['municipio'].toString() == sFiltro).toList();
+                      if (lista.isEmpty) return Center(child: Text('Sin sectores en $sFiltro.'));
                       return ListView.builder(
                         itemCount: lista.length,
                         itemBuilder: (_, i) {
                           final s = lista[i];
                           final activo = s['activo'] as bool? ?? true;
+                          final precioG = s['precio_global'] as int?;
                           return Card(
                             margin: const EdgeInsets.only(bottom: 6),
                             elevation: 0,
@@ -1804,15 +2314,61 @@ extension CentralScreenGestion on _CentralScreenState {
                               leading: Icon(Icons.location_city,
                                   color: activo ? Colors.indigo : Colors.grey, size: 20),
                               title: Text(s['nombre'].toString(),
-                                  style: TextStyle(
-                                      fontWeight: FontWeight.bold,
+                                  style: TextStyle(fontWeight: FontWeight.bold,
                                       color: activo ? Colors.black : Colors.grey)),
+                              subtitle: precioG != null
+                                  ? Text('\$${_milesStr(precioG)} global',
+                                      style: const TextStyle(fontSize: 11, color: Colors.green))
+                                  : null,
                               trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                                // Botón editar precio global
                                 GestureDetector(
                                   onTap: () async {
-                                    await Supabase.instance.client
-                                        .from('sectores').update({'activo': !activo}).eq('id', s['id']);
-                                    recargar(setSt);
+                                    final ctrl = TextEditingController(text: precioG?.toString() ?? '');
+                                    final nuevo = await showDialog<int?>(
+                                      context: ctx,
+                                      builder: (_) => AlertDialog(
+                                        title: const Text('Precio global del sector', style: TextStyle(fontSize: 14)),
+                                        content: TextField(
+                                          controller: ctrl,
+                                          keyboardType: TextInputType.number,
+                                          autofocus: true,
+                                          decoration: const InputDecoration(labelText: 'Precio \$', border: OutlineInputBorder()),
+                                        ),
+                                        actions: [
+                                          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+                                          ElevatedButton(
+                                            onPressed: () => Navigator.pop(ctx, int.tryParse(ctrl.text.trim())),
+                                            child: const Text('Guardar'),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                    if (nuevo != null) {
+                                      await Supabase.instance.client.from('sectores')
+                                          .update({'precio_global': nuevo}).eq('id', s['id']);
+                                      recargarS(setSt);
+                                    }
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: precioG != null ? Colors.green[50] : Colors.grey[100],
+                                      border: Border.all(color: precioG != null ? Colors.green[300]! : Colors.grey[300]!),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(
+                                      precioG != null ? '\$${_milesStr(precioG)}' : '\$—',
+                                      style: TextStyle(fontSize: 11, color: precioG != null ? Colors.green[800] : Colors.grey),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                                GestureDetector(
+                                  onTap: () async {
+                                    await Supabase.instance.client.from('sectores')
+                                        .update({'activo': !activo}).eq('id', s['id']);
+                                    recargarS(setSt);
                                   },
                                   child: Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -1821,8 +2377,7 @@ extension CentralScreenGestion on _CentralScreenState {
                                       borderRadius: BorderRadius.circular(10),
                                     ),
                                     child: Text(activo ? 'ON' : 'OFF',
-                                        style: TextStyle(
-                                            fontSize: 11, fontWeight: FontWeight.bold,
+                                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold,
                                             color: activo ? Colors.white : Colors.grey)),
                                   ),
                                 ),
@@ -1832,9 +2387,9 @@ extension CentralScreenGestion on _CentralScreenState {
                                   padding: EdgeInsets.zero,
                                   constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                                   onPressed: () async {
-                                    await Supabase.instance.client
-                                        .from('sectores').delete().eq('id', s['id']);
-                                    recargar(setSt);
+                                    await Supabase.instance.client.from('sectores')
+                                        .delete().eq('id', s['id']);
+                                    recargarS(setSt);
                                   },
                                 ),
                               ]),
@@ -1843,362 +2398,17 @@ extension CentralScreenGestion on _CentralScreenState {
                         },
                       );
                     },
-                  ),
-                ),
+                  )),
+                ]),
+
               ]),
             ),
             actions: [TextButton(
               onPressed: () => Navigator.pop(ctx),
               child: const Text('CERRAR', style: TextStyle(fontWeight: FontWeight.bold)),
             )],
-          );
-        },
-      ),
-    );
-  }
-
-
-  // ─────────────────────────────────────────────────────────────
-  // GESTOR DE RED DE DIRECCIONES
-  // ─────────────────────────────────────────────────────────────
-  void _abrirRedDirecciones(BuildContext context) {
-    final nombreCtrl = TextEditingController();
-    String municipioSel = 'Cúcuta';
-    String filtroDir   = 'Cúcuta';
-    int? sectorSel;
-
-    // Futures estables — fuera del builder para no resetear en cada setSt
-    final sectoresFuture = Supabase.instance.client
-        .from('sectores').select().eq('activo', true).order('nombre');
-
-    Future<List<Map<String, dynamic>>> dirsFuture = Supabase.instance.client
-        .from('red_direcciones')
-        .select('id, nombre, municipio, activo, sector_id, sectores(nombre)')
-        .order('municipio').order('nombre');
-
-    void recargar(StateSetter setSt) {
-      dirsFuture = Supabase.instance.client
-          .from('red_direcciones')
-          .select('id, nombre, municipio, activo, sector_id, sectores(nombre)')
-          .order('municipio').order('nombre');
-      setSt(() {});
-    }
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSt) {
-          return AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            title: const Row(children: [
-              Icon(Icons.map, color: Colors.indigo),
-              SizedBox(width: 8),
-              Text('RED DE DIRECCIONES', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            ]),
-            content: SizedBox(
-              width: double.maxFinite,
-              height: MediaQuery.of(context).size.height * 0.70,
-              child: FutureBuilder<List<Map<String, dynamic>>>(
-                future: sectoresFuture,
-                builder: (_, snapS) {
-                  final sectores = snapS.data ?? [];
-                  return Column(children: [
-                    // ── Filtros por municipio ────────────────────────────
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(children: ['Cúcuta', 'Los Patios', 'V. Rosario'].map((m) {
-                        final sel = filtroDir == m;
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 6, bottom: 8),
-                          child: ChoiceChip(
-                            label: Text(m, style: TextStyle(fontSize: 11, color: sel ? Colors.white : Colors.black87)),
-                            selected: sel,
-                            selectedColor: Colors.indigo,
-                            backgroundColor: Colors.grey[200],
-                            onSelected: (_) => setSt(() => filtroDir = m),
-                          ),
-                        );
-                      }).toList()),
-                    ),
-                    // --- Agregar dirección ---
-                    Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Row(children: [
-                        Expanded(
-                          child: TextField(
-                            controller: nombreCtrl,
-                            textCapitalization: TextCapitalization.words,
-                            decoration: const InputDecoration(labelText: 'Nombre del lugar/dirección', isDense: true, border: OutlineInputBorder()),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        DropdownButton<String>(
-                          value: municipioSel,
-                          isDense: true,
-                          items: ['Cúcuta', 'Los Patios', 'V. Rosario']
-                              .map((m) => DropdownMenuItem(value: m, child: Text(m, style: const TextStyle(fontSize: 12))))
-                              .toList(),
-                          onChanged: (v) => setSt(() => municipioSel = v ?? 'Cúcuta'),
-                        ),
-                      ]),
-                      const SizedBox(height: 8),
-                      Row(children: [
-                        const Text('Sector: ', style: TextStyle(fontSize: 12, color: Colors.black54)),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: DropdownButton<int?>(
-                            value: sectorSel,
-                            isDense: true,
-                            isExpanded: true,
-                            hint: const Text('Sin sector', style: TextStyle(fontSize: 12)),
-                            items: [
-                              const DropdownMenuItem<int?>(value: null, child: Text('Sin sector', style: TextStyle(fontSize: 12))),
-                              ...sectores.map((s) => DropdownMenuItem<int?>(
-                                value: s['id'] as int,
-                                child: Text('${s['nombre']} (${s['municipio']})', style: const TextStyle(fontSize: 12)),
-                              )),
-                            ],
-                            onChanged: (v) => setSt(() => sectorSel = v),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        ElevatedButton(
-                          style: ElevatedButton.styleFrom(backgroundColor: Colors.black, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12)),
-                          onPressed: () async {
-                            final n = nombreCtrl.text.trim();
-                            if (n.isEmpty) return;
-                            try {
-                              await Supabase.instance.client.from('red_direcciones').insert({
-                                'nombre': n, 'municipio': municipioSel,
-                                'zona_lluvia': 'general', 'activo': true,
-                                if (sectorSel != null) 'sector_id': sectorSel,
-                              });
-                              nombreCtrl.clear();
-                              recargar(setSt);
-                            } catch (e) {
-                              if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text('Error al agregar: $e'), backgroundColor: Colors.red),
-                                );
-                              }
-                            }
-                          },
-                          child: const Icon(Icons.add, color: Color(0xff3AF500), size: 18),
-                        ),
-                      ]),
-                    ]),
-                    const Divider(height: 20),
-                    Expanded(
-                      child: FutureBuilder<List<Map<String, dynamic>>>(
-                        future: dirsFuture,
-                        builder: (_, snap) {
-                          if (snap.connectionState == ConnectionState.waiting) {
-                            return const Center(child: CircularProgressIndicator(color: Colors.black));
-                          }
-                          final todaDir = snap.data ?? [];
-                          final dirs = todaDir.where((d) => d['municipio'].toString() == filtroDir).toList();
-                          if (dirs.isEmpty) return Center(child: Text('Sin direcciones en $filtroDir.'));
-                          return ListView.builder(
-                            itemCount: dirs.length,
-                            itemBuilder: (_, i) {
-                              final d = dirs[i];
-                              final activo = d['activo'] as bool? ?? true;
-                              final sectorNombre = (d['sectores'] as Map?)?['nombre'];
-                              return ListTile(
-                                dense: true,
-                                leading: Icon(Icons.place, color: activo ? Colors.indigo : Colors.grey, size: 18),
-                                title: Text(d['nombre'].toString(), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: activo ? Colors.black : Colors.grey)),
-                                subtitle: Text(
-                                  '${d['municipio']}${sectorNombre != null ? ' · $sectorNombre' : ''}',
-                                  style: const TextStyle(fontSize: 11),
-                                ),
-                                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                                  GestureDetector(
-                                    onTap: () async {
-                                      try {
-                                        await Supabase.instance.client.from('red_direcciones').update({'activo': !activo}).eq('id', d['id']);
-                                        recargar(setSt);
-                                      } catch (_) {}
-                                    },
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                      decoration: BoxDecoration(
-                                        color: activo ? Colors.indigo : Colors.grey[200],
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                      child: Text(activo ? 'ON' : 'OFF',
-                                          style: TextStyle(
-                                              fontSize: 11, fontWeight: FontWeight.bold,
-                                              color: activo ? Colors.white : Colors.grey)),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  IconButton(
-                                    icon: const Icon(Icons.delete, color: Colors.red, size: 18),
-                                    padding: EdgeInsets.zero,
-                                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                                    onPressed: () async {
-                                      try {
-                                        await Supabase.instance.client.from('red_direcciones').delete().eq('id', d['id']);
-                                        recargar(setSt);
-                                      } catch (_) {}
-                                    },
-                                  ),
-                                ]),
-                              );
-                            },
-                          );
-                        },
-                      ),
-                    ),
-                  ]);
-                },
-              ),
-            ),
-            actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('CERRAR', style: TextStyle(fontWeight: FontWeight.bold)))],
-          );
-        },
-      ),
-    );
-  }
-
-  // ─────────────────────────────────────────────────────────────
-  // GESTOR DE LISTAS DE PRECIOS (por local, por sector)
-  // ─────────────────────────────────────────────────────────────
-  void _abrirListasPrecios(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) {
-        String? localSelId;
-        String localSelNombre = '';
-        final localesFuture = Supabase.instance.client
-            .from('usuarios').select('id, nombre').eq('rol', 'local').order('nombre');
-        return StatefulBuilder(
-        builder: (ctx, setSt) {
-          return AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            title: const Row(children: [
-              Icon(Icons.price_change, color: Colors.orange),
-              SizedBox(width: 8),
-              Text('LISTAS DE PRECIOS', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            ]),
-            content: SizedBox(
-              width: double.maxFinite,
-              height: MediaQuery.of(context).size.height * 0.70,
-              child: FutureBuilder<List<Map<String, dynamic>>>(
-                future: localesFuture,
-                builder: (_, snapL) {
-                  final locales = snapL.data ?? [];
-                  if (locales.isEmpty) return const Center(child: Text('Sin locales registrados.'));
-                  if (localSelId == null) {
-                    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      const Text('Selecciona un local para ver o editar su lista de precios:', style: TextStyle(fontSize: 13, color: Colors.black54)),
-                      const SizedBox(height: 12),
-                      Expanded(
-                        child: ListView.builder(
-                          itemCount: locales.length,
-                          itemBuilder: (_, i) {
-                            final l = locales[i];
-                            return Card(
-                              margin: const EdgeInsets.only(bottom: 8),
-                              child: ListTile(
-                                leading: const Icon(Icons.store, color: Colors.orange),
-                                title: Text(l['nombre'].toString(), style: const TextStyle(fontWeight: FontWeight.bold)),
-                                trailing: const Icon(Icons.chevron_right),
-                                onTap: () => setSt(() { localSelId = l['id'].toString(); localSelNombre = l['nombre'].toString(); }),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                    ]);
-                  }
-                  return _PanelPreciosLocal(localId: localSelId!, localNombre: localSelNombre, onBack: () => setSt(() => localSelId = null));
-                },
-              ),
-            ),
-            actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('CERRAR', style: TextStyle(fontWeight: FontWeight.bold)))],
-          );
-        },
-      );
-      },
-    );
-  }
-
-  void _abrirBuzonSoporte(
-    BuildContext context,
-    List<Map<String, dynamic>> usuariosConAlarma,
-  ) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        title: const Text(
-          '🚨 BUZÓN DE SOPORTE GENERAL',
-          style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
-        ),
-        content: SizedBox(
-          width: 400,
-          height: 400,
-          child: ListView.builder(
-            itemCount: usuariosConAlarma.length,
-            itemBuilder: (context, index) {
-              final u = usuariosConAlarma[index];
-              return Card(
-                elevation: 2,
-                margin: const EdgeInsets.only(bottom: 8),
-                shape: RoundedRectangleBorder(
-                  side: const BorderSide(color: Colors.red, width: 1.5),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: ListTile(
-                  leading: const CircleAvatar(
-                    backgroundColor: Colors.red,
-                    child: Icon(Icons.warning, color: Colors.white, size: 20),
-                  ),
-                  title: Text(
-                    _formatearNombreCentral(u).toUpperCase(),
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  subtitle: Text('Rol: ${u['rol'].toString().toUpperCase()}'),
-                  trailing: const Icon(Icons.chat, color: Colors.blue),
-                  onTap: () {
-                    setState(() => _noLeidos.remove('soporte_${u['id']}'));
-                    Supabase.instance.client
-                        .from('usuarios')
-                        .update({'alarma_soporte': false})
-                        .eq('id', u['id']);
-                    Navigator.pop(ctx);
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => ChatScreen(
-                          salaId: 'soporte_${u['id']}',
-                          miId: 0,
-                          miNombre: 'Central',
-                          titulo: 'Soporte ➔ ${_formatearNombreCentral(u)}',
-                          usuarioId: u['id'],
-                          alarmaLocal: 'alarma_soporte',
-                          alarmaDestino: 'chat_central',
-                          destinatarioId: u['id'] as int?,
-                          tipoFaq: TipoFaqChat.central,
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              );
-            },
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text(
-              'CERRAR',
-              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black),
-            ),
-          ),
-        ],
       ),
     );
   }

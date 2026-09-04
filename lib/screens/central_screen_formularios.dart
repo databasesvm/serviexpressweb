@@ -23,26 +23,21 @@ extension CentralScreenFormularios on _CentralScreenState {
     Map<String, dynamic>? detalleActual;
 
     // Red de direcciones — se carga una vez al abrir el formulario
-    // Incluye 'sector' para agrupar sugerencias por zona
     List<Map<String, dynamic>> redDireccionesCompleta = [];
-    List<String> redDireccionesCentral = [];
-    List<String> sugerenciasDestino = [];
+    List<String> redDireccionesCentral = []; // para verificar si ya está en red
+    List<Map<String, dynamic>> sugerenciasDestino = [];
+    Map<int, int> localPreciosRed = {}; // direccion_id → precio del local elegido
+    String? destinoBase;
+    String? sectorBase;
     Supabase.instance.client
         .from('red_direcciones')
-        .select('nombre, municipio, sector')
+        .select('id, nombre, municipio, sector_id, precio, sectores(nombre, precio_global)')
         .eq('activo', true)
-        .order('sector', ascending: true)
         .order('nombre', ascending: true)
         .then((data) {
       redDireccionesCompleta = List<Map<String, dynamic>>.from(data);
       redDireccionesCentral = redDireccionesCompleta
-          .map((e) {
-            final sector = e['sector']?.toString();
-            final etiqueta = sector != null && sector.isNotEmpty
-                ? '${e['nombre']} · $sector'
-                : '${e['nombre']} (${e['municipio']})';
-            return etiqueta;
-          })
+          .map((e) => e['nombre'].toString().toUpperCase())
           .toList();
     });
 
@@ -224,6 +219,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                   },
                   onSelected: (local) {
                     origenController.text = (local['nombre'] ?? '').toString();
+                    final newLocalId = local['id'] as int?;
                     setDialogState(() {
                       origenLatCapturada = local['lat_fija'] != null
                           ? (local['lat_fija'] as num).toDouble()
@@ -231,7 +227,23 @@ extension CentralScreenFormularios on _CentralScreenState {
                       origenLngCapturada = local['lng_fija'] != null
                           ? (local['lng_fija'] as num).toDouble()
                           : null;
+                      localPreciosRed = {};
                     });
+                    if (newLocalId != null) {
+                      Supabase.instance.client
+                          .from('red_dir_precios_local')
+                          .select('direccion_id, precio')
+                          .eq('local_id', newLocalId)
+                          .then((lp) {
+                        final Map<int, int> mapa = {};
+                        for (final row in List<Map<String, dynamic>>.from(lp)) {
+                          final did = row['direccion_id'] as int?;
+                          final p   = row['precio'] as int?;
+                          if (did != null && p != null) mapa[did] = p;
+                        }
+                        localPreciosRed = mapa;
+                      });
+                    }
                   },
                   fieldViewBuilder:
                       (context, fieldController, focusNode, onFieldSubmitted) {
@@ -351,72 +363,99 @@ extension CentralScreenFormularios on _CentralScreenState {
                     prefixIcon: const Icon(Icons.flag, size: 18),
                   ),
                   onChanged: (texto) {
+                    // ── Preservar precio si el usuario añade detalles ──
+                    if (destinoBase != null &&
+                        texto.toUpperCase().startsWith(destinoBase!)) {
+                      setDialogState(() => sugerenciasDestino = []);
+                      return;
+                    }
+                    if (sectorBase != null &&
+                        texto.toLowerCase().contains(sectorBase!.toLowerCase())) {
+                      setDialogState(() => sugerenciasDestino = []);
+                      return;
+                    }
+                    destinoBase = null;
+                    sectorBase  = null;
+
                     if (texto.length < 2) {
                       setDialogState(() => sugerenciasDestino = []);
                       return;
                     }
                     final t = texto.toLowerCase();
-                    setDialogState(() {
-                      sugerenciasDestino = redDireccionesCompleta
-                          .where((d) {
-                            final nombre = (d['nombre'] ?? '').toString().toLowerCase();
-                            final sector = (d['sector'] ?? '').toString().toLowerCase();
-                            return nombre.contains(t) || sector.contains(t);
-                          })
-                          .take(6)
-                          .map((d) {
-                            final sector = d['sector']?.toString();
-                            return sector != null && sector.isNotEmpty
-                                ? '${d['nombre']} · $sector'
-                                : '${d['nombre']} (${d['municipio']})';
-                          })
-                          .toList();
-                    });
+                    final palabras = t.split(RegExp(r'\s+')).where((w) => w.length > 2).toList();
+
+                    final List<Map<String, dynamic>> encontradas = [];
+                    for (final d in redDireccionesCompleta) {
+                      final nombre  = (d['nombre'] ?? '').toString().toLowerCase();
+                      final sec     = d['sectores'] as Map<String, dynamic>?;
+                      final secNom  = (sec?['nombre'] ?? '').toString().toLowerCase();
+                      final coincide = nombre.contains(t) || secNom.contains(t) ||
+                          palabras.any((w) => nombre.contains(w) || secNom.contains(w));
+                      if (!coincide) continue;
+                      final id = d['id'] as int;
+                      final int? precio = localPreciosRed[id] ??
+                          (d['precio'] as int?) ??
+                          (sec?['precio_global'] as int?);
+                      encontradas.add({'id': id, 'nombre': d['nombre'].toString().toUpperCase(), 'precio': precio});
+                      if (encontradas.length >= 6) break;
+                    }
+                    setDialogState(() => sugerenciasDestino = encontradas);
                   },
                 ),
 
-                // Sugerencias de la red de direcciones (agrupadas con sector)
+                // Sugerencias de la red de direcciones (con precio si disponible)
                 if (sugerenciasDestino.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(top: 6, bottom: 4),
                     child: Wrap(
                       spacing: 8,
                       runSpacing: 6,
-                      children: sugerenciasDestino.map((zona) {
-                        // El nombre limpio es la parte antes del ' · ' o ' ('
-                        final nombreLimpio = zona.contains(' · ')
-                            ? zona.split(' · ')[0].trim()
-                            : zona.contains(' (')
-                                ? zona.split(' (')[0].trim()
-                                : zona;
-                        final esSector = zona.contains(' · ');
+                      children: sugerenciasDestino.map((sug) {
+                        final nombre = sug['nombre'].toString();
+                        final int? precio = sug['precio'] as int?;
+                        String? precioStr;
+                        if (precio != null) {
+                          String r = ''; int c = 0;
+                          final s = precio.toString();
+                          for (int i = s.length - 1; i >= 0; i--) {
+                            r = s[i] + r; c++;
+                            if (c == 3 && i > 0) { r = '.$r'; c = 0; }
+                          }
+                          precioStr = '\$$r';
+                        }
                         return InkWell(
                           onTap: () {
-                            destinoController.text = '$nombreLimpio - ';
+                            destinoBase = nombre;
+                            sectorBase  = null;
+                            destinoController.text = '$nombre - ';
+                            if (precioStr != null)
+                              tarifaController.text = precioStr;
                             setDialogState(() => sugerenciasDestino = []);
                           },
                           child: Container(
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 10, vertical: 7),
                             decoration: BoxDecoration(
-                              color: esSector ? Colors.blue[50] : Colors.grey[100],
+                              color: precio != null ? Colors.blue[50] : Colors.grey[100],
                               borderRadius: BorderRadius.circular(6),
                               border: Border.all(
-                                  color: esSector ? Colors.blue[200]! : Colors.grey[400]!),
+                                  color: precio != null ? Colors.blue[200]! : Colors.grey[400]!),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Icon(Icons.location_city,
-                                    color: esSector ? Colors.blue[600] : Colors.grey[600],
+                                    color: precio != null ? Colors.blue[600] : Colors.grey[600],
                                     size: 14),
                                 const SizedBox(width: 4),
-                                Text(zona,
-                                    style: TextStyle(
-                                      color: esSector ? Colors.blue[900] : Colors.grey[800],
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
-                                    )),
+                                Text(
+                                  precioStr != null ? '$nombre ($precioStr)' : nombre,
+                                  style: TextStyle(
+                                    color: precio != null ? Colors.blue[900] : Colors.grey[800],
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
                               ],
                             ),
                           ),

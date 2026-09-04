@@ -466,6 +466,8 @@ class _FormularioTabState extends State<_FormularioTab> {
   List<Map<String, dynamic>> _sectoresSede = []; // sectores con nombre y precio
   double? _precioSugerido; // precio de la dirección seleccionada de la red
   int? _redDireccionSelId; // id del registro seleccionado (negativo = sector)
+  String? _destinoBase; // dirección exacta de la red que se seleccionó (para permitir añadir detalles)
+  String? _sectorBase; // nombre del sector seleccionado (para conservar precio al seguir escribiendo)
   // Sugerencias de autocomplete (filtradas al escribir)
   List<Map<String, dynamic>> _sugerencias = [];
 
@@ -486,7 +488,31 @@ class _FormularioTabState extends State<_FormularioTab> {
   void _onDestinoCtrlChange() {
     if (!mounted || _seleccionandoDestino) return;
     final v = _destinoCtrl.text;
+
+    // Si hay una dirección base (red) seleccionada y el texto aún empieza con ella,
+    // conservar precio pero seguir buscando sectores en el texto adicional
+    if (_destinoBase != null && v.toUpperCase().startsWith(_destinoBase!)) {
+      final extra = v.substring(_destinoBase!.length).trim();
+      final sectores = extra.length >= 3
+          ? _filtrarDirecciones(extra)
+              .where((s) => s['tipo'] == 'sector')
+              .toList()
+          : <Map<String, dynamic>>[];
+      setState(() => _sugerencias = sectores);
+      return;
+    }
+
+    // Si hay un sector seleccionado y el texto aún lo contiene, conservar precio
+    if (_sectorBase != null &&
+        v.toLowerCase().contains(_sectorBase!.toLowerCase())) {
+      setState(() => _sugerencias = []);
+      return;
+    }
+
+    // El texto cambió completamente — limpiar selección y buscar de nuevo
     setState(() {
+      _destinoBase = null;
+      _sectorBase = null;
       _redDireccionSelId = null;
       _precioSugerido = null;
       _sugerencias = v.trim().isEmpty ? [] : _filtrarDirecciones(v);
@@ -1073,6 +1099,8 @@ class _FormularioTabState extends State<_FormularioTab> {
         _conDatafono = false;
         _precioSugerido = null;
         _redDireccionSelId = null;
+        _destinoBase = null;
+        _sectorBase = null;
         _sugerencias = [];
         _movilPreselId = null;
         _movilPreselNum = null;
@@ -1398,8 +1426,13 @@ class _FormularioTabState extends State<_FormularioTab> {
                                 : dir['id'] as int;
                             _precioSugerido = precio;
                             if (!esSector) {
-                              _destinoCtrl.text =
+                              _destinoBase =
                                   dir['direccion'].toString().toUpperCase();
+                              _destinoCtrl.text = _destinoBase!;
+                              _sectorBase = null;
+                            } else {
+                              _destinoBase = null;
+                              _sectorBase = dir['nombre'].toString().toLowerCase();
                             }
                             _sugerencias = [];
                           });

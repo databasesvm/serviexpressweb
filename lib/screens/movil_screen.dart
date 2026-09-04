@@ -289,18 +289,29 @@ class _MovilScreenState extends State<MovilScreen>
           return;
         }
 
-        // Suprimimos el banner del sistema (el radar ya muestra el servicio),
-        // pero disparamos el sonido de alerta para que el piloto se entere
-        // aunque tenga la pantalla encendida y la app abierta.
-        // Solo si está conectado y no suspendido — desconectados/suspendidos
-        // no deben escuchar el sonido ni ver headsup de FN.
+        // Suprimimos el banner del sistema en todos los casos y reproducimos
+        // el sonido correcto según el tipo de push.
         event.preventDefault();
-        if (mounted && _estaEnLinea && !_estabaSuspendido) {
-          _sonidos.reproducir(Sonidos.alerta);
-          // El teléfono acaba de despertar → aprovechar para verificar si
-          // el móvil sigue dentro del radio del paradero. Crítico para
-          // usuarios web y teléfonos que no reciben el stream GPS en background.
-          _verificarGeocercaUnaVez();
+        if (mounted) {
+          switch (tipo) {
+            case 'descanso_aprobado':
+              _sonidos.reproducirSuave(Sonidos.movilConfirmar);
+              break;
+            case 'descanso_rechazado':
+              _sonidos.reproducirSuave(Sonidos.movilFinalizar);
+              break;
+            case 'chat_movil':
+              _sonidos.reproducirSuave(Sonidos.movilChatCentral);
+              break;
+            default:
+              // Nuevo servicio, asignación directa, suspensión, rehabilitación, etc.
+              // Solo si está conectado y no suspendido.
+              if (_estaEnLinea && !_estabaSuspendido) {
+                _sonidos.reproducir(Sonidos.alerta);
+                // El teléfono acaba de despertar → verificar geocerca del paradero.
+                _verificarGeocercaUnaVez();
+              }
+          }
         }
       };
       OneSignal.Notifications.addForegroundWillDisplayListener(_onForegroundNotif!);

@@ -603,6 +603,11 @@ Total entregados período: <strong>\$${_miles(totalDom)}</strong>
 
   // ── Exportar Tirillas (PDF) ────────────────────────────────────────────────
   Future<void> _exportarTirillas() async {
+    // Capturar el listado ANTES de cambiar estado — evita que un setState
+    // durante la exportación (p.ej. _exportando = true) vacíe _filtrados.
+    final servicios = List<Map<String, dynamic>>.from(_filtrados);
+    if (servicios.isEmpty) return;
+
     setState(() => _exportando = true);
     try {
       final fecha = _fecha(DateTime.now().toIso8601String(), corta: true);
@@ -631,7 +636,7 @@ Total entregados período: <strong>\$${_miles(totalDom)}</strong>
       const chico = 6.5;
       const titulo = 9.5;
 
-      for (final s in _filtrados) {
+      for (final s in servicios) {
         final consecutivo = s['fn_consecutivo']?.toString() ?? '#${s['id']}';
         final facturaNum = s['fn_factura_numero']?.toString() ?? '—';
         final movil = _movilNumero(s);
@@ -869,7 +874,7 @@ Total entregados período: <strong>\$${_miles(totalDom)}</strong>
                 _btnExport('Relación', Icons.picture_as_pdf_outlined, const Color(0xFFB91C1C),
                     filtrados.isEmpty ? null : _exportarRelacion),
                 const SizedBox(width: 8),
-                _btnExport('Tirillas PDF', Icons.receipt_long, const Color(0xFF7C3AED),
+                _btnExport('Tirillas (${filtrados.length})', Icons.receipt_long, const Color(0xFF7C3AED),
                     filtrados.isEmpty ? null : _exportarTirillas),
               ],
       ),

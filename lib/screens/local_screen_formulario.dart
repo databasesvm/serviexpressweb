@@ -356,10 +356,11 @@ mixin _FormularioMixin on State<LocalScreen> {
   }) async {
     // --- CONSULTA ESPEJO CON "MI LOCAL" ---
     List<Map<String, dynamic>> listaPrecios = [];
-    List<String> redDirecciones = []; // zonas de la red central (sin precio)
+    List<Map<String, dynamic>> redDirecciones = []; // red global con precios
+    Map<int, int> localPreciosRed = {}; // direccion_id → precio local
 
     // ---> LIBERADO: Ahora descarga la lista también cuando es Cotización <---
-    // Las dos queries corren en PARALELO para reducir la espera a la mitad
+    // Las tres queries corren en PARALELO para reducir la espera
     if (!esPuntoAPunto) {
       try {
         final results = await Future.wait([
@@ -370,23 +371,36 @@ mixin _FormularioMixin on State<LocalScreen> {
               .order('tarifa', ascending: true),
           Supabase.instance.client
               .from('red_direcciones')
-              .select('nombre, municipio')
+              .select('id, nombre, municipio, sector_id, precio, sectores(nombre, municipio, precio_global)')
               .eq('activo', true)
               .order('nombre', ascending: true),
+          Supabase.instance.client
+              .from('red_dir_precios_local')
+              .select('direccion_id, precio')
+              .eq('local_id', widget.usuario['id']),
         ]);
 
         listaPrecios = List<Map<String, dynamic>>.from(results[0]);
 
-        // Excluir las que ya están en la lista propia (no duplicar)
+        // Construir mapa de precios locales por dirección
+        for (final lp in List<Map<String, dynamic>>.from(results[2])) {
+          final did = lp['direccion_id'] as int?;
+          final p   = lp['precio'] as int?;
+          if (did != null && p != null) localPreciosRed[did] = p;
+        }
+
+        // Excluir las que ya están en la lista propia (no duplicar por sector)
         final propias = listaPrecios.map((e) {
           final s = e['sectores'] as Map<String, dynamic>?;
           if (s == null) return '';
           return '${s['nombre']} (${s['municipio']})'.toUpperCase();
         }).toSet();
-        redDirecciones = List<Map<String, dynamic>>.from(results[1])
-            .map((e) => '${e['nombre']} (${e['municipio']})')
-            .where((nombre) => !propias.contains(nombre.toUpperCase()))
-            .toList();
+        redDirecciones = List<Map<String, dynamic>>.from(results[1]).where((d) {
+          final sec = d['sectores'] as Map<String, dynamic>?;
+          if (sec == null) return true;
+          final sLabel = '${sec['nombre']} (${sec['municipio']})'.toUpperCase();
+          return !propias.contains(sLabel);
+        }).toList();
       } catch (_) {}
     }
 
@@ -414,7 +428,9 @@ mixin _FormularioMixin on State<LocalScreen> {
     String tiempoPreparacion = 'Inmediato';
 
     List<Map<String, dynamic>> sugerenciasListaPrecios = [];
-    List<String> sugerenciasRed = []; // sugerencias de la red (sin precio)
+    List<Map<String, dynamic>> sugerenciasRed = []; // sugerencias de la red con precio
+    String? destinoBase; // dirección exacta seleccionada (preserva precio al escribir detalles)
+    String? sectorBase;  // sector seleccionado (preserva precio al escribir detalles)
 
     showDialog(
       context: context,
@@ -799,12 +815,24 @@ mixin _FormularioMixin on State<LocalScreen> {
                   onChanged: (texto) {
                     if (esPuntoAPunto) return;
 
+                    // ── Preservar precio si el usuario solo añade detalles ──
+                    if (destinoBase != null &&
+                        texto.toUpperCase().startsWith(destinoBase!)) {
+                      setDialogState(() { sugerenciasListaPrecios = []; sugerenciasRed = []; });
+                      return;
+                    }
+                    if (sectorBase != null &&
+                        texto.toLowerCase().contains(sectorBase!.toLowerCase())) {
+                      setDialogState(() { sugerenciasListaPrecios = []; sugerenciasRed = []; });
+                      return;
+                    }
+                    // Cambio real → resetear base
+                    destinoBase = null;
+                    sectorBase  = null;
+
                     String textoLimpio = texto.toLowerCase();
                     if (textoLimpio.length < 2) {
-                      setDialogState(() {
-                        sugerenciasListaPrecios = [];
-                        sugerenciasRed = [];
-                      });
+                      setDialogState(() { sugerenciasListaPrecios = []; sugerenciasRed = []; });
                       return;
                     }
 
@@ -833,19 +861,28 @@ mixin _FormularioMixin on State<LocalScreen> {
                         encontradas.add({
                           'palabra': '${sec['nombre']} (${sec['municipio']})'.toUpperCase(),
                           'tarifaStr': '\$$result',
+                          'sectorName': sec['nombre'].toString().toLowerCase(),
                         });
                       }
                     }
 
-                    // --- Sugerencias de red (sin precio, en gris) ---
-                    List<String> redEncontradas = redDirecciones
-                        .where((nombre) {
-                          String n = nombre.toLowerCase();
-                          return n.contains(textoLimpio) ||
-                              palabrasDigitadas.any((w) => n.contains(w));
-                        })
-                        .take(3)
-                        .toList();
+                    // --- Sugerencias de red (con precio si disponible) ---
+                    List<Map<String, dynamic>> redEncontradas = [];
+                    for (final d in redDirecciones) {
+                      final nombre   = (d['nombre'] ?? '').toString().toLowerCase();
+                      final sec      = d['sectores'] as Map<String, dynamic>?;
+                      final secNom   = (sec?['nombre'] ?? '').toString().toLowerCase();
+                      final coincide = nombre.contains(textoLimpio) ||
+                          secNom.contains(textoLimpio) ||
+                          palabrasDigitadas.any((w) => nombre.contains(w) || secNom.contains(w));
+                      if (!coincide) continue;
+                      final id = d['id'] as int;
+                      final int? precio = localPreciosRed[id] ??
+                          (d['precio'] as int?) ??
+                          (sec?['precio_global'] as int?);
+                      redEncontradas.add({'id': id, 'nombre': d['nombre'].toString().toUpperCase(), 'precio': precio});
+                      if (redEncontradas.length >= 4) break;
+                    }
 
                     setDialogState(() {
                       sugerenciasListaPrecios = encontradas.take(3).toList();
@@ -877,10 +914,13 @@ mixin _FormularioMixin on State<LocalScreen> {
                             children: sugerenciasListaPrecios.map((sug) =>
                               InkWell(
                                 onTap: () {
+                                  final palabra = sug['palabra'].toString();
                                   if (!esCotizacion)
                                     tarifaController.text = sug['tarifaStr'];
-                                  if (destinoController.text.length <= sug['palabra'].toString().length)
-                                    destinoController.text = '${sug['palabra']} - ';
+                                  if (destinoController.text.length <= palabra.length)
+                                    destinoController.text = '$palabra - ';
+                                  destinoBase = null;
+                                  sectorBase  = sug['sectorName']?.toString();
                                   setDialogState(() {
                                     sugerenciasListaPrecios = [];
                                     sugerenciasRed = [];
@@ -910,52 +950,66 @@ mixin _FormularioMixin on State<LocalScreen> {
                           ),
                         ],
 
-                        // --- SUGERENCIAS DE LA RED (sin precio, gris) ---
+                        // --- SUGERENCIAS DE LA RED (con precio si disponible) ---
                         if (sugerenciasRed.isNotEmpty) ...[
                           if (sugerenciasListaPrecios.isNotEmpty) const SizedBox(height: 8),
                           const Text(
                             '🌐 Zona de la red:',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.black45,
-                              fontWeight: FontWeight.bold,
-                            ),
+                            style: TextStyle(fontSize: 12, color: Colors.black45, fontWeight: FontWeight.bold),
                           ),
                           const SizedBox(height: 6),
                           Wrap(
                             spacing: 8,
                             runSpacing: 8,
-                            children: sugerenciasRed.map((nombre) =>
-                              InkWell(
+                            children: sugerenciasRed.map((sug) {
+                              final nombre = sug['nombre'].toString();
+                              final int? precio = sug['precio'] as int?;
+                              String? precioStr;
+                              if (precio != null) {
+                                String r = '';
+                                int c = 0;
+                                final s = precio.toString();
+                                for (int i = s.length - 1; i >= 0; i--) {
+                                  r = s[i] + r; c++;
+                                  if (c == 3 && i > 0) { r = '.$r'; c = 0; }
+                                }
+                                precioStr = '\$$r';
+                              }
+                              return InkWell(
                                 onTap: () {
+                                  destinoBase = nombre;
+                                  sectorBase  = null;
                                   if (destinoController.text.length <= nombre.length)
                                     destinoController.text = '$nombre - ';
-                                  setDialogState(() {
-                                    sugerenciasListaPrecios = [];
-                                    sugerenciasRed = [];
-                                  });
+                                  if (precioStr != null && !esCotizacion)
+                                    tarifaController.text = precioStr;
+                                  setDialogState(() { sugerenciasListaPrecios = []; sugerenciasRed = []; });
                                 },
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                                   decoration: BoxDecoration(
-                                    color: Colors.grey[100],
+                                    color: precio != null ? Colors.blue[50] : Colors.grey[100],
                                     borderRadius: BorderRadius.circular(6),
-                                    border: Border.all(color: Colors.grey[400]!),
+                                    border: Border.all(color: precio != null ? Colors.blue[300]! : Colors.grey[400]!),
                                   ),
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      Icon(Icons.location_city, color: Colors.grey[600], size: 14),
+                                      Icon(Icons.location_city, color: precio != null ? Colors.blue[700] : Colors.grey[600], size: 14),
                                       const SizedBox(width: 4),
                                       Text(
-                                        nombre,
-                                        style: TextStyle(color: Colors.grey[700], fontWeight: FontWeight.w600, fontSize: 11),
+                                        precioStr != null ? '$nombre ($precioStr)' : nombre,
+                                        style: TextStyle(
+                                          color: precio != null ? Colors.blue[900] : Colors.grey[700],
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 11,
+                                        ),
                                       ),
                                     ],
                                   ),
                                 ),
-                              ),
-                            ).toList(),
+                              );
+                            }).toList(),
                           ),
                         ],
                       ],

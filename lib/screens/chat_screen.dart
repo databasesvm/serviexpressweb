@@ -883,6 +883,7 @@ class _ChatScreenState extends State<ChatScreen> {
         urgente: false,
         sonido: 'movil_chat_central',
         canalAndroidId: MotorNotificaciones.canalChatMovilId,
+        data: {'tipo': 'chat_movil'},
       );
     }
   }

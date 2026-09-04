@@ -731,28 +731,80 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
   void _verRegistroDialog(Map<String, dynamic> u) {
     final plan = u['tipo_plan_movil']?.toString() ?? '';
     final numMovil = u['numero_movil']?.toString() ?? '';
-    Widget _docImg(String? url, String label) {
+
+    // Abre imagen a pantalla completa al tocar
+    void _verImagen(BuildContext ctx, String url) {
+      showDialog(
+        context: ctx,
+        builder: (_) => Dialog(
+          backgroundColor: Colors.black,
+          insetPadding: const EdgeInsets.all(8),
+          child: GestureDetector(
+            onTap: () => Navigator.pop(ctx),
+            child: InteractiveViewer(
+              child: Image.network(url, fit: BoxFit.contain),
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Selfie grande con tap para ampliar
+    Widget _selfieWidget(String? url) {
       if (url == null || url.isEmpty) {
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 12),
-          child: Row(children: [
-            const Icon(Icons.image_not_supported_rounded, color: Colors.white24, size: 16),
-            const SizedBox(width: 6),
-            Text('$label: no subido', style: const TextStyle(color: Colors.white30, fontSize: 12)),
-          ]),
+        return Container(
+          height: 180,
+          decoration: BoxDecoration(
+            color: Colors.white10,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: const Center(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.no_photography_rounded, color: Colors.white24, size: 32),
+              SizedBox(height: 6),
+              Text('Selfie no subida', style: TextStyle(color: Colors.white30, fontSize: 12)),
+            ]),
+          ),
         );
       }
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 12),
+      return GestureDetector(
+        onTap: () => _verImagen(context, url),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Image.network(url, height: 180, width: double.infinity, fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => Container(
+              height: 80, color: Colors.white10,
+              child: const Center(child: Text('No se pudo cargar', style: TextStyle(color: Colors.white30, fontSize: 11))),
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Doc pequeño en grid (tap para ampliar)
+    Widget _docGrid(String? url, String label) {
+      if (url == null || url.isEmpty) {
+        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(label, style: const TextStyle(color: Colors.white38, fontSize: 10)),
+          const SizedBox(height: 4),
+          Container(
+            height: 100,
+            decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(8)),
+            child: const Center(child: Icon(Icons.image_not_supported_rounded, color: Colors.white24, size: 20)),
+          ),
+        ]);
+      }
+      return GestureDetector(
+        onTap: () => _verImagen(context, url),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(label, style: const TextStyle(color: Colors.white54, fontSize: 11)),
+          Text(label, style: const TextStyle(color: Colors.white54, fontSize: 10)),
           const SizedBox(height: 4),
           ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: Image.network(url, height: 160, width: double.infinity, fit: BoxFit.cover,
+            borderRadius: BorderRadius.circular(8),
+            child: Image.network(url, height: 100, width: double.infinity, fit: BoxFit.cover,
               errorBuilder: (_, __, ___) => Container(
-                height: 60, color: Colors.white10,
-                child: const Center(child: Text('No se pudo cargar', style: TextStyle(color: Colors.white30, fontSize: 11))),
+                height: 100, color: Colors.white10,
+                child: const Center(child: Text('Error', style: TextStyle(color: Colors.white30, fontSize: 10))),
               ),
             ),
           ),
@@ -768,6 +820,7 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(20),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            // ── Header ──
             Row(children: [
               const Icon(Icons.person_search_rounded, color: Colors.lightBlueAccent, size: 20),
               const SizedBox(width: 8),
@@ -777,8 +830,21 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                   onPressed: () => Navigator.pop(ctx), padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(minWidth: 24, minHeight: 24)),
             ]),
-            const Divider(color: Colors.white12, height: 20),
+            const SizedBox(height: 14),
+
+            // ── Selfie de verificación (destacada) ──
+            const Text('📸 Selfie de verificación',
+                style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 6),
+            _selfieWidget(u['doc_perfil_url']?.toString()),
+            const SizedBox(height: 16),
+            const Divider(color: Colors.white12, height: 1),
+            const SizedBox(height: 14),
+
             // ── Datos básicos ──
+            const Text('Datos del registro',
+                style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 10),
             _infoRow(Icons.badge_rounded, 'Usuario', '@${u['usuario'] ?? '—'}'),
             _infoRow(Icons.phone_rounded, 'Teléfono', u['telefono']?.toString() ?? '—'),
             _infoRow(Icons.email_rounded, 'Correo', u['correo']?.toString() ?? '—'),
@@ -787,15 +853,28 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
             if (plan.isNotEmpty)
               _infoRow(Icons.work_rounded, 'Plan', plan.toUpperCase()),
             _infoRow(Icons.people_rounded, 'Rol', u['rol']?.toString().toUpperCase() ?? '—'),
-            const SizedBox(height: 12),
-            // ── Documentos ──
-            const Text('Documentación', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            _docImg(u['doc_perfil_url']?.toString(), '📸 Selfie de verificación'),
-            _docImg(u['doc_cedula_url']?.toString(), '🪪 Cédula'),
-            _docImg(u['doc_licencia_url']?.toString(), '🚗 Licencia de conducción'),
-            _docImg(u['doc_soat_url']?.toString(), '🛡️ SOAT'),
-            const SizedBox(height: 4),
+            const SizedBox(height: 16),
+            const Divider(color: Colors.white12, height: 1),
+            const SizedBox(height: 14),
+
+            // ── Documentos en grid 2 columnas ──
+            const Text('Documentos de identidad',
+                style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 10),
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Expanded(child: _docGrid(u['doc_cedula_url']?.toString(), '🪪 Cédula')),
+              const SizedBox(width: 10),
+              Expanded(child: _docGrid(u['doc_licencia_url']?.toString(), '🚗 Licencia')),
+            ]),
+            const SizedBox(height: 10),
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Expanded(child: _docGrid(u['doc_soat_url']?.toString(), '🛡️ SOAT')),
+              const SizedBox(width: 10),
+              const Expanded(child: SizedBox()), // espacio vacío si solo hay 3 docs
+            ]),
+            const SizedBox(height: 16),
+
+            // ── Botones ──
             Row(mainAxisAlignment: MainAxisAlignment.end, children: [
               TextButton(onPressed: () => Navigator.pop(ctx),
                   child: const Text('Cerrar', style: TextStyle(color: Colors.white54))),

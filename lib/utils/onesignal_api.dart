@@ -111,6 +111,7 @@ class MotorNotificaciones {
     bool urgente = true,
     String sonido = 'alerta',
     String? canalAndroidId,
+    Map<String, dynamic>? data,
   }) async {
     if (idDestino == 'null' || idDestino.isEmpty) return;
     await _enviarPush(
@@ -123,6 +124,7 @@ class MotorNotificaciones {
         'android_sound': sonido,
         'ios_sound': '$sonido.mp3',
         if (urgente) 'existing_android_channel_id': canalAndroidId ?? _canalAlarmaId,
+        if (data != null) 'data': data,
       },
     );
   }

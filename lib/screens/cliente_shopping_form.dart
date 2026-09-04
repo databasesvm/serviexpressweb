@@ -27,11 +27,97 @@ class _ClienteShoppingFormState extends State<ClienteShoppingForm> {
   bool _requiereCotizacion = true;
   double _tarifaSugerida = 0.0;
 
+  List<Map<String, dynamic>> _redDirecciones = [];
+  List<Map<String, dynamic>> _sugerenciasDestino = [];
+  String? _destinoBase;
+  String? _sectorDestinoBase;
+
   @override
   void initState() {
     super.initState();
     _telContactoCtrl.text = widget.usuario['telefono']?.toString() ?? '';
     _precargarUbicaciones();
+    _cargarRedDirecciones();
+  }
+
+  Future<void> _cargarRedDirecciones() async {
+    try {
+      final data = await Supabase.instance.client
+          .from('red_direcciones')
+          .select('id, nombre, municipio, sector_id, precio, sectores(nombre, precio_global)')
+          .eq('activo', true)
+          .order('nombre');
+      if (mounted) setState(() => _redDirecciones = List<Map<String, dynamic>>.from(data));
+    } catch (_) {}
+  }
+
+  void _onDestinoChanged(String texto) {
+    if (_destinoBase != null && texto.toUpperCase().startsWith(_destinoBase!)) {
+      if (_sugerenciasDestino.isNotEmpty) setState(() => _sugerenciasDestino = []);
+      return;
+    }
+    if (_sectorDestinoBase != null && texto.toLowerCase().contains(_sectorDestinoBase!.toLowerCase())) {
+      if (_sugerenciasDestino.isNotEmpty) setState(() => _sugerenciasDestino = []);
+      return;
+    }
+    _destinoBase = null; _sectorDestinoBase = null;
+    if (texto.length < 2) { if (_sugerenciasDestino.isNotEmpty) setState(() => _sugerenciasDestino = []); return; }
+    final t = texto.toLowerCase();
+    final palabras = t.split(RegExp(r'\s+')).where((w) => w.length > 2).toList();
+    final List<Map<String, dynamic>> enc = [];
+    for (final d in _redDirecciones) {
+      final n = (d['nombre'] ?? '').toString().toLowerCase();
+      final sec = d['sectores'] as Map<String, dynamic>?;
+      final sn = (sec?['nombre'] ?? '').toString().toLowerCase();
+      final ok = n.contains(t) || sn.contains(t) || palabras.any((w) => n.contains(w) || sn.contains(w));
+      if (!ok) continue;
+      final int? precio = (d['precio'] as int?) ?? (sec?['precio_global'] as int?);
+      enc.add({'id': d['id'], 'nombre': d['nombre'].toString().toUpperCase(), 'precio': precio});
+      if (enc.length >= 5) break;
+    }
+    setState(() => _sugerenciasDestino = enc);
+  }
+
+  Widget _buildSugerenciasDestino() {
+    if (_sugerenciasDestino.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, bottom: 4),
+      child: Wrap(
+        spacing: 8, runSpacing: 6,
+        children: _sugerenciasDestino.map((sug) {
+          final nombre = sug['nombre'].toString();
+          final int? precio = sug['precio'] as int?;
+          String? precioStr;
+          if (precio != null) {
+            String r = ''; int c = 0; final s = precio.toString();
+            for (int i = s.length - 1; i >= 0; i--) { r = s[i] + r; c++; if (c == 3 && i > 0) { r = '.$r'; c = 0; } }
+            precioStr = '\$$r';
+          }
+          return InkWell(
+            onTap: () {
+              _destinoBase = nombre; _sectorDestinoBase = null;
+              _destinoCtrl.text = '$nombre - ';
+              if (precio != null) { _tarifaSugerida = precio.toDouble(); _requiereCotizacion = false; }
+              setState(() => _sugerenciasDestino = []);
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              decoration: BoxDecoration(
+                color: precio != null ? Colors.blue[50] : Colors.grey[100],
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: precio != null ? Colors.blue[200]! : Colors.grey[300]!),
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.location_city, color: precio != null ? Colors.blue[700] : Colors.grey[600], size: 13),
+                const SizedBox(width: 4),
+                Text(precioStr != null ? '$nombre ($precioStr)' : nombre,
+                  style: TextStyle(color: precio != null ? Colors.blue[900] : Colors.grey[700], fontSize: 11, fontWeight: FontWeight.w600)),
+              ]),
+            ),
+          );
+        }).toList(),
+      ),
+    );
   }
 
   Future<void> _precargarUbicaciones() async {
@@ -377,6 +463,7 @@ class _ClienteShoppingFormState extends State<ClienteShoppingForm> {
               hijos: [
                 TextFormField(
                   controller: _destinoCtrl,
+                  onChanged: _onDestinoChanged,
                   decoration: InputDecoration(
                     labelText: 'Dirección donde recibes',
                     border: const OutlineInputBorder(),
@@ -388,6 +475,7 @@ class _ClienteShoppingFormState extends State<ClienteShoppingForm> {
                   ),
                   validator: (v) => v!.isEmpty ? 'Requerido' : null,
                 ),
+                _buildSugerenciasDestino(),
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _telContactoCtrl,
