@@ -396,18 +396,17 @@ class _FormularioTabState extends State<_FormularioTab> {
 
   /// Recargo en COP según distancia sede solicitante → sede extra de recogida
   double _recargoPorKm(double km) {
-    if (km < 2) return 3000;
-    if (km < 5) return 4000;
-    if (km < 6) return 6000;
-    if (km < 7) return 7000;
-    if (km < 8) return 8000;
-    if (km < 10) return 10000;
-    if (km < 11) return 12000;
-    if (km < 12) return 13000;
-    if (km < 13) return 14000;
-    if (km < 14) return 15000;
-    // >14 km: +$1.000 por cada km adicional
-    return 15000 + ((km - 13).floor() * 1000).toDouble();
+    if (km < 2)  return 3000;
+    if (km < 3)  return 4000;
+    if (km < 4)  return 6000;
+    if (km < 5)  return 8000;
+    if (km < 6)  return 10000;
+    if (km < 7)  return 12000;
+    if (km < 8)  return 14000;
+    if (km < 9)  return 16000;
+    if (km < 10) return 18000;
+    // >10 km: +$2.000 por cada km adicional sobre los 9
+    return 18000 + ((km - 9).floor() * 2000).toDouble();
   }
 
   /// Sedes FN de recogida adicionales (excluye la sede solicitante)
@@ -448,6 +447,10 @@ class _FormularioTabState extends State<_FormularioTab> {
     if (_haySedesExtraSinCoordenadas) return null;
     return _precioSugerido! + _recargoSedesExtra + (_conDatafono ? _recargoDaatafonoCOP : 0);
   }
+
+  /// Recargo parcial (sedes extra + datáfono) incluso sin precio sugerido de destino
+  double get _recargoParcial =>
+      _recargoSedesExtra + (_conDatafono ? _recargoDaatafonoCOP : 0);
 
   // Sedes disponibles para seleccionar como recogida
   List<Map<String, dynamic>> _sedesDisponibles = [];
@@ -882,6 +885,9 @@ class _FormularioTabState extends State<_FormularioTab> {
                 if (_conDatafono) 'recargo_datafono': _recargoDaatafonoCOP,
               },
             },
+            // Recargo parcial pre-calculado (sedes extra + datáfono) cuando no hay precio destino
+            if (!usaPrecioSugerido && _recargoParcial > 0)
+              'fn_recargo_calculado': _recargoParcial.round(),
             // Móvil preseleccionado desde "Nuevo servicio con este móvil"
             if (_movilPreselId != null && usaPrecioSugerido) ...{
               'movil_id': int.tryParse(_movilPreselId!),
@@ -1351,6 +1357,92 @@ class _FormularioTabState extends State<_FormularioTab> {
                       );
                     }).toList(),
                   ),
+                ),
+
+              // ── Recargo parcial (sin precio destino) ─────────────────────────
+              if (_precioSugerido == null && _recargoParcial > 0)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Builder(builder: (_) {
+                    final extras = _sedesExtraRecogida;
+                    final sLat = (widget.sede?['lat'] as num?)?.toDouble();
+                    final sLng = (widget.sede?['lng'] as num?)?.toDouble();
+                    return Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.amber[900]!.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.amber[700]!),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Row(children: [
+                            Icon(Icons.calculate_outlined,
+                                color: Colors.amber, size: 14),
+                            SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                'Recargo calculado (sin precio destino):',
+                                style: TextStyle(
+                                    color: Colors.amber,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ]),
+                          const SizedBox(height: 6),
+                          // Recargo por cada sede extra
+                          ...extras.map((r) {
+                            final rLat = (r['lat'] as num?)?.toDouble();
+                            final rLng = (r['lng'] as num?)?.toDouble();
+                            double recargo = 0;
+                            String dist = '';
+                            if (sLat != null && sLng != null &&
+                                rLat != null && rLng != null) {
+                              final km = _haversineKm(sLat, sLng, rLat, rLng);
+                              recargo = _recargoPorKm(km);
+                              dist = ' (${km.toStringAsFixed(1)} km)';
+                            }
+                            final nombre =
+                                r['tipo'] == 'FN' && r['numero'] != null
+                                    ? 'FN${r['numero']}'
+                                    : r['nombre']?.toString() ?? 'Sede extra';
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 3),
+                              child: Text(
+                                '+\$${_miles(recargo.toInt())} recogida $nombre$dist',
+                                style: const TextStyle(
+                                    color: Colors.indigoAccent,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold),
+                              ),
+                            );
+                          }),
+                          // Datáfono
+                          if (_conDatafono)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 3),
+                              child: Text(
+                                '+\$${_miles(_recargoDaatafonoCOP)} datáfono',
+                                style: const TextStyle(
+                                    color: Colors.amberAccent,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          const Divider(height: 10, color: Colors.amber),
+                          Text(
+                            'Subtotal: \$${_miles(_recargoParcial.toInt())} + precio al destino (central cotiza)',
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
                 ),
 
               // ── Precio sugerido (tras seleccionar) ─────────────────────────
@@ -1924,26 +2016,24 @@ class _ActivosTabState extends State<_ActivosTab> {
       final km = _haversine(sLat, sLng, rLat, rLng) / 1000;
       if (km < 2) {
         total += 3000;
-      } else if (km < 5) {
+      } else if (km < 3) {
         total += 4000;
-      } else if (km < 6) {
+      } else if (km < 4) {
         total += 6000;
-      } else if (km < 7) {
-        total += 7000;
-      } else if (km < 8) {
+      } else if (km < 5) {
         total += 8000;
-      } else if (km < 10) {
+      } else if (km < 6) {
         total += 10000;
-      } else if (km < 11) {
+      } else if (km < 7) {
         total += 12000;
-      } else if (km < 12) {
-        total += 13000;
-      } else if (km < 13) {
+      } else if (km < 8) {
         total += 14000;
-      } else if (km < 14) {
-        total += 15000;
+      } else if (km < 9) {
+        total += 16000;
+      } else if (km < 10) {
+        total += 18000;
       } else {
-        total += 15000 + ((km - 13).floor() * 1000);
+        total += 18000 + ((km - 9).floor() * 2000);
       }
     }
     return total;

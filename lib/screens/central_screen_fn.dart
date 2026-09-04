@@ -37,9 +37,6 @@ extension CentralScreenFn on _CentralScreenState {
   // ── Diálogo cotización FN — llamado desde el monitor con servicio FN sede ──
   Future<void> _mostrarDialogoCotizacionFn(
       Map<String, dynamic> servicio) async {
-    final tarifaCtrl = TextEditingController(
-      text: servicio['tarifa']?.toString() ?? '',
-    );
     final int? serviceId = servicio['id'] is int
         ? servicio['id'] as int
         : int.tryParse(servicio['id']?.toString() ?? '');
@@ -60,11 +57,20 @@ extension CentralScreenFn on _CentralScreenState {
     final altaDemanda = servicio['fn_alta_demanda'] == true;
     final recotizacion = (servicio['fn_recotizacion'] as int?) ?? 1;
 
+    // Recargo pre-calculado por la sede (sedes extra + datáfono, sin precio destino)
+    final recargoCalculado = (servicio['fn_recargo_calculado'] as num?)?.toInt();
+
     // Precio sugerido si viene de renegociación
     final precioSugerido = (servicio['fn_precio_sugerido_sede'] as num?)?.toInt();
-    if (precioSugerido != null && tarifaCtrl.text.isEmpty) {
-      tarifaCtrl.text = precioSugerido.toString();
+
+    // Pre-poblar tarifa: renegociación > recargo calculado > vacío
+    String tarifaInicial = servicio['tarifa']?.toString() ?? '';
+    if (tarifaInicial.isEmpty && precioSugerido != null) {
+      tarifaInicial = precioSugerido.toString();
+    } else if (tarifaInicial.isEmpty && recargoCalculado != null && recargoCalculado > 0) {
+      tarifaInicial = recargoCalculado.toString();
     }
+    final tarifaCtrl = TextEditingController(text: tarifaInicial);
 
     bool guardarEnRed = false;
 
@@ -206,6 +212,35 @@ extension CentralScreenFn on _CentralScreenState {
                 const SizedBox(height: 16),
                 const Divider(),
                 const SizedBox(height: 8),
+
+                // Recargo pre-calculado por la sede (sin precio destino)
+                if (recargoCalculado != null && recargoCalculado > 0 &&
+                    servicio['tarifa'] == null)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.all(9),
+                    decoration: BoxDecoration(
+                      color: Colors.amber[50],
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: Colors.amber[400]!),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.calculate_outlined,
+                            size: 15, color: Colors.orange),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            'La sede ya calculó \$${_milesStr(recargoCalculado)} (sedes extra + datáfono). '
+                            'Solo falta el precio al destino — el campo ya incluye este valor como punto de partida.',
+                            style: const TextStyle(
+                                fontSize: 11, color: Colors.orange),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
 
                 // Campo tarifa
                 TextField(
