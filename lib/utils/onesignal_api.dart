@@ -36,12 +36,35 @@ class MotorNotificaciones {
   static const String _edgeFnUrl =
       'https://oukiofdtargjrclualgm.supabase.co/functions/v1/send-notification';
 
-  // v2: ID nuevo — canal fresco con alerta.mp3 (ver ServiMotoApp.kt)
-  // El ID viejo (a26379a9) quedó sin sonido porque Android bloquea cambios en canales existentes.
-  // CHANNEL_ZONA_ID (serviexpress_zona_v2) solo lo usa el cron SQL — no se referencia aquí.
-  static const String _canalAlarmaId = 'serviexpress_alerta_v2';
-  // Canal exclusivo de pánico — reproduce panico.mp3 con IMPORTANCIA MÁXIMA
-  static const String canalPanicoId = 'serviexpress_panico_v1';
+  // ── CANALES ANDROID (deben coincidir con ServiMotoApp.kt) ───────────────
+  // Alertas de servicio (alerta.mp3) — T=0 para no-masters, paradero, cascada
+  static const String _canalAlarmaId       = 'serviexpress_alerta_v2';
+  // Pánico (panico.mp3)
+  static const String canalPanicoId        = 'serviexpress_panico_v1';
+  // Masters rango MASTER — sonido suave (master.mp3)
+  static const String canalMasterId        = 'serviexpress_master_v1';
+  // Inactividad 5h45min (movil_inactividad.mp3)
+  static const String canalInactividadId   = 'serviexpress_inactividad_v1';
+  // Chat hacia el móvil (movil_chat_central.mp3)
+  static const String canalChatMovilId     = 'serviexpress_chat_movil_v1';
+  // Chat hacia la central (central_chat.mp3)
+  static const String canalChatCentralId   = 'serviexpress_chat_central_v1';
+  // Chat hacia el local (local_chat.mp3)
+  static const String canalChatLocalId     = 'serviexpress_chat_local_v1';
+  // Central: nueva cotización (central_cotizacion.mp3)
+  static const String canalCotizacionId    = 'serviexpress_cotizacion_v1';
+  // Central: radar (central_radar.mp3)
+  static const String canalRadarId         = 'serviexpress_radar_v1';
+  // Central: demora (central_demora.mp3)
+  static const String canalDemoraId        = 'serviexpress_demora_v1';
+  // Central: problema (central_problema.mp3)
+  static const String canalProblemaId      = 'serviexpress_problema_v1';
+  // Central: caducado (central_caducado.mp3)
+  static const String canalCaducadoId      = 'serviexpress_caducado_v1';
+  // Central: cancelado (central_cancelado.mp3)
+  static const String canalCanceladoId     = 'serviexpress_cancelado_v1';
+  // FN / Local / Cliente: respuesta de cotización (fn_cotizacion.mp3)
+  static const String canalFnCotizacionId  = 'serviexpress_fn_cotizacion_v1';
 
   // -----------------------------------------------------------------------
   // 1. RÁFAGA DE PRECISIÓN — A múltiples destinos de un golpe
@@ -115,6 +138,7 @@ class MotorNotificaciones {
     required String mensaje,
     bool urgente = true,
     String sonido = 'alerta',
+    String? canalAndroidId,
   }) async {
     await _enviarPush(
       body: {
@@ -127,7 +151,8 @@ class MotorNotificaciones {
         'priority': 10,
         'android_sound': sonido,
         'ios_sound': '$sonido.mp3',
-        if (urgente) 'existing_android_channel_id': _canalAlarmaId,
+        if (urgente || canalAndroidId != null)
+          'existing_android_channel_id': canalAndroidId ?? _canalAlarmaId,
       },
     );
   }
@@ -142,6 +167,8 @@ class MotorNotificaciones {
     int minutosRetardo = 0,
     int segundosRetardo = 0,
     String sonido = 'alerta',
+    /// Override del canal Android. Por defecto usa _canalAlarmaId.
+    String? canalAndroidId,
   }) async {
     if (externalIds.isEmpty) return null;
 
@@ -165,7 +192,7 @@ class MotorNotificaciones {
         'priority': 10,
         'android_sound': sonido,
         'ios_sound': '$sonido.mp3',
-        'existing_android_channel_id': _canalAlarmaId,
+        'existing_android_channel_id': canalAndroidId ?? _canalAlarmaId,
         'send_after': formatGMT,
       },
     );

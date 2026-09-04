@@ -83,6 +83,7 @@ mixin _CardsMixin on State<LocalScreen> {
         mensaje: '${widget.usuario['nombre']} canceló el pedido #$id.',
         urgente: false,
         sonido: 'central_cancelado',
+        canalAndroidId: MotorNotificaciones.canalCanceladoId,
       );
     } catch (e) {
       if (mounted) {

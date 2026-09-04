@@ -290,8 +290,9 @@ class _ServiMotoTaskHandler extends TaskHandler {
                     'Llevas 5h45min sin tomar servicios. Serás desconectado en $_kProrrogaMinutos min si no hay actividad.',
               },
               'priority': 7,
-              // Sin existing_android_channel_id → usa sonido suave del sistema,
-              // no el canal de alarma. El moto lo distingue de un servicio nuevo.
+              'android_sound': 'movil_inactividad',
+              'ios_sound': 'movil_inactividad.mp3',
+              'existing_android_channel_id': 'serviexpress_inactividad_v1',
               'data': {'tipo': 'aviso_inactividad_push'},
             },
           );

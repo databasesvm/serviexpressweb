@@ -770,13 +770,14 @@ class _FormularioTabState extends State<_FormularioTab> {
       final titulo = '🔵 FN $consec';
       final msg = '\$${_miles(tarifa)} → $destino';
 
-      // ── FASE 1 (T=0): Masters — push inmediato, aceptan voluntariamente ────
+      // ── FASE 1 (T=0): Masters — push inmediato con canal master ────────────
       if (masterIds.isNotEmpty) {
         await MotorNotificaciones.programarMisilRetardado(
           externalIds: masterIds,
           titulo: titulo,
           mensaje: msg,
-          sonido: Sonidos.fnCotizacion,
+          sonido: 'master',
+          canalAndroidId: MotorNotificaciones.canalMasterId,
         );
       }
 
@@ -1008,6 +1009,7 @@ class _FormularioTabState extends State<_FormularioTab> {
                 : 'Cotizar para ${_destinoCtrl.text.trim()}',
         urgente: true,
         sonido: Sonidos.fnCotizacion,
+        canalAndroidId: MotorNotificaciones.canalFnCotizacionId,
       );
 
       // Si tiene precio sugerido → notificar o lanzar cascada
@@ -1929,6 +1931,7 @@ class _ActivosTabState extends State<_ActivosTab> {
           mensaje: '${_labelSede(s)} aprobó. Móvil asignado directo.',
           urgente: false,
           sonido: Sonidos.fnCotizacion,
+          canalAndroidId: MotorNotificaciones.canalFnCotizacionId,
         );
         return;
       }
@@ -2082,6 +2085,7 @@ class _ActivosTabState extends State<_ActivosTab> {
         mensaje: '${_labelSede(s)} aprobó. Enviando al radar FN.',
         urgente: false,
         sonido: Sonidos.fnCotizacion,
+        canalAndroidId: MotorNotificaciones.canalFnCotizacionId,
       );
     } catch (e) {
       _snack('Error: \$e');
@@ -2281,6 +2285,7 @@ class _ActivosTabState extends State<_ActivosTab> {
                       mensaje: '${_labelSede(s)} propone \$${precioCtrl.text}',
                       urgente: false,
                       sonido: Sonidos.fnCotizacion,
+                      canalAndroidId: MotorNotificaciones.canalFnCotizacionId,
                     );
                   } else {
                     await _db.from('servicios').update({
@@ -2416,6 +2421,7 @@ class _ActivosTabState extends State<_ActivosTab> {
                           mensaje: nota.isNotEmpty ? '$cat: $nota' : cat,
                           urgente: true,
                           sonido: Sonidos.fnCotizacion,
+                          canalAndroidId: MotorNotificaciones.canalFnCotizacionId,
                         );
                         _snack('Queja enviada a la central.');
                       } catch (e) {

@@ -868,19 +868,35 @@ class _MovilScreenState extends State<MovilScreen>
       final local = p['local_nombre']?.toString() ?? 'local';
       final msgAlerta = '🔄 Domicilio liberado — busca nuevo móvil para: $local';
 
-      // T=0: Masters + Central
+      // T=0: Central (alerta) + Masters rango MASTER (sonido master)
       final mastersData = await db
           .from('usuarios')
-          .select('id')
+          .select('id, rol, rango_movil')
           .or('rol.eq.central,rol.eq.master,rango_movil.eq.MASTER')
           .eq('activo', true)
           .neq('suspendido', true);
-      final masterIds = mastersData.map((u) => u['id'].toString()).toList();
-      if (masterIds.isNotEmpty) {
+      final centralIds = mastersData
+          .where((u) => u['rol'] == 'central' || u['rol'] == 'master')
+          .map<String>((u) => u['id'].toString()).toList();
+      final masterMobileIds = mastersData
+          .where((u) => u['rango_movil'] == 'MASTER' && u['rol'] != 'central' && u['rol'] != 'master')
+          .map<String>((u) => u['id'].toString()).toList();
+      if (centralIds.isNotEmpty) {
         await MotorNotificaciones.dispararRafa(
-          idsDestinos: masterIds,
+          idsDestinos: centralIds,
           titulo: '🔄 DOMICILIO SIN MÓVIL',
           mensaje: msgAlerta,
+          urgente: true,
+        );
+      }
+      if (masterMobileIds.isNotEmpty) {
+        await MotorNotificaciones.dispararRafa(
+          idsDestinos: masterMobileIds,
+          titulo: '🔄 DOMICILIO SIN MÓVIL',
+          mensaje: msgAlerta,
+          urgente: true,
+          sonido: 'master',
+          canalAndroidId: MotorNotificaciones.canalMasterId,
         );
       }
 
@@ -894,7 +910,7 @@ class _MovilScreenState extends State<MovilScreen>
           .not('paradero_actual', 'is', null);
       final paraderoIds = enParaderoData
           .map((u) => u['id'].toString())
-          .where((id) => id != movilId?.toString() && !masterIds.contains(id))
+          .where((id) => id != movilId?.toString() && !masterMobileIds.contains(id))
           .toList();
       if (paraderoIds.isNotEmpty) {
         await MotorNotificaciones.programarMisilRetardado(
@@ -908,7 +924,7 @@ class _MovilScreenState extends State<MovilScreen>
       // T=60s: todos los disponibles — misil server-side
       {
         final todosD = await db.from('usuarios').select('id').eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true);
-        final idsTodosD = todosD.map((u) => u['id'].toString()).where((id) => !masterIds.contains(id)).toList();
+        final idsTodosD = todosD.map((u) => u['id'].toString()).where((id) => !masterMobileIds.contains(id)).toList();
         if (idsTodosD.isNotEmpty) {
           final id60sD = await MotorNotificaciones.programarMisilRetardado(
             externalIds: idsTodosD,
@@ -3572,6 +3588,7 @@ class _MovilScreenState extends State<MovilScreen>
                     '${movilLabel(widget.usuario)} cerró el servicio #$servicioId con demora.',
                 urgente: true,
                 sonido: 'central_demora',
+                canalAndroidId: MotorNotificaciones.canalDemoraId,
               );
 
               _ultimaActividadUtc = DateTime.now().toUtc();
@@ -3744,6 +3761,7 @@ class _MovilScreenState extends State<MovilScreen>
               '${movilLabel(widget.usuario)} cerró el servicio #$servicioId con PROBLEMA.',
           urgente: true,
           sonido: 'central_problema',
+          canalAndroidId: MotorNotificaciones.canalProblemaId,
         );
       }
 
@@ -10398,14 +10416,15 @@ class _MovilScreenState extends State<MovilScreen>
         final fase3IdsFn =
             noMasterIdsFn.where((id) => id != fase2IdFn).toList();
 
-        // FASE 1 (T=0)
+        // FASE 1 (T=0) — canal master (sonido menos invasivo para MASTER)
         if (masterIdsFn.isNotEmpty) {
           await MotorNotificaciones.dispararRafa(
             idsDestinos: masterIdsFn,
             titulo: '👑 TURNO FN LIBERADO — MASTER',
             mensaje: 'Servicio Farmanorte reiniciado · $zonaFn',
             urgente: true,
-            sonido: Sonidos.movilParadero,
+            sonido: 'master',
+            canalAndroidId: MotorNotificaciones.canalMasterId,
           );
         }
 
@@ -10455,17 +10474,32 @@ class _MovilScreenState extends State<MovilScreen>
 
         final mastersData = await Supabase.instance.client
             .from('usuarios')
-            .select('id')
+            .select('id, rol, rango_movil')
             .or('rol.eq.central,rol.eq.master,rango_movil.eq.MASTER')
             .eq('activo', true)
             .neq('suspendido', true);
-        final masterIds =
-            mastersData.map((u) => u['id'].toString()).toList();
-        if (masterIds.isNotEmpty) {
+        final centralIds2 = mastersData
+            .where((u) => u['rol'] == 'central' || u['rol'] == 'master')
+            .map<String>((u) => u['id'].toString()).toList();
+        final masterMobileIds2 = mastersData
+            .where((u) => u['rango_movil'] == 'MASTER' && u['rol'] != 'central' && u['rol'] != 'master')
+            .map<String>((u) => u['id'].toString()).toList();
+        if (centralIds2.isNotEmpty) {
           await MotorNotificaciones.dispararRafa(
-            idsDestinos: masterIds,
+            idsDestinos: centralIds2,
             titulo: '👑 SERVICIO LIBERADO',
             mensaje: msgAlerta,
+            urgente: true,
+          );
+        }
+        if (masterMobileIds2.isNotEmpty) {
+          await MotorNotificaciones.dispararRafa(
+            idsDestinos: masterMobileIds2,
+            titulo: '👑 SERVICIO LIBERADO',
+            mensaje: msgAlerta,
+            urgente: true,
+            sonido: 'master',
+            canalAndroidId: MotorNotificaciones.canalMasterId,
           );
         }
 
@@ -10475,7 +10509,7 @@ class _MovilScreenState extends State<MovilScreen>
             : exclusivoStr
                 .split(',')
                 .map((e) => e.trim())
-                .where((e) => e.isNotEmpty && !masterIds.contains(e))
+                .where((e) => e.isNotEmpty && !masterMobileIds2.contains(e))
                 .toList();
 
         if (paraderoIds.isNotEmpty) {
@@ -10506,7 +10540,7 @@ class _MovilScreenState extends State<MovilScreen>
             .not('rango_movil', 'in', '("MASTER")');
         final idsZona60 = movilesLib.where((u) {
           final id = u['id'].toString();
-          if (masterIds.contains(id) || paraderoIds.contains(id))
+          if (masterMobileIds2.contains(id) || paraderoIds.contains(id))
             return false;
           if (origLat == null || origLng == null) return true;
           final uLat = (u['latitud'] as num?)?.toDouble();
@@ -10518,7 +10552,7 @@ class _MovilScreenState extends State<MovilScreen>
         }).map((u) => u['id'].toString()).toList();
         final idsTodos90 = movilesLib
             .map((u) => u['id'].toString())
-            .where((id) => !masterIds.contains(id))
+            .where((id) => !masterMobileIds2.contains(id))
             .toList();
         String? idLib60;
         String? idLib90;

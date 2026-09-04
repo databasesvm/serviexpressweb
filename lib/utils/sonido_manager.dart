@@ -53,6 +53,8 @@ class Sonidos {
 
   // MÓVIL
   static const String alerta = 'alerta';
+  static const String master = 'master';                   // Push suave para rango MASTER
+  static const String movilInactividad = 'movil_inactividad'; // Aviso 5h45min sin servicios
   static const String movilChatCliente = 'movil_chat_cliente';
   static const String movilChatCentral = 'movil_chat_central';
   static const String movilConfirmar = 'movil_confirmar';

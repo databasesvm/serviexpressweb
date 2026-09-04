@@ -73,6 +73,21 @@ extension CentralScreenFn on _CentralScreenState {
     final tarifaCtrl = TextEditingController(text: tarifaInicial);
 
     bool guardarEnRed = false;
+    String? movilPreselId;
+
+    // Cargar móviles conectados para selector de pre-asignación
+    List<Map<String, dynamic>> movilesConectados = [];
+    try {
+      final raw = await Supabase.instance.client
+          .from('usuarios')
+          .select('id, numero_movil, nombre')
+          .eq('rol', 'movil')
+          .eq('en_linea', true)
+          .eq('activo', true)
+          .neq('suspendido', true)
+          .order('numero_movil');
+      movilesConectados = List<Map<String, dynamic>>.from(raw as List);
+    } catch (_) {}
 
     await showDialog(
       context: context,
@@ -255,6 +270,41 @@ extension CentralScreenFn on _CentralScreenState {
                   ),
                 ),
 
+                // Selector: pre-asignar móvil (opcional)
+                if (movilesConectados.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  const Divider(height: 1),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<String>(
+                    value: movilPreselId,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: '🎯 Pre-asignar móvil (opcional)',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                      helperText: 'Si la sede aprueba, va directo a este móvil',
+                      helperStyle: TextStyle(fontSize: 10),
+                    ),
+                    items: [
+                      const DropdownMenuItem<String>(
+                        value: null,
+                        child: Text('— Sin pre-asignación (cascada normal) —',
+                            style: TextStyle(fontSize: 12, color: Colors.black54)),
+                      ),
+                      ...movilesConectados.map((m) {
+                        final num = m['numero_movil']?.toString() ?? '?';
+                        final nombre = m['nombre']?.toString() ?? '';
+                        return DropdownMenuItem<String>(
+                          value: m['id'].toString(),
+                          child: Text('Móvil$num — $nombre',
+                              style: const TextStyle(fontSize: 13)),
+                        );
+                      }),
+                    ],
+                    onChanged: (v) => setD(() => movilPreselId = v),
+                  ),
+                ],
+
                 // Toggle: guardar en red de direcciones
                 const SizedBox(height: 10),
                 SwitchListTile(
@@ -296,7 +346,7 @@ extension CentralScreenFn on _CentralScreenState {
               final tarifa = int.tryParse(tarifaCtrl.text.trim());
               if (tarifa == null || tarifa <= 0) return;
               Navigator.pop(ctx);
-              await _enviarCotizacionFn(serviceId, tarifa);
+              await _enviarCotizacionFn(serviceId, tarifa, movilPreselId: movilPreselId);
 
               // Guardar en red de direcciones si el toggle está activo
               if (guardarEnRed) {
@@ -356,11 +406,14 @@ extension CentralScreenFn on _CentralScreenState {
   }
 
   // ── Enviar cotización a la sede ─────────────────────────────────────────
-  Future<void> _enviarCotizacionFn(int serviceId, int tarifa) async {
+  Future<void> _enviarCotizacionFn(int serviceId, int tarifa,
+      {String? movilPreselId}) async {
     try {
       await Supabase.instance.client.from('servicios').update({
         'estado': 'cotizada',
         'tarifa': tarifa,
+        if (movilPreselId != null)
+          'fn_movil_preseleccionado_id': int.tryParse(movilPreselId),
       }).eq('id', serviceId);
 
       // Notificar a la sede FN
@@ -387,8 +440,9 @@ extension CentralScreenFn on _CentralScreenState {
               idDestino: userSede['id'].toString(),
               titulo: '✅ Cotización lista — $consec',
               mensaje: 'La central cotizó tu servicio en \$${_milesStr(tarifa)}',
-              urgente: true,
+              urgente: false,
               sonido: Sonidos.fnCotizacion,
+              canalAndroidId: MotorNotificaciones.canalFnCotizacionId,
             );
           }
         }

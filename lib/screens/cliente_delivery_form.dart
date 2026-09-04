@@ -300,6 +300,9 @@ class _ClienteDeliveryFormState extends State<ClienteDeliveryForm> {
           mensaje: 'Paquetería desde ${_dirOrigenCtrl.text.trim().toUpperCase()}',
           urgente: true,
           sonido: _requiereCotizacion ? 'central_cotizacion' : 'central_radar',
+          canalAndroidId: _requiereCotizacion
+              ? MotorNotificaciones.canalCotizacionId
+              : MotorNotificaciones.canalRadarId,
         );
       } catch (e) {
         debugPrint('Error OneSignal central: $e');

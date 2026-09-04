@@ -10,15 +10,37 @@ import android.os.Build
 class ServiMotoApp : Application() {
 
     companion object {
-        // v2: IDs nuevos — garantizan que Android crea el canal FRESCO con
-        // alerta.mp3. Los IDs viejos (a26379a9 / 63802a9e) quedaron sin sonido
-        // porque Android bloquea cambios en canales ya registrados.
-        const val CHANNEL_ALERTA_ID = "serviexpress_alerta_v2"
-        const val CHANNEL_ZONA_ID   = "serviexpress_zona_v2"
-        // Canal exclusivo de pánico — reproduce panico.mp3
-        const val CHANNEL_PANICO_ID = "serviexpress_panico_v1"
-        // Canal por defecto de OneSignal (Dashboard y pushes sin canal explícito)
+        // ── CANALES EXISTENTES ───────────────────────────────────────────────
+        const val CHANNEL_ALERTA_ID         = "serviexpress_alerta_v2"
+        const val CHANNEL_ZONA_ID           = "serviexpress_zona_v2"
+        const val CHANNEL_PANICO_ID         = "serviexpress_panico_v1"
         const val CHANNEL_ONESIGNAL_DEFAULT = "OneSignal_channel_id"
+
+        // ── CANALES NUEVOS ───────────────────────────────────────────────────
+        // Masters (rango MASTER) — sonido más suave, reciben muchas alertas
+        const val CHANNEL_MASTER_ID         = "serviexpress_master_v1"
+        // Aviso de inactividad 5h45min al móvil
+        const val CHANNEL_INACTIVIDAD_ID    = "serviexpress_inactividad_v1"
+        // Chat: móvil recibe mensaje de central o cliente
+        const val CHANNEL_CHAT_MOVIL_ID     = "serviexpress_chat_movil_v1"
+        // Chat: central recibe mensaje de móvil, local o cliente
+        const val CHANNEL_CHAT_CENTRAL_ID   = "serviexpress_chat_central_v1"
+        // Chat: local recibe mensaje
+        const val CHANNEL_CHAT_LOCAL_ID     = "serviexpress_chat_local_v1"
+        // Central: nueva cotización recibida
+        const val CHANNEL_COTIZACION_ID     = "serviexpress_cotizacion_v1"
+        // Central: radar activo
+        const val CHANNEL_RADAR_ID          = "serviexpress_radar_v1"
+        // Central: demora reportada
+        const val CHANNEL_DEMORA_ID         = "serviexpress_demora_v1"
+        // Central: problema reportado
+        const val CHANNEL_PROBLEMA_ID       = "serviexpress_problema_v1"
+        // Central: servicio caducado
+        const val CHANNEL_CADUCADO_ID       = "serviexpress_caducado_v1"
+        // Central: servicio cancelado
+        const val CHANNEL_CANCELADO_ID      = "serviexpress_cancelado_v1"
+        // FN / Local / Cliente: respuesta de cotización
+        const val CHANNEL_FN_COTIZACION_ID  = "serviexpress_fn_cotizacion_v1"
     }
 
     override fun onCreate() {
@@ -26,97 +48,74 @@ class ServiMotoApp : Application() {
         registrarCanalesNotificacion()
     }
 
+    private fun uri(nombre: String): Uri =
+        Uri.parse("android.resource://$packageName/raw/$nombre")
+
+    private fun audioAttr(): AudioAttributes = AudioAttributes.Builder()
+        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+        .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+        .build()
+
+    private fun crearCanal(
+        id: String,
+        nombre: String,
+        descripcion: String,
+        importancia: Int,
+        sonidoUri: Uri,
+        vibracion: Boolean = true,
+        luces: Boolean = true,
+    ): NotificationChannel = NotificationChannel(id, nombre, importancia).apply {
+        this.description = descripcion
+        setSound(sonidoUri, audioAttr())
+        enableVibration(vibracion)
+        enableLights(luces)
+        setShowBadge(true)
+        lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+    }
+
     private fun registrarCanalesNotificacion() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-
         val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
 
-        // URI → res/raw/alerta.mp3 (sin extensión)
-        val alertaUri: Uri = Uri.parse("android.resource://$packageName/raw/alerta")
-        val audioAttr: AudioAttributes = AudioAttributes.Builder()
-            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-            .setUsage(AudioAttributes.USAGE_NOTIFICATION)
-            .build()
-
-        // IMPORTANTE: Android bloquea cambios de sonido en canales ya registrados.
-        // Solución: borrar canales previos antes de recrearlos con alerta.mp3.
-        // Los canales v2 son IDs nuevos (nunca existieron) — no necesitan delete.
-        // OneSignal_channel_id SÍ necesita delete porque el SDK lo crea sin sonido.
-        // También limpiamos los IDs viejos si quedan en el sistema.
+        // Limpiar canales obsoletos (Android bloquea cambios de sonido en canales ya registrados)
         listOf(
-            CHANNEL_ONESIGNAL_DEFAULT,               // SDK de OneSignal lo crea sin sonido
-            "a26379a9-df0b-4d1e-8679-20ee949f7c59", // ID viejo CHANNEL_ALERTA
-            "63802a9e-afed-4b02-83b8-55376cea49f0"  // ID viejo CHANNEL_ZONA
+            CHANNEL_ONESIGNAL_DEFAULT,
+            "a26379a9-df0b-4d1e-8679-20ee949f7c59",
+            "63802a9e-afed-4b02-83b8-55376cea49f0"
         ).forEach { nm.deleteNotificationChannel(it) }
 
-        val panicoUri: Uri = Uri.parse("android.resource://$packageName/raw/panico")
-        val audioAttrPanico: AudioAttributes = AudioAttributes.Builder()
-            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-            .setUsage(AudioAttributes.USAGE_NOTIFICATION)
-            .build()
+        val HI  = NotificationManager.IMPORTANCE_HIGH
+        val MED = NotificationManager.IMPORTANCE_DEFAULT
 
-        // Canal ALERTA CRÍTICA (v2) — T=0, paradero, misiles, +2min/+5min
-        // ID nuevo → se crea fresco, Android aplica alerta.mp3 sin restricciones
-        val canalAlerta = NotificationChannel(
-            CHANNEL_ALERTA_ID,
-            "Alertas de Servicio",
-            NotificationManager.IMPORTANCE_HIGH
-        ).apply {
-            description = "Avisos urgentes de nuevos servicios disponibles."
-            setSound(alertaUri, audioAttr)
-            enableVibration(true)
-            enableLights(true)
-            setShowBadge(true)
-            lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
-        }
+        listOf(
+            // ── ALERTAS CRÍTICAS ────────────────────────────────────────────
+            crearCanal(CHANNEL_ALERTA_ID,        "Alertas de Servicio",     "Avisos urgentes de nuevos servicios.",          HI,  uri("alerta")),
+            crearCanal(CHANNEL_ZONA_ID,           "Alertas de Proximidad",   "Servicios en tu zona o global.",                HI,  uri("alerta")),
+            crearCanal(CHANNEL_PANICO_ID,         "Alertas de Pánico",       "Emergencias urgentes (pánico).",                HI,  uri("panico")),
+            // Recrea el default de OneSignal fresco antes de que el SDK lo registre sin sonido
+            crearCanal(CHANNEL_ONESIGNAL_DEFAULT, "Notificaciones",          "Notificaciones generales de ServiExpress.",     HI,  uri("alerta")),
 
-        // Canal ZONAL (v2) — cron Supabase +2min/+5min
-        val canalZona = NotificationChannel(
-            CHANNEL_ZONA_ID,
-            "Alertas de Proximidad",
-            NotificationManager.IMPORTANCE_HIGH
-        ).apply {
-            description = "Servicios disponibles en tu zona o a nivel global."
-            setSound(alertaUri, audioAttr)
-            enableVibration(true)
-            enableLights(true)
-            setShowBadge(true)
-            lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
-        }
+            // ── MASTERS ─────────────────────────────────────────────────────
+            crearCanal(CHANNEL_MASTER_ID,         "Alertas Master",          "Servicios disponibles — rango Master.",         HI,  uri("master")),
 
-        // Canal OneSignal default — Dashboard y pushes sin canal explícito.
-        // Recién borrado arriba → se recrea fresco con alerta.mp3 ANTES de
-        // que el SDK de OneSignal intente recrearlo sin sonido.
-        val canalOneSignalDefault = NotificationChannel(
-            CHANNEL_ONESIGNAL_DEFAULT,
-            "Notificaciones",
-            NotificationManager.IMPORTANCE_HIGH
-        ).apply {
-            description = "Notificaciones generales de ServiExpress."
-            setSound(alertaUri, audioAttr)
-            enableVibration(true)
-            enableLights(true)
-            setShowBadge(true)
-            lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
-        }
+            // ── INACTIVIDAD ─────────────────────────────────────────────────
+            crearCanal(CHANNEL_INACTIVIDAD_ID,    "Aviso de Inactividad",    "Recordatorio de sesión prolongada.",            MED, uri("movil_inactividad")),
 
-        // Canal PÁNICO — reproduce panico.mp3, prioridad máxima
-        val canalPanico = NotificationChannel(
-            CHANNEL_PANICO_ID,
-            "Alertas de Pánico",
-            NotificationManager.IMPORTANCE_HIGH
-        ).apply {
-            description = "Alertas de emergencia urgente (pánico)."
-            setSound(panicoUri, audioAttrPanico)
-            enableVibration(true)
-            enableLights(true)
-            setShowBadge(true)
-            lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
-        }
+            // ── CHAT ────────────────────────────────────────────────────────
+            crearCanal(CHANNEL_CHAT_MOVIL_ID,     "Chat — Móvil",            "Mensajes de chat recibidos por el móvil.",      MED, uri("movil_chat_central")),
+            crearCanal(CHANNEL_CHAT_CENTRAL_ID,   "Chat — Central",          "Mensajes de chat recibidos por la central.",    MED, uri("central_chat")),
+            crearCanal(CHANNEL_CHAT_LOCAL_ID,     "Chat — Local",            "Mensajes de chat recibidos por el local.",      MED, uri("local_chat")),
 
-        nm.createNotificationChannel(canalAlerta)
-        nm.createNotificationChannel(canalZona)
-        nm.createNotificationChannel(canalPanico)
-        nm.createNotificationChannel(canalOneSignalDefault)
+            // ── CENTRAL: EVENTOS OPERATIVOS ─────────────────────────────────
+            crearCanal(CHANNEL_COTIZACION_ID,     "Cotización",              "Nueva cotización recibida.",                    HI,  uri("central_cotizacion")),
+            crearCanal(CHANNEL_RADAR_ID,          "Radar",                   "Alerta de radar activo.",                       HI,  uri("central_radar")),
+            crearCanal(CHANNEL_DEMORA_ID,         "Demora",                  "Demora reportada en servicio.",                 HI,  uri("central_demora")),
+            crearCanal(CHANNEL_PROBLEMA_ID,       "Problema",                "Problema reportado en servicio.",               HI,  uri("central_problema")),
+            crearCanal(CHANNEL_CADUCADO_ID,       "Caducado",                "Servicio caducado sin asignar.",                HI,  uri("central_caducado")),
+            crearCanal(CHANNEL_CANCELADO_ID,      "Cancelado",               "Servicio cancelado.",                           HI,  uri("central_cancelado")),
+
+            // ── FN / LOCAL / CLIENTE ────────────────────────────────────────
+            crearCanal(CHANNEL_FN_COTIZACION_ID,  "Respuesta Cotización",    "Central respondió tu cotización.",              MED, uri("fn_cotizacion")),
+        ).forEach { nm.createNotificationChannel(it) }
     }
 }

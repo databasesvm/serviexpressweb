@@ -866,19 +866,23 @@ class _ChatScreenState extends State<ChatScreen> {
   void _enviarPush(String texto) {
     final preview = texto.length > 70 ? '${texto.substring(0, 70)}…' : texto;
     if (widget.miId != 0) {
+      // No-central escribe → push a la central con sonido de chat
       MotorNotificaciones.dispararACentral(
         titulo: '💬 ${widget.miNombre}',
         mensaje: preview,
         urgente: false,
         sonido: 'central_chat',
+        canalAndroidId: MotorNotificaciones.canalChatCentralId,
       );
     } else if (widget.destinatarioId != null) {
+      // Central escribe → push al destinatario (móvil o local) con sonido de chat
       MotorNotificaciones.dispararMisil(
         idDestino: widget.destinatarioId!.toString(),
         titulo: '💬 Central',
         mensaje: preview,
         urgente: false,
         sonido: 'movil_chat_central',
+        canalAndroidId: MotorNotificaciones.canalChatMovilId,
       );
     }
   }

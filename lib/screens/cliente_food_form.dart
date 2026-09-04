@@ -232,6 +232,9 @@ class _ClienteFoodFormState extends State<ClienteFoodForm> {
           mensaje: 'Pedido de COMIDA desde ${_restauranteCtrl.text.trim().toUpperCase()}',
           urgente: true,
           sonido: _requiereCotizacion ? 'central_cotizacion' : 'central_radar',
+          canalAndroidId: _requiereCotizacion
+              ? MotorNotificaciones.canalCotizacionId
+              : MotorNotificaciones.canalRadarId,
         );
       } catch (e) {
         debugPrint('Error OneSignal central: $e');
