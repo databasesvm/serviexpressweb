@@ -398,14 +398,14 @@ class _FormularioTabState extends State<_FormularioTab> {
 
   /// Recargo en COP según distancia sede solicitante → sede extra de recogida
   double _recargoPorKm(double km) {
-    if (km < 2)  return 3000;
-    if (km < 3)  return 4000;
-    if (km < 4)  return 6000;
-    if (km < 5)  return 8000;
-    if (km < 6)  return 10000;
-    if (km < 7)  return 12000;
-    if (km < 8)  return 14000;
-    if (km < 9)  return 16000;
+    if (km < 2) return 3000;
+    if (km < 3) return 4000;
+    if (km < 4) return 6000;
+    if (km < 5) return 8000;
+    if (km < 6) return 10000;
+    if (km < 7) return 12000;
+    if (km < 8) return 14000;
+    if (km < 9) return 16000;
     if (km < 10) return 18000;
     // >10 km: +$2.000 por cada km adicional sobre los 9
     return 18000 + ((km - 9).floor() * 2000).toDouble();
@@ -447,7 +447,9 @@ class _FormularioTabState extends State<_FormularioTab> {
   double? get _tarifaEfectiva {
     if (_precioSugerido == null) return null;
     if (_haySedesExtraSinCoordenadas) return null;
-    return _precioSugerido! + _recargoSedesExtra + (_conDatafono ? _recargoDaatafonoCOP : 0);
+    return _precioSugerido! +
+        _recargoSedesExtra +
+        (_conDatafono ? _recargoDaatafonoCOP : 0);
   }
 
   /// Recargo parcial (sedes extra + datáfono) incluso sin precio sugerido de destino
@@ -570,10 +572,7 @@ class _FormularioTabState extends State<_FormularioTab> {
             .from('fn_tarifas_sede')
             .select('sector_id, precio')
             .eq('sede_id', sedeId),
-        _db
-            .from('fn_sectores')
-            .select('id, nombre')
-            .eq('activo', true),
+        _db.from('fn_sectores').select('id, nombre').eq('activo', true),
       ]);
       if (!mounted) return;
       final data = results[0] as List;
@@ -617,11 +616,13 @@ class _FormularioTabState extends State<_FormularioTab> {
     final palabras = texto.toLowerCase().trim().split(RegExp(r'\s+'));
 
     // ── 1. Coincidencias exactas en red de direcciones ──────────────────────
-    final redMatches = _redDirecciones.where((dir) {
-      final haystack =
-          '${dir['nombre']} ${dir['direccion']}'.toLowerCase();
-      return palabras.every((p) => haystack.contains(p));
-    }).take(6).toList();
+    final redMatches = _redDirecciones
+        .where((dir) {
+          final haystack = '${dir['nombre']} ${dir['direccion']}'.toLowerCase();
+          return palabras.every((p) => haystack.contains(p));
+        })
+        .take(6)
+        .toList();
 
     // ── 2. Sugerencias por sector cuando alguna palabra coincide ────────────
     final sectorMatches = <Map<String, dynamic>>[];
@@ -642,7 +643,7 @@ class _FormularioTabState extends State<_FormularioTab> {
       if (coincide) {
         sectorMatches.add({
           'tipo': 'sector',
-          'id': sectorId,        // ID negativo para distinguir de fn_red_direcciones
+          'id': sectorId, // ID negativo para distinguir de fn_red_direcciones
           'nombre': sect['nombre'],
           'direccion': 'Sector ${sect['nombre']} — precio estimado',
           'precio': precio,
@@ -684,7 +685,8 @@ class _FormularioTabState extends State<_FormularioTab> {
       // 1. Móviles FN online
       final movilesData = await _db
           .from('usuarios')
-          .select('id, rango_movil, latitud, longitud, tipo_plan_movil, saldo_wallet')
+          .select(
+              'id, rango_movil, latitud, longitud, tipo_plan_movil, saldo_wallet')
           .eq('rol', 'movil')
           .eq('en_linea', true)
           .eq('activo', true)
@@ -694,14 +696,14 @@ class _FormularioTabState extends State<_FormularioTab> {
       // FN: sin límite de capacidad — todos los móviles FN reciben notificaciones
       // independientemente de cuántos servicios activos tengan.
       // Excepción: prediarios con saldo <= 0 no reciben nuevas alertas.
-      final moviles = List<Map<String, dynamic>>.from(movilesData as List)
-          .where((m) {
-            final plan = m['tipo_plan_movil']?.toString() ?? '';
-            if (plan == 'prediario') {
-              return ((m['saldo_wallet'] as num?)?.toDouble() ?? 0.0) > 0;
-            }
-            return true;
-          }).toList();
+      final moviles =
+          List<Map<String, dynamic>>.from(movilesData as List).where((m) {
+        final plan = m['tipo_plan_movil']?.toString() ?? '';
+        if (plan == 'prediario') {
+          return ((m['saldo_wallet'] as num?)?.toDouble() ?? 0.0) > 0;
+        }
+        return true;
+      }).toList();
 
       final masters = moviles
           .where((m) => m['rango_movil']?.toString().toUpperCase() == 'MASTER')
@@ -745,7 +747,8 @@ class _FormularioTabState extends State<_FormularioTab> {
 
       // 4. Fase 3: no-Masters dentro de 2km (excl. fase2)
       //    Fase 4: resto global (excl. fase2 y fase3)
-      final fase3Ids = noMasters.map<String>((m) => m['id'].toString()).where((id) {
+      final fase3Ids =
+          noMasters.map<String>((m) => m['id'].toString()).where((id) {
         if (id == fase2Id) return false;
         if (sLat == null || sLng == null) return false;
         final mData = noMasters.firstWhere(
@@ -806,9 +809,9 @@ class _FormularioTabState extends State<_FormularioTab> {
       // Solo los Masters ven la card in-app con detalles y botón aceptar
       // (el radar limita puedeVer = esMaster en FASE 4 — ver movil_screen.dart).
       final fase4Todos = [
-        ...fase3Ids,   // re-notificar los de 2km con alerta SIN CUBRIR
-        ...fase4Ids,   // no-Masters fuera de 2km
-        ...masterIds,  // Masters re-alertados para que actúen
+        ...fase3Ids, // re-notificar los de 2km con alerta SIN CUBRIR
+        ...fase4Ids, // no-Masters fuera de 2km
+        ...masterIds, // Masters re-alertados para que actúen
       ];
       String? id90s;
       if (fase4Todos.isNotEmpty) {
@@ -1166,8 +1169,7 @@ class _FormularioTabState extends State<_FormularioTab> {
                           ),
                           style: OutlinedButton.styleFrom(
                             side: const BorderSide(color: Colors.white54),
-                            padding:
-                                const EdgeInsets.symmetric(vertical: 6),
+                            padding: const EdgeInsets.symmetric(vertical: 6),
                           ),
                         ),
                       ),
@@ -1400,9 +1402,8 @@ class _FormularioTabState extends State<_FormularioTab> {
                             _sugerencias = [];
                           });
                           if (!esSector) {
-                            _destinoCtrl.selection =
-                                TextSelection.fromPosition(TextPosition(
-                                    offset: _destinoCtrl.text.length));
+                            _destinoCtrl.selection = TextSelection.fromPosition(
+                                TextPosition(offset: _destinoCtrl.text.length));
                           }
                           _seleccionandoDestino = false;
                         },
@@ -1418,9 +1419,7 @@ class _FormularioTabState extends State<_FormularioTab> {
                           ),
                           child: Row(children: [
                             Icon(
-                              esSector
-                                  ? Icons.map_outlined
-                                  : Icons.location_on,
+                              esSector ? Icons.map_outlined : Icons.location_on,
                               color: esSector
                                   ? Colors.indigoAccent
                                   : Colors.indigo,
@@ -1474,7 +1473,6 @@ class _FormularioTabState extends State<_FormularioTab> {
                   ),
                 ),
 
-
               // ── Recargo parcial (sin precio destino) ─────────────────────────
               if (_precioSugerido == null && _recargoParcial > 0)
                 Padding(
@@ -1492,8 +1490,10 @@ class _FormularioTabState extends State<_FormularioTab> {
                           final rLng = (r['lng'] as num?)?.toDouble();
                           double recargo = 0;
                           String dist = '';
-                          if (sLat != null && sLng != null &&
-                              rLat != null && rLng != null) {
+                          if (sLat != null &&
+                              sLng != null &&
+                              rLat != null &&
+                              rLng != null) {
                             final km = _haversineKm(sLat, sLng, rLat, rLng);
                             recargo = _recargoPorKm(km);
                             dist = ' (${km.toStringAsFixed(1)} km)';
@@ -1604,7 +1604,7 @@ class _FormularioTabState extends State<_FormularioTab> {
                               color: Colors.greenAccent, size: 14),
                           const SizedBox(width: 4),
                           Text(
-                            'Ruta: \$${_miles(_precioSugerido!.toInt())}',
+                            'Direccion Destino: \$${_miles(_precioSugerido!.toInt())}',
                             style: const TextStyle(
                                 color: Colors.greenAccent,
                                 fontSize: 11,
@@ -1617,15 +1617,18 @@ class _FormularioTabState extends State<_FormularioTab> {
                           final rLng = (r['lng'] as num?)?.toDouble();
                           double recargo = 0;
                           String dist = '';
-                          if (sLat != null && sLng != null &&
-                              rLat != null && rLng != null) {
+                          if (sLat != null &&
+                              sLng != null &&
+                              rLat != null &&
+                              rLng != null) {
                             final km = _haversineKm(sLat, sLng, rLat, rLng);
                             recargo = _recargoPorKm(km);
                             dist = ' (${km.toStringAsFixed(1)} km)';
                           }
-                          final nombre = r['tipo'] == 'FN' && r['numero'] != null
-                              ? 'FN${r['numero']}'
-                              : r['nombre']?.toString() ?? 'Sede extra';
+                          final nombre =
+                              r['tipo'] == 'FN' && r['numero'] != null
+                                  ? 'FN${r['numero']}'
+                                  : r['nombre']?.toString() ?? 'Sede extra';
                           return Padding(
                             padding: const EdgeInsets.only(top: 3),
                             child: Row(children: [
@@ -1682,8 +1685,7 @@ class _FormularioTabState extends State<_FormularioTab> {
                             child: Text(
                               'Directo sin cotización',
                               style: TextStyle(
-                                  color: Colors.greenAccent,
-                                  fontSize: 10),
+                                  color: Colors.greenAccent, fontSize: 10),
                             ),
                           ),
                       ],
@@ -1934,7 +1936,8 @@ class _ActivosTabState extends State<_ActivosTab> {
       // 1. Móviles FN disponibles en línea
       final movilesRaw = await _db
           .from('usuarios')
-          .select('id, rango_movil, latitud, longitud, tipo_plan_movil, saldo_wallet')
+          .select(
+              'id, rango_movil, latitud, longitud, tipo_plan_movil, saldo_wallet')
           .eq('rol', 'movil')
           .eq('en_linea', true)
           .eq('activo', true)
@@ -1943,14 +1946,14 @@ class _ActivosTabState extends State<_ActivosTab> {
 
       // FN: sin límite de capacidad — todos reciben la cascada.
       // Prediarios con saldo <= 0 quedan excluidos.
-      final moviles = List<Map<String, dynamic>>.from(movilesRaw as List)
-          .where((m) {
-            final plan = m['tipo_plan_movil']?.toString() ?? '';
-            if (plan == 'prediario') {
-              return ((m['saldo_wallet'] as num?)?.toDouble() ?? 0.0) > 0;
-            }
-            return true;
-          }).toList();
+      final moviles =
+          List<Map<String, dynamic>>.from(movilesRaw as List).where((m) {
+        final plan = m['tipo_plan_movil']?.toString() ?? '';
+        if (plan == 'prediario') {
+          return ((m['saldo_wallet'] as num?)?.toDouble() ?? 0.0) > 0;
+        }
+        return true;
+      }).toList();
 
       final masters = moviles
           .where((m) => m['rango_movil']?.toString().toUpperCase() == 'MASTER')
@@ -2047,9 +2050,9 @@ class _ActivosTabState extends State<_ActivosTab> {
       // + Masters como alerta crítica de servicio sin cubrir.
       // Solo Masters ven la card con detalles y aceptar (radar: puedeVer = esMaster).
       final fase4Todos = [
-        ...fase3Ids,  // re-notificar zona 2km con alerta SIN CUBRIR
-        ...fase4Ids,  // no-Masters fuera de 2km
-        ...masters,   // Masters re-alertados
+        ...fase3Ids, // re-notificar zona 2km con alerta SIN CUBRIR
+        ...fase4Ids, // no-Masters fuera de 2km
+        ...masters, // Masters re-alertados
       ];
       String? notifF4;
       if (fase4Todos.isNotEmpty) {
@@ -2198,7 +2201,8 @@ class _ActivosTabState extends State<_ActivosTab> {
                   Builder(builder: (_) {
                     final recargo = _recargoRecogidas(s);
                     final tarifa = (s['tarifa'] as num?)?.toInt() ?? 0;
-                    if (recargo == 0 && tarifa == 0) return const SizedBox.shrink();
+                    if (recargo == 0 && tarifa == 0)
+                      return const SizedBox.shrink();
                     final base = tarifa > 0 && recargo > 0
                         ? (tarifa - recargo.round()).clamp(0, tarifa)
                         : 0;
@@ -2225,8 +2229,7 @@ class _ActivosTabState extends State<_ActivosTab> {
                             Text('Cotización central: \$${_miles(tarifa)}',
                                 style: const TextStyle(fontSize: 11)),
                           if (recargo > 0 && base > 0) ...[
-                            Text(
-                                '  Tarifa destino: \$${_miles(base.round())}',
+                            Text('  Tarifa destino: \$${_miles(base.round())}',
                                 style: const TextStyle(fontSize: 11)),
                             Text(
                                 '  Recargo sedes extra: \$${_miles(recargo.round())}',
@@ -2587,7 +2590,8 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
     try {
       final row = await _db
           .from('usuarios')
-          .select('telefono, usuario, pago_nequi, pago_daviplata, pago_bancolombia, pago_llave')
+          .select(
+              'telefono, usuario, pago_nequi, pago_daviplata, pago_bancolombia, pago_llave')
           .eq('id', mid)
           .maybeSingle();
       if (!mounted) return;
@@ -2836,6 +2840,7 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
                     ),
                   ));
                 }
+
                 _addPago(_pagoNequi, 'Nequi', Colors.purple);
                 _addPago(_pagoDaviplata, 'Daviplata', const Color(0xFFFF5722));
                 _addPago(_pagoBancolombia, 'Bancolombia', Colors.amber);
@@ -3048,7 +3053,8 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
                 decoration: BoxDecoration(
                   color: Colors.indigo.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: Colors.indigo.withValues(alpha: 0.25)),
+                  border:
+                      Border.all(color: Colors.indigo.withValues(alpha: 0.25)),
                 ),
                 child: Wrap(
                   spacing: 6,
@@ -3061,7 +3067,8 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
                             fontSize: 9,
                             fontWeight: FontWeight.bold)),
                     ...widget.otrosServiciosMismoMovil.map((o) {
-                      final c = o['fn_consecutivo']?.toString() ?? '#${o['id']}';
+                      final c =
+                          o['fn_consecutivo']?.toString() ?? '#${o['id']}';
                       return Container(
                         padding: const EdgeInsets.symmetric(
                             horizontal: 6, vertical: 2),
@@ -3364,11 +3371,13 @@ class _HistorialTabState extends State<_HistorialTab> {
                 child: ElevatedButton.icon(
                   icon: const Icon(Icons.receipt_long, size: 16),
                   label: const Text('Facturación',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                      style:
+                          TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.indigo[700],
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     minimumSize: Size.zero,
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     shape: RoundedRectangleBorder(

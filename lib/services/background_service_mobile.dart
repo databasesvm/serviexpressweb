@@ -19,14 +19,17 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 // Claves de SharedPreferences (públicas para que movil_screen pueda resetearlas)
-const String kBgUserId    = 'bg_user_id';
-const String kBgStartTime = 'bg_start_time';    // epoch ms — inicio de sesión
-const String kBgProrroga  = 'bg_prorroga_time'; // epoch ms — cuando se envió el aviso
-const String kBgAviso2h   = 'bg_aviso_2h';      // bool — ya se envió aviso 2h
-const String kBgAviso4h   = 'bg_aviso_4h';      // bool — ya se envió aviso 4h
+const String kBgUserId = 'bg_user_id';
+const String kBgStartTime = 'bg_start_time'; // epoch ms — inicio de sesión
+const String kBgProrroga =
+    'bg_prorroga_time'; // epoch ms — cuando se envió el aviso
+const String kBgAviso2h = 'bg_aviso_2h'; // bool — ya se envió aviso 2h
+const String kBgAviso4h = 'bg_aviso_4h'; // bool — ya se envió aviso 4h
+const String kBgMotivoDesconexion =
+    'bg_motivo_desconexion'; // String — razón de la última desconexión forzada
 
-const int _kMaxHorasConectado = 6; // horas sin servicio → aviso final + prorroga
-const int _kProrrogaMinutos   = 5; // minutos de gracia tras el aviso final
+const int _kAvisoMinutos = 345; // 5h 45min → aviso push + diálogo in-app
+const int _kProrrogaMinutos = 15; // minutos entre aviso y desconexión
 
 Future<void> initBackgroundService() async {
   FlutterForegroundTask.initCommunicationPort();
@@ -46,7 +49,7 @@ Future<void> initBackgroundService() async {
       playSound: false,
     ),
     foregroundTaskOptions: ForegroundTaskOptions(
-      eventAction: ForegroundTaskEventAction.repeat(60000),
+      eventAction: ForegroundTaskEventAction.repeat(15000),
       autoRunOnBoot: false,
       autoRunOnMyPackageReplaced: true, // reinicia tras actualización de la app
       allowWakeLock: true,
@@ -112,6 +115,9 @@ void _startCallback() {
 }
 
 class _ServiMotoTaskHandler extends TaskHandler {
+  bool _gpsEnProceso =
+      false; // Evita solapamiento si getCurrentPosition tarda más de 15s
+
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
     try {
@@ -160,36 +166,41 @@ class _ServiMotoTaskHandler extends TaskHandler {
     // fue restringido por el fabricante, el foreground service (este isolate
     // separado) sirve como último respaldo: actualiza latitud/longitud cada 60s.
     try {
-      await Supabase.instance.client
-          .from('usuarios')
-          .update({'ultimo_ping': ahora.toUtc().toIso8601String()})
-          .eq('id', userId);
+      await Supabase.instance.client.from('usuarios').update(
+          {'ultimo_ping': ahora.toUtc().toIso8601String()}).eq('id', userId);
     } catch (_) {}
 
     // GPS respaldo: solo actualiza posición si la app logra obtenerla.
     // En la práctica, el stream principal del isolate UI lo hace cada 1-3s;
     // este bloque actúa solo cuando ese stream está muerto o bloqueado.
-    try {
-      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (serviceEnabled) {
-        final permission = await Geolocator.checkPermission();
-        if (permission == LocationPermission.always ||
-            permission == LocationPermission.whileInUse) {
-          final pos = await Geolocator.getCurrentPosition(
-            locationSettings: AndroidSettings(
-              accuracy: LocationAccuracy.high,
-              timeLimit: const Duration(seconds: 8),
-            ),
-          );
-          await Supabase.instance.client
-              .from('usuarios')
-              .update({'latitud': pos.latitude, 'longitud': pos.longitude})
-              .eq('id', userId);
+    // El flag _gpsEnProceso evita solapamiento si getCurrentPosition tarda
+    // más de 15s (el nuevo intervalo del tick).
+    if (!_gpsEnProceso) {
+      _gpsEnProceso = true;
+      try {
+        final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+        if (serviceEnabled) {
+          final permission = await Geolocator.checkPermission();
+          if (permission == LocationPermission.always ||
+              permission == LocationPermission.whileInUse) {
+            final pos = await Geolocator.getCurrentPosition(
+              locationSettings: AndroidSettings(
+                accuracy: LocationAccuracy.high,
+                timeLimit: const Duration(seconds: 12),
+              ),
+            );
+            await Supabase.instance.client.from('usuarios').update({
+              'latitud': pos.latitude,
+              'longitud': pos.longitude
+            }).eq('id', userId);
+          }
         }
+      } catch (_) {
+        // GPS no disponible o timeout — no es crítico, el stream principal
+        // se encarga cuando el hardware vuelva a estar disponible.
+      } finally {
+        _gpsEnProceso = false;
       }
-    } catch (_) {
-      // GPS no disponible o timeout — no es crítico, el stream principal
-      // se encarga cuando el hardware vuelva a estar disponible.
     }
 
     // ── 2. Prorroga activa → comprobar si ya pasaron los 5 min ─────────────
@@ -214,6 +225,9 @@ class _ServiMotoTaskHandler extends TaskHandler {
     // Solo actuamos a partir de 2h (120 min)
     if (minutos < 120) return;
 
+    // Referencia local para el bloque de aviso final
+    const int kAviso = _kAvisoMinutos;
+
     // ── 4. Comprobar si tiene servicio activo o está en fila de paradero ───
     try {
       final activos = await Supabase.instance.client
@@ -221,12 +235,11 @@ class _ServiMotoTaskHandler extends TaskHandler {
           .select('id')
           .eq('movil_id', userId)
           .inFilter('estado', [
-            'en_ruta_origen',
-            'en_origen',
-            'en_ruta_destino',
-            'problema',
-          ])
-          .limit(1);
+        'en_ruta_origen',
+        'en_origen',
+        'en_ruta_destino',
+        'problema',
+      ]).limit(1);
 
       if (activos.isNotEmpty) {
         // Tiene servicio activo → reiniciar contador silenciosamente
@@ -253,14 +266,36 @@ class _ServiMotoTaskHandler extends TaskHandler {
 
       // ── 5. Sin servicio — evaluar umbrales ──────────────────────────────
 
-      // 6 h (360 min) → avisar y arrancar prorroga
-      if (minutos >= _kMaxHorasConectado * 60) {
+      // 5h 45min (345 min) → aviso push suave + diálogo in-app + prorroga 15min
+      // El push usa sonido suave (sin canal de alarma) para que el moto sepa
+      // que debe abrir la app, pero sin confundirlo con un servicio nuevo.
+      if (minutos >= kAviso) {
         await prefs.setInt(kBgProrroga, ahora.millisecondsSinceEpoch);
         await FlutterForegroundTask.updateService(
-          notificationTitle: '⚠️ ServiExpress — Inactividad',
+          notificationTitle: '⏱️ ServiExpress — Inactividad',
           notificationText:
-              'Serás desconectado en $_kProrrogaMinutos min. Abre la app para continuar.',
+              'Llevas 5h45min sin actividad. Serás desconectado en $_kProrrogaMinutos min.',
         );
+        // Push con sonido suave (sin existing_android_channel_id → no alarma)
+        try {
+          await Supabase.instance.client.functions.invoke(
+            'send-notification',
+            body: {
+              'include_external_user_ids': [userId],
+              'headings': {'en': '⏱️ Inactividad', 'es': '⏱️ Inactividad'},
+              'contents': {
+                'en':
+                    'Llevas 5h45min sin tomar servicios. Serás desconectado en $_kProrrogaMinutos min si no hay actividad.',
+                'es':
+                    'Llevas 5h45min sin tomar servicios. Serás desconectado en $_kProrrogaMinutos min si no hay actividad.',
+              },
+              'priority': 7,
+              // Sin existing_android_channel_id → usa sonido suave del sistema,
+              // no el canal de alarma. El moto lo distingue de un servicio nuevo.
+              'data': {'tipo': 'aviso_inactividad_push'},
+            },
+          );
+        } catch (_) {}
         FlutterForegroundTask.sendDataToMain({
           'tipo': 'aviso_desconexion',
           'minutos': _kProrrogaMinutos,
@@ -268,29 +303,23 @@ class _ServiMotoTaskHandler extends TaskHandler {
         return;
       }
 
-      // 4 h (240 min) → aviso suave, solo una vez
-      if (minutos >= 240 && prefs.getBool(kBgAviso4h) != true) {
-        await prefs.setBool(kBgAviso4h, true);
-        FlutterForegroundTask.sendDataToMain({
-          'tipo': 'aviso_inactividad',
-          'horas': 4,
-        });
-        return;
-      }
-
-      // 2 h (120 min) → aviso suave, solo una vez
-      if (minutos >= 120 && prefs.getBool(kBgAviso2h) != true) {
-        await prefs.setBool(kBgAviso2h, true);
-        FlutterForegroundTask.sendDataToMain({
-          'tipo': 'aviso_inactividad',
-          'horas': 2,
-        });
-      }
+      // Los avisos de 2h y 4h fueron eliminados — solo existe el aviso final
+      // a las 5h45min con push y diálogo in-app.
     } catch (_) {}
   }
 
   Future<void> _desconectarForzado(
       String userId, SharedPreferences prefs) async {
+    // Avisar al isolate principal ANTES de cambiar la BD, para que el
+    // _vigilanteDeConexion no interprete esto como un zombie-cleanup y
+    // reafirme la conexión anulando la desconexión intencional.
+    FlutterForegroundTask.sendDataToMain({
+      'tipo': 'desconexion_forzada_inactividad',
+    });
+    // Pequeña pausa para que el mensaje llegue al main isolate
+    await Future.delayed(const Duration(milliseconds: 500));
+    // Guardar motivo para mostrarlo cuando el moto abra la app
+    await prefs.setString(kBgMotivoDesconexion, 'inactividad_6h');
     try {
       await Supabase.instance.client.from('usuarios').update({
         'en_linea': false,

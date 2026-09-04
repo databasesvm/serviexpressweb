@@ -64,6 +64,7 @@ class _MovilScreenState extends State<MovilScreen>
   DateTime _ultimaActividadUtc = DateTime.now().toUtc();
   bool _alertaInactividadMostrada = false;
   bool _alerta4hMostrada = false;
+  bool _avisoDesconexionDialogAbierto = false; // true mientras el diálogo de 5h45 está visible
 
   // --- VARIABLES DE ESTADO TÁCTICAS ---
   final Set<int> _serviciosExpandidos = {}; // cuáles están abiertos ahora
@@ -251,6 +252,10 @@ class _MovilScreenState extends State<MovilScreen>
       if (mounted) await _chequearPermisosCriticos();
       // OTA: verificar actualización (solo Android/iOS, no aplica en web)
       if (!kIsWeb && mounted) await OtaUpdater.verificar(context);
+      // ── MOTIVO DE ÚLTIMA DESCONEXIÓN FORZADA ─────────────────────────────
+      // Si el background service desconectó al moto por inactividad mientras
+      // la app estaba cerrada, lo avisamos al abrirla por primera vez.
+      if (!kIsWeb && mounted) await _mostrarMotivoDesconexionSiExiste();
     });
 
     Future.microtask(() async {
@@ -273,6 +278,14 @@ class _MovilScreenState extends State<MovilScreen>
             _iniciarRastreoGps();
             if (!kIsWeb) resetBgInactivityTimer();
           }
+          return;
+        }
+
+        // Push de aviso de inactividad (5h45min) — suprimir sin sonido de alarma.
+        // El diálogo ya se muestra vía sendDataToMain; el push solo sirve si
+        // la app estaba en background y el moto necesita verlo en la bandeja.
+        if (tipo == 'aviso_inactividad_push') {
+          event.preventDefault();
           return;
         }
 
@@ -2615,7 +2628,7 @@ class _MovilScreenState extends State<MovilScreen>
       if (!kIsWeb && !_reiniciandoGps) {
         final ahora = DateTime.now();
         final streamMudo = _ultimaEmisionGps == null ||
-            ahora.difference(_ultimaEmisionGps!).inSeconds > 90;
+            ahora.difference(_ultimaEmisionGps!).inSeconds > 30;
         if (streamMudo && _estaEnLinea) {
           _iniciarRastreoGps();
           // No hacemos return: igual intentamos getCurrentPosition abajo
@@ -2923,48 +2936,112 @@ class _MovilScreenState extends State<MovilScreen>
     if (!mounted) return;
     if (data is! Map) return;
     final tipo = data['tipo'];
-    if (tipo == 'aviso_inactividad') {
-      final horas = data['horas'] as int? ?? 2;
-      _mostrarAlertaSigoActivo('$horas horas');
+
+    // Los avisos de 2h y 4h fueron eliminados — solo existe el aviso final a 5h45min.
+    if (tipo == 'aviso_desconexion') {
+      _mostrarAvisoDesconexionInminente(data['minutos'] as int? ?? 15);
       return;
     }
-    if (tipo == 'aviso_desconexion') {
-      final minutos = data['minutos'] as int? ?? 5;
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          backgroundColor: const Color(0xFF1A1A1A),
-          title: const Text(
-            '⏱️ Inactividad detectada',
-            style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 16),
-          ),
-          content: Text(
-            'Llevas 2 horas conectado sin recibir servicios.\n\n'
-            'Serás desconectado automáticamente en $minutos minutos.\n'
-            'Abre la app o sigue activo para continuar recibiendo servicios.',
-            style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
-          ),
-          actions: [
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xff3AF500),
-                foregroundColor: Colors.black,
-              ),
-              onPressed: () {
-                Navigator.pop(ctx);
-                // Resetear el timer — el moto quiere seguir conectado
-                if (!kIsWeb) resetBgInactivityTimer();
-              },
-              child: const Text('SEGUIR CONECTADO', style: TextStyle(fontWeight: FontWeight.bold)),
-            ),
-          ],
-        ),
-      );
+
+    // Desconexión forzada por inactividad desde el foreground service.
+    // Llegamos aquí ANTES de que el servicio modifique la BD, para que
+    // el _vigilanteDeConexion no interprete el cambio como zombie-cleanup
+    // y reafirme la conexión anulando la desconexión intencional.
+    if (tipo == 'desconexion_forzada_inactividad') {
+      _cerrarAvisoDesconexionSiAbierto();
+      _autoDesconectarPorInactividad();
     }
   }
 
+  /// Muestra el diálogo de "serás desconectado en X minutos".
+  /// Cierra automáticamente cualquier diálogo previo si estaba abierto,
+  /// para que el moto nunca tenga que quitar 2 avisos al abrir la app.
+  void _mostrarAvisoDesconexionInminente(int minutos) {
+    if (!mounted) return;
+    // Si ya hay un diálogo de inactividad abierto, cerrarlo primero.
+    if (_avisoDesconexionDialogAbierto) {
+      Navigator.of(context, rootNavigator: false).maybePop();
+    }
+    _avisoDesconexionDialogAbierto = true;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        backgroundColor: const Color(0xFF1A1A1A),
+        title: const Text(
+          '⏱️ Inactividad detectada',
+          style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 16),
+        ),
+        content: Text(
+          'Llevas 5h45min conectado sin tomar ningún servicio.\n\n'
+          'Serás desconectado automáticamente en $minutos minutos.\n'
+          'Presiona el botón para seguir recibiendo servicios.',
+          style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
+        ),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xff3AF500),
+              foregroundColor: Colors.black,
+            ),
+            onPressed: () {
+              _avisoDesconexionDialogAbierto = false;
+              Navigator.pop(ctx);
+              if (!kIsWeb) resetBgInactivityTimer();
+            },
+            child: const Text('SEGUIR CONECTADO', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    ).whenComplete(() => _avisoDesconexionDialogAbierto = false);
+  }
+
+  /// Cierra el diálogo de desconexión inminente si está visible.
+  /// Llamar antes de mostrar el estado de desconexión forzada.
+  void _cerrarAvisoDesconexionSiAbierto() {
+    if (_avisoDesconexionDialogAbierto && mounted) {
+      _avisoDesconexionDialogAbierto = false;
+      Navigator.of(context, rootNavigator: false).maybePop();
+    }
+  }
+
+  /// Revisa si el background service guardó un motivo de desconexión forzada.
+  /// Si existe, muestra un SnackBar explicativo y borra el flag para que
+  /// no vuelva a aparecer en próximas aperturas de la app.
+  Future<void> _mostrarMotivoDesconexionSiExiste() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final motivo = prefs.getString(kBgMotivoDesconexion);
+      if (motivo == null || !mounted) return;
+      await prefs.remove(kBgMotivoDesconexion);
+
+      String mensaje;
+      if (motivo == 'inactividad_6h') {
+        mensaje =
+            '⏱️ Tu sesión fue cerrada automáticamente por 6 horas sin tomar ningún servicio.';
+      } else {
+        mensaje = '⚠️ Tu sesión fue cerrada automáticamente ($motivo).';
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            mensaje,
+            style: const TextStyle(color: Colors.white, fontSize: 13),
+          ),
+          backgroundColor: const Color(0xFF2A2A2A),
+          duration: const Duration(seconds: 8),
+          action: SnackBarAction(
+            label: 'OK',
+            textColor: const Color(0xff3AF500),
+            onPressed: () =>
+                ScaffoldMessenger.of(context).hideCurrentSnackBar(),
+          ),
+        ),
+      );
+    } catch (_) {}
+  }
 
   Future<void> _enviarPing() async {
     try {
