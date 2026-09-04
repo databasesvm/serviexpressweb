@@ -418,9 +418,7 @@ class _TabSectoresState extends State<_TabSectores>
                           backgroundColor:
                               activo ? const Color(0xFF0070CC) : Colors.grey[800],
                           child: Icon(Icons.map,
-                              color: activo
-                                  ? const Color(0xFF008FFF)
-                                  : Colors.white38,
+                              color: activo ? Colors.white : Colors.white38,
                               size: 18),
                         ),
                         title: Text(
@@ -904,9 +902,7 @@ class _TabDireccionesState extends State<_TabDirecciones>
                                     ? const Color(0xFF0070CC)
                                     : Colors.grey[800],
                                 child: Icon(Icons.location_on,
-                                    color: activo
-                                        ? const Color(0xFF008FFF)
-                                        : Colors.white38,
+                                    color: activo ? Colors.white : Colors.white38,
                                     size: 18),
                               ),
                               title: Row(
@@ -1075,7 +1071,7 @@ class _TabTarifasState extends State<_TabTarifas> {
           .order('precio', ascending: true);
       final sectores = await widget.db
           .from('fn_sectores')
-          .select('id, nombre')
+          .select('id, nombre, municipio')
           .eq('activo', true)
           .order('nombre');
       if (mounted) {
@@ -1100,6 +1096,8 @@ class _TabTarifasState extends State<_TabTarifas> {
     return buf.toString();
   }
 
+  static const _municipios = ['Cúcuta', 'Los Patios', 'Villa del Rosario'];
+
   Future<void> _abrirFormulario({Map<String, dynamic>? tarifa}) async {
     // Sectores ya configurados (excluir al agregar nuevo)
     final yaConfigurados = _tarifas
@@ -1119,97 +1117,154 @@ class _TabTarifasState extends State<_TabTarifas> {
       return;
     }
 
+    // Al editar: pre-cargar municipio del sector actual
     int? sectorId = tarifa?['sector_id'] as int?;
+    String? municipioSel = sectorId != null
+        ? (_sectores.firstWhere(
+            (s) => s['id'] == sectorId,
+            orElse: () => {},
+          )['municipio'] as String?)
+        : null;
+
     final precioCtrl = TextEditingController(
         text: tarifa != null ? '${tarifa['precio']}' : '');
 
     final guardado = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setD) => AlertDialog(
-          backgroundColor: const Color(0xFF1A1A1A),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          title: Text(
-            tarifa == null ? '➕ Nueva tarifa' : '✏️ Editar tarifa',
-            style: const TextStyle(
-                color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              DropdownButtonFormField<int>(
-                value: sectorId,
-                dropdownColor: const Color(0xFF1A1A1A),
-                style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
-                  labelText: 'Sector',
-                  labelStyle: TextStyle(color: Colors.white54),
-                  border: OutlineInputBorder(),
-                  isDense: true,
+        builder: (ctx, setD) {
+          // Sectores del municipio seleccionado (o todos si no hay municipio)
+          final sectoresFiltrados = municipioSel == null
+              ? disponibles
+              : disponibles
+                  .where((s) => s['municipio'] == municipioSel)
+                  .toList();
+
+          // Si el sector seleccionado no pertenece al nuevo municipio, limpiar
+          final sectorValido = sectoresFiltrados.any((s) => s['id'] == sectorId);
+
+          return AlertDialog(
+            backgroundColor: const Color(0xFF1A1A1A),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            title: Text(
+              tarifa == null ? '➕ Nueva tarifa' : '✏️ Editar tarifa',
+              style: const TextStyle(
+                  color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // ── Municipio ──
+                DropdownButtonFormField<String?>(
+                  value: municipioSel,
+                  dropdownColor: const Color(0xFF1A1A1A),
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(
+                    labelText: 'Municipio',
+                    labelStyle: TextStyle(color: Colors.white54),
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  items: [
+                    const DropdownMenuItem<String?>(
+                      value: null,
+                      child: Text('Selecciona municipio',
+                          style: TextStyle(color: Colors.white54)),
+                    ),
+                    ..._municipios.map((m) => DropdownMenuItem<String?>(
+                          value: m,
+                          child: Text(m,
+                              style: const TextStyle(color: Colors.white)),
+                        )),
+                  ],
+                  onChanged: tarifa == null
+                      ? (v) => setD(() {
+                            municipioSel = v;
+                            sectorId = null; // reset sector al cambiar municipio
+                          })
+                      : null,
                 ),
-                items: disponibles
-                    .map((s) => DropdownMenuItem<int>(
-                          value: s['id'] as int,
-                          child: Text(s['nombre'].toString(),
-                              style:
-                                  const TextStyle(color: Colors.white)),
-                        ))
-                    .toList(),
-                onChanged: tarifa == null
-                    ? (v) => setD(() => sectorId = v)
-                    : null,
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: precioCtrl,
-                style: const TextStyle(color: Colors.white),
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'Tarifa (\$)',
-                  labelStyle: TextStyle(color: Colors.white54),
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                  prefixText: '\$ ',
-                  prefixStyle: TextStyle(color: Colors.white70),
+                const SizedBox(height: 12),
+                // ── Sector (filtrado por municipio) ──
+                DropdownButtonFormField<int>(
+                  value: sectorValido ? sectorId : null,
+                  dropdownColor: const Color(0xFF1A1A1A),
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    labelText: 'Sector',
+                    labelStyle: const TextStyle(color: Colors.white54),
+                    border: const OutlineInputBorder(),
+                    isDense: true,
+                    hintText: municipioSel == null
+                        ? 'Selecciona municipio primero'
+                        : sectoresFiltrados.isEmpty
+                            ? 'Sin sectores en este municipio'
+                            : null,
+                    hintStyle: const TextStyle(color: Colors.white38, fontSize: 12),
+                  ),
+                  items: sectoresFiltrados
+                      .map((s) => DropdownMenuItem<int>(
+                            value: s['id'] as int,
+                            child: Text(s['nombre'].toString(),
+                                style: const TextStyle(color: Colors.white)),
+                          ))
+                      .toList(),
+                  onChanged: (tarifa == null && municipioSel != null)
+                      ? (v) => setD(() => sectorId = v)
+                      : null,
                 ),
+                const SizedBox(height: 12),
+                // ── Precio ──
+                TextField(
+                  controller: precioCtrl,
+                  style: const TextStyle(color: Colors.white),
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Tarifa (\$)',
+                    labelStyle: TextStyle(color: Colors.white54),
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                    prefixText: '\$ ',
+                    prefixStyle: TextStyle(color: Colors.white70),
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('CANCELAR',
+                      style: TextStyle(color: Colors.white54))),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.indigo[700]),
+                onPressed: () async {
+                  final precio = int.tryParse(precioCtrl.text.trim());
+                  if (sectorId == null || precio == null || precio <= 0) {
+                    ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                        content: Text('Selecciona municipio, sector e ingresa precio')));
+                    return;
+                  }
+                  if (tarifa == null) {
+                    await widget.db.from('fn_tarifas_sede').insert({
+                      'sede_id': widget.sede['id'],
+                      'sector_id': sectorId,
+                      'precio': precio,
+                    });
+                  } else {
+                    await widget.db.from('fn_tarifas_sede').update({
+                      'precio': precio,
+                    }).eq('id', tarifa['id']);
+                  }
+                  if (ctx.mounted) Navigator.pop(ctx, true);
+                },
+                child: const Text('GUARDAR',
+                    style: TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.bold)),
               ),
             ],
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('CANCELAR',
-                    style: TextStyle(color: Colors.white54))),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.indigo[700]),
-              onPressed: () async {
-                final precio = int.tryParse(precioCtrl.text.trim());
-                if (sectorId == null || precio == null || precio <= 0) {
-                  ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
-                      content: Text('Selecciona sector e ingresa precio')));
-                  return;
-                }
-                if (tarifa == null) {
-                  await widget.db.from('fn_tarifas_sede').insert({
-                    'sede_id': widget.sede['id'],
-                    'sector_id': sectorId,
-                    'precio': precio,
-                  });
-                } else {
-                  await widget.db.from('fn_tarifas_sede').update({
-                    'precio': precio,
-                  }).eq('id', tarifa['id']);
-                }
-                if (ctx.mounted) Navigator.pop(ctx, true);
-              },
-              child: const Text('GUARDAR',
-                  style: TextStyle(
-                      color: Colors.white, fontWeight: FontWeight.bold)),
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
     if (guardado == true) _cargar();
@@ -1336,7 +1391,7 @@ class _TabTarifasState extends State<_TabTarifas> {
                                     leading: CircleAvatar(
                                       backgroundColor: Colors.indigo[800],
                                       child: const Icon(Icons.map,
-                                          color: Colors.indigoAccent,
+                                          color: Colors.white,
                                           size: 18),
                                     ),
                                     title: Text(
