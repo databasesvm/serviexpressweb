@@ -56,6 +56,8 @@ class _MovilScreenState extends State<MovilScreen>
   Timer? _ubicacionHeartbeatTimer; // Fallback: envía ubicación cada 20s aunque GPS stream esté silencioso
   bool _enviandoUbicacion = false; // Mutex: evita writes de ubicación simultáneos
   DateTime? _ultimoEnvioUbicacion; // Para el heartbeat: evita doble-write si GPS ya emitió
+  DateTime? _ultimaEmisionGps;     // Última vez que el stream GPS emitió — watchdog lo reinicia si lleva >90s mudo
+  bool _reiniciandoGps = false;    // Evita reinicios simultáneos del stream
 
   List<Map<String, dynamic>> _serviciosActivosData = [];
   final Set<int> _serviciosOcultosLocales = {};
@@ -260,6 +262,20 @@ class _MovilScreenState extends State<MovilScreen>
       // Guardamos referencia para limpiar en dispose() y no acumular
       // múltiples instancias del listener si la pantalla se reconstruye.
       _onForegroundNotif = (event) {
+        // ── HEARTBEAT DE SISTEMA: push silencioso cada 10 min ────────────
+        // El servidor manda este push para mantener vivo el isolate de Dart
+        // y reiniciar el stream GPS si fue matado por el fabricante.
+        // No suena, no se muestra — es puramente técnico.
+        final tipo = event.notification.additionalData?['tipo']?.toString();
+        if (tipo == 'heartbeat') {
+          event.preventDefault();
+          if (mounted && _estaEnLinea) {
+            _iniciarRastreoGps();
+            if (!kIsWeb) resetBgInactivityTimer();
+          }
+          return;
+        }
+
         // Suprimimos el banner del sistema (el radar ya muestra el servicio),
         // pero disparamos el sonido de alerta para que el piloto se entere
         // aunque tenga la pantalla encendida y la app abierta.
@@ -1910,6 +1926,10 @@ class _MovilScreenState extends State<MovilScreen>
 
     _gpsTimer = Geolocator.getPositionStream(locationSettings: locationSettings)
         .listen((Position? pos) async {
+          // Watchdog: registramos cada vez que el stream emite — si deja de
+          // emitir, _iniciarHeartbeatUbicacion lo detecta y reinicia el stream.
+          _ultimaEmisionGps = DateTime.now();
+
           if (pos != null && _estaEnLinea) {
             _ultimaPosicionConocida = pos; // <-- RADAR ACTUALIZADO
             // Mutex: si ya hay un write en curso, saltamos este tick
@@ -2003,7 +2023,31 @@ class _MovilScreenState extends State<MovilScreen>
               _panicoUbicacionExpiraAt = null;
             }
           }
-        });
+        },
+        // Auto-reinicio si Android mata el proveedor de ubicación.
+        // En dispositivos Xiaomi/Samsung con batería restringida, el stream
+        // puede morir silenciosamente (sin error visible). Estos handlers
+        // capturan los casos en que SÍ notifica el cierre.
+        onError: (e) {
+          if (mounted && _estaEnLinea && !_reiniciandoGps) {
+            _reiniciandoGps = true;
+            Future.delayed(const Duration(seconds: 3), () {
+              _reiniciandoGps = false;
+              if (mounted && _estaEnLinea) _iniciarRastreoGps();
+            });
+          }
+        },
+        onDone: () {
+          if (mounted && _estaEnLinea && !_reiniciandoGps) {
+            _reiniciandoGps = true;
+            Future.delayed(const Duration(seconds: 3), () {
+              _reiniciandoGps = false;
+              if (mounted && _estaEnLinea) _iniciarRastreoGps();
+            });
+          }
+        },
+        cancelOnError: false,
+        );
   }
 
   Future<void> _intentarRegistroParadero() async {
@@ -2563,6 +2607,23 @@ class _MovilScreenState extends State<MovilScreen>
         _verificarGeocercaUnaVez();
         return;
       }
+
+      // ── WATCHDOG: reiniciar el stream si lleva >90s sin emitir ────────────
+      // En fabricantes agresivos (Xiaomi MIUI, Samsung One UI con batería
+      // restringida), el proveedor de ubicación puede morir silenciosamente
+      // sin disparar onError ni onDone. Reiniciar el stream lo reactiva.
+      if (!kIsWeb && !_reiniciandoGps) {
+        final ahora = DateTime.now();
+        final streamMudo = _ultimaEmisionGps == null ||
+            ahora.difference(_ultimaEmisionGps!).inSeconds > 90;
+        if (streamMudo && _estaEnLinea) {
+          _iniciarRastreoGps();
+          // No hacemos return: igual intentamos getCurrentPosition abajo
+          // como respaldo inmediato mientras el stream recién reiniciado
+          // tarda unos segundos en emitir la primera posición.
+        }
+      }
+
       // Si el GPS stream emitió hace menos de 10s, ya está actualizado
       if (_ultimoEnvioUbicacion != null &&
           DateTime.now().difference(_ultimoEnvioUbicacion!).inSeconds < 10) {

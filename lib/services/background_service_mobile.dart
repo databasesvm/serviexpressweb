@@ -14,6 +14,7 @@
 // ============================================================================
 
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -154,13 +155,42 @@ class _ServiMotoTaskHandler extends TaskHandler {
     final userId = prefs.getString(kBgUserId);
     if (userId == null) return;
 
-    // ── 1. Ping normal ──────────────────────────────────────────────────────
+    // ── 1. Ping normal + GPS de respaldo ────────────────────────────────────
+    // El stream GPS principal vive en el isolate de la app. Si ese isolate
+    // fue restringido por el fabricante, el foreground service (este isolate
+    // separado) sirve como último respaldo: actualiza latitud/longitud cada 60s.
     try {
       await Supabase.instance.client
           .from('usuarios')
           .update({'ultimo_ping': ahora.toUtc().toIso8601String()})
           .eq('id', userId);
     } catch (_) {}
+
+    // GPS respaldo: solo actualiza posición si la app logra obtenerla.
+    // En la práctica, el stream principal del isolate UI lo hace cada 1-3s;
+    // este bloque actúa solo cuando ese stream está muerto o bloqueado.
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (serviceEnabled) {
+        final permission = await Geolocator.checkPermission();
+        if (permission == LocationPermission.always ||
+            permission == LocationPermission.whileInUse) {
+          final pos = await Geolocator.getCurrentPosition(
+            locationSettings: AndroidSettings(
+              accuracy: LocationAccuracy.high,
+              timeLimit: const Duration(seconds: 8),
+            ),
+          );
+          await Supabase.instance.client
+              .from('usuarios')
+              .update({'latitud': pos.latitude, 'longitud': pos.longitude})
+              .eq('id', userId);
+        }
+      }
+    } catch (_) {
+      // GPS no disponible o timeout — no es crítico, el stream principal
+      // se encarga cuando el hardware vuelva a estar disponible.
+    }
 
     // ── 2. Prorroga activa → comprobar si ya pasaron los 5 min ─────────────
     final prorrogaMs = prefs.getInt(kBgProrroga);
