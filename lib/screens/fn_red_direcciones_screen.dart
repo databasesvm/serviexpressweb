@@ -66,7 +66,7 @@ class _FnRedDireccionesScreenState extends State<FnRedDireccionesScreen> {
       child: Scaffold(
         backgroundColor: const Color(0xFF0A0A0A),
         appBar: AppBar(
-          backgroundColor: const Color(0xFF004D40),
+          backgroundColor: const Color(0xFF008FFF),
           iconTheme: const IconThemeData(color: Colors.white),
           title: const Text(
             '📍 Red de Direcciones FN',
@@ -86,7 +86,7 @@ class _FnRedDireccionesScreenState extends State<FnRedDireccionesScreen> {
         ),
         body: _cargandoSedes
             ? const Center(
-                child: CircularProgressIndicator(color: Colors.teal))
+                child: CircularProgressIndicator(color: const Color(0xFF008FFF)))
             : Column(
                 children: [
                   // ── Selector de sede ──────────────────────────────────────
@@ -300,7 +300,7 @@ class _TabSectoresState extends State<_TabSectores>
                     style: TextStyle(color: Colors.white54))),
             ElevatedButton(
               style:
-                  ElevatedButton.styleFrom(backgroundColor: Colors.teal[700]),
+                  ElevatedButton.styleFrom(backgroundColor: const Color(0xFF008FFF)),
               onPressed: () async {
                 final nombre = ctrl.text.trim();
                 if (nombre.isEmpty) return;
@@ -364,7 +364,7 @@ class _TabSectoresState extends State<_TabSectores>
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
       floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: Colors.teal[700],
+        backgroundColor: const Color(0xFF008FFF),
         icon: const Icon(Icons.add, color: Colors.white),
         label: const Text('Nuevo sector',
             style:
@@ -372,7 +372,7 @@ class _TabSectoresState extends State<_TabSectores>
         onPressed: _abrirFormulario,
       ),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator(color: Colors.teal))
+          ? const Center(child: CircularProgressIndicator(color: const Color(0xFF008FFF)))
           : _sectores.isEmpty
               ? Center(
                   child: Column(
@@ -386,9 +386,9 @@ class _TabSectoresState extends State<_TabSectores>
                       const SizedBox(height: 8),
                       TextButton.icon(
                         onPressed: _abrirFormulario,
-                        icon: const Icon(Icons.add, color: Colors.teal),
+                        icon: const Icon(Icons.add, color: const Color(0xFF008FFF)),
                         label: const Text('Crear primer sector',
-                            style: TextStyle(color: Colors.teal)),
+                            style: TextStyle(color: const Color(0xFF008FFF))),
                       ),
                     ],
                   ),
@@ -409,14 +409,14 @@ class _TabSectoresState extends State<_TabSectores>
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(
                           color: activo
-                              ? Colors.teal.withValues(alpha: 0.4)
+                              ? const Color(0xFF008FFF).withValues(alpha: 0.4)
                               : Colors.white12,
                         ),
                       ),
                       child: ListTile(
                         leading: CircleAvatar(
                           backgroundColor:
-                              activo ? Colors.teal[800] : Colors.grey[800],
+                              activo ? const Color(0xFF0070CC) : Colors.grey[800],
                           child: Icon(Icons.map,
                               color: activo
                                   ? const Color(0xFF008FFF)
@@ -462,7 +462,7 @@ class _TabSectoresState extends State<_TabSectores>
                           children: [
                             IconButton(
                               icon: const Icon(Icons.edit_outlined,
-                                  color: Colors.teal, size: 20),
+                                  color: const Color(0xFF008FFF), size: 20),
                               onPressed: () => _abrirFormulario(sector: s),
                             ),
                             IconButton(
@@ -720,7 +720,7 @@ class _TabDireccionesState extends State<_TabDirecciones>
                     style: TextStyle(color: Colors.white54))),
             ElevatedButton(
               style:
-                  ElevatedButton.styleFrom(backgroundColor: Colors.teal[700]),
+                  ElevatedButton.styleFrom(backgroundColor: const Color(0xFF008FFF)),
               onPressed: () async {
                 final nombre = nombreCtrl.text.trim();
                 final direccion = direccionCtrl.text.trim();
@@ -822,7 +822,7 @@ class _TabDireccionesState extends State<_TabDirecciones>
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
       floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: Colors.teal[700],
+        backgroundColor: const Color(0xFF008FFF),
         icon: const Icon(Icons.add_location_alt, color: Colors.white),
         label: const Text('Agregar',
             style:
@@ -855,7 +855,7 @@ class _TabDireccionesState extends State<_TabDirecciones>
           Expanded(
             child: _cargando
                 ? const Center(
-                    child: CircularProgressIndicator(color: Colors.teal))
+                    child: CircularProgressIndicator(color: const Color(0xFF008FFF)))
                 : filtradas.isEmpty
                     ? Center(
                         child: Column(
@@ -869,9 +869,9 @@ class _TabDireccionesState extends State<_TabDirecciones>
                             const SizedBox(height: 8),
                             TextButton.icon(
                               onPressed: _abrirFormulario,
-                              icon: const Icon(Icons.add, color: Colors.teal),
+                              icon: const Icon(Icons.add, color: const Color(0xFF008FFF)),
                               label: const Text('Agregar primera dirección',
-                                  style: TextStyle(color: Colors.teal)),
+                                  style: TextStyle(color: const Color(0xFF008FFF))),
                             ),
                           ],
                         ),
@@ -894,18 +894,18 @@ class _TabDireccionesState extends State<_TabDirecciones>
                               borderRadius: BorderRadius.circular(10),
                               border: Border.all(
                                 color: activo
-                                    ? Colors.teal.withValues(alpha: 0.4)
+                                    ? const Color(0xFF008FFF).withValues(alpha: 0.4)
                                     : Colors.white12,
                               ),
                             ),
                             child: ListTile(
                               leading: CircleAvatar(
                                 backgroundColor: activo
-                                    ? Colors.teal[800]
+                                    ? const Color(0xFF0070CC)
                                     : Colors.grey[800],
                                 child: Icon(Icons.location_on,
                                     color: activo
-                                        ? Colors.teal[200]
+                                        ? const Color(0xFF008FFF)
                                         : Colors.white38,
                                     size: 18),
                               ),
@@ -929,11 +929,11 @@ class _TabDireccionesState extends State<_TabDirecciones>
                                       padding: const EdgeInsets.symmetric(
                                           horizontal: 6, vertical: 2),
                                       decoration: BoxDecoration(
-                                        color: Colors.teal.withValues(alpha: 0.2),
+                                        color: const Color(0xFF008FFF).withValues(alpha: 0.2),
                                         borderRadius:
                                             BorderRadius.circular(10),
                                         border: Border.all(
-                                            color: Colors.teal.withValues(alpha: 0.5)),
+                                            color: const Color(0xFF008FFF).withValues(alpha: 0.5)),
                                       ),
                                       child: Text(
                                         sectorNombre,
@@ -987,7 +987,7 @@ class _TabDireccionesState extends State<_TabDirecciones>
                                 children: [
                                   IconButton(
                                     icon: const Icon(Icons.edit_outlined,
-                                        color: Colors.teal, size: 20),
+                                        color: const Color(0xFF008FFF), size: 20),
                                     onPressed: () =>
                                         _abrirFormulario(dir: dir),
                                   ),
@@ -1016,7 +1016,7 @@ class _TabDireccionesState extends State<_TabDirecciones>
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         decoration: BoxDecoration(
           color:
-              selected ? Colors.teal[700] : const Color(0xFF1A1A1A),
+              selected ? const Color(0xFF008FFF) : const Color(0xFF1A1A1A),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
               color: selected ? const Color(0xFF008FFF) : Colors.white24),
