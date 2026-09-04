@@ -237,17 +237,18 @@ mixin _FormularioMixin on State<LocalScreen> {
                                   );
 
                                   await Supabase.instance.client
-                                      .from('tarifas_locales')
-                                      .upsert(
-                                        {
-                                          'local_id': widget.usuario['id'],
-                                          'local_nombre': widget.usuario['nombre'],
-                                          'sector_id': sectorId,
-                                          'tarifa':
-                                              double.tryParse(tarLimpia) ?? 0.0,
-                                        },
-                                        onConflict: 'local_id, sector_id',
-                                      );
+                                      .from('dir_usuario')
+                                      .insert({
+                                        'usuario_id': widget.usuario['id'],
+                                        'nombre': palabraCtrl.text.trim().toUpperCase(),
+                                        'municipio': zonaSeleccionada == 'CÚCUTA'
+                                            ? 'Cúcuta'
+                                            : zonaSeleccionada == 'LOS PATIOS'
+                                                ? 'Los Patios'
+                                                : 'V. Rosario',
+                                        'sector_id': sectorId,
+                                        'precio': int.tryParse(tarLimpia),
+                                      });
 
                                   if (ctxAdd.mounted) {
                                     Navigator.pop(ctxAdd);
@@ -272,10 +273,11 @@ mixin _FormularioMixin on State<LocalScreen> {
                 Expanded(
                   child: FutureBuilder<List<Map<String, dynamic>>>(
                     future: Supabase.instance.client
-                        .from('tarifas_locales')
-                        .select('id, sector_id, sectores(nombre, municipio), tarifa')
-                        .eq('local_id', widget.usuario['id'])
-                        .order('tarifa', ascending: true),
+                        .from('dir_usuario')
+                        .select('id, nombre, municipio, sector_id, precio, sectores(nombre)')
+                        .eq('usuario_id', widget.usuario['id'])
+                        .eq('activo', true)
+                        .order('nombre', ascending: true),
                     builder: (context, snapshot) {
                       if (snapshot.connectionState == ConnectionState.waiting)
                         return const Center(
@@ -284,15 +286,13 @@ mixin _FormularioMixin on State<LocalScreen> {
 
                       final datos = snapshot.data ?? [];
                       final filtrados = datos.where((d) {
-                        final s = d['sectores'] as Map<String, dynamic>?;
-                        if (s == null) return false;
-                        final label = '${s['nombre']} (${s['municipio']})'.toLowerCase();
-                        return label.contains(filtroActual);
+                        final nom = (d['nombre'] ?? '').toString().toLowerCase();
+                        return nom.contains(filtroActual);
                       }).toList();
 
                       if (filtrados.isEmpty)
                         return const Center(
-                          child: Text('No hay tarifas registradas.'),
+                          child: Text('No hay direcciones guardadas.'),
                         );
 
                       return ListView.builder(
@@ -300,23 +300,26 @@ mixin _FormularioMixin on State<LocalScreen> {
                         itemCount: filtrados.length,
                         itemBuilder: (c, i) {
                           final item = filtrados[i];
-                          final s = item['sectores'] as Map<String, dynamic>? ?? {};
-                          final label = '${s['nombre'] ?? ''} (${s['municipio'] ?? ''})';
+                          final nom = (item['nombre'] ?? '').toString();
+                          final mun = (item['municipio'] ?? '').toString();
+                          final precio = item['precio'] as int?;
                           return Card(
                             elevation: 1,
                             margin: const EdgeInsets.only(bottom: 8),
                             child: ListTile(
                               leading: const Icon(
-                                Icons.location_city,
+                                Icons.place,
                                 color: Colors.blue,
                               ),
                               title: Text(
-                                label,
+                                nom,
                                 style: const TextStyle(
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
-                              subtitle: Text('Tarifa: ${fmtPeso(item['tarifa'])}'),
+                              subtitle: Text(
+                                precio != null ? '$mun · ${fmtPeso(precio)}' : mun,
+                              ),
                               trailing: IconButton(
                                 icon: const Icon(
                                   Icons.delete,
@@ -324,8 +327,8 @@ mixin _FormularioMixin on State<LocalScreen> {
                                 ),
                                 onPressed: () async {
                                   await Supabase.instance.client
-                                      .from('tarifas_locales')
-                                      .delete()
+                                      .from('dir_usuario')
+                                      .update({'activo': false})
                                       .eq('id', item['id']);
                                   setModalState(() {});
                                 },
@@ -365,10 +368,11 @@ mixin _FormularioMixin on State<LocalScreen> {
       try {
         final results = await Future.wait([
           Supabase.instance.client
-              .from('tarifas_locales')
-              .select('sector_id, sectores(nombre, municipio), tarifa')
-              .eq('local_id', widget.usuario['id'])
-              .order('tarifa', ascending: true),
+              .from('dir_usuario')
+              .select('id, nombre, municipio, sector_id, precio, activo, sectores(nombre)')
+              .eq('usuario_id', widget.usuario['id'])
+              .eq('activo', true)
+              .order('nombre', ascending: true),
           Supabase.instance.client
               .from('red_direcciones')
               .select('id, nombre, municipio, sector_id, precio, sectores(nombre, municipio, precio_global)')
@@ -389,17 +393,13 @@ mixin _FormularioMixin on State<LocalScreen> {
           if (did != null && p != null) localPreciosRed[did] = p;
         }
 
-        // Excluir las que ya están en la lista propia (no duplicar por sector)
-        final propias = listaPrecios.map((e) {
-          final s = e['sectores'] as Map<String, dynamic>?;
-          if (s == null) return '';
-          return '${s['nombre']} (${s['municipio']})'.toUpperCase();
-        }).toSet();
+        // Excluir de la red los que ya tienen coincidencia por nombre en dir_usuario
+        final propias = listaPrecios
+            .map((e) => (e['nombre'] ?? '').toString().toUpperCase())
+            .toSet();
         redDirecciones = List<Map<String, dynamic>>.from(results[1]).where((d) {
-          final sec = d['sectores'] as Map<String, dynamic>?;
-          if (sec == null) return true;
-          final sLabel = '${sec['nombre']} (${sec['municipio']})'.toUpperCase();
-          return !propias.contains(sLabel);
+          final nom = (d['nombre'] ?? '').toString().toUpperCase();
+          return !propias.contains(nom);
         }).toList();
       } catch (_) {}
     }
@@ -719,25 +719,19 @@ mixin _FormularioMixin on State<LocalScreen> {
                                       itemCount: listaPrecios.length,
                                       itemBuilder: (ctx, i) {
                                         final item = listaPrecios[i];
-                                        String numStr = (item['tarifa'] as num)
-                                            .toInt()
-                                            .toString();
-                                        String result = '';
-                                        int count = 0;
-                                        for (
-                                          int j = numStr.length - 1;
-                                          j >= 0;
-                                          j--
-                                        ) {
-                                          result = numStr[j] + result;
-                                          count++;
-                                          if (count == 3 && j > 0) {
-                                            result = '.$result';
-                                            count = 0;
+                                        final precio = item['precio'] as int?;
+                                        String tarifaStr = '';
+                                        if (precio != null) {
+                                          String numStr = precio.toString();
+                                          String result = '';
+                                          int count = 0;
+                                          for (int j = numStr.length - 1; j >= 0; j--) {
+                                            result = numStr[j] + result;
+                                            count++;
+                                            if (count == 3 && j > 0) { result = '.$result'; count = 0; }
                                           }
+                                          tarifaStr = '\$$result';
                                         }
-                                        String tarifaStr = '\$$result';
-
                                         return Card(
                                           elevation: 0.5,
                                           margin: const EdgeInsets.only(
@@ -756,15 +750,15 @@ mixin _FormularioMixin on State<LocalScreen> {
                                                   BorderRadius.circular(8),
                                             ),
                                             title: Text(
-                                              () {
-                                                final s = item['sectores'] as Map<String, dynamic>?;
-                                                if (s == null) return '';
-                                                return '${s['nombre']} (${s['municipio']})'.toUpperCase();
-                                              }(),
+                                              (item['nombre'] ?? '').toString().toUpperCase(),
                                               style: const TextStyle(
                                                 fontWeight: FontWeight.bold,
                                                 fontSize: 13,
                                               ),
+                                            ),
+                                            subtitle: Text(
+                                              item['municipio']?.toString() ?? '',
+                                              style: const TextStyle(fontSize: 11),
                                             ),
                                             trailing: Text(
                                               tarifaStr,
@@ -775,13 +769,11 @@ mixin _FormularioMixin on State<LocalScreen> {
                                               ),
                                             ),
                                             onTap: () {
-                                              final s = item['sectores'] as Map<String, dynamic>?;
-                                              final lbl = s != null ? '${s['nombre']} (${s['municipio']})'.toUpperCase() : '';
+                                              final lbl = (item['nombre'] ?? '').toString().toUpperCase();
                                               destinoController.text = '$lbl - ';
                                               // Solo pega el precio si no es cotización
-                                              if (!esCotizacion)
-                                                tarifaController.text =
-                                                    tarifaStr;
+                                              if (!esCotizacion && tarifaStr.isNotEmpty)
+                                                tarifaController.text = tarifaStr;
 
                                               setDialogState(
                                                 () => sugerenciasListaPrecios =
@@ -841,16 +833,21 @@ mixin _FormularioMixin on State<LocalScreen> {
                         .where((w) => w.length > 2)
                         .toList();
 
-                    // --- Sugerencias de lista propia (con precio, en verde) ---
+                    // --- Sugerencias de dir_usuario (propias, en verde) ---
                     List<Map<String, dynamic>> encontradas = [];
-                    for (var t in listaPrecios) {
-                      final sec = t['sectores'] as Map<String, dynamic>?;
-                      if (sec == null) continue;
-                      String palabraClave = '${sec['nombre']} (${sec['municipio']})'.toLowerCase();
-                      bool hay = textoLimpio.contains(palabraClave) ||
-                          palabrasDigitadas.any((w) => palabraClave.contains(w));
-                      if (hay) {
-                        String numStr = (t['tarifa'] as num).toInt().toString();
+                    for (var d in listaPrecios) {
+                      final nombre = (d['nombre'] ?? '').toString();
+                      final nomLower = nombre.toLowerCase();
+                      final mun = (d['municipio'] ?? '').toString();
+                      final sec = d['sectores'] as Map<String, dynamic>?;
+                      bool hay = nomLower.contains(textoLimpio) ||
+                          textoLimpio.contains(nomLower) ||
+                          palabrasDigitadas.any((w) => nomLower.contains(w));
+                      if (!hay) continue;
+                      final precio = d['precio'] as int?;
+                      String tarifaStr = '';
+                      if (precio != null) {
+                        String numStr = precio.toString();
                         String result = '';
                         int count = 0;
                         for (int i = numStr.length - 1; i >= 0; i--) {
@@ -858,12 +855,15 @@ mixin _FormularioMixin on State<LocalScreen> {
                           count++;
                           if (count == 3 && i > 0) { result = '.$result'; count = 0; }
                         }
-                        encontradas.add({
-                          'palabra': '${sec['nombre']} (${sec['municipio']})'.toUpperCase(),
-                          'tarifaStr': '\$$result',
-                          'sectorName': sec['nombre'].toString().toLowerCase(),
-                        });
+                        tarifaStr = '\$$result';
                       }
+                      encontradas.add({
+                        'palabra': nombre.toUpperCase(),
+                        'tarifaStr': tarifaStr,
+                        'precio': precio,
+                        'municipio': mun,
+                        'sectorName': (sec?['nombre'] ?? '').toString().toLowerCase(),
+                      });
                     }
 
                     // --- Sugerencias de red (con precio si disponible) ---
@@ -1999,17 +1999,20 @@ mixin _FormularioMixin on State<LocalScreen> {
                                                   zonaSeleccionada,
                                                 );
 
+                                                final munNorm = zonaSeleccionada == 'CÚCUTA'
+                                                    ? 'Cúcuta'
+                                                    : zonaSeleccionada == 'LOS PATIOS'
+                                                        ? 'Los Patios'
+                                                        : 'V. Rosario';
                                                 await Supabase.instance.client
-                                                    .from('tarifas_locales')
-                                                    .upsert(
-                                                      {
-                                                        'local_id': widget.usuario['id'],
-                                                        'local_nombre': widget.usuario['nombre'],
-                                                        'sector_id': sectorId,
-                                                        'tarifa': tarifaNueva,
-                                                      },
-                                                      onConflict: 'local_id, sector_id',
-                                                    );
+                                                    .from('dir_usuario')
+                                                    .insert({
+                                                      'usuario_id': widget.usuario['id'],
+                                                      'nombre': barrioCtrl.text.trim().toUpperCase(),
+                                                      'municipio': munNorm,
+                                                      'sector_id': sectorId,
+                                                      'precio': tarifaNueva.toInt(),
+                                                    });
 
                                                 if (ctxSave.mounted) {
                                                   Navigator.pop(ctxSave);
@@ -2018,7 +2021,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                                                   ).showSnackBar(
                                                     const SnackBar(
                                                       content: Text(
-                                                        '✅ Dirección guardada en tu lista de precios.',
+                                                        '✅ Dirección guardada en tu Red de Direcciones.',
                                                       ),
                                                       backgroundColor:
                                                           Colors.green,

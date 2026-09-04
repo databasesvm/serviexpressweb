@@ -1066,8 +1066,8 @@ extension CentralScreenGestion on _CentralScreenState {
                     _tarjetaGestion(
                       icono: Icons.price_change,
                       color: Colors.orange[800]!,
-                      titulo: 'Listas de Precios',
-                      subtitulo: 'Ver y editar tarifas de cada local por sector',
+                      titulo: 'Red SE — Direcciones',
+                      subtitulo: 'Direcciones y tarifas por sector de cada local y cliente',
                       onTap: () => _abrirListasPrecios(context),
                     ),
                     _tarjetaGestion(
@@ -1446,395 +1446,24 @@ extension CentralScreenGestion on _CentralScreenState {
   }
 
   void _abrirGestorParaderos() {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        title: const Row(
-          children: [
-            Icon(Icons.storefront, color: Colors.blue),
-            SizedBox(width: 8),
-            Expanded(
-              // <--- AQUÍ ESTÁ LA MAGIA
-              child: Text(
-                'GESTOR DE LOCALES EXCLUSIVOS',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-              ),
-            ),
-          ],
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _PanelGestorParaderos(
+          onConfigRecargos: (local) => _abrirConfigRecargosLocal(local),
         ),
-        content: SizedBox(
-          width: double.maxFinite,
-          height: MediaQuery.of(context).size.height * 0.65,
-          child: FutureBuilder<List<Map<String, dynamic>>>(
-            future: Supabase.instance.client
-                .from('usuarios')
-                .select(
-                  'id, nombre, paradero_exclusivo, recargo_nocturno_especial, zona_lluvia',
-                )
-                .eq('rol', 'local')
-                .order('nombre', ascending: true),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(
-                  child: CircularProgressIndicator(color: Colors.black),
-                );
-              }
-              final locales = snapshot.data ?? [];
-              if (locales.isEmpty) {
-                return const Center(
-                  child: Text(
-                    'No hay locales registrados en el sistema.',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black54,
-                    ),
-                  ),
-                );
-              }
-
-              final localesExpuente = locales
-                  .where((l) => l['paradero_exclusivo'] == 'EXPUENTE')
-                  .toList();
-              final localesMemos = locales
-                  .where((l) => l['paradero_exclusivo'] == 'MEMOS')
-                  .toList();
-              final localesLibres = locales
-                  .where(
-                    (l) =>
-                        l['paradero_exclusivo'] != 'EXPUENTE' &&
-                        l['paradero_exclusivo'] != 'MEMOS',
-                  )
-                  .toList();
-
-              Widget construirListaLocales(
-                String titulo,
-                List<Map<String, dynamic>> lista,
-                Color color,
-                String paraderoEtiqueta,
-              ) {
-                return ExpansionTile(
-                  initiallyExpanded: true,
-                  collapsedBackgroundColor: color.withValues(alpha: 0.1),
-                  backgroundColor: color.withValues(alpha: 0.05),
-                  title: Text(
-                    '$titulo (${lista.length})',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: color,
-                      fontSize: 14,
-                    ),
-                  ),
-                  children: lista.isEmpty
-                      ? [
-                          const Padding(
-                            padding: EdgeInsets.all(12),
-                            child: Text(
-                              'Sin locales asignados',
-                              style: TextStyle(
-                                color: Colors.black45,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ),
-                        ]
-                      : lista
-                            .map(
-                              (local) => Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.business, color: color, size: 18),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Text(
-                                        local['nombre'].toString().toUpperCase(),
-                                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                    // CONFIGURACIÓN DE RECARGOS — nocturno especial + zona lluvia
-                                    IconButton(
-                                      icon: const Icon(Icons.tune, size: 18, color: Colors.orange),
-                                      tooltip: 'Configurar recargos',
-                                      padding: EdgeInsets.zero,
-                                      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                                      onPressed: () => _abrirConfigRecargosLocal(local),
-                                    ),
-                                    const SizedBox(width: 4),
-                                    SizedBox(
-                                      width: 120,
-                                      child: DropdownButtonFormField<String>(
-                                        initialValue: paraderoEtiqueta,
-                                        isDense: true,
-                                        isExpanded: true,
-                                        decoration: const InputDecoration(
-                                          contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-                                          border: OutlineInputBorder(),
-                                          isDense: true,
-                                        ),
-                                        style: const TextStyle(
-                                          fontSize: 10,
-                                          color: Colors.black,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                        items: const [
-                                          DropdownMenuItem(value: 'LIBRE', child: Text('LIBRE 🟢', style: TextStyle(fontSize: 11))),
-                                          DropdownMenuItem(value: 'EXPUENTE', child: Text('EXPUENTE 🔵', style: TextStyle(fontSize: 11))),
-                                          DropdownMenuItem(value: 'MEMOS', child: Text('MEMOS 🟣', style: TextStyle(fontSize: 11))),
-                                        ],
-                                        onChanged: (nuevoParadero) async {
-                                          if (nuevoParadero != null &&
-                                              nuevoParadero != paraderoEtiqueta) {
-                                            String? valorFinal =
-                                                nuevoParadero == 'LIBRE'
-                                                ? null
-                                                : nuevoParadero;
-                                            await Supabase.instance.client
-                                                .from('usuarios')
-                                                .update({
-                                                  'paradero_exclusivo': valorFinal,
-                                                })
-                                                .eq('id', local['id']);
-                                            if (ctx.mounted) {
-                                              Navigator.pop(ctx);
-                                              _abrirGestorParaderos();
-                                              ScaffoldMessenger.of(
-                                                context,
-                                              ).showSnackBar(
-                                                SnackBar(
-                                                  content: Text(
-                                                    'Local ${local['nombre']} reasignado a $nuevoParadero',
-                                                  ),
-                                                  backgroundColor: Colors.black,
-                                                ),
-                                              );
-                                            }
-                                          }
-                                        },
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            )
-                            .toList(),
-                );
-              }
-
-              return ListView(
-                children: [
-                  const Text(
-                    'Asigna de qué paradero saldrán los móviles para cada local. Si lo dejas libre, el radar buscará al más cercano.',
-                    style: TextStyle(fontSize: 12, color: Colors.black54),
-                  ),
-                  const SizedBox(height: 12),
-                  construirListaLocales(
-                    '📍 EXCLUSIVOS EXPUENTE',
-                    localesExpuente,
-                    Colors.blue[800]!,
-                    'EXPUENTE',
-                  ),
-                  const SizedBox(height: 8),
-                  construirListaLocales(
-                    '📍 EXCLUSIVOS MEMOS',
-                    localesMemos,
-                    Colors.purple[800]!,
-                    'MEMOS',
-                  ),
-                  const SizedBox(height: 8),
-                  construirListaLocales(
-                    '🟢 LOCALES LIBRES (Por Cercanía)',
-                    localesLibres,
-                    Colors.green[800]!,
-                    'LIBRE',
-                  ),
-                ],
-              );
-            },
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text(
-              'CERRAR',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: Colors.black,
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }
 
+
   // ─────────────────────────────────────────────────────────────
-  // ─────────────────────────────────────────────────────────────
-  // GESTOR: LISTAS DE PRECIOS (tarifas_locales)
+  // RED DE DIRECCIONES SE — navega a pantalla completa
   // ─────────────────────────────────────────────────────────────
   void _abrirListasPrecios(BuildContext context) {
-    final nomCtrl    = TextEditingController();
-    final clavCtrl   = TextEditingController();
-    final tarifaCtrl = TextEditingController();
-    bool recarga     = false;
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(builder: (ctx, setLocal) {
-        Future<List<Map<String, dynamic>>> cargar() =>
-            Supabase.instance.client
-                .from('tarifas_locales')
-                .select()
-                .order('local_nombre')
-                .then((d) => List<Map<String, dynamic>>.from(d));
-
-        Future<void> guardar() async {
-          final nom   = nomCtrl.text.trim();
-          final clav  = clavCtrl.text.trim();
-          final tar   = int.tryParse(tarifaCtrl.text.trim());
-          if (nom.isEmpty || tar == null) return;
-          await Supabase.instance.client.from('tarifas_locales').insert({
-            'local_nombre': nom,
-            'palabra_clave': clav.isEmpty ? null : clav,
-            'tarifa': tar,
-          });
-          nomCtrl.clear(); clavCtrl.clear(); tarifaCtrl.clear();
-          setLocal(() => recarga = !recarga);
-        }
-
-        Future<void> eliminar(int id) async {
-          await Supabase.instance.client.from('tarifas_locales').delete().eq('id', id);
-          setLocal(() => recarga = !recarga);
-        }
-
-        Future<void> actualizarTarifa(int id, String val) async {
-          final tar = int.tryParse(val);
-          if (tar == null) return;
-          await Supabase.instance.client.from('tarifas_locales').update({'tarifa': tar}).eq('id', id);
-        }
-
-        return Dialog(
-          backgroundColor: const Color(0xFF1A1A1A),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          child: SizedBox(
-            width: 480,
-            height: 520,
-            child: Column(children: [
-              // Header
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 12, 0),
-                child: Row(children: [
-                  const Icon(Icons.price_change, color: Colors.orange, size: 20),
-                  const SizedBox(width: 8),
-                  const Expanded(child: Text('Listas de Precios',
-                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15))),
-                  IconButton(icon: const Icon(Icons.close, color: Colors.white54, size: 18),
-                      onPressed: () => Navigator.pop(ctx), padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(minWidth: 24, minHeight: 24)),
-                ]),
-              ),
-              const Divider(color: Colors.white12),
-
-              // Formulario agregar
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: Row(children: [
-                  Expanded(child: TextField(
-                    controller: nomCtrl,
-                    style: const TextStyle(color: Colors.white, fontSize: 12),
-                    decoration: const InputDecoration(
-                      labelText: 'Local', labelStyle: TextStyle(color: Colors.white54, fontSize: 11),
-                      isDense: true, border: OutlineInputBorder(),
-                      contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                    ),
-                  )),
-                  const SizedBox(width: 6),
-                  Expanded(child: TextField(
-                    controller: clavCtrl,
-                    style: const TextStyle(color: Colors.white, fontSize: 12),
-                    decoration: const InputDecoration(
-                      labelText: 'Palabra clave', labelStyle: TextStyle(color: Colors.white54, fontSize: 11),
-                      isDense: true, border: OutlineInputBorder(),
-                      contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                    ),
-                  )),
-                  const SizedBox(width: 6),
-                  SizedBox(width: 80, child: TextField(
-                    controller: tarifaCtrl,
-                    keyboardType: TextInputType.number,
-                    style: const TextStyle(color: Colors.white, fontSize: 12),
-                    decoration: const InputDecoration(
-                      labelText: '\$ Tarifa', labelStyle: TextStyle(color: Colors.white54, fontSize: 11),
-                      isDense: true, border: OutlineInputBorder(),
-                      contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                    ),
-                  )),
-                  const SizedBox(width: 6),
-                  IconButton(
-                    icon: const Icon(Icons.add_circle, color: Colors.green, size: 22),
-                    onPressed: guardar,
-                    tooltip: 'Agregar',
-                  ),
-                ]),
-              ),
-              const Divider(color: Colors.white12, height: 1),
-
-              // Lista
-              Expanded(
-                child: FutureBuilder<List<Map<String, dynamic>>>(
-                  key: ValueKey(recarga),
-                  future: cargar(),
-                  builder: (_, snap) {
-                    if (snap.connectionState == ConnectionState.waiting)
-                      return const Center(child: CircularProgressIndicator(color: Colors.orange));
-                    final items = snap.data ?? [];
-                    if (items.isEmpty)
-                      return const Center(child: Text('Sin tarifas registradas',
-                          style: TextStyle(color: Colors.white38, fontSize: 12)));
-                    return ListView.builder(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      itemCount: items.length,
-                      itemBuilder: (_, i) {
-                        final it = items[i];
-                        final ctrl = TextEditingController(text: it['tarifa']?.toString() ?? '');
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 6),
-                          child: Row(children: [
-                            Expanded(child: Text(it['local_nombre']?.toString() ?? '—',
-                                style: const TextStyle(color: Colors.white70, fontSize: 12))),
-                            Expanded(child: Text(it['palabra_clave']?.toString() ?? '—',
-                                style: const TextStyle(color: Colors.white38, fontSize: 11))),
-                            SizedBox(width: 80, child: TextField(
-                              controller: ctrl,
-                              keyboardType: TextInputType.number,
-                              style: const TextStyle(fontSize: 12),
-                              onSubmitted: (v) => actualizarTarifa(it['id'] as int, v),
-                              decoration: const InputDecoration(
-                                isDense: true, border: OutlineInputBorder(),
-                                contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-                                filled: true, fillColor: Colors.white,
-                              ),
-                            )),
-                            IconButton(
-                              icon: const Icon(Icons.delete_outline, color: Colors.red, size: 18),
-                              onPressed: () => eliminar(it['id'] as int),
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                            ),
-                          ]),
-                        );
-                      },
-                    );
-                  },
-                ),
-              ),
-            ]),
-          ),
-        );
-      }),
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const _PanelRedSe()),
     );
   }
 
@@ -1844,573 +1473,696 @@ extension CentralScreenGestion on _CentralScreenState {
   // GESTOR UNIFICADO: RED DE DIRECCIONES + SECTORES
   // ─────────────────────────────────────────────────────────────
   void _abrirGestorRedYSectores(BuildContext context) {
-    // ── Sectores ──
-    final sNombreCtrl  = TextEditingController();
-    final sPrecioCtrl  = TextEditingController();
-    String sFiltro     = 'Cúcuta';
-    String sMunicipio  = 'Cúcuta';
-
-    // ── Direcciones ──
-    final dNombreCtrl  = TextEditingController();
-    final dPrecioCtrl  = TextEditingController();
-    String dMunicipio  = 'Cúcuta';
-    String dFiltro     = 'Cúcuta';
-    int? dSectorSel;
-
-    Future<List<Map<String, dynamic>>> sectorsFuture =
-        Supabase.instance.client.from('sectores')
-            .select('id, nombre, municipio, activo, precio_global')
-            .order('municipio').order('nombre');
-
-    final sectoresParaDropFuture = Supabase.instance.client
-        .from('sectores').select('id, nombre, municipio')
-        .eq('activo', true).order('nombre');
-
-    Future<List<Map<String, dynamic>>> dirsFuture =
-        Supabase.instance.client.from('red_direcciones')
-            .select('id, nombre, municipio, activo, precio, sector_id, sectores(nombre)')
-            .order('municipio').order('nombre');
-
-    void recargarS(StateSetter setSt) {
-      sectorsFuture = Supabase.instance.client.from('sectores')
-          .select('id, nombre, municipio, activo, precio_global')
-          .order('municipio').order('nombre');
-      setSt(() {});
-    }
-
-    void recargarD(StateSetter setSt) {
-      dirsFuture = Supabase.instance.client.from('red_direcciones')
-          .select('id, nombre, municipio, activo, precio, sector_id, sectores(nombre)')
-          .order('municipio').order('nombre');
-      setSt(() {});
-    }
-
-    String _milesStr(int v) {
-      final s = v.toString();
-      final buf = StringBuffer();
-      for (int i = 0; i < s.length; i++) {
-        if (i > 0 && (s.length - i) % 3 == 0) buf.write('.');
-        buf.write(s[i]);
-      }
-      return buf.toString();
-    }
-
-    showDialog(
-      context: context,
-      builder: (ctx) => DefaultTabController(
-        length: 2,
-        child: StatefulBuilder(
-          builder: (ctx, setSt) => AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            titlePadding: EdgeInsets.zero,
-            title: Column(mainAxisSize: MainAxisSize.min, children: [
-              const Padding(
-                padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
-                child: Row(children: [
-                  Icon(Icons.map_outlined, color: Colors.indigo),
-                  SizedBox(width: 8),
-                  Text('RED & SECTORES', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                ]),
-              ),
-              TabBar(
-                labelColor: Colors.indigo,
-                unselectedLabelColor: Colors.black54,
-                indicatorColor: Colors.indigo,
-                tabs: const [
-                  Tab(icon: Icon(Icons.place, size: 16), text: 'Direcciones'),
-                  Tab(icon: Icon(Icons.grid_view_rounded, size: 16), text: 'Sectores'),
-                ],
-              ),
-            ]),
-            content: SizedBox(
-              width: double.maxFinite,
-              height: MediaQuery.of(context).size.height * 0.72,
-              child: TabBarView(children: [
-
-                // ══════════════════════════════════════════════════════
-                // TAB 1: DIRECCIONES
-                // ══════════════════════════════════════════════════════
-                FutureBuilder<List<Map<String, dynamic>>>(
-                  future: sectoresParaDropFuture,
-                  builder: (_, snapS) {
-                    final sectores = snapS.data ?? [];
-                    return Column(children: [
-                      // Filtro municipio
-                      SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Row(children: ['Cúcuta', 'Los Patios', 'V. Rosario'].map((m) {
-                          final sel = dFiltro == m;
-                          return Padding(
-                            padding: const EdgeInsets.fromLTRB(0, 8, 6, 8),
-                            child: ChoiceChip(
-                              label: Text(m, style: TextStyle(fontSize: 11, color: sel ? Colors.white : Colors.black87)),
-                              selected: sel, selectedColor: Colors.indigo, backgroundColor: Colors.grey[200],
-                              onSelected: (_) => setSt(() => dFiltro = m),
-                            ),
-                          );
-                        }).toList()),
-                      ),
-                      // Formulario agregar
-                      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Row(children: [
-                          Expanded(child: TextField(
-                            controller: dNombreCtrl,
-                            textCapitalization: TextCapitalization.words,
-                            decoration: const InputDecoration(labelText: 'Nombre/dirección', isDense: true, border: OutlineInputBorder()),
-                          )),
-                          const SizedBox(width: 6),
-                          SizedBox(width: 90, child: TextField(
-                            controller: dPrecioCtrl,
-                            keyboardType: TextInputType.number,
-                            decoration: const InputDecoration(labelText: 'Precio \$', isDense: true, border: OutlineInputBorder()),
-                          )),
-                          const SizedBox(width: 6),
-                          DropdownButton<String>(
-                            value: dMunicipio, isDense: true,
-                            items: ['Cúcuta', 'Los Patios', 'V. Rosario']
-                                .map((m) => DropdownMenuItem(value: m, child: Text(m, style: const TextStyle(fontSize: 11))))
-                                .toList(),
-                            onChanged: (v) => setSt(() => dMunicipio = v ?? 'Cúcuta'),
-                          ),
-                        ]),
-                        const SizedBox(height: 6),
-                        Row(children: [
-                          const Text('Sector: ', style: TextStyle(fontSize: 12, color: Colors.black54)),
-                          const SizedBox(width: 6),
-                          Expanded(child: DropdownButton<int?>(
-                            value: dSectorSel, isDense: true, isExpanded: true,
-                            hint: const Text('Sin sector', style: TextStyle(fontSize: 12)),
-                            items: [
-                              const DropdownMenuItem<int?>(value: null, child: Text('Sin sector', style: TextStyle(fontSize: 12))),
-                              ...sectores.map((s) => DropdownMenuItem<int?>(
-                                value: s['id'] as int,
-                                child: Text('${s['nombre']} (${s['municipio']})', style: const TextStyle(fontSize: 12)),
-                              )),
-                            ],
-                            onChanged: (v) => setSt(() => dSectorSel = v),
-                          )),
-                          const SizedBox(width: 6),
-                          ElevatedButton(
-                            style: ElevatedButton.styleFrom(backgroundColor: Colors.black, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12)),
-                            onPressed: () async {
-                              final n = dNombreCtrl.text.trim();
-                              if (n.isEmpty) return;
-                              final precio = int.tryParse(dPrecioCtrl.text.trim());
-                              try {
-                                await Supabase.instance.client.from('red_direcciones').insert({
-                                  'nombre': n, 'municipio': dMunicipio,
-                                  'zona_lluvia': 'general', 'activo': true,
-                                  if (dSectorSel != null) 'sector_id': dSectorSel,
-                                  if (precio != null) 'precio': precio,
-                                });
-                                dNombreCtrl.clear(); dPrecioCtrl.clear();
-                                recargarD(setSt);
-                              } catch (e) {
-                                if (ctx.mounted) ScaffoldMessenger.of(ctx).showSnackBar(
-                                  SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
-                              }
-                            },
-                            child: const Icon(Icons.add, color: Color(0xff3AF500), size: 18),
-                          ),
-                        ]),
-                      ]),
-                      const Divider(height: 16),
-                      // Lista de direcciones
-                      Expanded(child: FutureBuilder<List<Map<String, dynamic>>>(
-                        future: dirsFuture,
-                        builder: (_, snap) {
-                          if (snap.connectionState == ConnectionState.waiting)
-                            return const Center(child: CircularProgressIndicator(color: Colors.indigo));
-                          final dirs = (snap.data ?? [])
-                              .where((d) => d['municipio'].toString() == dFiltro).toList();
-                          if (dirs.isEmpty) return Center(child: Text('Sin direcciones en $dFiltro.'));
-                          return ListView.builder(
-                            itemCount: dirs.length,
-                            itemBuilder: (_, i) {
-                              final d = dirs[i];
-                              final activo = d['activo'] as bool? ?? true;
-                              final sectorNombre = (d['sectores'] as Map?)?['nombre'];
-                              final precio = d['precio'] as int?;
-                              return ListTile(
-                                dense: true,
-                                leading: Icon(Icons.place, color: activo ? Colors.indigo : Colors.grey, size: 18),
-                                title: Text(d['nombre'].toString(),
-                                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13,
-                                        color: activo ? Colors.black : Colors.grey)),
-                                subtitle: Text(
-                                  '${d['municipio']}${sectorNombre != null ? ' · $sectorNombre' : ''}'
-                                  '${precio != null ? ' · \$${_milesStr(precio)}' : ''}',
-                                  style: const TextStyle(fontSize: 11),
-                                ),
-                                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                                  // Botón editar precio global + por local
-                                  GestureDetector(
-                                    onTap: () async {
-                                      final globalCtrl = TextEditingController(text: precio?.toString() ?? '');
-                                      final dirId = d['id'] as int;
-                                      bool recargaPrecios = false;
-
-                                      await showDialog<void>(
-                                        context: ctx,
-                                        builder: (ctx2) => StatefulBuilder(
-                                          builder: (ctx2, setLocal) => AlertDialog(
-                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                            titlePadding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                                            title: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-                                              Text('💰 ${d['nombre']}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
-                                            ]),
-                                            content: SizedBox(
-                                              width: double.maxFinite,
-                                              height: 380,
-                                              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                                // ── Precio global ──────────────────────────
-                                                const Text('Precio global (todos los locales):', style: TextStyle(fontSize: 12, color: Colors.black54, fontWeight: FontWeight.bold)),
-                                                const SizedBox(height: 6),
-                                                Row(children: [
-                                                  Expanded(child: TextField(
-                                                    controller: globalCtrl,
-                                                    keyboardType: TextInputType.number,
-                                                    autofocus: true,
-                                                    decoration: const InputDecoration(labelText: 'Precio \$', isDense: true, border: OutlineInputBorder()),
-                                                  )),
-                                                  const SizedBox(width: 8),
-                                                  ElevatedButton(
-                                                    style: ElevatedButton.styleFrom(backgroundColor: Colors.black, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14)),
-                                                    onPressed: () async {
-                                                      final n = int.tryParse(globalCtrl.text.trim());
-                                                      if (n == null) return;
-                                                      await Supabase.instance.client.from('red_direcciones')
-                                                          .update({'precio': n}).eq('id', dirId);
-                                                      recargarD(setSt);
-                                                    },
-                                                    child: const Icon(Icons.save, color: Color(0xff3AF500), size: 18),
-                                                  ),
-                                                ]),
-                                                const SizedBox(height: 12),
-                                                const Divider(height: 1),
-                                                const SizedBox(height: 8),
-                                                // ── Precios por local ──────────────────────
-                                                const Text('Precios por local (sobrescriben el global):', style: TextStyle(fontSize: 12, color: Colors.black54, fontWeight: FontWeight.bold)),
-                                                const SizedBox(height: 6),
-                                                Expanded(child: FutureBuilder<List<dynamic>>(
-                                                  key: ValueKey(recargaPrecios),
-                                                  future: Future.wait([
-                                                    Supabase.instance.client.from('usuarios')
-                                                        .select('id, nombre')
-                                                        .eq('rol', 'local')
-                                                        .eq('activo', true)
-                                                        .order('nombre'),
-                                                    Supabase.instance.client.from('red_dir_precios_local')
-                                                        .select('local_id, precio')
-                                                        .eq('direccion_id', dirId),
-                                                  ]),
-                                                  builder: (_, snap) {
-                                                    if (snap.connectionState == ConnectionState.waiting)
-                                                      return const Center(child: CircularProgressIndicator(color: Colors.indigo));
-                                                    final locales = List<Map<String, dynamic>>.from(snap.data![0] as List);
-                                                    final rawPrecios = List<Map<String, dynamic>>.from(snap.data![1] as List);
-                                                    final Map<int, int> pm = { for (final p in rawPrecios) p['local_id'] as int: p['precio'] as int };
-                                                    return ListView.builder(
-                                                      itemCount: locales.length,
-                                                      itemBuilder: (_, i) {
-                                                        final loc = locales[i];
-                                                        final lid = loc['id'] as int;
-                                                        final precioLocal = pm[lid];
-                                                        final lCtrl = TextEditingController(text: precioLocal?.toString() ?? '');
-                                                        return Padding(
-                                                          padding: const EdgeInsets.only(bottom: 6),
-                                                          child: Row(children: [
-                                                            Expanded(child: Text(loc['nombre'].toString(),
-                                                                style: TextStyle(fontSize: 12, color: precioLocal != null ? Colors.black87 : Colors.black38))),
-                                                            SizedBox(width: 72, child: TextField(
-                                                              controller: lCtrl,
-                                                              keyboardType: TextInputType.number,
-                                                              decoration: InputDecoration(
-                                                                isDense: true,
-                                                                hintText: '\$—',
-                                                                border: const OutlineInputBorder(),
-                                                                contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
-                                                                fillColor: precioLocal != null ? Colors.green[50] : null,
-                                                                filled: precioLocal != null,
-                                                              ),
-                                                            )),
-                                                            const SizedBox(width: 4),
-                                                            InkWell(
-                                                              onTap: () async {
-                                                                final np = int.tryParse(lCtrl.text.trim());
-                                                                if (np != null) {
-                                                                  await Supabase.instance.client.from('red_dir_precios_local').upsert({
-                                                                    'direccion_id': dirId,
-                                                                    'local_id': lid,
-                                                                    'precio': np,
-                                                                  }, onConflict: 'direccion_id, local_id');
-                                                                } else if (precioLocal != null) {
-                                                                  await Supabase.instance.client.from('red_dir_precios_local')
-                                                                      .delete().eq('direccion_id', dirId).eq('local_id', lid);
-                                                                }
-                                                                setLocal(() => recargaPrecios = !recargaPrecios);
-                                                              },
-                                                              child: Container(
-                                                                padding: const EdgeInsets.all(6),
-                                                                decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(6)),
-                                                                child: const Icon(Icons.save, color: Color(0xff3AF500), size: 14),
-                                                              ),
-                                                            ),
-                                                          ]),
-                                                        );
-                                                      },
-                                                    );
-                                                  },
-                                                )),
-                                              ]),
-                                            ),
-                                            actions: [TextButton(
-                                              onPressed: () => Navigator.pop(ctx2),
-                                              child: const Text('CERRAR', style: TextStyle(fontWeight: FontWeight.bold)),
-                                            )],
-                                          ),
-                                        ),
-                                      );
-                                      recargarD(setSt);
-                                    },
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                                      decoration: BoxDecoration(
-                                        color: precio != null ? Colors.green[50] : Colors.grey[100],
-                                        border: Border.all(color: precio != null ? Colors.green[300]! : Colors.grey[300]!),
-                                        borderRadius: BorderRadius.circular(6),
-                                      ),
-                                      child: Text(
-                                        precio != null ? '\$${_milesStr(precio)}' : '\$—',
-                                        style: TextStyle(fontSize: 11, color: precio != null ? Colors.green[800] : Colors.grey),
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  GestureDetector(
-                                    onTap: () async {
-                                      await Supabase.instance.client.from('red_direcciones')
-                                          .update({'activo': !activo}).eq('id', d['id']);
-                                      recargarD(setSt);
-                                    },
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                      decoration: BoxDecoration(
-                                        color: activo ? Colors.indigo : Colors.grey[200],
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                      child: Text(activo ? 'ON' : 'OFF',
-                                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold,
-                                              color: activo ? Colors.white : Colors.grey)),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  IconButton(
-                                    icon: const Icon(Icons.delete, color: Colors.red, size: 18),
-                                    padding: EdgeInsets.zero,
-                                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                                    onPressed: () async {
-                                      await Supabase.instance.client.from('red_direcciones')
-                                          .delete().eq('id', d['id']);
-                                      recargarD(setSt);
-                                    },
-                                  ),
-                                ]),
-                              );
-                            },
-                          );
-                        },
-                      )),
-                    ]);
-                  },
-                ),
-
-                // ══════════════════════════════════════════════════════
-                // TAB 2: SECTORES
-                // ══════════════════════════════════════════════════════
-                Column(children: [
-                  // Formulario agregar
-                  Row(children: [
-                    Expanded(child: TextField(
-                      controller: sNombreCtrl,
-                      textCapitalization: TextCapitalization.words,
-                      decoration: const InputDecoration(labelText: 'Nombre del sector/barrio', isDense: true, border: OutlineInputBorder()),
-                    )),
-                    const SizedBox(width: 6),
-                    SizedBox(width: 90, child: TextField(
-                      controller: sPrecioCtrl,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: 'Precio \$', isDense: true, border: OutlineInputBorder()),
-                    )),
-                    const SizedBox(width: 6),
-                    DropdownButton<String>(
-                      value: sMunicipio, isDense: true,
-                      items: ['Cúcuta', 'Los Patios', 'V. Rosario']
-                          .map((m) => DropdownMenuItem(value: m, child: Text(m, style: const TextStyle(fontSize: 11))))
-                          .toList(),
-                      onChanged: (v) => setSt(() => sMunicipio = v ?? 'Cúcuta'),
-                    ),
-                    const SizedBox(width: 6),
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(backgroundColor: Colors.black, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12)),
-                      onPressed: () async {
-                        final n = sNombreCtrl.text.trim();
-                        if (n.isEmpty) return;
-                        final precio = int.tryParse(sPrecioCtrl.text.trim());
-                        try {
-                          await Supabase.instance.client.from('sectores').insert({
-                            'nombre': n, 'municipio': sMunicipio,
-                            if (precio != null) 'precio_global': precio,
-                          });
-                          sNombreCtrl.clear(); sPrecioCtrl.clear();
-                          recargarS(setSt);
-                        } catch (e) {
-                          if (ctx.mounted) ScaffoldMessenger.of(ctx).showSnackBar(
-                            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
-                        }
-                      },
-                      child: const Icon(Icons.add, color: Color(0xff3AF500), size: 18),
-                    ),
-                  ]),
-                  const SizedBox(height: 10),
-                  // Filtro municipio
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(children: ['Cúcuta', 'Los Patios', 'V. Rosario'].map((m) {
-                      final sel = sFiltro == m;
-                      return Padding(
-                        padding: const EdgeInsets.only(right: 6),
-                        child: ChoiceChip(
-                          label: Text(m, style: TextStyle(fontSize: 11, color: sel ? Colors.white : Colors.black87)),
-                          selected: sel, selectedColor: Colors.indigo, backgroundColor: Colors.grey[200],
-                          onSelected: (_) => setSt(() => sFiltro = m),
-                        ),
-                      );
-                    }).toList()),
-                  ),
-                  const SizedBox(height: 10),
-                  // Lista sectores
-                  Expanded(child: FutureBuilder<List<Map<String, dynamic>>>(
-                    future: sectorsFuture,
-                    builder: (_, snap) {
-                      if (snap.connectionState == ConnectionState.waiting)
-                        return const Center(child: CircularProgressIndicator(color: Colors.indigo));
-                      final lista = (snap.data ?? [])
-                          .where((s) => s['municipio'].toString() == sFiltro).toList();
-                      if (lista.isEmpty) return Center(child: Text('Sin sectores en $sFiltro.'));
-                      return ListView.builder(
-                        itemCount: lista.length,
-                        itemBuilder: (_, i) {
-                          final s = lista[i];
-                          final activo = s['activo'] as bool? ?? true;
-                          final precioG = s['precio_global'] as int?;
-                          return Card(
-                            margin: const EdgeInsets.only(bottom: 6),
-                            elevation: 0,
-                            color: Colors.grey[100],
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                            child: ListTile(
-                              dense: true,
-                              leading: Icon(Icons.location_city,
-                                  color: activo ? Colors.indigo : Colors.grey, size: 20),
-                              title: Text(s['nombre'].toString(),
-                                  style: TextStyle(fontWeight: FontWeight.bold,
-                                      color: activo ? Colors.black : Colors.grey)),
-                              subtitle: precioG != null
-                                  ? Text('\$${_milesStr(precioG)} global',
-                                      style: const TextStyle(fontSize: 11, color: Colors.green))
-                                  : null,
-                              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                                // Botón editar precio global
-                                GestureDetector(
-                                  onTap: () async {
-                                    final ctrl = TextEditingController(text: precioG?.toString() ?? '');
-                                    final nuevo = await showDialog<int?>(
-                                      context: ctx,
-                                      builder: (_) => AlertDialog(
-                                        title: const Text('Precio global del sector', style: TextStyle(fontSize: 14)),
-                                        content: TextField(
-                                          controller: ctrl,
-                                          keyboardType: TextInputType.number,
-                                          autofocus: true,
-                                          decoration: const InputDecoration(labelText: 'Precio \$', border: OutlineInputBorder()),
-                                        ),
-                                        actions: [
-                                          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
-                                          ElevatedButton(
-                                            onPressed: () => Navigator.pop(ctx, int.tryParse(ctrl.text.trim())),
-                                            child: const Text('Guardar'),
-                                          ),
-                                        ],
-                                      ),
-                                    );
-                                    if (nuevo != null) {
-                                      await Supabase.instance.client.from('sectores')
-                                          .update({'precio_global': nuevo}).eq('id', s['id']);
-                                      recargarS(setSt);
-                                    }
-                                  },
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                                    decoration: BoxDecoration(
-                                      color: precioG != null ? Colors.green[50] : Colors.grey[100],
-                                      border: Border.all(color: precioG != null ? Colors.green[300]! : Colors.grey[300]!),
-                                      borderRadius: BorderRadius.circular(6),
-                                    ),
-                                    child: Text(
-                                      precioG != null ? '\$${_milesStr(precioG)}' : '\$—',
-                                      style: TextStyle(fontSize: 11, color: precioG != null ? Colors.green[800] : Colors.grey),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 4),
-                                GestureDetector(
-                                  onTap: () async {
-                                    await Supabase.instance.client.from('sectores')
-                                        .update({'activo': !activo}).eq('id', s['id']);
-                                    recargarS(setSt);
-                                  },
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                    decoration: BoxDecoration(
-                                      color: activo ? Colors.indigo : Colors.grey[200],
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    child: Text(activo ? 'ON' : 'OFF',
-                                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold,
-                                            color: activo ? Colors.white : Colors.grey)),
-                                  ),
-                                ),
-                                const SizedBox(width: 4),
-                                IconButton(
-                                  icon: const Icon(Icons.delete, color: Colors.red, size: 18),
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                                  onPressed: () async {
-                                    await Supabase.instance.client.from('sectores')
-                                        .delete().eq('id', s['id']);
-                                    recargarS(setSt);
-                                  },
-                                ),
-                              ]),
-                            ),
-                          );
-                        },
-                      );
-                    },
-                  )),
-                ]),
-
-              ]),
-            ),
-            actions: [TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('CERRAR', style: TextStyle(fontWeight: FontWeight.bold)),
-            )],
-          ),
-        ),
-      ),
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const _PanelRedYSectores()),
     );
   }
 
+
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// GESTOR DE PARADEROS — pantalla completa
+// ══════════════════════════════════════════════════════════════════════════════
+
+class _PanelGestorParaderos extends StatefulWidget {
+  final Function(Map<String, dynamic>) onConfigRecargos;
+  const _PanelGestorParaderos({required this.onConfigRecargos});
+
+  @override
+  State<_PanelGestorParaderos> createState() => _PanelGestorParaderosState();
+}
+
+class _PanelGestorParaderosState extends State<_PanelGestorParaderos> {
+  late Future<List<Map<String, dynamic>>> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _cargar();
+  }
+
+  Future<List<Map<String, dynamic>>> _cargar() =>
+      Supabase.instance.client
+          .from('usuarios')
+          .select('id, nombre, paradero_exclusivo, recargo_nocturno_especial, zona_lluvia')
+          .eq('rol', 'local')
+          .order('nombre', ascending: true);
+
+  void _recargar() => setState(() { _future = _cargar(); });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black,
+        elevation: 1,
+        title: const Row(children: [
+          Icon(Icons.storefront, color: Colors.blue),
+          SizedBox(width: 8),
+          Expanded(child: Text('GESTOR DE LOCALES EXCLUSIVOS',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16))),
+        ]),
+      ),
+      body: FutureBuilder<List<Map<String, dynamic>>>(
+        future: _future,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator(color: Colors.black));
+          }
+          final locales = snapshot.data ?? [];
+          if (locales.isEmpty) {
+            return const Center(child: Text('No hay locales registrados en el sistema.',
+                style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black54)));
+          }
+
+          final localesExpuente = locales.where((l) => l['paradero_exclusivo'] == 'EXPUENTE').toList();
+          final localesMemos    = locales.where((l) => l['paradero_exclusivo'] == 'MEMOS').toList();
+          final localesLibres   = locales.where((l) =>
+              l['paradero_exclusivo'] != 'EXPUENTE' && l['paradero_exclusivo'] != 'MEMOS').toList();
+
+          Widget construirLista(String titulo, List<Map<String, dynamic>> lista, Color color, String etiqueta) {
+            return ExpansionTile(
+              initiallyExpanded: true,
+              collapsedBackgroundColor: color.withValues(alpha: 0.1),
+              backgroundColor: color.withValues(alpha: 0.05),
+              title: Text('$titulo (${lista.length})',
+                  style: TextStyle(fontWeight: FontWeight.bold, color: color, fontSize: 14)),
+              children: lista.isEmpty
+                  ? [const Padding(padding: EdgeInsets.all(12),
+                      child: Text('Sin locales asignados',
+                          style: TextStyle(color: Colors.black45, fontSize: 12)))]
+                  : lista.map((local) => Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      child: Row(children: [
+                        Icon(Icons.business, color: color, size: 18),
+                        const SizedBox(width: 10),
+                        Expanded(child: Text(local['nombre'].toString().toUpperCase(),
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                            maxLines: 2, overflow: TextOverflow.ellipsis)),
+                        IconButton(
+                          icon: const Icon(Icons.tune, size: 18, color: Colors.orange),
+                          tooltip: 'Configurar recargos',
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                          onPressed: () => widget.onConfigRecargos(local),
+                        ),
+                        const SizedBox(width: 4),
+                        SizedBox(width: 120, child: DropdownButtonFormField<String>(
+                          initialValue: etiqueta,
+                          isDense: true, isExpanded: true,
+                          decoration: const InputDecoration(
+                            contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                            border: OutlineInputBorder(), isDense: true,
+                          ),
+                          style: const TextStyle(fontSize: 10, color: Colors.black, fontWeight: FontWeight.bold),
+                          items: const [
+                            DropdownMenuItem(value: 'LIBRE',    child: Text('LIBRE 🟢',    style: TextStyle(fontSize: 11))),
+                            DropdownMenuItem(value: 'EXPUENTE', child: Text('EXPUENTE 🔵', style: TextStyle(fontSize: 11))),
+                            DropdownMenuItem(value: 'MEMOS',    child: Text('MEMOS 🟣',    style: TextStyle(fontSize: 11))),
+                          ],
+                          onChanged: (nuevo) async {
+                            if (nuevo == null || nuevo == etiqueta) return;
+                            final valor = nuevo == 'LIBRE' ? null : nuevo;
+                            await Supabase.instance.client.from('usuarios')
+                                .update({'paradero_exclusivo': valor}).eq('id', local['id']);
+                            if (mounted) {
+                              _recargar();
+                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                                content: Text('Local ${local['nombre']} reasignado a $nuevo'),
+                                backgroundColor: Colors.black,
+                              ));
+                            }
+                          },
+                        )),
+                      ]),
+                    )).toList(),
+            );
+          }
+
+          return ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              const Text(
+                'Asigna de qué paradero saldrán los móviles para cada local. Si lo dejas libre, el radar buscará al más cercano.',
+                style: TextStyle(fontSize: 12, color: Colors.black54),
+              ),
+              const SizedBox(height: 12),
+              construirLista('📍 EXCLUSIVOS EXPUENTE', localesExpuente, Colors.blue[800]!,   'EXPUENTE'),
+              const SizedBox(height: 8),
+              construirLista('📍 EXCLUSIVOS MEMOS',    localesMemos,    Colors.purple[800]!, 'MEMOS'),
+              const SizedBox(height: 8),
+              construirLista('🟢 LOCALES LIBRES (Por Cercanía)', localesLibres, Colors.green[800]!, 'LIBRE'),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// RED & SECTORES — pantalla completa
+// ══════════════════════════════════════════════════════════════════════════════
+
+class _PanelRedYSectores extends StatefulWidget {
+  const _PanelRedYSectores();
+
+  @override
+  State<_PanelRedYSectores> createState() => _PanelRedYSectoresState();
+}
+
+class _PanelRedYSectoresState extends State<_PanelRedYSectores>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tab;
+
+  // ── Sectores ──
+  final _sNombreCtrl = TextEditingController();
+  final _sPrecioCtrl = TextEditingController();
+  String _sFiltro    = 'Cúcuta';
+  String _sMunicipio = 'Cúcuta';
+  late Future<List<Map<String, dynamic>>> _sectorsFuture;
+
+  // ── Direcciones ──
+  final _dNombreCtrl = TextEditingController();
+  final _dPrecioCtrl = TextEditingController();
+  String _dMunicipio = 'Cúcuta';
+  String _dFiltro    = 'Cúcuta';
+  int?   _dSectorSel;
+  late Future<List<Map<String, dynamic>>> _dirsFuture;
+  late Future<List<Map<String, dynamic>>> _sectoresDropFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _tab = TabController(length: 2, vsync: this);
+    _sectorsFuture     = _cargarSectores();
+    _dirsFuture        = _cargarDirs();
+    _sectoresDropFuture = _cargarSectoresDrop();
+  }
+
+  @override
+  void dispose() {
+    _tab.dispose();
+    _sNombreCtrl.dispose(); _sPrecioCtrl.dispose();
+    _dNombreCtrl.dispose(); _dPrecioCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<List<Map<String, dynamic>>> _cargarSectores() =>
+      Supabase.instance.client.from('sectores')
+          .select('id, nombre, municipio, activo, precio_global')
+          .order('municipio').order('nombre');
+
+  Future<List<Map<String, dynamic>>> _cargarSectoresDrop() =>
+      Supabase.instance.client.from('sectores')
+          .select('id, nombre, municipio').eq('activo', true).order('nombre');
+
+  Future<List<Map<String, dynamic>>> _cargarDirs() =>
+      Supabase.instance.client.from('red_direcciones')
+          .select('id, nombre, municipio, activo, precio, sector_id, sectores(nombre)')
+          .order('municipio').order('nombre');
+
+  void _recargarS() => setState(() { _sectorsFuture = _cargarSectores(); });
+  void _recargarD() => setState(() { _dirsFuture    = _cargarDirs(); });
+
+  String _miles(int v) {
+    final s = v.toString(); final buf = StringBuffer();
+    for (int i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) buf.write('.');
+      buf.write(s[i]);
+    }
+    return buf.toString();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black,
+        elevation: 1,
+        title: const Row(children: [
+          Icon(Icons.map_outlined, color: Colors.indigo),
+          SizedBox(width: 8),
+          Text('RED & SECTORES', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        ]),
+        bottom: TabBar(
+          controller: _tab,
+          labelColor: Colors.indigo,
+          unselectedLabelColor: Colors.black54,
+          indicatorColor: Colors.indigo,
+          tabs: const [
+            Tab(icon: Icon(Icons.place, size: 16), text: 'Direcciones'),
+            Tab(icon: Icon(Icons.grid_view_rounded, size: 16), text: 'Sectores'),
+          ],
+        ),
+      ),
+      body: TabBarView(controller: _tab, children: [_tabDirecciones(), _tabSectores()]),
+    );
+  }
+
+  // ──────────────────────── TAB DIRECCIONES ────────────────────────
+  Widget _tabDirecciones() {
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: _sectoresDropFuture,
+      builder: (_, snapS) {
+        final sectores = snapS.data ?? [];
+        return Column(children: [
+          // Filtro municipio
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+            child: Row(children: ['Cúcuta', 'Los Patios', 'V. Rosario'].map((m) {
+              final sel = _dFiltro == m;
+              return Padding(padding: const EdgeInsets.only(right: 6), child: ChoiceChip(
+                label: Text(m, style: TextStyle(fontSize: 11, color: sel ? Colors.white : Colors.black87)),
+                selected: sel, selectedColor: Colors.indigo, backgroundColor: Colors.grey[200],
+                onSelected: (_) => setState(() => _dFiltro = m),
+              ));
+            }).toList()),
+          ),
+          // Formulario agregar
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Expanded(child: TextField(
+                  controller: _dNombreCtrl, textCapitalization: TextCapitalization.words,
+                  decoration: const InputDecoration(labelText: 'Nombre/dirección', isDense: true, border: OutlineInputBorder()),
+                )),
+                const SizedBox(width: 6),
+                SizedBox(width: 90, child: TextField(
+                  controller: _dPrecioCtrl, keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Precio \$', isDense: true, border: OutlineInputBorder()),
+                )),
+                const SizedBox(width: 6),
+                DropdownButton<String>(
+                  value: _dMunicipio, isDense: true,
+                  items: ['Cúcuta', 'Los Patios', 'V. Rosario']
+                      .map((m) => DropdownMenuItem(value: m, child: Text(m, style: const TextStyle(fontSize: 11)))).toList(),
+                  onChanged: (v) => setState(() => _dMunicipio = v ?? 'Cúcuta'),
+                ),
+              ]),
+              const SizedBox(height: 6),
+              Row(children: [
+                const Text('Sector: ', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                const SizedBox(width: 6),
+                Expanded(child: DropdownButton<int?>(
+                  value: _dSectorSel, isDense: true, isExpanded: true,
+                  hint: const Text('Sin sector', style: TextStyle(fontSize: 12)),
+                  items: [
+                    const DropdownMenuItem<int?>(value: null, child: Text('Sin sector', style: TextStyle(fontSize: 12))),
+                    ...sectores.map((s) => DropdownMenuItem<int?>(
+                      value: s['id'] as int,
+                      child: Text('${s['nombre']} (${s['municipio']})', style: const TextStyle(fontSize: 12)),
+                    )),
+                  ],
+                  onChanged: (v) => setState(() => _dSectorSel = v),
+                )),
+                const SizedBox(width: 6),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.black, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12)),
+                  onPressed: () async {
+                    final n = _dNombreCtrl.text.trim();
+                    if (n.isEmpty) return;
+                    final precio = int.tryParse(_dPrecioCtrl.text.trim());
+                    try {
+                      await Supabase.instance.client.from('red_direcciones').insert({
+                        'nombre': n, 'municipio': _dMunicipio,
+                        'zona_lluvia': 'general', 'activo': true,
+                        if (_dSectorSel != null) 'sector_id': _dSectorSel,
+                        if (precio != null) 'precio': precio,
+                      });
+                      _dNombreCtrl.clear(); _dPrecioCtrl.clear();
+                      _recargarD();
+                    } catch (e) {
+                      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+                    }
+                  },
+                  child: const Icon(Icons.add, color: Color(0xff3AF500), size: 18),
+                ),
+              ]),
+            ]),
+          ),
+          const Divider(height: 1),
+          // Lista de direcciones
+          Expanded(child: FutureBuilder<List<Map<String, dynamic>>>(
+            future: _dirsFuture,
+            builder: (_, snap) {
+              if (snap.connectionState == ConnectionState.waiting)
+                return const Center(child: CircularProgressIndicator(color: Colors.indigo));
+              final dirs = (snap.data ?? []).where((d) => d['municipio'].toString() == _dFiltro).toList();
+              if (dirs.isEmpty) return Center(child: Text('Sin direcciones en $_dFiltro.'));
+              return ListView.builder(
+                itemCount: dirs.length,
+                itemBuilder: (_, i) {
+                  final d = dirs[i];
+                  final activo = d['activo'] as bool? ?? true;
+                  final sectorNombre = (d['sectores'] as Map?)?['nombre'];
+                  final precio = d['precio'] as int?;
+                  return ListTile(
+                    dense: true,
+                    leading: Icon(Icons.place, color: activo ? Colors.indigo : Colors.grey, size: 18),
+                    title: Text(d['nombre'].toString(),
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13,
+                            color: activo ? Colors.black : Colors.grey)),
+                    subtitle: Text(
+                      '${d['municipio']}${sectorNombre != null ? ' · $sectorNombre' : ''}'
+                      '${precio != null ? ' · \$${_miles(precio)}' : ''}',
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                    trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                      GestureDetector(
+                        onTap: () async {
+                          final globalCtrl = TextEditingController(text: precio?.toString() ?? '');
+                          final dirId = d['id'] as int;
+                          bool recargaPrecios = false;
+                          await showDialog<void>(
+                            context: context,
+                            builder: (ctx2) => StatefulBuilder(
+                              builder: (ctx2, setLocal) => AlertDialog(
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                titlePadding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                                title: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                                  Text('💰 ${d['nombre']}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                                ]),
+                                content: SizedBox(
+                                  width: double.maxFinite,
+                                  height: 380,
+                                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                    const Text('Precio global (todos los locales):', style: TextStyle(fontSize: 12, color: Colors.black54, fontWeight: FontWeight.bold)),
+                                    const SizedBox(height: 6),
+                                    Row(children: [
+                                      Expanded(child: TextField(
+                                        controller: globalCtrl, keyboardType: TextInputType.number, autofocus: true,
+                                        decoration: const InputDecoration(labelText: 'Precio \$', isDense: true, border: OutlineInputBorder()),
+                                      )),
+                                      const SizedBox(width: 8),
+                                      ElevatedButton(
+                                        style: ElevatedButton.styleFrom(backgroundColor: Colors.black, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14)),
+                                        onPressed: () async {
+                                          final n = int.tryParse(globalCtrl.text.trim());
+                                          if (n == null) return;
+                                          await Supabase.instance.client.from('red_direcciones')
+                                              .update({'precio': n}).eq('id', dirId);
+                                          _recargarD();
+                                        },
+                                        child: const Icon(Icons.save, color: Color(0xff3AF500), size: 18),
+                                      ),
+                                    ]),
+                                    const SizedBox(height: 12),
+                                    const Divider(height: 1),
+                                    const SizedBox(height: 8),
+                                    const Text('Precios por local (sobrescriben el global):', style: TextStyle(fontSize: 12, color: Colors.black54, fontWeight: FontWeight.bold)),
+                                    const SizedBox(height: 6),
+                                    Expanded(child: FutureBuilder<List<dynamic>>(
+                                      key: ValueKey(recargaPrecios),
+                                      future: Future.wait([
+                                        Supabase.instance.client.from('usuarios').select('id, nombre').eq('rol', 'local').eq('activo', true).order('nombre'),
+                                        Supabase.instance.client.from('red_dir_precios_local').select('local_id, precio').eq('direccion_id', dirId),
+                                      ]),
+                                      builder: (_, snap) {
+                                        if (snap.connectionState == ConnectionState.waiting)
+                                          return const Center(child: CircularProgressIndicator(color: Colors.indigo));
+                                        final locales = List<Map<String, dynamic>>.from(snap.data![0] as List);
+                                        final rawPrecios = List<Map<String, dynamic>>.from(snap.data![1] as List);
+                                        final Map<int, int> pm = { for (final p in rawPrecios) p['local_id'] as int: p['precio'] as int };
+                                        return ListView.builder(
+                                          itemCount: locales.length,
+                                          itemBuilder: (_, i) {
+                                            final loc = locales[i];
+                                            final lid = loc['id'] as int;
+                                            final precioLocal = pm[lid];
+                                            final lCtrl = TextEditingController(text: precioLocal?.toString() ?? '');
+                                            return Padding(
+                                              padding: const EdgeInsets.only(bottom: 6),
+                                              child: Row(children: [
+                                                Expanded(child: Text(loc['nombre'].toString(),
+                                                    style: TextStyle(fontSize: 12,
+                                                        color: precioLocal != null ? Colors.black87 : Colors.black38))),
+                                                SizedBox(width: 72, child: TextField(
+                                                  controller: lCtrl, keyboardType: TextInputType.number,
+                                                  decoration: InputDecoration(
+                                                    isDense: true, hintText: '\$—', border: const OutlineInputBorder(),
+                                                    contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                                                    fillColor: precioLocal != null ? Colors.green[50] : null,
+                                                    filled: precioLocal != null,
+                                                  ),
+                                                )),
+                                                const SizedBox(width: 4),
+                                                InkWell(
+                                                  onTap: () async {
+                                                    final np = int.tryParse(lCtrl.text.trim());
+                                                    if (np != null) {
+                                                      await Supabase.instance.client.from('red_dir_precios_local').upsert({
+                                                        'direccion_id': dirId, 'local_id': lid, 'precio': np,
+                                                      }, onConflict: 'direccion_id, local_id');
+                                                    } else if (precioLocal != null) {
+                                                      await Supabase.instance.client.from('red_dir_precios_local')
+                                                          .delete().eq('direccion_id', dirId).eq('local_id', lid);
+                                                    }
+                                                    setLocal(() => recargaPrecios = !recargaPrecios);
+                                                  },
+                                                  child: Container(
+                                                    padding: const EdgeInsets.all(6),
+                                                    decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(6)),
+                                                    child: const Icon(Icons.save, color: Color(0xff3AF500), size: 14),
+                                                  ),
+                                                ),
+                                              ]),
+                                            );
+                                          },
+                                        );
+                                      },
+                                    )),
+                                  ]),
+                                ),
+                                actions: [TextButton(
+                                  onPressed: () => Navigator.pop(ctx2),
+                                  child: const Text('CERRAR', style: TextStyle(fontWeight: FontWeight.bold)),
+                                )],
+                              ),
+                            ),
+                          );
+                          _recargarD();
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: precio != null ? Colors.green[50] : Colors.grey[100],
+                            border: Border.all(color: precio != null ? Colors.green[300]! : Colors.grey[300]!),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            precio != null ? '\$${_miles(precio)}' : '\$—',
+                            style: TextStyle(fontSize: 11, color: precio != null ? Colors.green[800] : Colors.grey),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      GestureDetector(
+                        onTap: () async {
+                          await Supabase.instance.client.from('red_direcciones')
+                              .update({'activo': !activo}).eq('id', d['id']);
+                          _recargarD();
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: activo ? Colors.indigo : Colors.grey[200],
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(activo ? 'ON' : 'OFF',
+                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold,
+                                  color: activo ? Colors.white : Colors.grey)),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      IconButton(
+                        icon: const Icon(Icons.delete, color: Colors.red, size: 18),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                        onPressed: () async {
+                          await Supabase.instance.client.from('red_direcciones').delete().eq('id', d['id']);
+                          _recargarD();
+                        },
+                      ),
+                    ]),
+                  );
+                },
+              );
+            },
+          )),
+        ]);
+      },
+    );
+  }
+
+  // ──────────────────────── TAB SECTORES ────────────────────────
+  Widget _tabSectores() {
+    return Column(children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+        child: Row(children: [
+          Expanded(child: TextField(
+            controller: _sNombreCtrl, textCapitalization: TextCapitalization.words,
+            decoration: const InputDecoration(labelText: 'Nombre del sector/barrio', isDense: true, border: OutlineInputBorder()),
+          )),
+          const SizedBox(width: 6),
+          SizedBox(width: 90, child: TextField(
+            controller: _sPrecioCtrl, keyboardType: TextInputType.number,
+            decoration: const InputDecoration(labelText: 'Precio \$', isDense: true, border: OutlineInputBorder()),
+          )),
+          const SizedBox(width: 6),
+          DropdownButton<String>(
+            value: _sMunicipio, isDense: true,
+            items: ['Cúcuta', 'Los Patios', 'V. Rosario']
+                .map((m) => DropdownMenuItem(value: m, child: Text(m, style: const TextStyle(fontSize: 11)))).toList(),
+            onChanged: (v) => setState(() => _sMunicipio = v ?? 'Cúcuta'),
+          ),
+          const SizedBox(width: 6),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.black, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12)),
+            onPressed: () async {
+              final n = _sNombreCtrl.text.trim();
+              if (n.isEmpty) return;
+              final precio = int.tryParse(_sPrecioCtrl.text.trim());
+              try {
+                await Supabase.instance.client.from('sectores').insert({
+                  'nombre': n, 'municipio': _sMunicipio,
+                  if (precio != null) 'precio_global': precio,
+                });
+                _sNombreCtrl.clear(); _sPrecioCtrl.clear();
+                _recargarS();
+              } catch (e) {
+                if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+              }
+            },
+            child: const Icon(Icons.add, color: Color(0xff3AF500), size: 18),
+          ),
+        ]),
+      ),
+      SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+        child: Row(children: ['Cúcuta', 'Los Patios', 'V. Rosario'].map((m) {
+          final sel = _sFiltro == m;
+          return Padding(padding: const EdgeInsets.only(right: 6), child: ChoiceChip(
+            label: Text(m, style: TextStyle(fontSize: 11, color: sel ? Colors.white : Colors.black87)),
+            selected: sel, selectedColor: Colors.indigo, backgroundColor: Colors.grey[200],
+            onSelected: (_) => setState(() => _sFiltro = m),
+          ));
+        }).toList()),
+      ),
+      const Divider(height: 1),
+      Expanded(child: FutureBuilder<List<Map<String, dynamic>>>(
+        future: _sectorsFuture,
+        builder: (_, snap) {
+          if (snap.connectionState == ConnectionState.waiting)
+            return const Center(child: CircularProgressIndicator(color: Colors.indigo));
+          final lista = (snap.data ?? []).where((s) => s['municipio'].toString() == _sFiltro).toList();
+          if (lista.isEmpty) return Center(child: Text('Sin sectores en $_sFiltro.'));
+          return ListView.builder(
+            padding: const EdgeInsets.all(8),
+            itemCount: lista.length,
+            itemBuilder: (_, i) {
+              final s = lista[i];
+              final activo = s['activo'] as bool? ?? true;
+              final precioG = s['precio_global'] as int?;
+              return Card(
+                margin: const EdgeInsets.only(bottom: 6),
+                elevation: 0, color: Colors.grey[100],
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                child: ListTile(
+                  dense: true,
+                  leading: Icon(Icons.location_city, color: activo ? Colors.indigo : Colors.grey, size: 20),
+                  title: Text(s['nombre'].toString(),
+                      style: TextStyle(fontWeight: FontWeight.bold, color: activo ? Colors.black : Colors.grey)),
+                  subtitle: precioG != null
+                      ? Text('\$${_miles(precioG)} global', style: const TextStyle(fontSize: 11, color: Colors.green))
+                      : null,
+                  trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                    GestureDetector(
+                      onTap: () async {
+                        final ctrl = TextEditingController(text: precioG?.toString() ?? '');
+                        final nuevo = await showDialog<int?>(
+                          context: context,
+                          builder: (_) => AlertDialog(
+                            title: const Text('Precio global del sector', style: TextStyle(fontSize: 14)),
+                            content: TextField(
+                              controller: ctrl, keyboardType: TextInputType.number, autofocus: true,
+                              decoration: const InputDecoration(labelText: 'Precio \$', border: OutlineInputBorder()),
+                            ),
+                            actions: [
+                              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+                              ElevatedButton(
+                                onPressed: () => Navigator.pop(context, int.tryParse(ctrl.text.trim())),
+                                child: const Text('Guardar'),
+                              ),
+                            ],
+                          ),
+                        );
+                        if (nuevo != null) {
+                          await Supabase.instance.client.from('sectores')
+                              .update({'precio_global': nuevo}).eq('id', s['id']);
+                          _recargarS();
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: precioG != null ? Colors.green[50] : Colors.grey[100],
+                          border: Border.all(color: precioG != null ? Colors.green[300]! : Colors.grey[300]!),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          precioG != null ? '\$${_miles(precioG)}' : '\$—',
+                          style: TextStyle(fontSize: 11, color: precioG != null ? Colors.green[800] : Colors.grey),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    GestureDetector(
+                      onTap: () async {
+                        await Supabase.instance.client.from('sectores')
+                            .update({'activo': !activo}).eq('id', s['id']);
+                        _recargarS();
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: activo ? Colors.indigo : Colors.grey[200],
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(activo ? 'ON' : 'OFF',
+                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold,
+                                color: activo ? Colors.white : Colors.grey)),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    IconButton(
+                      icon: const Icon(Icons.delete, color: Colors.red, size: 18),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                      onPressed: () async {
+                        await Supabase.instance.client.from('sectores').delete().eq('id', s['id']);
+                        _recargarS();
+                      },
+                    ),
+                  ]),
+                ),
+              );
+            },
+          );
+        },
+      )),
+    ]);
+  }
 }

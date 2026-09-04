@@ -579,11 +579,9 @@ class _CentralScreenState extends State<CentralScreen>
     if (mounted) setState(() => _reportesSinLeer = 0);
 
     if (!mounted) return;
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => _PanelReportesBottomSheet(),
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const _PanelReportesScreen()),
     );
   }
 

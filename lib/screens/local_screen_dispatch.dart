@@ -922,9 +922,10 @@ mixin _DispatchMixin on State<LocalScreen> {
       // --- DIÁLOGO RÁPIDO PARA GUARDAR EN LA LISTA DE PRECIOS ---
       if (contextoPrincipal.mounted) {
         final resLista = await Supabase.instance.client
-            .from('tarifas_locales')
-            .select('sector_id, sectores(nombre, municipio), tarifa')
-            .eq('local_id', widget.usuario['id']);
+            .from('dir_usuario')
+            .select('nombre, precio')
+            .eq('usuario_id', widget.usuario['id'])
+            .eq('activo', true);
 
         String destinoMayus = destinoNuevo.toUpperCase();
         String barrioExtraido = destinoMayus.contains('-')
@@ -933,12 +934,8 @@ mixin _DispatchMixin on State<LocalScreen> {
         final tarifaCobrada = (servicio['tarifa'] as num).toDouble();
 
         bool yaEstaGuardado = resLista.any((item) {
-          final s = item['sectores'] as Map<String, dynamic>?;
-          if (s == null) return false;
-          final clave = '${s['nombre']} (${s['municipio']})'.toUpperCase();
-          return barrioExtraido == clave ||
-              (destinoMayus.startsWith(clave) &&
-                  (item['tarifa'] as num).toDouble() == tarifaCobrada);
+          final nom = (item['nombre'] ?? '').toString().toUpperCase();
+          return barrioExtraido == nom || destinoMayus.startsWith(nom);
         });
 
         if (!yaEstaGuardado) {
@@ -1023,22 +1020,25 @@ mixin _DispatchMixin on State<LocalScreen> {
                                 barrioCtrl.text.trim().toUpperCase(),
                                 zonaSeleccionada,
                               );
+                              final munNorm = zonaSeleccionada == 'CÚCUTA'
+                                  ? 'Cúcuta'
+                                  : zonaSeleccionada == 'LOS PATIOS'
+                                      ? 'Los Patios'
+                                      : 'V. Rosario';
                               await Supabase.instance.client
-                                  .from('tarifas_locales')
-                                  .upsert(
-                                    {
-                                      'local_id': widget.usuario['id'],
-                                      'local_nombre': widget.usuario['nombre'],
-                                      'sector_id': sectorId,
-                                      'tarifa': tarifaCobrada,
-                                    },
-                                    onConflict: 'local_id, sector_id',
-                                  );
+                                  .from('dir_usuario')
+                                  .insert({
+                                    'usuario_id': widget.usuario['id'],
+                                    'nombre': barrioCtrl.text.trim().toUpperCase(),
+                                    'municipio': munNorm,
+                                    'sector_id': sectorId,
+                                    'precio': tarifaCobrada.toInt(),
+                                  });
                               if (ctxSave.mounted) {
                                 Navigator.pop(ctxSave);
                                 ScaffoldMessenger.of(contextoPrincipal).showSnackBar(
                                   const SnackBar(
-                                    content: Text('✅ Dirección guardada en tu Tarifario.'),
+                                    content: Text('✅ Dirección guardada en tu Red de Direcciones.'),
                                     backgroundColor: Colors.green,
                                   ),
                                 );
