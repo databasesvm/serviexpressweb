@@ -466,10 +466,6 @@ class _FormularioTabState extends State<_FormularioTab> {
   int? _redDireccionSelId; // id del registro seleccionado (negativo = sector)
   // Sugerencias de autocomplete (filtradas al escribir)
   List<Map<String, dynamic>> _sugerencias = [];
-  // GPS del destino (parseado de link pegado por el usuario)
-  double? _destinoLat;
-  double? _destinoLng;
-  final _destinoGpsCtrl = TextEditingController();
 
   // Móvil preseleccionado desde tab Activos
   String? _movilPreselId;
@@ -505,12 +501,15 @@ class _FormularioTabState extends State<_FormularioTab> {
         _movilPreselNum = widget.movilPreselNum;
       });
     }
+    // La sede se carga async en el padre: cuando llega, recargar la red de direcciones
+    if (widget.sede?['id'] != old.sede?['id'] && widget.sede != null) {
+      _cargarRedDirecciones();
+    }
   }
 
   @override
   void dispose() {
     _destinoCtrl.dispose();
-    _destinoGpsCtrl.dispose();
     _facturaNumCtrl.dispose();
     _instruccionesCtrl.dispose();
     for (final c in _recogidasNombreCtrl) {
@@ -663,31 +662,6 @@ class _FormularioTabState extends State<_FormularioTab> {
         .toList();
 
     return [...redMatches, ...sectorFiltrados];
-  }
-
-  /// Parsea una URL de Google Maps y retorna (lat, lng) o (null, null).
-  static (double?, double?) _parsearUrlMaps(String url) {
-    // Formato @lat,lng (el más común)
-    var m = RegExp(r'@(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)').firstMatch(url);
-    if (m != null) {
-      return (double.tryParse(m.group(1)!), double.tryParse(m.group(2)!));
-    }
-    // Formato ?q=lat,lng
-    m = RegExp(r'[?&]q=(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)').firstMatch(url);
-    if (m != null) {
-      return (double.tryParse(m.group(1)!), double.tryParse(m.group(2)!));
-    }
-    // Formato ll=lat,lng
-    m = RegExp(r'll=(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)').firstMatch(url);
-    if (m != null) {
-      return (double.tryParse(m.group(1)!), double.tryParse(m.group(2)!));
-    }
-    // Formato /place/.../lat,lng
-    m = RegExp(r'(-?\d{1,3}\.\d{4,}),(-?\d{1,3}\.\d{4,})').firstMatch(url);
-    if (m != null) {
-      return (double.tryParse(m.group(1)!), double.tryParse(m.group(2)!));
-    }
-    return (null, null);
   }
 
   // ── Cascada FN automática (precio sugerido de la red) ────────────────────
@@ -992,9 +966,6 @@ class _FormularioTabState extends State<_FormularioTab> {
             // Recargo parcial pre-calculado (sedes extra + datáfono) cuando no hay precio destino
             if (!usaPrecioSugerido && _recargoParcial > 0)
               'fn_recargo_calculado': _recargoParcial.round(),
-            // Coordenadas GPS del destino (si la sede pegó un link de Maps)
-            if (_destinoLat != null) 'destino_lat': _destinoLat,
-            if (_destinoLng != null) 'destino_lng': _destinoLng,
             // Móvil preseleccionado desde "Nuevo servicio con este móvil"
             if (_movilPreselId != null && usaPrecioSugerido) ...{
               'movil_id': int.tryParse(_movilPreselId!),
@@ -1100,11 +1071,8 @@ class _FormularioTabState extends State<_FormularioTab> {
         _sugerencias = [];
         _movilPreselId = null;
         _movilPreselNum = null;
-        _destinoLat = null;
-        _destinoLng = null;
       });
       _destinoCtrl.clear();
-      _destinoGpsCtrl.clear();
       _facturaNumCtrl.clear();
       _instruccionesCtrl.clear();
       widget.onPreselLimpiado?.call();
@@ -1506,95 +1474,6 @@ class _FormularioTabState extends State<_FormularioTab> {
                   ),
                 ),
 
-              // ── Link GPS opcional ─────────────────────────────────────────────
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: StatefulBuilder(builder: (ctx, setGps) {
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      TextFormField(
-                        controller: _destinoGpsCtrl,
-                        style: const TextStyle(
-                            color: Colors.white, fontSize: 12),
-                        decoration: InputDecoration(
-                          hintText:
-                              '📍 Pegar link de Google Maps (opcional)',
-                          hintStyle: const TextStyle(
-                              color: Colors.white38, fontSize: 12),
-                          isDense: true,
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 8),
-                          filled: true,
-                          fillColor:
-                              Colors.white.withValues(alpha: 0.05),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide:
-                                const BorderSide(color: Colors.white12),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: const BorderSide(
-                                color: Colors.teal, width: 1.5),
-                          ),
-                          suffixIcon: _destinoGpsCtrl.text.isNotEmpty
-                              ? IconButton(
-                                  icon: const Icon(Icons.clear,
-                                      size: 16, color: Colors.white38),
-                                  onPressed: () {
-                                    _destinoGpsCtrl.clear();
-                                    setState(() {
-                                      _destinoLat = null;
-                                      _destinoLng = null;
-                                    });
-                                  },
-                                )
-                              : null,
-                        ),
-                        autofillHints: const <String>[],
-                        onChanged: (v) {
-                          final (lat, lng) = _parsearUrlMaps(v);
-                          setState(() {
-                            _destinoLat = lat;
-                            _destinoLng = lng;
-                          });
-                        },
-                      ),
-                      if (_destinoLat != null && _destinoLng != null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 4),
-                          child: Row(children: [
-                            const Icon(Icons.check_circle,
-                                size: 13, color: Colors.tealAccent),
-                            const SizedBox(width: 4),
-                            Text(
-                              'GPS detectado: ${_destinoLat!.toStringAsFixed(5)}, ${_destinoLng!.toStringAsFixed(5)}',
-                              style: const TextStyle(
-                                  color: Colors.tealAccent,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold),
-                            ),
-                          ]),
-                        )
-                      else if (_destinoGpsCtrl.text.isNotEmpty)
-                        const Padding(
-                          padding: EdgeInsets.only(top: 4),
-                          child: Row(children: [
-                            Icon(Icons.warning_amber_rounded,
-                                size: 13, color: Colors.orange),
-                            SizedBox(width: 4),
-                            Text(
-                              'No se pudo leer el link — usa Google Maps → Compartir → Copiar link',
-                              style: TextStyle(
-                                  color: Colors.orange, fontSize: 10),
-                            ),
-                          ]),
-                        ),
-                    ],
-                  );
-                }),
-              ),
 
               // ── Recargo parcial (sin precio destino) ─────────────────────────
               if (_precioSugerido == null && _recargoParcial > 0)
