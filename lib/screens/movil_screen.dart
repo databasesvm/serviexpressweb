@@ -8430,6 +8430,40 @@ class _MovilScreenState extends State<MovilScreen>
                               style: const TextStyle(
                                   fontSize: 13, fontWeight: FontWeight.bold)),
                         ),
+                        // Botón "Ver en mapa" si la sede adjuntó coordenadas GPS
+                        if ((servicio['destino_lat'] as num?) != null &&
+                            (servicio['destino_lng'] as num?) != null)
+                          GestureDetector(
+                            onTap: () {
+                              final lat = (servicio['destino_lat'] as num).toDouble();
+                              final lng = (servicio['destino_lng'] as num).toDouble();
+                              _abrirMapsHaciaCoords(lat, lng, 'Destino');
+                            },
+                            child: Container(
+                              margin: const EdgeInsets.only(left: 6),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 7, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: Colors.teal[700]!.withValues(alpha: 0.2),
+                                borderRadius: BorderRadius.circular(5),
+                                border: Border.all(
+                                    color: Colors.tealAccent.withValues(alpha: 0.5)),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.map_outlined,
+                                      size: 12, color: Colors.tealAccent),
+                                  SizedBox(width: 3),
+                                  Text('GPS',
+                                      style: TextStyle(
+                                          color: Colors.tealAccent,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold)),
+                                ],
+                              ),
+                            ),
+                          ),
                       ],
                     ),
                   ],

@@ -74,13 +74,13 @@ class _FnRedDireccionesScreenState extends State<FnRedDireccionesScreen> {
                 color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
           ),
           bottom: const TabBar(
-            indicatorColor: Colors.tealAccent,
+            indicatorColor: const Color(0xFF008FFF),
             labelColor: Colors.white,
             unselectedLabelColor: Colors.white54,
             tabs: [
               Tab(icon: Icon(Icons.map, size: 18), text: 'Sectores'),
-              Tab(icon: Icon(Icons.location_on, size: 18), text: 'Direcciones'),
               Tab(icon: Icon(Icons.price_change, size: 18), text: 'Tarifas'),
+              Tab(icon: Icon(Icons.location_on, size: 18), text: 'Direcciones'),
             ],
           ),
         ),
@@ -106,9 +106,9 @@ class _FnRedDireccionesScreenState extends State<FnRedDireccionesScreen> {
                             children: [
                               _TabSectores(
                                   sede: _sedeSeleccionada!, db: _db),
-                              _TabDirecciones(
-                                  sede: _sedeSeleccionada!, db: _db),
                               _TabTarifas(
+                                  sede: _sedeSeleccionada!, db: _db),
+                              _TabDirecciones(
                                   sede: _sedeSeleccionada!, db: _db),
                             ],
                           ),
@@ -209,8 +209,7 @@ class _TabSectoresState extends State<_TabSectores>
     try {
       final data = await widget.db
           .from('fn_sectores')
-          .select('id, nombre, activo')
-          .eq('sede_id', widget.sede['id'])
+          .select('id, nombre, activo, municipio')
           .order('nombre');
       if (mounted) {
         setState(() {
@@ -223,9 +222,12 @@ class _TabSectoresState extends State<_TabSectores>
     }
   }
 
+  static const _municipios = ['Cúcuta', 'Los Patios', 'Villa del Rosario'];
+
   Future<void> _abrirFormulario({Map<String, dynamic>? sector}) async {
     final ctrl = TextEditingController(text: sector?['nombre']?.toString() ?? '');
     bool activo = sector?['activo'] != false;
+    String? municipio = sector?['municipio']?.toString();
     final guardado = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -253,6 +255,31 @@ class _TabSectoresState extends State<_TabSectores>
                   isDense: true,
                 ),
               ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String?>(
+                value: municipio,
+                dropdownColor: const Color(0xFF1A1A1A),
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: 'Municipio',
+                  labelStyle: TextStyle(color: Colors.white54),
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                items: [
+                  const DropdownMenuItem<String?>(
+                    value: null,
+                    child: Text('Sin definir',
+                        style: TextStyle(color: Colors.white54)),
+                  ),
+                  ..._municipios.map((m) => DropdownMenuItem<String?>(
+                        value: m,
+                        child: Text(m,
+                            style: const TextStyle(color: Colors.white)),
+                      )),
+                ],
+                onChanged: (v) => setD(() => municipio = v),
+              ),
               if (sector != null) ...[
                 const SizedBox(height: 12),
                 SwitchListTile(
@@ -279,14 +306,15 @@ class _TabSectoresState extends State<_TabSectores>
                 if (nombre.isEmpty) return;
                 if (sector == null) {
                   await widget.db.from('fn_sectores').insert({
-                    'sede_id': widget.sede['id'],
                     'nombre': nombre,
                     'activo': true,
+                    if (municipio != null) 'municipio': municipio,
                   });
                 } else {
                   await widget.db.from('fn_sectores').update({
                     'nombre': nombre,
                     'activo': activo,
+                    'municipio': municipio,
                   }).eq('id', sector['id']);
                 }
                 if (ctx.mounted) Navigator.pop(ctx, true);
@@ -391,7 +419,7 @@ class _TabSectoresState extends State<_TabSectores>
                               activo ? Colors.teal[800] : Colors.grey[800],
                           child: Icon(Icons.map,
                               color: activo
-                                  ? Colors.tealAccent
+                                  ? const Color(0xFF008FFF)
                                   : Colors.white38,
                               size: 18),
                         ),
@@ -403,12 +431,31 @@ class _TabSectoresState extends State<_TabSectores>
                             fontSize: 13,
                           ),
                         ),
-                        subtitle: Text(
-                          activo ? 'Activo' : 'Inactivo',
-                          style: TextStyle(
-                            color: activo ? Colors.tealAccent : Colors.red,
-                            fontSize: 11,
-                          ),
+                        subtitle: Row(
+                          children: [
+                            Text(
+                              activo ? 'Activo' : 'Inactivo',
+                              style: TextStyle(
+                                color: activo ? const Color(0xFF008FFF) : Colors.red,
+                                fontSize: 11,
+                              ),
+                            ),
+                            if (s['municipio'] != null) ...[
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF008FFF).withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: const Color(0xFF008FFF).withValues(alpha: 0.4)),
+                                ),
+                                child: Text(
+                                  s['municipio'].toString(),
+                                  style: const TextStyle(color: Color(0xFF008FFF), fontSize: 10),
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -484,7 +531,6 @@ class _TabDireccionesState extends State<_TabDirecciones>
       final secs = await widget.db
           .from('fn_sectores')
           .select('id, nombre')
-          .eq('sede_id', widget.sede['id'])
           .eq('activo', true)
           .order('nombre');
       if (mounted) {
@@ -520,6 +566,9 @@ class _TabDireccionesState extends State<_TabDirecciones>
     );
     int? sectorId = dir?['sector_id'] as int?;
     bool activo = dir?['activo'] != false;
+    double? gpsLat = (dir?['lat'] as num?)?.toDouble();
+    double? gpsLng = (dir?['lng'] as num?)?.toDouble();
+    final gpsCtrl = TextEditingController();
 
     final guardado = await showDialog<bool>(
       context: context,
@@ -604,6 +653,53 @@ class _TabDireccionesState extends State<_TabDirecciones>
                   prefixStyle: TextStyle(color: Colors.white70),
                 ),
               ),
+              const SizedBox(height: 10),
+              // GPS link
+              TextField(
+                controller: gpsCtrl,
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+                decoration: InputDecoration(
+                  labelText: 'Link GPS (opcional)',
+                  labelStyle: const TextStyle(color: Colors.white54, fontSize: 13),
+                  hintText: 'Pega un link de Google Maps',
+                  hintStyle: const TextStyle(color: Colors.white24, fontSize: 12),
+                  border: const OutlineInputBorder(),
+                  isDense: true,
+                  suffixIcon: gpsLat != null
+                      ? const Icon(Icons.gps_fixed, color: const Color(0xFF008FFF), size: 18)
+                      : const Icon(Icons.gps_not_fixed, color: Colors.white38, size: 18),
+                ),
+                onChanged: (v) {
+                  if (v.trim().isEmpty) {
+                    setD(() { gpsLat = null; gpsLng = null; });
+                    return;
+                  }
+                  final (lat, lng) = _parsearUrlMaps(v.trim());
+                  setD(() { gpsLat = lat; gpsLng = lng; });
+                },
+              ),
+              if (gpsLat != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Row(children: [
+                    const Icon(Icons.check_circle, color: const Color(0xFF008FFF), size: 13),
+                    const SizedBox(width: 4),
+                    Text(
+                      'GPS detectado: ${gpsLat!.toStringAsFixed(5)}, ${gpsLng!.toStringAsFixed(5)}',
+                      style: const TextStyle(color: const Color(0xFF008FFF), fontSize: 11),
+                    ),
+                  ]),
+                )
+              else if (gpsCtrl.text.trim().isNotEmpty)
+                const Padding(
+                  padding: EdgeInsets.only(top: 4),
+                  child: Row(children: [
+                    Icon(Icons.warning_amber, color: Colors.orange, size: 13),
+                    SizedBox(width: 4),
+                    Text('No se pudo leer el GPS',
+                        style: TextStyle(color: Colors.orange, fontSize: 11)),
+                  ]),
+                ),
               if (dir != null) ...[
                 const SizedBox(height: 10),
                 SwitchListTile(
@@ -645,6 +741,8 @@ class _TabDireccionesState extends State<_TabDirecciones>
                     'precio': precio,
                     'activo': true,
                     'sector_id': sectorId,
+                    if (gpsLat != null) 'lat': gpsLat,
+                    if (gpsLng != null) 'lng': gpsLng,
                   });
                 } else {
                   await widget.db.from('fn_red_direcciones').update({
@@ -653,6 +751,8 @@ class _TabDireccionesState extends State<_TabDirecciones>
                     'precio': precio,
                     'activo': activo,
                     'sector_id': sectorId,
+                    'lat': gpsLat,
+                    'lng': gpsLng,
                   }).eq('id', dir['id']);
                 }
                 if (ctx.mounted) Navigator.pop(ctx, true);
@@ -666,6 +766,18 @@ class _TabDireccionesState extends State<_TabDirecciones>
       ),
     );
     if (guardado == true) _cargar();
+  }
+
+  static (double?, double?) _parsearUrlMaps(String url) {
+    var m = RegExp(r'@(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)').firstMatch(url);
+    if (m != null) return (double.tryParse(m.group(1)!), double.tryParse(m.group(2)!));
+    m = RegExp(r'[?&]q=(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)').firstMatch(url);
+    if (m != null) return (double.tryParse(m.group(1)!), double.tryParse(m.group(2)!));
+    m = RegExp(r'll=(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)').firstMatch(url);
+    if (m != null) return (double.tryParse(m.group(1)!), double.tryParse(m.group(2)!));
+    m = RegExp(r'(-?\d{1,3}\.\d{4,}),(-?\d{1,3}\.\d{4,})').firstMatch(url);
+    if (m != null) return (double.tryParse(m.group(1)!), double.tryParse(m.group(2)!));
+    return (null, null);
   }
 
   Future<void> _eliminar(Map<String, dynamic> dir) async {
@@ -826,7 +938,7 @@ class _TabDireccionesState extends State<_TabDirecciones>
                                       child: Text(
                                         sectorNombre,
                                         style: const TextStyle(
-                                            color: Colors.tealAccent,
+                                            color: const Color(0xFF008FFF),
                                             fontSize: 10),
                                       ),
                                     ),
@@ -907,7 +1019,7 @@ class _TabDireccionesState extends State<_TabDirecciones>
               selected ? Colors.teal[700] : const Color(0xFF1A1A1A),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-              color: selected ? Colors.tealAccent : Colors.white24),
+              color: selected ? const Color(0xFF008FFF) : Colors.white24),
         ),
         child: Text(
           label,
@@ -936,14 +1048,10 @@ class _TabTarifas extends StatefulWidget {
   State<_TabTarifas> createState() => _TabTarifasState();
 }
 
-class _TabTarifasState extends State<_TabTarifas>
-    with AutomaticKeepAliveClientMixin {
+class _TabTarifasState extends State<_TabTarifas> {
   List<Map<String, dynamic>> _tarifas = [];
   List<Map<String, dynamic>> _sectores = [];
   bool _cargando = true;
-
-  @override
-  bool get wantKeepAlive => true;
 
   @override
   void initState() {
@@ -968,7 +1076,6 @@ class _TabTarifasState extends State<_TabTarifas>
       final sectores = await widget.db
           .from('fn_sectores')
           .select('id, nombre')
-          .eq('sede_id', widget.sede['id'])
           .eq('activo', true)
           .order('nombre');
       if (mounted) {
@@ -1140,7 +1247,6 @@ class _TabTarifasState extends State<_TabTarifas>
 
   @override
   Widget build(BuildContext context) {
-    super.build(context);
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
       floatingActionButton: FloatingActionButton.extended(

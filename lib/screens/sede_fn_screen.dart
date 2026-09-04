@@ -378,6 +378,8 @@ class _FormularioTabState extends State<_FormularioTab> {
 
   bool _conDatafono = false;
   bool _enviando = false;
+  // Flag para evitar que el listener del destino interfiera al seleccionar sugerencia
+  bool _seleccionandoDestino = false;
 
   static const int _recargoDaatafonoCOP = 2000;
 
@@ -459,10 +461,15 @@ class _FormularioTabState extends State<_FormularioTab> {
   // Red de direcciones de esta sede
   List<Map<String, dynamic>> _redDirecciones = [];
   Map<int, int> _tarifasSede = {}; // sector_id → precio (de fn_tarifas_sede)
+  List<Map<String, dynamic>> _sectoresSede = []; // sectores con nombre y precio
   double? _precioSugerido; // precio de la dirección seleccionada de la red
-  int? _redDireccionSelId; // id del registro seleccionado
+  int? _redDireccionSelId; // id del registro seleccionado (negativo = sector)
   // Sugerencias de autocomplete (filtradas al escribir)
   List<Map<String, dynamic>> _sugerencias = [];
+  // GPS del destino (parseado de link pegado por el usuario)
+  double? _destinoLat;
+  double? _destinoLng;
+  final _destinoGpsCtrl = TextEditingController();
 
   // Móvil preseleccionado desde tab Activos
   String? _movilPreselId;
@@ -475,6 +482,17 @@ class _FormularioTabState extends State<_FormularioTab> {
     _movilPreselNum = widget.movilPreselNum;
     _cargarSedes();
     _cargarRedDirecciones();
+    _destinoCtrl.addListener(_onDestinoCtrlChange);
+  }
+
+  void _onDestinoCtrlChange() {
+    if (!mounted || _seleccionandoDestino) return;
+    final v = _destinoCtrl.text;
+    setState(() {
+      _redDireccionSelId = null;
+      _precioSugerido = null;
+      _sugerencias = v.trim().isEmpty ? [] : _filtrarDirecciones(v);
+    });
   }
 
   @override
@@ -492,6 +510,7 @@ class _FormularioTabState extends State<_FormularioTab> {
   @override
   void dispose() {
     _destinoCtrl.dispose();
+    _destinoGpsCtrl.dispose();
     _facturaNumCtrl.dispose();
     _instruccionesCtrl.dispose();
     for (final c in _recogidasNombreCtrl) {
@@ -541,28 +560,46 @@ class _FormularioTabState extends State<_FormularioTab> {
     final sedeId = widget.sede?['id'];
     if (sedeId == null) return;
     try {
-      final data = await _db
-          .from('fn_red_direcciones')
-          .select('id, nombre, direccion, precio, sector_id')
-          .eq('sede_id', sedeId)
-          .eq('activo', true)
-          .order('nombre');
-      final tarifas = await _db
-          .from('fn_tarifas_sede')
-          .select('sector_id, precio')
-          .eq('sede_id', sedeId);
-      if (mounted) {
-        final mapa = <int, int>{};
-        for (final t in List<Map<String, dynamic>>.from(tarifas)) {
-          final sid = t['sector_id'] as int?;
-          final p = t['precio'] as int?;
-          if (sid != null && p != null) mapa[sid] = p;
-        }
-        setState(() {
-          _redDirecciones = List<Map<String, dynamic>>.from(data);
-          _tarifasSede = mapa;
-        });
+      final results = await Future.wait([
+        _db
+            .from('fn_red_direcciones')
+            .select('id, nombre, direccion, precio, sector_id')
+            .eq('sede_id', sedeId)
+            .eq('activo', true)
+            .order('nombre'),
+        _db
+            .from('fn_tarifas_sede')
+            .select('sector_id, precio')
+            .eq('sede_id', sedeId),
+        _db
+            .from('fn_sectores')
+            .select('id, nombre')
+            .eq('activo', true),
+      ]);
+      if (!mounted) return;
+      final data = results[0] as List;
+      final tarifas = results[1] as List;
+      final sectData = results[2] as List;
+
+      final mapa = <int, int>{};
+      for (final t in List<Map<String, dynamic>>.from(tarifas)) {
+        final sid = t['sector_id'] as int?;
+        final p = t['precio'] as int?;
+        if (sid != null && p != null) mapa[sid] = p;
       }
+      // Construir lista de sectores con precio (solo los que tienen tarifa)
+      final sects = <Map<String, dynamic>>[];
+      for (final s in List<Map<String, dynamic>>.from(sectData)) {
+        final sid = s['id'] as int?;
+        if (sid != null && mapa.containsKey(sid)) {
+          sects.add({'id': sid, 'nombre': s['nombre']?.toString() ?? ''});
+        }
+      }
+      setState(() {
+        _redDirecciones = List<Map<String, dynamic>>.from(data);
+        _tarifasSede = mapa;
+        _sectoresSede = sects;
+      });
     } catch (_) {}
   }
 
@@ -575,15 +612,82 @@ class _FormularioTabState extends State<_FormularioTab> {
     return (dir['precio'] as num).toDouble();
   }
 
-  /// Filtra la red de direcciones por texto escrito.
+  /// Filtra la red de direcciones y sectores por texto escrito.
   List<Map<String, dynamic>> _filtrarDirecciones(String texto) {
     if (texto.trim().isEmpty) return [];
     final palabras = texto.toLowerCase().trim().split(RegExp(r'\s+'));
-    return _redDirecciones.where((dir) {
+
+    // ── 1. Coincidencias exactas en red de direcciones ──────────────────────
+    final redMatches = _redDirecciones.where((dir) {
       final haystack =
           '${dir['nombre']} ${dir['direccion']}'.toLowerCase();
       return palabras.every((p) => haystack.contains(p));
     }).take(6).toList();
+
+    // ── 2. Sugerencias por sector cuando alguna palabra coincide ────────────
+    final sectorMatches = <Map<String, dynamic>>[];
+    for (final sect in _sectoresSede) {
+      final sectorNombre = sect['nombre'].toString().toLowerCase();
+      final sectorId = sect['id'] as int;
+      final precio = (_tarifasSede[sectorId] ?? 0).toDouble();
+      if (precio == 0) continue;
+
+      // Coincidencia: alguna palabra del texto está contenida en el nombre del sector
+      // o el nombre del sector está contenido en alguna palabra del texto
+      final sectorWords = sectorNombre.split(RegExp(r'\s+'));
+      final coincide = palabras.any((p) =>
+          p.length >= 3 &&
+          (sectorWords.any((sw) => sw.contains(p)) ||
+              sectorNombre.contains(p)));
+
+      if (coincide) {
+        sectorMatches.add({
+          'tipo': 'sector',
+          'id': sectorId,        // ID negativo para distinguir de fn_red_direcciones
+          'nombre': sect['nombre'],
+          'direccion': 'Sector ${sect['nombre']} — precio estimado',
+          'precio': precio,
+          'sector_id': sectorId,
+        });
+      }
+    }
+
+    // Red primero (más precisas), luego sectores que no ya estén cubiertos por red
+    final idsEnRed = redMatches
+        .map((d) => d['sector_id'] as int?)
+        .where((s) => s != null)
+        .toSet();
+    final sectorFiltrados = sectorMatches
+        .where((s) => !idsEnRed.contains(s['sector_id']))
+        .take(3)
+        .toList();
+
+    return [...redMatches, ...sectorFiltrados];
+  }
+
+  /// Parsea una URL de Google Maps y retorna (lat, lng) o (null, null).
+  static (double?, double?) _parsearUrlMaps(String url) {
+    // Formato @lat,lng (el más común)
+    var m = RegExp(r'@(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)').firstMatch(url);
+    if (m != null) {
+      return (double.tryParse(m.group(1)!), double.tryParse(m.group(2)!));
+    }
+    // Formato ?q=lat,lng
+    m = RegExp(r'[?&]q=(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)').firstMatch(url);
+    if (m != null) {
+      return (double.tryParse(m.group(1)!), double.tryParse(m.group(2)!));
+    }
+    // Formato ll=lat,lng
+    m = RegExp(r'll=(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)').firstMatch(url);
+    if (m != null) {
+      return (double.tryParse(m.group(1)!), double.tryParse(m.group(2)!));
+    }
+    // Formato /place/.../lat,lng
+    m = RegExp(r'(-?\d{1,3}\.\d{4,}),(-?\d{1,3}\.\d{4,})').firstMatch(url);
+    if (m != null) {
+      return (double.tryParse(m.group(1)!), double.tryParse(m.group(2)!));
+    }
+    return (null, null);
   }
 
   // ── Cascada FN automática (precio sugerido de la red) ────────────────────
@@ -888,6 +992,9 @@ class _FormularioTabState extends State<_FormularioTab> {
             // Recargo parcial pre-calculado (sedes extra + datáfono) cuando no hay precio destino
             if (!usaPrecioSugerido && _recargoParcial > 0)
               'fn_recargo_calculado': _recargoParcial.round(),
+            // Coordenadas GPS del destino (si la sede pegó un link de Maps)
+            if (_destinoLat != null) 'destino_lat': _destinoLat,
+            if (_destinoLng != null) 'destino_lng': _destinoLng,
             // Móvil preseleccionado desde "Nuevo servicio con este móvil"
             if (_movilPreselId != null && usaPrecioSugerido) ...{
               'movil_id': int.tryParse(_movilPreselId!),
@@ -993,8 +1100,11 @@ class _FormularioTabState extends State<_FormularioTab> {
         _sugerencias = [];
         _movilPreselId = null;
         _movilPreselNum = null;
+        _destinoLat = null;
+        _destinoLng = null;
       });
       _destinoCtrl.clear();
+      _destinoGpsCtrl.clear();
       _facturaNumCtrl.clear();
       _instruccionesCtrl.clear();
       widget.onPreselLimpiado?.call();
@@ -1154,19 +1264,29 @@ class _FormularioTabState extends State<_FormularioTab> {
                                 () => setState(
                                     () => _recogidasEsManual[i] = true)),
                             const Spacer(),
-                            if (_recogidasSel.length > 1)
+                            if (_recogidasSel.length > 1 ||
+                                _recogidasSel[i] != null ||
+                                _recogidasEsManual[i])
                               IconButton(
                                 icon: const Icon(Icons.remove_circle,
                                     color: Colors.red, size: 20),
                                 onPressed: () => setState(() {
-                                  _recogidasSel.removeAt(i);
-                                  _recogidasEsManual.removeAt(i);
-                                  _recogidasNombreCtrl[i].dispose();
-                                  _recogidasNombreCtrl.removeAt(i);
-                                  _recogidasDireccionCtrl[i].dispose();
-                                  _recogidasDireccionCtrl.removeAt(i);
-                                  _recogidasGpsCtrl[i].dispose();
-                                  _recogidasGpsCtrl.removeAt(i);
+                                  if (_recogidasSel.length > 1) {
+                                    // Eliminar la fila completa
+                                    _recogidasSel.removeAt(i);
+                                    _recogidasEsManual.removeAt(i);
+                                    _recogidasNombreCtrl[i].dispose();
+                                    _recogidasNombreCtrl.removeAt(i);
+                                    _recogidasDireccionCtrl[i].dispose();
+                                    _recogidasDireccionCtrl.removeAt(i);
+                                    _recogidasGpsCtrl[i].dispose();
+                                    _recogidasGpsCtrl.removeAt(i);
+                                  } else {
+                                    // Solo limpiar la selección (fila única)
+                                    _recogidasSel[i] = null;
+                                    _recogidasEsManual[i] = false;
+                                    _recogidasNombreCtrl[i].clear();
+                                  }
                                 }),
                               ),
                           ],
@@ -1275,14 +1395,7 @@ class _FormularioTabState extends State<_FormularioTab> {
                 style: const TextStyle(color: Colors.white),
                 decoration: _inputDeco('Dirección de entrega'),
                 autofillHints: const <String>[],
-                onChanged: (v) {
-                  setState(() {
-                    // Al escribir manualmente, limpia selección y recalcula sugerencias
-                    _redDireccionSelId = null;
-                    _precioSugerido = null;
-                    _sugerencias = _filtrarDirecciones(v);
-                  });
-                },
+                // Listener en _destinoCtrl maneja las sugerencias
                 validator: (v) =>
                     (v == null || v.trim().isEmpty) ? 'Requerido' : null,
               ),
@@ -1299,46 +1412,78 @@ class _FormularioTabState extends State<_FormularioTab> {
                   ),
                   child: Column(
                     children: _sugerencias.map((dir) {
-                      final precio = _precioDeDir(dir);
+                      final esSector = dir['tipo'] == 'sector';
+                      final precio = esSector
+                          ? (dir['precio'] as num).toDouble()
+                          : _precioDeDir(dir);
                       return InkWell(
                         onTap: () {
+                          _seleccionandoDestino = true;
                           setState(() {
-                            _redDireccionSelId = dir['id'] as int;
+                            // Sector: conservar texto escrito; red: reemplazar con dirección exacta
+                            _redDireccionSelId = esSector
+                                ? -(dir['id'] as int)
+                                : dir['id'] as int;
                             _precioSugerido = precio;
-                            _destinoCtrl.text =
-                                dir['direccion'].toString().toUpperCase();
+                            if (!esSector) {
+                              _destinoCtrl.text =
+                                  dir['direccion'].toString().toUpperCase();
+                            }
                             _sugerencias = [];
                           });
-                          // Mover cursor al final
-                          _destinoCtrl.selection = TextSelection.fromPosition(
-                              TextPosition(offset: _destinoCtrl.text.length));
+                          if (!esSector) {
+                            _destinoCtrl.selection =
+                                TextSelection.fromPosition(TextPosition(
+                                    offset: _destinoCtrl.text.length));
+                          }
+                          _seleccionandoDestino = false;
                         },
                         child: Container(
                           padding: const EdgeInsets.symmetric(
                               horizontal: 12, vertical: 10),
-                          decoration: const BoxDecoration(
-                            border: Border(
+                          decoration: BoxDecoration(
+                            color: esSector
+                                ? Colors.indigo[900]!.withValues(alpha: 0.3)
+                                : Colors.transparent,
+                            border: const Border(
                                 bottom: BorderSide(color: Colors.white10)),
                           ),
                           child: Row(children: [
-                            const Icon(Icons.location_on,
-                                color: Colors.indigo, size: 16),
+                            Icon(
+                              esSector
+                                  ? Icons.map_outlined
+                                  : Icons.location_on,
+                              color: esSector
+                                  ? Colors.indigoAccent
+                                  : Colors.indigo,
+                              size: 16,
+                            ),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    dir['nombre'].toString(),
-                                    style: const TextStyle(
-                                        color: Colors.white,
+                                    esSector
+                                        ? 'Sector ${dir['nombre']}'
+                                        : dir['nombre'].toString(),
+                                    style: TextStyle(
+                                        color: esSector
+                                            ? Colors.indigoAccent
+                                            : Colors.white,
                                         fontSize: 13,
                                         fontWeight: FontWeight.bold),
                                   ),
                                   Text(
-                                    dir['direccion'].toString(),
-                                    style: const TextStyle(
-                                        color: Colors.white54, fontSize: 11),
+                                    esSector
+                                        ? 'Precio estimado por sector'
+                                        : dir['direccion'].toString(),
+                                    style: TextStyle(
+                                        color: esSector
+                                            ? Colors.indigoAccent
+                                                .withValues(alpha: 0.7)
+                                            : Colors.white54,
+                                        fontSize: 11),
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                   ),
@@ -1347,8 +1492,10 @@ class _FormularioTabState extends State<_FormularioTab> {
                             ),
                             Text(
                               '\$${_miles(precio.toInt())}',
-                              style: const TextStyle(
-                                  color: Colors.greenAccent,
+                              style: TextStyle(
+                                  color: esSector
+                                      ? Colors.indigoAccent
+                                      : Colors.greenAccent,
                                   fontSize: 12,
                                   fontWeight: FontWeight.bold),
                             ),
@@ -1359,6 +1506,96 @@ class _FormularioTabState extends State<_FormularioTab> {
                   ),
                 ),
 
+              // ── Link GPS opcional ─────────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: StatefulBuilder(builder: (ctx, setGps) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      TextFormField(
+                        controller: _destinoGpsCtrl,
+                        style: const TextStyle(
+                            color: Colors.white, fontSize: 12),
+                        decoration: InputDecoration(
+                          hintText:
+                              '📍 Pegar link de Google Maps (opcional)',
+                          hintStyle: const TextStyle(
+                              color: Colors.white38, fontSize: 12),
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 8),
+                          filled: true,
+                          fillColor:
+                              Colors.white.withValues(alpha: 0.05),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide:
+                                const BorderSide(color: Colors.white12),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: const BorderSide(
+                                color: Colors.teal, width: 1.5),
+                          ),
+                          suffixIcon: _destinoGpsCtrl.text.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.clear,
+                                      size: 16, color: Colors.white38),
+                                  onPressed: () {
+                                    _destinoGpsCtrl.clear();
+                                    setState(() {
+                                      _destinoLat = null;
+                                      _destinoLng = null;
+                                    });
+                                  },
+                                )
+                              : null,
+                        ),
+                        autofillHints: const <String>[],
+                        onChanged: (v) {
+                          final (lat, lng) = _parsearUrlMaps(v);
+                          setState(() {
+                            _destinoLat = lat;
+                            _destinoLng = lng;
+                          });
+                        },
+                      ),
+                      if (_destinoLat != null && _destinoLng != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Row(children: [
+                            const Icon(Icons.check_circle,
+                                size: 13, color: Colors.tealAccent),
+                            const SizedBox(width: 4),
+                            Text(
+                              'GPS detectado: ${_destinoLat!.toStringAsFixed(5)}, ${_destinoLng!.toStringAsFixed(5)}',
+                              style: const TextStyle(
+                                  color: Colors.tealAccent,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold),
+                            ),
+                          ]),
+                        )
+                      else if (_destinoGpsCtrl.text.isNotEmpty)
+                        const Padding(
+                          padding: EdgeInsets.only(top: 4),
+                          child: Row(children: [
+                            Icon(Icons.warning_amber_rounded,
+                                size: 13, color: Colors.orange),
+                            SizedBox(width: 4),
+                            Text(
+                              'No se pudo leer el link — usa Google Maps → Compartir → Copiar link',
+                              style: TextStyle(
+                                  color: Colors.orange, fontSize: 10),
+                            ),
+                          ]),
+                        ),
+                    ],
+                  );
+                }),
+              ),
+
               // ── Recargo parcial (sin precio destino) ─────────────────────────
               if (_precioSugerido == null && _recargoParcial > 0)
                 Padding(
@@ -1367,80 +1604,77 @@ class _FormularioTabState extends State<_FormularioTab> {
                     final extras = _sedesExtraRecogida;
                     final sLat = (widget.sede?['lat'] as num?)?.toDouble();
                     final sLng = (widget.sede?['lng'] as num?)?.toDouble();
-                    return Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: Colors.amber[900]!.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.amber[700]!),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Row(children: [
-                            Icon(Icons.calculate_outlined,
-                                color: Colors.amber, size: 14),
-                            SizedBox(width: 6),
-                            Expanded(
-                              child: Text(
-                                'Recargo calculado (sin precio destino):',
-                                style: TextStyle(
-                                    color: Colors.amber,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.bold),
-                              ),
-                            ),
-                          ]),
-                          const SizedBox(height: 6),
-                          // Recargo por cada sede extra
-                          ...extras.map((r) {
-                            final rLat = (r['lat'] as num?)?.toDouble();
-                            final rLng = (r['lng'] as num?)?.toDouble();
-                            double recargo = 0;
-                            String dist = '';
-                            if (sLat != null && sLng != null &&
-                                rLat != null && rLng != null) {
-                              final km = _haversineKm(sLat, sLng, rLat, rLng);
-                              recargo = _recargoPorKm(km);
-                              dist = ' (${km.toStringAsFixed(1)} km)';
-                            }
-                            final nombre =
-                                r['tipo'] == 'FN' && r['numero'] != null
-                                    ? 'FN${r['numero']}'
-                                    : r['nombre']?.toString() ?? 'Sede extra';
-                            return Padding(
-                              padding: const EdgeInsets.only(bottom: 3),
-                              child: Text(
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Recargo por cada sede extra
+                        ...extras.map((r) {
+                          final rLat = (r['lat'] as num?)?.toDouble();
+                          final rLng = (r['lng'] as num?)?.toDouble();
+                          double recargo = 0;
+                          String dist = '';
+                          if (sLat != null && sLng != null &&
+                              rLat != null && rLng != null) {
+                            final km = _haversineKm(sLat, sLng, rLat, rLng);
+                            recargo = _recargoPorKm(km);
+                            dist = ' (${km.toStringAsFixed(1)} km)';
+                          }
+                          final nombre =
+                              r['tipo'] == 'FN' && r['numero'] != null
+                                  ? 'FN${r['numero']}'
+                                  : r['nombre']?.toString() ?? 'Sede extra';
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 3),
+                            child: Row(children: [
+                              const Icon(Icons.add_location_alt_outlined,
+                                  color: Colors.indigoAccent, size: 14),
+                              const SizedBox(width: 4),
+                              Text(
                                 '+\$${_miles(recargo.toInt())} recogida $nombre$dist',
                                 style: const TextStyle(
                                     color: Colors.indigoAccent,
                                     fontSize: 11,
                                     fontWeight: FontWeight.bold),
                               ),
-                            );
-                          }),
-                          // Datáfono
-                          if (_conDatafono)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 3),
-                              child: Text(
+                            ]),
+                          );
+                        }),
+                        // Datáfono
+                        if (_conDatafono)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 3),
+                            child: Row(children: [
+                              const Icon(Icons.credit_card,
+                                  color: Colors.amberAccent, size: 14),
+                              const SizedBox(width: 4),
+                              Text(
                                 '+\$${_miles(_recargoDaatafonoCOP)} datáfono',
                                 style: const TextStyle(
                                     color: Colors.amberAccent,
                                     fontSize: 11,
                                     fontWeight: FontWeight.bold),
                               ),
-                            ),
-                          const Divider(height: 10, color: Colors.amber),
-                          Text(
-                            'Subtotal: \$${_miles(_recargoParcial.toInt())} + precio al destino (central cotiza)',
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold),
+                            ]),
                           ),
-                        ],
-                      ),
+                        // Total parcial
+                        Padding(
+                          padding: const EdgeInsets.only(top: 5),
+                          child: Row(children: [
+                            const Icon(Icons.payments_outlined,
+                                color: Colors.white, size: 14),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                'Subtotal: \$${_miles(_recargoParcial.toInt())} + precio destino (central cotiza)',
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ]),
+                        ),
+                      ],
                     );
                   }),
                 ),
@@ -2448,6 +2682,11 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
   String? _movilTelefono;
   String? _movilNumero; // número real: extraído de usuarios.usuario
   String? _movilIdCargado;
+  // Métodos de pago del móvil
+  String? _pagoNequi;
+  String? _pagoDaviplata;
+  String? _pagoBancolombia;
+  String? _pagoLlave;
 
   @override
   void initState() {
@@ -2469,7 +2708,7 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
     try {
       final row = await _db
           .from('usuarios')
-          .select('telefono, usuario')
+          .select('telefono, usuario, pago_nequi, pago_daviplata, pago_bancolombia, pago_llave')
           .eq('id', mid)
           .maybeSingle();
       if (!mounted) return;
@@ -2480,6 +2719,10 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
       setState(() {
         _movilTelefono = row?['telefono']?.toString();
         _movilNumero = numExtraido;
+        _pagoNequi = row?['pago_nequi']?.toString();
+        _pagoDaviplata = row?['pago_daviplata']?.toString();
+        _pagoBancolombia = row?['pago_bancolombia']?.toString();
+        _pagoLlave = row?['pago_llave']?.toString();
       });
     } catch (_) {}
   }
@@ -2634,10 +2877,8 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
               ),
             ],
 
-            // ── Móvil asignado + WA ───────────────────────────────────────
-            if (numMovil != null &&
-                estado != 'cotizacion' &&
-                estado != 'cotizada') ...[
+            // ── Móvil asignado + WA + Métodos de pago ───────────────────
+            if (numMovil != null) ...[
               const SizedBox(height: 8),
               Row(
                 children: [
@@ -2687,6 +2928,45 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
                     ),
                 ],
               ),
+
+              // ── Métodos de pago del móvil ─────────────────────────────
+              Builder(builder: (_) {
+                final metodos = <Widget>[];
+                void _addPago(String? valor, String label, Color color) {
+                  if (valor == null || valor.trim().isEmpty) return;
+                  metodos.add(GestureDetector(
+                    onLongPress: () {
+                      // Copiar al portapapeles
+                    },
+                    child: Container(
+                      margin: const EdgeInsets.only(right: 6, top: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 7, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: color.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(5),
+                        border: Border.all(color: color.withValues(alpha: 0.5)),
+                      ),
+                      child: Text(
+                        '$label: $valor',
+                        style: TextStyle(
+                            color: color,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ));
+                }
+                _addPago(_pagoNequi, 'Nequi', Colors.purple);
+                _addPago(_pagoDaviplata, 'Daviplata', const Color(0xFFFF5722));
+                _addPago(_pagoBancolombia, 'Bancolombia', Colors.amber);
+                _addPago(_pagoLlave, 'Llave', Colors.teal);
+                if (metodos.isEmpty) return const SizedBox.shrink();
+                return Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Wrap(children: metodos),
+                );
+              }),
 
               // ── Tiempo estimado según estado ────────────────────────────
               Builder(builder: (_) {
