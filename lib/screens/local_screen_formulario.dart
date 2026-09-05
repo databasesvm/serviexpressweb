@@ -237,7 +237,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                                   );
 
                                   await Supabase.instance.client
-                                      .from('dir_usuario')
+                                      .from('red_dir_se')
                                       .insert({
                                         'usuario_id': widget.usuario['id'],
                                         'nombre': palabraCtrl.text.trim().toUpperCase(),
@@ -273,7 +273,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                 Expanded(
                   child: FutureBuilder<List<Map<String, dynamic>>>(
                     future: Supabase.instance.client
-                        .from('dir_usuario')
+                        .from('red_dir_se')
                         .select('id, nombre, municipio, sector_id, precio, sectores(nombre)')
                         .eq('usuario_id', widget.usuario['id'])
                         .eq('activo', true)
@@ -327,7 +327,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                                 ),
                                 onPressed: () async {
                                   await Supabase.instance.client
-                                      .from('dir_usuario')
+                                      .from('red_dir_se')
                                       .update({'activo': false})
                                       .eq('id', item['id']);
                                   setModalState(() {});
@@ -359,48 +359,17 @@ mixin _FormularioMixin on State<LocalScreen> {
   }) async {
     // --- CONSULTA ESPEJO CON "MI LOCAL" ---
     List<Map<String, dynamic>> listaPrecios = [];
-    List<Map<String, dynamic>> redDirecciones = []; // red global con precios
-    Map<int, int> localPreciosRed = {}; // direccion_id → precio local
 
-    // ---> LIBERADO: Ahora descarga la lista también cuando es Cotización <---
-    // Las tres queries corren en PARALELO para reducir la espera
+    // Carga red_dir_se del local (también en modo cotización)
     if (!esPuntoAPunto) {
       try {
-        final results = await Future.wait([
-          Supabase.instance.client
-              .from('dir_usuario')
-              .select('id, nombre, municipio, sector_id, precio, activo, sectores(nombre)')
-              .eq('usuario_id', widget.usuario['id'])
-              .eq('activo', true)
-              .order('nombre', ascending: true),
-          Supabase.instance.client
-              .from('red_direcciones')
-              .select('id, nombre, municipio, sector_id, precio, sectores(nombre, municipio, precio_global)')
-              .eq('activo', true)
-              .order('nombre', ascending: true),
-          Supabase.instance.client
-              .from('red_dir_precios_local')
-              .select('direccion_id, precio')
-              .eq('local_id', widget.usuario['id']),
-        ]);
-
-        listaPrecios = List<Map<String, dynamic>>.from(results[0]);
-
-        // Construir mapa de precios locales por dirección
-        for (final lp in List<Map<String, dynamic>>.from(results[2])) {
-          final did = lp['direccion_id'] as int?;
-          final p   = lp['precio'] as int?;
-          if (did != null && p != null) localPreciosRed[did] = p;
-        }
-
-        // Excluir de la red los que ya tienen coincidencia por nombre en dir_usuario
-        final propias = listaPrecios
-            .map((e) => (e['nombre'] ?? '').toString().toUpperCase())
-            .toSet();
-        redDirecciones = List<Map<String, dynamic>>.from(results[1]).where((d) {
-          final nom = (d['nombre'] ?? '').toString().toUpperCase();
-          return !propias.contains(nom);
-        }).toList();
+        final data = await Supabase.instance.client
+            .from('red_dir_se')
+            .select('id, nombre, municipio, sector_id, precio, activo, sectores(nombre)')
+            .eq('usuario_id', widget.usuario['id'])
+            .eq('activo', true)
+            .order('nombre', ascending: true);
+        listaPrecios = List<Map<String, dynamic>>.from(data);
       } catch (_) {}
     }
 
@@ -428,7 +397,6 @@ mixin _FormularioMixin on State<LocalScreen> {
     String tiempoPreparacion = 'Inmediato';
 
     List<Map<String, dynamic>> sugerenciasListaPrecios = [];
-    List<Map<String, dynamic>> sugerenciasRed = []; // sugerencias de la red con precio
     String? destinoBase; // dirección exacta seleccionada (preserva precio al escribir detalles)
     String? sectorBase;  // sector seleccionado (preserva precio al escribir detalles)
 
@@ -810,12 +778,12 @@ mixin _FormularioMixin on State<LocalScreen> {
                     // ── Preservar precio si el usuario solo añade detalles ──
                     if (destinoBase != null &&
                         texto.toUpperCase().startsWith(destinoBase!)) {
-                      setDialogState(() { sugerenciasListaPrecios = []; sugerenciasRed = []; });
+                      setDialogState(() { sugerenciasListaPrecios = []; });
                       return;
                     }
                     if (sectorBase != null &&
                         texto.toLowerCase().contains(sectorBase!.toLowerCase())) {
-                      setDialogState(() { sugerenciasListaPrecios = []; sugerenciasRed = []; });
+                      setDialogState(() { sugerenciasListaPrecios = []; });
                       return;
                     }
                     // Cambio real → resetear base
@@ -824,7 +792,7 @@ mixin _FormularioMixin on State<LocalScreen> {
 
                     String textoLimpio = texto.toLowerCase();
                     if (textoLimpio.length < 2) {
-                      setDialogState(() { sugerenciasListaPrecios = []; sugerenciasRed = []; });
+                      setDialogState(() { sugerenciasListaPrecios = []; });
                       return;
                     }
 
@@ -833,7 +801,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                         .where((w) => w.length > 2)
                         .toList();
 
-                    // --- Sugerencias de dir_usuario (propias, en verde) ---
+                    // --- Sugerencias de red_dir_se (propias, en verde) ---
                     List<Map<String, dynamic>> encontradas = [];
                     for (var d in listaPrecios) {
                       final nombre = (d['nombre'] ?? '').toString();
@@ -866,32 +834,13 @@ mixin _FormularioMixin on State<LocalScreen> {
                       });
                     }
 
-                    // --- Sugerencias de red (con precio si disponible) ---
-                    List<Map<String, dynamic>> redEncontradas = [];
-                    for (final d in redDirecciones) {
-                      final nombre   = (d['nombre'] ?? '').toString().toLowerCase();
-                      final sec      = d['sectores'] as Map<String, dynamic>?;
-                      final secNom   = (sec?['nombre'] ?? '').toString().toLowerCase();
-                      final coincide = nombre.contains(textoLimpio) ||
-                          secNom.contains(textoLimpio) ||
-                          palabrasDigitadas.any((w) => nombre.contains(w) || secNom.contains(w));
-                      if (!coincide) continue;
-                      final id = d['id'] as int;
-                      final int? precio = localPreciosRed[id] ??
-                          (d['precio'] as int?) ??
-                          (sec?['precio_global'] as int?);
-                      redEncontradas.add({'id': id, 'nombre': d['nombre'].toString().toUpperCase(), 'precio': precio});
-                      if (redEncontradas.length >= 4) break;
-                    }
-
                     setDialogState(() {
-                      sugerenciasListaPrecios = encontradas.take(3).toList();
-                      sugerenciasRed = redEncontradas;
+                      sugerenciasListaPrecios = encontradas.take(5).toList();
                     });
                   },
                 ),
 
-                if (sugerenciasListaPrecios.isNotEmpty || sugerenciasRed.isNotEmpty)
+                if (sugerenciasListaPrecios.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
                     child: Column(
@@ -923,7 +872,6 @@ mixin _FormularioMixin on State<LocalScreen> {
                                   sectorBase  = sug['sectorName']?.toString();
                                   setDialogState(() {
                                     sugerenciasListaPrecios = [];
-                                    sugerenciasRed = [];
                                   });
                                 },
                                 child: Container(
@@ -950,68 +898,6 @@ mixin _FormularioMixin on State<LocalScreen> {
                           ),
                         ],
 
-                        // --- SUGERENCIAS DE LA RED (con precio si disponible) ---
-                        if (sugerenciasRed.isNotEmpty) ...[
-                          if (sugerenciasListaPrecios.isNotEmpty) const SizedBox(height: 8),
-                          const Text(
-                            '🌐 Zona de la red:',
-                            style: TextStyle(fontSize: 12, color: Colors.black45, fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(height: 6),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: sugerenciasRed.map((sug) {
-                              final nombre = sug['nombre'].toString();
-                              final int? precio = sug['precio'] as int?;
-                              String? precioStr;
-                              if (precio != null) {
-                                String r = '';
-                                int c = 0;
-                                final s = precio.toString();
-                                for (int i = s.length - 1; i >= 0; i--) {
-                                  r = s[i] + r; c++;
-                                  if (c == 3 && i > 0) { r = '.$r'; c = 0; }
-                                }
-                                precioStr = '\$$r';
-                              }
-                              return InkWell(
-                                onTap: () {
-                                  destinoBase = nombre;
-                                  sectorBase  = null;
-                                  if (destinoController.text.length <= nombre.length)
-                                    destinoController.text = '$nombre - ';
-                                  if (precioStr != null && !esCotizacion)
-                                    tarifaController.text = precioStr;
-                                  setDialogState(() { sugerenciasListaPrecios = []; sugerenciasRed = []; });
-                                },
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                                  decoration: BoxDecoration(
-                                    color: precio != null ? Colors.blue[50] : Colors.grey[100],
-                                    borderRadius: BorderRadius.circular(6),
-                                    border: Border.all(color: precio != null ? Colors.blue[300]! : Colors.grey[400]!),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(Icons.location_city, color: precio != null ? Colors.blue[700] : Colors.grey[600], size: 14),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        precioStr != null ? '$nombre ($precioStr)' : nombre,
-                                        style: TextStyle(
-                                          color: precio != null ? Colors.blue[900] : Colors.grey[700],
-                                          fontWeight: FontWeight.w600,
-                                          fontSize: 11,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            }).toList(),
-                          ),
-                        ],
                       ],
                     ),
                   ),
@@ -2005,7 +1891,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                                                         ? 'Los Patios'
                                                         : 'V. Rosario';
                                                 await Supabase.instance.client
-                                                    .from('dir_usuario')
+                                                    .from('red_dir_se')
                                                     .insert({
                                                       'usuario_id': widget.usuario['id'],
                                                       'nombre': barrioCtrl.text.trim().toUpperCase(),

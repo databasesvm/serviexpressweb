@@ -922,7 +922,7 @@ mixin _DispatchMixin on State<LocalScreen> {
       // --- DIÁLOGO RÁPIDO PARA GUARDAR EN LA LISTA DE PRECIOS ---
       if (contextoPrincipal.mounted) {
         final resLista = await Supabase.instance.client
-            .from('dir_usuario')
+            .from('red_dir_se')
             .select('nombre, precio')
             .eq('usuario_id', widget.usuario['id'])
             .eq('activo', true);
@@ -1026,7 +1026,7 @@ mixin _DispatchMixin on State<LocalScreen> {
                                       ? 'Los Patios'
                                       : 'V. Rosario';
                               await Supabase.instance.client
-                                  .from('dir_usuario')
+                                  .from('red_dir_se')
                                   .insert({
                                     'usuario_id': widget.usuario['id'],
                                     'nombre': barrioCtrl.text.trim().toUpperCase(),

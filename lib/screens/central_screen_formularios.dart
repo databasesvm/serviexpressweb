@@ -22,24 +22,13 @@ extension CentralScreenFormularios on _CentralScreenState {
     // Desglose del precio capturado por CampoTarifaInteligente.
     Map<String, dynamic>? detalleActual;
 
-    // Red de direcciones — se carga una vez al abrir el formulario
-    List<Map<String, dynamic>> redDireccionesCompleta = [];
-    List<String> redDireccionesCentral = []; // para verificar si ya está en red
+    // Red de direcciones SE del local seleccionado (red_dir_se)
+    List<Map<String, dynamic>> dirUsuarioLocal = []; // red_dir_se del local elegido
+    List<String> dirUsuarioNombres = []; // nombres para verificar si ya existe
     List<Map<String, dynamic>> sugerenciasDestino = [];
-    Map<int, int> localPreciosRed = {}; // direccion_id → precio del local elegido
+    int? localSeleccionadoId;
     String? destinoBase;
     String? sectorBase;
-    Supabase.instance.client
-        .from('red_direcciones')
-        .select('id, nombre, municipio, sector_id, precio, sectores(nombre, precio_global)')
-        .eq('activo', true)
-        .order('nombre', ascending: true)
-        .then((data) {
-      redDireccionesCompleta = List<Map<String, dynamic>>.from(data);
-      redDireccionesCentral = redDireccionesCompleta
-          .map((e) => e['nombre'].toString().toUpperCase())
-          .toList();
-    });
 
     // Feature 2: asignación directa a un móvil específico
     String? movilDirectoServimotoId;
@@ -227,21 +216,22 @@ extension CentralScreenFormularios on _CentralScreenState {
                       origenLngCapturada = local['lng_fija'] != null
                           ? (local['lng_fija'] as num).toDouble()
                           : null;
-                      localPreciosRed = {};
+                      localSeleccionadoId = newLocalId;
+                      dirUsuarioLocal = [];
+                      dirUsuarioNombres = [];
                     });
                     if (newLocalId != null) {
                       Supabase.instance.client
-                          .from('red_dir_precios_local')
-                          .select('direccion_id, precio')
-                          .eq('local_id', newLocalId)
-                          .then((lp) {
-                        final Map<int, int> mapa = {};
-                        for (final row in List<Map<String, dynamic>>.from(lp)) {
-                          final did = row['direccion_id'] as int?;
-                          final p   = row['precio'] as int?;
-                          if (did != null && p != null) mapa[did] = p;
-                        }
-                        localPreciosRed = mapa;
+                          .from('red_dir_se')
+                          .select('id, nombre, municipio, sector_id, precio')
+                          .eq('usuario_id', newLocalId)
+                          .eq('activo', true)
+                          .order('nombre', ascending: true)
+                          .then((du) {
+                        dirUsuarioLocal = List<Map<String, dynamic>>.from(du);
+                        dirUsuarioNombres = dirUsuarioLocal
+                            .map((e) => e['nombre'].toString().toUpperCase())
+                            .toList();
                       });
                     }
                   },
@@ -385,18 +375,13 @@ extension CentralScreenFormularios on _CentralScreenState {
                     final palabras = t.split(RegExp(r'\s+')).where((w) => w.length > 2).toList();
 
                     final List<Map<String, dynamic>> encontradas = [];
-                    for (final d in redDireccionesCompleta) {
-                      final nombre  = (d['nombre'] ?? '').toString().toLowerCase();
-                      final sec     = d['sectores'] as Map<String, dynamic>?;
-                      final secNom  = (sec?['nombre'] ?? '').toString().toLowerCase();
-                      final coincide = nombre.contains(t) || secNom.contains(t) ||
-                          palabras.any((w) => nombre.contains(w) || secNom.contains(w));
+                    for (final d in dirUsuarioLocal) {
+                      final nombre = (d['nombre'] ?? '').toString().toLowerCase();
+                      final coincide = nombre.contains(t) ||
+                          palabras.any((w) => nombre.contains(w));
                       if (!coincide) continue;
-                      final id = d['id'] as int;
-                      final int? precio = localPreciosRed[id] ??
-                          (d['precio'] as int?) ??
-                          (sec?['precio_global'] as int?);
-                      encontradas.add({'id': id, 'nombre': d['nombre'].toString().toUpperCase(), 'precio': precio});
+                      final int? precio = d['precio'] as int?;
+                      encontradas.add({'id': d['id'], 'nombre': d['nombre'].toString().toUpperCase(), 'precio': precio});
                       if (encontradas.length >= 6) break;
                     }
                     setDialogState(() => sugerenciasDestino = encontradas);
@@ -989,7 +974,7 @@ extension CentralScreenFormularios on _CentralScreenState {
 
                           // Revisamos si ya existe en la red cargada al abrir
                           // el formulario — comparación nombre vs. nombre.
-                          final bool yaEstaEnRed = redDireccionesCentral.any((
+                          final bool yaEstaEnRed = dirUsuarioNombres.any((
                             dir,
                           ) {
                             final String nombreDir = dir.contains(' (')
@@ -1000,7 +985,8 @@ extension CentralScreenFormularios on _CentralScreenState {
 
                           if (tarifaFinal > 0 &&
                               !yaEstaEnRed &&
-                              barrioExtraido.isNotEmpty) {
+                              barrioExtraido.isNotEmpty &&
+                              localSeleccionadoId != null) {
                             final barrioCtrl = TextEditingController(
                               text: barrioExtraido,
                             );
@@ -1019,7 +1005,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                                     borderRadius: BorderRadius.circular(12),
                                   ),
                                   title: const Text(
-                                    '💾 ¿GUARDAR EN LA RED?',
+                                    '💾 ¿GUARDAR EN LA LISTA SE?',
                                     style: TextStyle(
                                       fontWeight: FontWeight.bold,
                                       fontSize: 16,
@@ -1031,9 +1017,8 @@ extension CentralScreenFormularios on _CentralScreenState {
                                         CrossAxisAlignment.start,
                                     children: [
                                       const Text(
-                                        'Esta dirección no está en la red de zonas. '
-                                        '¿La agregamos para que todos los locales '
-                                        'la vean como sugerencia?',
+                                        'Esta dirección no está en la lista del local. '
+                                        '¿La guardamos en su red de direcciones SE?',
                                         style: TextStyle(fontSize: 13),
                                       ),
                                       const SizedBox(height: 12),
@@ -1123,19 +1108,16 @@ extension CentralScreenFormularios on _CentralScreenState {
                                                 () => guardandoRed = true,
                                               );
                                               try {
-                                                final sectorTexto = sectorCtrl.text.trim().toUpperCase();
                                                 await Supabase.instance.client
-                                                    .from('red_direcciones')
+                                                    .from('red_dir_se')
                                                     .insert({
+                                                      'usuario_id': localSeleccionadoId,
                                                       'nombre': barrioCtrl.text
                                                           .trim()
                                                           .toUpperCase(),
                                                       'municipio':
                                                           zonaSeleccionada,
-                                                      'zona_lluvia': 'general',
                                                       'activo': true,
-                                                      if (sectorTexto.isNotEmpty)
-                                                        'sector': sectorTexto,
                                                     });
                                                 if (ctxSave.mounted) {
                                                   Navigator.pop(ctxSave);
@@ -1144,8 +1126,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                                                   ).showSnackBar(
                                                     const SnackBar(
                                                       content: Text(
-                                                        '✅ Dirección agregada a la red. '
-                                                        'Todos los locales la verán.',
+                                                        '✅ Dirección guardada en la lista SE del local.',
                                                       ),
                                                       backgroundColor:
                                                           Colors.green,

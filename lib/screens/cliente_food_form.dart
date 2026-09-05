@@ -43,8 +43,9 @@ class _ClienteFoodFormState extends State<ClienteFoodForm> {
   Future<void> _cargarRedDirecciones() async {
     try {
       final data = await Supabase.instance.client
-          .from('red_direcciones')
-          .select('id, nombre, municipio, sector_id, precio, sectores(nombre, precio_global)')
+          .from('red_dir_se')
+          .select('id, nombre, municipio, sector_id, precio')
+          .eq('usuario_id', widget.usuario['id'])
           .eq('activo', true)
           .order('nombre');
       if (mounted) setState(() => _redDirecciones = List<Map<String, dynamic>>.from(data));
@@ -67,11 +68,9 @@ class _ClienteFoodFormState extends State<ClienteFoodForm> {
     final List<Map<String, dynamic>> enc = [];
     for (final d in _redDirecciones) {
       final n = (d['nombre'] ?? '').toString().toLowerCase();
-      final sec = d['sectores'] as Map<String, dynamic>?;
-      final sn = (sec?['nombre'] ?? '').toString().toLowerCase();
-      final ok = n.contains(t) || sn.contains(t) || palabras.any((w) => n.contains(w) || sn.contains(w));
+      final ok = n.contains(t) || palabras.any((w) => n.contains(w));
       if (!ok) continue;
-      final int? precio = (d['precio'] as int?) ?? (sec?['precio_global'] as int?);
+      final int? precio = d['precio'] as int?;
       enc.add({'id': d['id'], 'nombre': d['nombre'].toString().toUpperCase(), 'precio': precio});
       if (enc.length >= 5) break;
     }
