@@ -1158,7 +1158,7 @@ class _CentralScreenState extends State<CentralScreen>
             ),
             _item(Icons.local_pharmacy_rounded, 'Crear servicio FN', Colors.indigo[200]!, () => _abrirFormularioFN(context)),
             _item(Icons.receipt_long_rounded, 'Facturación FN', Colors.indigo[200]!, () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FnFacturacionScreen(titulo: 'Facturación FN — Central')))),
-            _item(Icons.location_on_rounded, 'Red de direcciones FN', const Color(0xFF008FFF), () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FnRedDireccionesScreen()))),
+            _item(Icons.location_on_rounded, 'Red de direcciones FN', const Color(0xFF002DA2), () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FnRedDireccionesScreen()))),
 
             const Divider(color: Colors.white10, height: 20),
 

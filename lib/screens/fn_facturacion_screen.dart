@@ -893,7 +893,7 @@ Total entregados período: <strong>\$${_miles(totalDom)}</strong>
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1A237E),
+        backgroundColor: const Color(0xFF002DA2),
         iconTheme: const IconThemeData(color: Colors.white),
         title: Text(widget.titulo,
             style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
@@ -1155,7 +1155,7 @@ Total entregados período: <strong>\$${_miles(totalDom)}</strong>
       margin: const EdgeInsets.only(top: 8, bottom: 4),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: const Color(0xFF1A237E).withValues(alpha: 0.3),
+        color: const Color(0xFF002DA2).withValues(alpha: 0.3),
         borderRadius: BorderRadius.circular(6),
         border: const Border(left: BorderSide(color: Color(0xFF3949AB), width: 3)),
       ),

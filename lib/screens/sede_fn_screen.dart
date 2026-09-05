@@ -192,7 +192,7 @@ class _SedeFnScreenState extends State<SedeFnScreen>
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1A237E),
+        backgroundColor: const Color(0xFF002DA2),
         iconTheme: const IconThemeData(color: Colors.white),
         title: Row(
           children: [
@@ -1822,7 +1822,7 @@ class _FormularioTabState extends State<_FormularioTab> {
                 width: double.infinity,
                 child: ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF1A237E),
+                    backgroundColor: const Color(0xFF002DA2),
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(

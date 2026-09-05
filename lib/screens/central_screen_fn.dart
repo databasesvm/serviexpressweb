@@ -337,7 +337,7 @@ extension CentralScreenFn on _CentralScreenState {
           // Enviar cotización
           ElevatedButton.icon(
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF1A237E),
+              backgroundColor: const Color(0xFF002DA2),
               foregroundColor: Colors.white,
             ),
             icon: const Icon(Icons.send_rounded, size: 16),

@@ -4141,7 +4141,7 @@ class _MovilScreenState extends State<MovilScreen>
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF1A237E).withValues(alpha: 0.20),
+                              color: const Color(0xFF002DA2).withValues(alpha: 0.20),
                               borderRadius: BorderRadius.circular(20),
                               border: Border.all(color: const Color(0xFF3949AB), width: 1.5),
                             ),
@@ -4406,7 +4406,7 @@ class _MovilScreenState extends State<MovilScreen>
                     Container(
                       margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF1A237E).withValues(alpha: 0.04),
+                        color: const Color(0xFF002DA2).withValues(alpha: 0.04),
                         borderRadius: BorderRadius.circular(14),
                         border: Border.all(color: const Color(0xFF3949AB).withValues(alpha: 0.5)),
                       ),
@@ -4422,7 +4422,7 @@ class _MovilScreenState extends State<MovilScreen>
                             const Spacer(),
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(color: const Color(0xFF1A237E), borderRadius: BorderRadius.circular(8)),
+                              decoration: BoxDecoration(color: const Color(0xFF002DA2), borderRadius: BorderRadius.circular(8)),
                               child: const Text('FN', style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold, letterSpacing: 0.8)),
                             ),
                           ]),
@@ -4436,7 +4436,7 @@ class _MovilScreenState extends State<MovilScreen>
                             const Text('Hoy', style: TextStyle(fontSize: 12, color: Color(0xFF5C6BC0))),
                             const SizedBox(width: 8),
                             Text('$_serviciosFnHoy',
-                                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1A237E))),
+                                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF002DA2))),
                             const Spacer(),
                             Text(_formatearMoneda(_producidoFnHoy, mostrarCero: true),
                                 style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF1565C0))),
@@ -4452,7 +4452,7 @@ class _MovilScreenState extends State<MovilScreen>
                             const Text('Total FN', style: TextStyle(fontSize: 12, color: Color(0xFF5C6BC0))),
                             const SizedBox(width: 8),
                             Text('$_serviciosFnTotal',
-                                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1A237E))),
+                                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF002DA2))),
                             const Spacer(),
                             Text(_formatearMoneda(_producidoFnTotal, mostrarCero: true),
                                 style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF1565C0))),
@@ -6364,7 +6364,7 @@ class _MovilScreenState extends State<MovilScreen>
                               margin: const EdgeInsets.only(left: 4),
                               padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                               decoration: BoxDecoration(
-                                color: const Color(0xFF1A237E),
+                                color: const Color(0xFF002DA2),
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: const Text(

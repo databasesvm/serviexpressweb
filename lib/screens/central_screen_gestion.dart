@@ -839,7 +839,7 @@ extension CentralScreenGestion on _CentralScreenState {
     final enLinea = m['en_linea'] == true;
     return CircleAvatar(
       radius: 12,
-      backgroundColor: (esFn && enLinea) ? const Color(0xFF1A237E) : colorBase,
+      backgroundColor: (esFn && enLinea) ? const Color(0xFF002DA2) : colorBase,
       child: Text(
         _extraerNumeroAvatar(m),
         style: const TextStyle(
@@ -923,7 +923,7 @@ extension CentralScreenGestion on _CentralScreenState {
             margin: const EdgeInsets.only(right: 6),
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
             decoration: BoxDecoration(
-              color: const Color(0xFF1A237E),
+              color: const Color(0xFF002DA2),
               borderRadius: BorderRadius.circular(6),
             ),
             child: const Row(

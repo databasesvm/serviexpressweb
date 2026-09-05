@@ -71,7 +71,7 @@ class _SupervisorFnScreenState extends State<SupervisorFnScreen>
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1A237E),
+        backgroundColor: const Color(0xFF002DA2),
         iconTheme: const IconThemeData(color: Colors.white),
         title: const Row(
           children: [
