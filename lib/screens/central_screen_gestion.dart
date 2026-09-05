@@ -1725,28 +1725,6 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
-  Widget _seSubChip(String label, bool sel, VoidCallback onTap) =>
-      GestureDetector(
-        onTap: onTap,
-        child: Container(
-          margin: const EdgeInsets.only(right: 6),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-          decoration: BoxDecoration(
-            color: sel
-                ? const Color(0xff3AF500).withValues(alpha: 0.2)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-                color: sel ? const Color(0xff3AF500) : Colors.white24),
-          ),
-          child: Text(label,
-              style: TextStyle(
-                color: sel ? const Color(0xff3AF500) : Colors.white54,
-                fontSize: 11,
-                fontWeight: sel ? FontWeight.bold : FontWeight.normal,
-              )),
-        ),
-      );
 
   String _etiqueta(Map<String, dynamic> u) {
     final rol = u['rol'] as String? ?? '';
@@ -1914,6 +1892,52 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
       await _db.from('sectores').delete().eq('id', s['id']);
       await _cargarInicial();
     }
+  }
+
+  String _miles(int v) {
+    if (v >= 1000) {
+      final s = v.toString();
+      return '${s.substring(0, s.length - 3)}.${s.substring(s.length - 3)}';
+    }
+    return v.toString();
+  }
+
+  void _editarTarifaDialog(int sId, int? tarifaActual) {
+    final ctrl = TextEditingController(text: tarifaActual?.toString() ?? '');
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        title: const Text('Tarifa del sector', style: TextStyle(color: Colors.white, fontSize: 15)),
+        content: TextField(
+          controller: ctrl,
+          keyboardType: TextInputType.number,
+          autofocus: true,
+          style: const TextStyle(color: Colors.white),
+          decoration: const InputDecoration(
+            prefixText: '\$ ',
+            prefixStyle: TextStyle(color: Colors.white54),
+            hintText: '0',
+            hintStyle: TextStyle(color: Colors.white38),
+          ),
+        ),
+        actions: [
+          if (tarifaActual != null)
+            TextButton(
+              onPressed: () { _eliminarTarifa(sId); Navigator.pop(context); },
+              child: const Text('Quitar', style: TextStyle(color: Colors.red)),
+            ),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar', style: TextStyle(color: Colors.white54)),
+          ),
+          TextButton(
+            onPressed: () { _upsertTarifa(sId, ctrl.text); Navigator.pop(context); },
+            child: const Text('Guardar', style: TextStyle(color: Color(0xff3AF500))),
+          ),
+        ],
+      ),
+    );
   }
 
   // ── CRUD Tarifas por usuario ────────────────────────────────────────────────
@@ -2298,19 +2322,18 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
     }
 
     return Column(children: [
-      // Chips municipio
+      // Chips municipio centrados
       Container(
         color: const Color(0xFF111111),
         height: 42,
-        child: ListView(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: _municipios.map((m) {
             final sel = _secFiltroMun == m;
             return GestureDetector(
               onTap: () => setState(() { _secFiltroMun = m; _secFiltroSector = null; }),
               child: Container(
-                margin: const EdgeInsets.only(right: 8),
+                margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                 decoration: BoxDecoration(
                   color: sel ? const Color(0xff3AF500) : const Color(0xFF1A1A1A),
@@ -2326,7 +2349,7 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
           }).toList(),
         ),
       ),
-      // Sub-chips sector
+      // Dropdown sector
       Builder(builder: (ctx) {
         final subSecs = _sectoresActivos
             .where((s) => s['municipio'] == _secFiltroMun && s['parent_id'] == null)
@@ -2336,18 +2359,29 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
         if (subSecs.isEmpty) return const SizedBox.shrink();
         return Container(
           color: const Color(0xFF0D0D0D),
-          height: 34,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
-            children: [
-              _seSubChip('Todos', _secFiltroSector == null,
-                  () => setState(() => _secFiltroSector = null)),
-              ...subSecs.map((s) => _seSubChip(
-                  s['nombre']?.toString() ?? '',
-                  _secFiltroSector == s['id'],
-                  () => setState(() => _secFiltroSector = s['id'] as int))),
+          padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+          child: DropdownButtonFormField<int?>(
+            value: _secFiltroSector,
+            dropdownColor: const Color(0xFF1A1A1A),
+            style: const TextStyle(color: Colors.white, fontSize: 12),
+            decoration: InputDecoration(
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(color: Colors.white24),
+              ),
+              prefixIcon: const Icon(Icons.map_outlined, color: Colors.white38, size: 16),
+            ),
+            items: [
+              const DropdownMenuItem<int?>(value: null, child: Text('Todos los sectores', style: TextStyle(color: Colors.white54))),
+              ...subSecs.map((s) => DropdownMenuItem<int?>(
+                value: s['id'] as int?,
+                child: Text(s['nombre']?.toString() ?? '', style: const TextStyle(color: Colors.white)),
+              )),
             ],
+            onChanged: (v) => setState(() => _secFiltroSector = v),
           ),
         );
       }),
@@ -2376,120 +2410,113 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
                   final sId = s['id'] as int;
                   final activo = s['activo'] as bool? ?? true;
                   final tarifa = _tarifaMap[sId];
-                  final tCtrl = TextEditingController(text: tarifa?.toString() ?? '');
                   return Padding(
-                    padding: EdgeInsets.only(left: esBarrio ? 20 : 0),
-                    child: Card(
-                      color: esBarrio ? const Color(0xFF161616) : const Color(0xFF1A1A1A),
-                      margin: const EdgeInsets.only(bottom: 6),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Row(children: [
-                            CircleAvatar(
-                              radius: esBarrio ? 13 : 16,
-                              backgroundColor: activo
-                                  ? const Color(0xff3AF500).withValues(alpha: esBarrio ? 0.10 : 0.18)
-                                  : Colors.white10,
-                              child: Icon(
-                                esBarrio ? Icons.location_city : Icons.map,
-                                color: activo ? const Color(0xff3AF500) : Colors.white24,
-                                size: esBarrio ? 13 : 16,
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(child: Text(s['nombre']?.toString() ?? '',
-                                style: TextStyle(
-                                  fontWeight: esBarrio ? FontWeight.normal : FontWeight.bold,
-                                  fontSize: esBarrio ? 12 : 13,
-                                  color: activo ? Colors.white : Colors.white38,
-                                ))),
-                            // Toggle activo
+                    padding: EdgeInsets.only(left: esBarrio ? 20 : 0, bottom: 6),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: activo ? const Color(0xFF1A1A1A) : const Color(0xFF111111),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: activo
+                              ? const Color(0xff3AF500).withValues(alpha: 0.3)
+                              : Colors.white12,
+                        ),
+                      ),
+                      child: ListTile(
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                        leading: CircleAvatar(
+                          radius: esBarrio ? 14 : 18,
+                          backgroundColor: activo
+                              ? (esBarrio
+                                  ? const Color(0xff3AF500).withValues(alpha: 0.12)
+                                  : const Color(0xff3AF500).withValues(alpha: 0.22))
+                              : Colors.grey[800],
+                          child: Icon(
+                            esBarrio ? Icons.location_city : Icons.map,
+                            color: activo ? const Color(0xff3AF500) : Colors.white38,
+                            size: esBarrio ? 14 : 18,
+                          ),
+                        ),
+                        title: Text(
+                          s['nombre']?.toString() ?? '',
+                          style: TextStyle(
+                            color: activo ? Colors.white : Colors.white38,
+                            fontWeight: esBarrio ? FontWeight.normal : FontWeight.bold,
+                            fontSize: esBarrio ? 12 : 13,
+                          ),
+                        ),
+                        subtitle: Row(
+                          children: [
                             GestureDetector(
                               onTap: () async {
                                 await _db.from('sectores').update({'activo': !activo}).eq('id', sId);
                                 await _cargarInicial();
                               },
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                decoration: BoxDecoration(
-                                  color: activo
-                                      ? const Color(0xff3AF500).withValues(alpha: 0.15)
-                                      : Colors.white10,
-                                  borderRadius: BorderRadius.circular(10),
+                              child: Text(
+                                activo ? 'Activo' : 'Inactivo',
+                                style: TextStyle(
+                                  color: activo ? const Color(0xff3AF500) : Colors.red,
+                                  fontSize: 11,
                                 ),
-                                child: Text(activo ? 'ON' : 'OFF',
-                                    style: TextStyle(
-                                      fontSize: 11, fontWeight: FontWeight.bold,
-                                      color: activo ? const Color(0xff3AF500) : Colors.white38,
-                                    )),
                               ),
                             ),
-                            const SizedBox(width: 4),
+                            if (_userSel != null) ...[
+                              const SizedBox(width: 8),
+                              GestureDetector(
+                                onTap: () => _editarTarifaDialog(sId, tarifa),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: tarifa != null
+                                        ? Colors.green.withValues(alpha: 0.2)
+                                        : Colors.orange.withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: tarifa != null
+                                          ? Colors.green.withValues(alpha: 0.6)
+                                          : Colors.orange.withValues(alpha: 0.5),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        tarifa != null ? Icons.attach_money : Icons.add,
+                                        size: 11,
+                                        color: tarifa != null ? Colors.greenAccent : Colors.orange,
+                                      ),
+                                      Text(
+                                        tarifa != null ? '\$${_miles(tarifa)}' : 'Asignar tarifa',
+                                        style: TextStyle(
+                                          color: tarifa != null ? Colors.greenAccent : Colors.orange,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
                             IconButton(
-                              icon: const Icon(Icons.edit_outlined, color: Color(0xff3AF500), size: 18),
+                              icon: const Icon(Icons.edit_outlined, color: Color(0xff3AF500), size: 20),
                               padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                               onPressed: () => _abrirFormSector(sector: s),
                             ),
                             IconButton(
-                              icon: const Icon(Icons.delete_outline, color: Colors.red, size: 18),
+                              icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
                               padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                               onPressed: () => _eliminarSector(s),
                             ),
-                          ]),
-                          if (_userSel != null)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 6),
-                              child: Row(children: [
-                                Expanded(child: TextField(
-                                  controller: tCtrl,
-                                  keyboardType: TextInputType.number,
-                                  style: const TextStyle(color: Colors.white, fontSize: 13),
-                                  textAlign: TextAlign.right,
-                                  decoration: InputDecoration(
-                                    isDense: true,
-                                    hintText: 'Sin tarifa',
-                                    hintStyle: const TextStyle(color: Colors.white24, fontSize: 12),
-                                    filled: true, fillColor: const Color(0xFF2A2A2A),
-                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
-                                    enabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(6),
-                                      borderSide: BorderSide(
-                                        color: tarifa != null
-                                            ? const Color(0xff3AF500).withValues(alpha: 0.4)
-                                            : Colors.white12,
-                                      ),
-                                    ),
-                                    prefixText: '\$ ',
-                                    prefixStyle: const TextStyle(color: Colors.white54, fontSize: 12),
-                                    contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                                  ),
-                                  onSubmitted: (v) => _upsertTarifa(sId, v),
-                                )),
-                                const SizedBox(width: 4),
-                                IconButton(
-                                  icon: Icon(
-                                    tarifa != null ? Icons.check_circle : Icons.radio_button_unchecked,
-                                    color: tarifa != null ? const Color(0xff3AF500) : Colors.white24,
-                                    size: 18,
-                                  ),
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                                  onPressed: tarifa != null ? () => _eliminarTarifa(sId) : null,
-                                  tooltip: tarifa != null ? 'Quitar tarifa' : 'Sin tarifa',
-                                ),
-                              ]),
-                            )
-                          else
-                            const Padding(
-                              padding: EdgeInsets.only(top: 4),
-                              child: Text('Selecciona un usuario para gestionar tarifas',
-                                  style: TextStyle(color: Colors.white24, fontSize: 11)),
-                            ),
-                        ]),
+                          ],
+                        ),
                       ),
                     ),
                   );
@@ -2515,19 +2542,18 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
         (a['nombre'] ?? '').toString().compareTo((b['nombre'] ?? '').toString()));
 
     return Column(children: [
-      // Chips municipio
+      // Chips municipio centrados
       Container(
         color: const Color(0xFF111111),
         height: 42,
-        child: ListView(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: _municipios.map((m) {
             final sel = _dirFiltroMun == m;
             return GestureDetector(
               onTap: () => setState(() { _dirFiltroMun = m; _dirFiltroSector = null; }),
               child: Container(
-                margin: const EdgeInsets.only(right: 8),
+                margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                 decoration: BoxDecoration(
                   color: sel ? const Color(0xff3AF500) : const Color(0xFF1A1A1A),
@@ -2543,7 +2569,7 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
           }).toList(),
         ),
       ),
-      // Sub-chips sector
+      // Dropdown sector
       Builder(builder: (ctx) {
         final subSecs = _sectoresActivos
             .where((s) => s['municipio'] == _dirFiltroMun)
@@ -2553,18 +2579,29 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
         if (subSecs.isEmpty) return const SizedBox.shrink();
         return Container(
           color: const Color(0xFF0D0D0D),
-          height: 34,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
-            children: [
-              _seSubChip('Todos', _dirFiltroSector == null,
-                  () => setState(() => _dirFiltroSector = null)),
-              ...subSecs.map((s) => _seSubChip(
-                  s['nombre']?.toString() ?? '',
-                  _dirFiltroSector == s['id'],
-                  () => setState(() => _dirFiltroSector = s['id'] as int))),
+          padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+          child: DropdownButtonFormField<int?>(
+            value: _dirFiltroSector,
+            dropdownColor: const Color(0xFF1A1A1A),
+            style: const TextStyle(color: Colors.white, fontSize: 12),
+            decoration: InputDecoration(
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(color: Colors.white24),
+              ),
+              prefixIcon: const Icon(Icons.map_outlined, color: Colors.white38, size: 16),
+            ),
+            items: [
+              const DropdownMenuItem<int?>(value: null, child: Text('Todos los sectores', style: TextStyle(color: Colors.white54))),
+              ...subSecs.map((s) => DropdownMenuItem<int?>(
+                value: s['id'] as int?,
+                child: Text(s['nombre']?.toString() ?? '', style: const TextStyle(color: Colors.white)),
+              )),
             ],
+            onChanged: (v) => setState(() => _dirFiltroSector = v),
           ),
         );
       }),

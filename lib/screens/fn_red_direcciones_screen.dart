@@ -244,26 +244,6 @@ class _TabSectoresState extends State<_TabSectores>
     return buf.toString();
   }
 
-  Widget _subChipSec(String label, bool sel, VoidCallback onTap) =>
-      GestureDetector(
-        onTap: onTap,
-        child: Container(
-          margin: const EdgeInsets.only(right: 6),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-          decoration: BoxDecoration(
-            color: sel ? const Color(0xFF002DA2).withValues(alpha: 0.25) : Colors.transparent,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-                color: sel ? const Color(0xFF002DA2) : Colors.white24),
-          ),
-          child: Text(label,
-              style: TextStyle(
-                color: sel ? Colors.white : Colors.white54,
-                fontSize: 11,
-                fontWeight: sel ? FontWeight.bold : FontWeight.normal,
-              )),
-        ),
-      );
 
   // Guardar/actualizar tarifa para esta sede
   Future<void> _guardarTarifa(int sectorId, int precio) async {
@@ -606,15 +586,14 @@ class _TabSectoresState extends State<_TabSectores>
                 Container(
                   color: const Color(0xFF111111),
                   height: 42,
-                  child: ListView(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: _municipios.map((m) {
                       final sel = _filtroMun == m;
                       return GestureDetector(
                         onTap: () => setState(() { _filtroMun = m; _filtroSector = null; }),
                         child: Container(
-                          margin: const EdgeInsets.only(right: 8),
+                          margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
                           padding: const EdgeInsets.symmetric(
                               horizontal: 12, vertical: 4),
                           decoration: BoxDecoration(
@@ -640,7 +619,7 @@ class _TabSectoresState extends State<_TabSectores>
                     }).toList(),
                   ),
                 ),
-                // ── Sub-filtro sector ─────────────────────────────────────
+                // ── Sub-filtro sector (dropdown) ──────────────────────────
                 Builder(builder: (ctx) {
                   final subSecs = _sectores
                       .where((s) => s['municipio'] == _filtroMun && s['parent_id'] == null)
@@ -650,18 +629,29 @@ class _TabSectoresState extends State<_TabSectores>
                   if (subSecs.isEmpty) return const SizedBox.shrink();
                   return Container(
                     color: const Color(0xFF0D0D0D),
-                    height: 34,
-                    child: ListView(
-                      scrollDirection: Axis.horizontal,
-                      padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
-                      children: [
-                        _subChipSec('Todos', _filtroSector == null,
-                            () => setState(() => _filtroSector = null)),
-                        ...subSecs.map((s) => _subChipSec(
-                            s['nombre']?.toString() ?? '',
-                            _filtroSector == s['id'],
-                            () => setState(() => _filtroSector = s['id'] as int))),
+                    padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+                    child: DropdownButtonFormField<int?>(
+                      value: _filtroSector,
+                      dropdownColor: const Color(0xFF1A1A1A),
+                      style: const TextStyle(color: Colors.white, fontSize: 12),
+                      decoration: InputDecoration(
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(color: Colors.white24),
+                        ),
+                        prefixIcon: const Icon(Icons.map_outlined, color: Colors.white38, size: 16),
+                      ),
+                      items: [
+                        const DropdownMenuItem<int?>(value: null, child: Text('Todos los sectores', style: TextStyle(color: Colors.white54))),
+                        ...subSecs.map((s) => DropdownMenuItem<int?>(
+                          value: s['id'] as int?,
+                          child: Text(s['nombre']?.toString() ?? '', style: const TextStyle(color: Colors.white)),
+                        )),
                       ],
+                      onChanged: (v) => setState(() => _filtroSector = v),
                     ),
                   );
                 }),
@@ -1370,16 +1360,15 @@ class _TabDireccionesState extends State<_TabDirecciones>
                 Container(
                   color: const Color(0xFF111111),
                   height: 42,
-                  child: ListView(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: _municipios
                         .map((m) => _chip(m, _filtroMun == m,
                             () => setState(() { _filtroMun = m; _filtroSector = null; })))
                         .toList(),
                   ),
                 ),
-                // ── Sub-filtro sector ─────────────────────────────────────
+                // ── Sub-filtro sector (dropdown) ──────────────────────────
                 Builder(builder: (ctx) {
                   final subSecs = _sectores
                       .where((s) => s['municipio'] == _filtroMun)
@@ -1389,19 +1378,29 @@ class _TabDireccionesState extends State<_TabDirecciones>
                   if (subSecs.isEmpty) return const SizedBox.shrink();
                   return Container(
                     color: const Color(0xFF0D0D0D),
-                    height: 34,
-                    child: ListView(
-                      scrollDirection: Axis.horizontal,
-                      padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
-                      children: [
-                        _chip('Todos', _filtroSector == null,
-                            () => setState(() => _filtroSector = null), small: true),
-                        ...subSecs.map((s) => _chip(
-                            s['nombre']?.toString() ?? '',
-                            _filtroSector == s['id'],
-                            () => setState(() => _filtroSector = s['id'] as int),
-                            small: true)),
+                    padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+                    child: DropdownButtonFormField<int?>(
+                      value: _filtroSector,
+                      dropdownColor: const Color(0xFF1A1A1A),
+                      style: const TextStyle(color: Colors.white, fontSize: 12),
+                      decoration: InputDecoration(
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(color: Colors.white24),
+                        ),
+                        prefixIcon: const Icon(Icons.map_outlined, color: Colors.white38, size: 16),
+                      ),
+                      items: [
+                        const DropdownMenuItem<int?>(value: null, child: Text('Todos los sectores', style: TextStyle(color: Colors.white54))),
+                        ...subSecs.map((s) => DropdownMenuItem<int?>(
+                          value: s['id'] as int?,
+                          child: Text(s['nombre']?.toString() ?? '', style: const TextStyle(color: Colors.white)),
+                        )),
                       ],
+                      onChanged: (v) => setState(() => _filtroSector = v),
                     ),
                   );
                 }),
