@@ -1642,7 +1642,9 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
 
   // ── Filtros ─────────────────────────────────────────────────────────────────
   String _secFiltroMun = 'Cúcuta';
+  int? _secFiltroSector;
   String _dirFiltroMun = 'Cúcuta';
+  int? _dirFiltroSector;
 
   static const _municipios = ['Cúcuta', 'Los Patios', 'V. Rosario'];
 
@@ -1672,7 +1674,7 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
           .order('nombre');
       final sectores = await _db
           .from('sectores')
-          .select('id, nombre, municipio, activo')
+          .select('id, nombre, municipio, activo, parent_id')
           .order('municipio')
           .order('nombre');
       if (mounted) setState(() {
@@ -1723,6 +1725,29 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
+  Widget _seSubChip(String label, bool sel, VoidCallback onTap) =>
+      GestureDetector(
+        onTap: onTap,
+        child: Container(
+          margin: const EdgeInsets.only(right: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+          decoration: BoxDecoration(
+            color: sel
+                ? const Color(0xff3AF500).withValues(alpha: 0.2)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+                color: sel ? const Color(0xff3AF500) : Colors.white24),
+          ),
+          child: Text(label,
+              style: TextStyle(
+                color: sel ? const Color(0xff3AF500) : Colors.white54,
+                fontSize: 11,
+                fontWeight: sel ? FontWeight.bold : FontWeight.normal,
+              )),
+        ),
+      );
+
   String _etiqueta(Map<String, dynamic> u) {
     final rol = u['rol'] as String? ?? '';
     final nom = u['nombre']?.toString() ?? '';
@@ -1744,6 +1769,8 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
     final ctrl = TextEditingController(text: sector?['nombre']?.toString() ?? '');
     bool activo = sector?['activo'] != false;
     String? municipio = sector?['municipio']?.toString() ?? _secFiltroMun;
+    final sId = sector?['id'] as int?;
+    int? parentId = sector?['parent_id'] as int?;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -1751,7 +1778,7 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           backgroundColor: const Color(0xFF1A1A1A),
           title: Text(
-            sector == null ? '➕ Nuevo sector' : '✏️ Editar sector',
+            sector == null ? '➕ Nuevo sector/barrio' : '✏️ Editar sector/barrio',
             style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
           ),
           content: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -1769,19 +1796,53 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
                 ..._municipios.map((m) => DropdownMenuItem<String?>(
                       value: m, child: Text(m, style: const TextStyle(color: Colors.white)))),
               ],
-              onChanged: (v) => setD(() => municipio = v),
+              onChanged: (v) => setD(() { municipio = v; parentId = null; }),
             ),
+            const SizedBox(height: 12),
+            // Dropdown padre (barrio de...)
+            Builder(builder: (ctx2) {
+              final padres = _sectoresActivos
+                  .where((s) =>
+                      s['municipio'] == municipio &&
+                      s['parent_id'] == null &&
+                      (sId == null || s['id'] != sId))
+                  .toList()
+                ..sort((a, b) => (a['nombre'] ?? '').toString()
+                    .compareTo((b['nombre'] ?? '').toString()));
+              final validParent = padres.any((p) => p['id'] == parentId) ? parentId : null;
+              return DropdownButtonFormField<int?>(
+                value: validParent,
+                dropdownColor: const Color(0xFF1A1A1A),
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: '¿Barrio de...?', labelStyle: TextStyle(color: Colors.white54),
+                  border: OutlineInputBorder(), isDense: true,
+                ),
+                items: [
+                  const DropdownMenuItem<int?>(
+                      value: null,
+                      child: Text('— Es un sector raíz —',
+                          style: TextStyle(color: Colors.white54, fontSize: 13))),
+                  ...padres.map((p) => DropdownMenuItem<int?>(
+                      value: p['id'] as int,
+                      child: Text(p['nombre']?.toString() ?? '',
+                          style: const TextStyle(color: Colors.white)))),
+                ],
+                onChanged: (v) => setD(() => parentId = v),
+              );
+            }),
             const SizedBox(height: 12),
             TextField(
               controller: ctrl,
               autofocus: true,
               style: const TextStyle(color: Colors.white),
               textCapitalization: TextCapitalization.words,
-              decoration: const InputDecoration(
-                labelText: 'Nombre del sector', labelStyle: TextStyle(color: Colors.white54),
-                hintText: 'Ej: Norte, Centro, Aeropuerto',
-                hintStyle: TextStyle(color: Colors.white24),
-                border: OutlineInputBorder(), isDense: true,
+              decoration: InputDecoration(
+                labelText: 'Nombre',
+                labelStyle: const TextStyle(color: Colors.white54),
+                hintText: parentId != null ? 'Ej: Norte, Centro, Alto' : 'Ej: Bocono, Aeropuerto',
+                hintStyle: const TextStyle(color: Colors.white24),
+                border: const OutlineInputBorder(), isDense: true,
               ),
             ),
             if (sector != null) ...[
@@ -1806,10 +1867,12 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
                   await _db.from('sectores').insert({
                     'nombre': nombre, 'activo': true,
                     if (municipio != null) 'municipio': municipio,
+                    if (parentId != null) 'parent_id': parentId,
                   });
                 } else {
                   await _db.from('sectores').update({
                     'nombre': nombre, 'activo': activo, 'municipio': municipio,
+                    'parent_id': parentId,
                   }).eq('id', sector['id']);
                 }
                 if (ctx.mounted) Navigator.pop(ctx, true);
@@ -2141,7 +2204,7 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
           unselectedLabelColor: Colors.white54,
           indicatorColor: const Color(0xff3AF500),
           tabs: const [
-            Tab(icon: Icon(Icons.grid_view_rounded, size: 16), text: 'Sectores'),
+            Tab(icon: Icon(Icons.grid_view_rounded, size: 16), text: 'Sectores/Barrios'),
             Tab(icon: Icon(Icons.place_outlined, size: 16), text: 'Direcciones'),
           ],
         ),
@@ -2164,10 +2227,12 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
                   style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
             )
           : _userSel != null
-              ? FloatingActionButton(
+              ? FloatingActionButton.extended(
                   backgroundColor: const Color(0xff3AF500),
                   onPressed: () => _formDir(),
-                  child: const Icon(Icons.add_location_alt, color: Colors.black),
+                  icon: const Icon(Icons.add_location_alt, color: Colors.black),
+                  label: const Text('Nueva dirección',
+                      style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
                 )
               : null,
     );
@@ -2208,9 +2273,29 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
 
   // ── Tab 0: Sectores + tarifas por usuario ───────────────────────────────────
   Widget _tabSectores() {
-    final filtrados = _sectoresActivos
-        .where((s) => s['municipio']?.toString() == _secFiltroMun)
+    var raices = _sectoresActivos
+        .where((s) =>
+            s['municipio']?.toString() == _secFiltroMun &&
+            s['parent_id'] == null)
         .toList();
+    if (_secFiltroSector != null) {
+      raices = raices.where((s) => s['id'] == _secFiltroSector).toList();
+    }
+    raices.sort((a, b) =>
+        (a['nombre'] ?? '').toString().compareTo((b['nombre'] ?? '').toString()));
+    // Expandir: sector raíz + sus barrios ordenados
+    final filtrados = <Map<String, dynamic>>[];
+    for (final s in raices) {
+      filtrados.add({...s, '_tipo': 'sector'});
+      final barrios = _sectoresActivos
+          .where((b) => b['parent_id'] == s['id'])
+          .toList()
+        ..sort((a, b) => (a['nombre'] ?? '').toString()
+            .compareTo((b['nombre'] ?? '').toString()));
+      for (final b in barrios) {
+        filtrados.add({...b, '_tipo': 'barrio'});
+      }
+    }
 
     return Column(children: [
       // Chips municipio
@@ -2219,11 +2304,11 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
         height: 42,
         child: ListView(
           scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
           children: _municipios.map((m) {
             final sel = _secFiltroMun == m;
             return GestureDetector(
-              onTap: () => setState(() => _secFiltroMun = m),
+              onTap: () => setState(() { _secFiltroMun = m; _secFiltroSector = null; }),
               child: Container(
                 margin: const EdgeInsets.only(right: 8),
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -2241,6 +2326,31 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
           }).toList(),
         ),
       ),
+      // Sub-chips sector
+      Builder(builder: (ctx) {
+        final subSecs = _sectoresActivos
+            .where((s) => s['municipio'] == _secFiltroMun && s['parent_id'] == null)
+            .toList()
+          ..sort((a, b) => (a['nombre'] ?? '').toString()
+              .compareTo((b['nombre'] ?? '').toString()));
+        if (subSecs.isEmpty) return const SizedBox.shrink();
+        return Container(
+          color: const Color(0xFF0D0D0D),
+          height: 34,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+            children: [
+              _seSubChip('Todos', _secFiltroSector == null,
+                  () => setState(() => _secFiltroSector = null)),
+              ...subSecs.map((s) => _seSubChip(
+                  s['nombre']?.toString() ?? '',
+                  _secFiltroSector == s['id'],
+                  () => setState(() => _secFiltroSector = s['id'] as int))),
+            ],
+          ),
+        );
+      }),
       const Divider(height: 1, color: Colors.white12),
       Expanded(
         child: filtrados.isEmpty
@@ -2262,108 +2372,125 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
                 itemCount: filtrados.length,
                 itemBuilder: (_, i) {
                   final s = filtrados[i];
+                  final esBarrio = s['_tipo'] == 'barrio';
                   final sId = s['id'] as int;
                   final activo = s['activo'] as bool? ?? true;
                   final tarifa = _tarifaMap[sId];
                   final tCtrl = TextEditingController(text: tarifa?.toString() ?? '');
-                  return Card(
-                    color: const Color(0xFF1A1A1A),
-                    margin: const EdgeInsets.only(bottom: 6),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Row(children: [
-                          Expanded(child: Text(s['nombre']?.toString() ?? '',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold, fontSize: 13,
-                                color: activo ? Colors.white : Colors.white38,
-                              ))),
-                          // Toggle activo
-                          GestureDetector(
-                            onTap: () async {
-                              await _db.from('sectores').update({'activo': !activo}).eq('id', sId);
-                              await _cargarInicial();
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: activo
-                                    ? const Color(0xff3AF500).withValues(alpha: 0.15)
-                                    : Colors.white10,
-                                borderRadius: BorderRadius.circular(10),
+                  return Padding(
+                    padding: EdgeInsets.only(left: esBarrio ? 20 : 0),
+                    child: Card(
+                      color: esBarrio ? const Color(0xFF161616) : const Color(0xFF1A1A1A),
+                      margin: const EdgeInsets.only(bottom: 6),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Row(children: [
+                            CircleAvatar(
+                              radius: esBarrio ? 13 : 16,
+                              backgroundColor: activo
+                                  ? const Color(0xff3AF500).withValues(alpha: esBarrio ? 0.10 : 0.18)
+                                  : Colors.white10,
+                              child: Icon(
+                                esBarrio ? Icons.location_city : Icons.map,
+                                color: activo ? const Color(0xff3AF500) : Colors.white24,
+                                size: esBarrio ? 13 : 16,
                               ),
-                              child: Text(activo ? 'ON' : 'OFF',
-                                  style: TextStyle(
-                                    fontSize: 11, fontWeight: FontWeight.bold,
-                                    color: activo ? const Color(0xff3AF500) : Colors.white38,
-                                  )),
                             ),
-                          ),
-                          const SizedBox(width: 4),
-                          IconButton(
-                            icon: const Icon(Icons.edit_outlined, color: Color(0xff3AF500), size: 18),
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                            onPressed: () => _abrirFormSector(sector: s),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.delete_outline, color: Colors.red, size: 18),
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                            onPressed: () => _eliminarSector(s),
-                          ),
-                        ]),
-                        if (_userSel != null)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 6),
-                            child: Row(children: [
-                              Expanded(child: TextField(
-                                controller: tCtrl,
-                                keyboardType: TextInputType.number,
-                                style: const TextStyle(color: Colors.white, fontSize: 13),
-                                textAlign: TextAlign.right,
-                                decoration: InputDecoration(
-                                  isDense: true,
-                                  hintText: 'Sin tarifa',
-                                  hintStyle: const TextStyle(color: Colors.white24, fontSize: 12),
-                                  filled: true, fillColor: const Color(0xFF2A2A2A),
-                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
-                                  enabledBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(6),
-                                    borderSide: BorderSide(
-                                      color: tarifa != null
-                                          ? const Color(0xff3AF500).withValues(alpha: 0.4)
-                                          : Colors.white12,
-                                    ),
-                                  ),
-                                  prefixText: '\$ ',
-                                  prefixStyle: const TextStyle(color: Colors.white54, fontSize: 12),
-                                  contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                            const SizedBox(width: 10),
+                            Expanded(child: Text(s['nombre']?.toString() ?? '',
+                                style: TextStyle(
+                                  fontWeight: esBarrio ? FontWeight.normal : FontWeight.bold,
+                                  fontSize: esBarrio ? 12 : 13,
+                                  color: activo ? Colors.white : Colors.white38,
+                                ))),
+                            // Toggle activo
+                            GestureDetector(
+                              onTap: () async {
+                                await _db.from('sectores').update({'activo': !activo}).eq('id', sId);
+                                await _cargarInicial();
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: activo
+                                      ? const Color(0xff3AF500).withValues(alpha: 0.15)
+                                      : Colors.white10,
+                                  borderRadius: BorderRadius.circular(10),
                                 ),
-                                onSubmitted: (v) => _upsertTarifa(sId, v),
-                              )),
-                              const SizedBox(width: 4),
-                              IconButton(
-                                icon: Icon(
-                                  tarifa != null ? Icons.check_circle : Icons.radio_button_unchecked,
-                                  color: tarifa != null ? const Color(0xff3AF500) : Colors.white24,
-                                  size: 18,
-                                ),
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                                onPressed: tarifa != null ? () => _eliminarTarifa(sId) : null,
-                                tooltip: tarifa != null ? 'Quitar tarifa' : 'Sin tarifa',
+                                child: Text(activo ? 'ON' : 'OFF',
+                                    style: TextStyle(
+                                      fontSize: 11, fontWeight: FontWeight.bold,
+                                      color: activo ? const Color(0xff3AF500) : Colors.white38,
+                                    )),
                               ),
-                            ]),
-                          )
-                        else
-                          const Padding(
-                            padding: EdgeInsets.only(top: 4),
-                            child: Text('Selecciona un usuario para gestionar tarifas',
-                                style: TextStyle(color: Colors.white24, fontSize: 11)),
-                          ),
-                      ]),
+                            ),
+                            const SizedBox(width: 4),
+                            IconButton(
+                              icon: const Icon(Icons.edit_outlined, color: Color(0xff3AF500), size: 18),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                              onPressed: () => _abrirFormSector(sector: s),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline, color: Colors.red, size: 18),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                              onPressed: () => _eliminarSector(s),
+                            ),
+                          ]),
+                          if (_userSel != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: Row(children: [
+                                Expanded(child: TextField(
+                                  controller: tCtrl,
+                                  keyboardType: TextInputType.number,
+                                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                                  textAlign: TextAlign.right,
+                                  decoration: InputDecoration(
+                                    isDense: true,
+                                    hintText: 'Sin tarifa',
+                                    hintStyle: const TextStyle(color: Colors.white24, fontSize: 12),
+                                    filled: true, fillColor: const Color(0xFF2A2A2A),
+                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(6),
+                                      borderSide: BorderSide(
+                                        color: tarifa != null
+                                            ? const Color(0xff3AF500).withValues(alpha: 0.4)
+                                            : Colors.white12,
+                                      ),
+                                    ),
+                                    prefixText: '\$ ',
+                                    prefixStyle: const TextStyle(color: Colors.white54, fontSize: 12),
+                                    contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                  ),
+                                  onSubmitted: (v) => _upsertTarifa(sId, v),
+                                )),
+                                const SizedBox(width: 4),
+                                IconButton(
+                                  icon: Icon(
+                                    tarifa != null ? Icons.check_circle : Icons.radio_button_unchecked,
+                                    color: tarifa != null ? const Color(0xff3AF500) : Colors.white24,
+                                    size: 18,
+                                  ),
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                                  onPressed: tarifa != null ? () => _eliminarTarifa(sId) : null,
+                                  tooltip: tarifa != null ? 'Quitar tarifa' : 'Sin tarifa',
+                                ),
+                              ]),
+                            )
+                          else
+                            const Padding(
+                              padding: EdgeInsets.only(top: 4),
+                              child: Text('Selecciona un usuario para gestionar tarifas',
+                                  style: TextStyle(color: Colors.white24, fontSize: 11)),
+                            ),
+                        ]),
+                      ),
                     ),
                   );
                 },
@@ -2376,9 +2503,16 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
   Widget _tabDirecciones() {
     if (_cargandoUser) return const Center(child: CircularProgressIndicator(color: Color(0xff3AF500)));
 
-    final filtradas = _dirs
+    var filtradas = _dirs
         .where((d) => d['municipio']?.toString() == _dirFiltroMun)
         .toList();
+    if (_dirFiltroSector != null) {
+      filtradas = filtradas
+          .where((d) => d['sector_id'] == _dirFiltroSector)
+          .toList();
+    }
+    filtradas.sort((a, b) =>
+        (a['nombre'] ?? '').toString().compareTo((b['nombre'] ?? '').toString()));
 
     return Column(children: [
       // Chips municipio
@@ -2387,11 +2521,11 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
         height: 42,
         child: ListView(
           scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
           children: _municipios.map((m) {
             final sel = _dirFiltroMun == m;
             return GestureDetector(
-              onTap: () => setState(() => _dirFiltroMun = m),
+              onTap: () => setState(() { _dirFiltroMun = m; _dirFiltroSector = null; }),
               child: Container(
                 margin: const EdgeInsets.only(right: 8),
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -2409,6 +2543,31 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
           }).toList(),
         ),
       ),
+      // Sub-chips sector
+      Builder(builder: (ctx) {
+        final subSecs = _sectoresActivos
+            .where((s) => s['municipio'] == _dirFiltroMun)
+            .toList()
+          ..sort((a, b) => (a['nombre'] ?? '').toString()
+              .compareTo((b['nombre'] ?? '').toString()));
+        if (subSecs.isEmpty) return const SizedBox.shrink();
+        return Container(
+          color: const Color(0xFF0D0D0D),
+          height: 34,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+            children: [
+              _seSubChip('Todos', _dirFiltroSector == null,
+                  () => setState(() => _dirFiltroSector = null)),
+              ...subSecs.map((s) => _seSubChip(
+                  s['nombre']?.toString() ?? '',
+                  _dirFiltroSector == s['id'],
+                  () => setState(() => _dirFiltroSector = s['id'] as int))),
+            ],
+          ),
+        );
+      }),
       const Divider(height: 1, color: Colors.white12),
       Expanded(
         child: _dirs.isEmpty && _userSel == null

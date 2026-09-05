@@ -467,6 +467,7 @@ class _FormularioTabState extends State<_FormularioTab> {
   // Red de direcciones de esta sede
   List<Map<String, dynamic>> _redDirecciones = [];
   Map<int, int> _tarifasSede = {}; // sector_id → precio (de fn_tarifas_sede)
+  Map<int, int> _parentMap = {}; // barrio_id → parent_sector_id (para fallback)
   List<Map<String, dynamic>> _sectoresSede = []; // sectores con nombre y precio
   double? _precioSugerido; // precio de la dirección seleccionada de la red
   int? _redDireccionSelId; // id del registro seleccionado (negativo = sector)
@@ -602,7 +603,7 @@ class _FormularioTabState extends State<_FormularioTab> {
             .from('fn_tarifas_sede')
             .select('sector_id, precio')
             .eq('sede_id', sedeId),
-        _db.from('fn_sectores').select('id, nombre').eq('activo', true),
+        _db.from('sectores').select('id, nombre, parent_id').eq('activo', true),
       ]);
       if (!mounted) return;
       final data = results[0] as List;
@@ -615,27 +616,50 @@ class _FormularioTabState extends State<_FormularioTab> {
         final p = t['precio'] as int?;
         if (sid != null && p != null) mapa[sid] = p;
       }
-      // Construir lista de sectores con precio (solo los que tienen tarifa)
+      // Mapa barrio_id → parent_sector_id para fallback de precio
+      final parentMapa = <int, int>{};
+      for (final s in List<Map<String, dynamic>>.from(sectData)) {
+        final sid = s['id'] as int?;
+        final pid = s['parent_id'] as int?;
+        if (sid != null && pid != null) parentMapa[sid] = pid;
+      }
+      // Construir lista de sectores con precio:
+      // incluye sectores raíz con tarifa propia + barrios que heredan del padre
       final sects = <Map<String, dynamic>>[];
       for (final s in List<Map<String, dynamic>>.from(sectData)) {
         final sid = s['id'] as int?;
-        if (sid != null && mapa.containsKey(sid)) {
-          sects.add({'id': sid, 'nombre': s['nombre']?.toString() ?? ''});
+        if (sid == null) continue;
+        final precioPropio = mapa[sid];
+        final parentId = parentMapa[sid];
+        final precioEfectivo = precioPropio ?? (parentId != null ? mapa[parentId] : null);
+        if (precioEfectivo != null) {
+          sects.add({
+            'id': sid,
+            'nombre': s['nombre']?.toString() ?? '',
+            'precio_efectivo': precioEfectivo,
+          });
         }
       }
       setState(() {
         _redDirecciones = List<Map<String, dynamic>>.from(data);
         _tarifasSede = mapa;
+        _parentMap = parentMapa;
         _sectoresSede = sects;
       });
     } catch (_) {}
   }
 
-  /// Precio efectivo de una dirección: prioridad tarifa del sector, luego precio directo.
+  /// Precio efectivo de una dirección: tarifa barrio → tarifa sector padre → precio directo.
   double _precioDeDir(Map<String, dynamic> dir) {
     final sectorId = dir['sector_id'] as int?;
-    if (sectorId != null && _tarifasSede.containsKey(sectorId)) {
-      return _tarifasSede[sectorId]!.toDouble();
+    if (sectorId != null) {
+      if (_tarifasSede.containsKey(sectorId)) {
+        return _tarifasSede[sectorId]!.toDouble();
+      }
+      final parentId = _parentMap[sectorId];
+      if (parentId != null && _tarifasSede.containsKey(parentId)) {
+        return _tarifasSede[parentId]!.toDouble();
+      }
     }
     return (dir['precio'] as num).toDouble();
   }
@@ -659,7 +683,7 @@ class _FormularioTabState extends State<_FormularioTab> {
     for (final sect in _sectoresSede) {
       final sectorNombre = sect['nombre'].toString().toLowerCase();
       final sectorId = sect['id'] as int;
-      final precio = (_tarifasSede[sectorId] ?? 0).toDouble();
+      final precio = ((sect['precio_efectivo'] as int?) ?? 0).toDouble();
       if (precio == 0) continue;
 
       // Coincidencia: alguna palabra del texto está contenida en el nombre del sector

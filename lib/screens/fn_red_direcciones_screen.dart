@@ -80,7 +80,7 @@ class _FnRedDireccionesScreenState extends State<FnRedDireccionesScreen> {
             labelColor: Colors.white,
             unselectedLabelColor: Colors.white54,
             tabs: [
-              Tab(icon: Icon(Icons.map, size: 18), text: 'Sectores'),
+              Tab(icon: Icon(Icons.map, size: 18), text: 'Sectores/Barrios'),
               Tab(icon: Icon(Icons.location_on, size: 18), text: 'Direcciones'),
             ],
           ),
@@ -187,6 +187,7 @@ class _TabSectoresState extends State<_TabSectores>
   Map<int, int> _tarifas = {}; // sector_id → precio para esta sede
   bool _cargando = true;
   String _filtroMun = 'Cúcuta';
+  int? _filtroSector;
 
   static const _municipios = ['Cúcuta', 'Los Patios', 'V. Rosario'];
 
@@ -210,7 +211,7 @@ class _TabSectoresState extends State<_TabSectores>
     try {
       final secs = await widget.db
           .from('sectores')
-          .select('id, nombre, activo, municipio')
+          .select('id, nombre, activo, municipio, parent_id')
           .order('municipio')
           .order('nombre');
       final tars = await widget.db
@@ -242,6 +243,27 @@ class _TabSectoresState extends State<_TabSectores>
     }
     return buf.toString();
   }
+
+  Widget _subChipSec(String label, bool sel, VoidCallback onTap) =>
+      GestureDetector(
+        onTap: onTap,
+        child: Container(
+          margin: const EdgeInsets.only(right: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+          decoration: BoxDecoration(
+            color: sel ? const Color(0xFF002DA2).withValues(alpha: 0.25) : Colors.transparent,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+                color: sel ? const Color(0xFF002DA2) : Colors.white24),
+          ),
+          child: Text(label,
+              style: TextStyle(
+                color: sel ? Colors.white : Colors.white54,
+                fontSize: 11,
+                fontWeight: sel ? FontWeight.bold : FontWeight.normal,
+              )),
+        ),
+      );
 
   // Guardar/actualizar tarifa para esta sede
   Future<void> _guardarTarifa(int sectorId, int precio) async {
@@ -276,6 +298,7 @@ class _TabSectoresState extends State<_TabSectores>
     bool activo = sector?['activo'] != false;
     String? municipio =
         sector?['municipio']?.toString() ?? _filtroMun;
+    int? parentId = sector?['parent_id'] as int?;
 
     final guardado = await showDialog<bool>(
       context: context,
@@ -316,8 +339,47 @@ class _TabSectoresState extends State<_TabSectores>
                               style: const TextStyle(color: Colors.white)),
                         )),
                   ],
-                  onChanged: (v) => setD(() => municipio = v),
+                  onChanged: (v) => setD(() { municipio = v; parentId = null; }),
                 ),
+                const SizedBox(height: 12),
+                // 1b. ¿Barrio de...?
+                Builder(builder: (ctx) {
+                  final padres = _sectores
+                      .where((s) =>
+                          s['municipio'] == municipio &&
+                          s['parent_id'] == null &&
+                          (sId == null || s['id'] != sId))
+                      .toList()
+                    ..sort((a, b) => (a['nombre'] ?? '')
+                        .toString()
+                        .compareTo((b['nombre'] ?? '').toString()));
+                  return DropdownButtonFormField<int?>(
+                    value: padres.any((s) => s['id'] == parentId) ? parentId : null,
+                    dropdownColor: const Color(0xFF1A1A1A),
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                      labelText: '¿Barrio de...? (opcional)',
+                      labelStyle: TextStyle(color: Colors.white54),
+                      hintText: 'Dejar vacío si es sector raíz',
+                      hintStyle: TextStyle(color: Colors.white24, fontSize: 12),
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    items: [
+                      const DropdownMenuItem<int?>(
+                        value: null,
+                        child: Text('— Es un sector raíz —',
+                            style: TextStyle(color: Colors.white54, fontSize: 13)),
+                      ),
+                      ...padres.map((p) => DropdownMenuItem<int?>(
+                            value: p['id'] as int,
+                            child: Text(p['nombre']?.toString() ?? '',
+                                style: const TextStyle(color: Colors.white)),
+                          )),
+                    ],
+                    onChanged: (v) => setD(() => parentId = v),
+                  );
+                }),
                 const SizedBox(height: 12),
                 // 2. Nombre
                 TextField(
@@ -383,6 +445,7 @@ class _TabSectoresState extends State<_TabSectores>
                         'nombre': nombre,
                         'activo': true,
                         if (municipio != null) 'municipio': municipio,
+                        if (parentId != null) 'parent_id': parentId,
                       })
                       .select('id')
                       .single();
@@ -392,6 +455,7 @@ class _TabSectoresState extends State<_TabSectores>
                     'nombre': nombre,
                     'activo': activo,
                     'municipio': municipio,
+                    'parent_id': parentId,
                   }).eq('id', sector['id']);
                   newSectorId = sector['id'] as int;
                 }
@@ -544,12 +608,11 @@ class _TabSectoresState extends State<_TabSectores>
                   height: 42,
                   child: ListView(
                     scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 6),
+                    padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
                     children: _municipios.map((m) {
                       final sel = _filtroMun == m;
                       return GestureDetector(
-                        onTap: () => setState(() => _filtroMun = m),
+                        onTap: () => setState(() { _filtroMun = m; _filtroSector = null; }),
                         child: Container(
                           margin: const EdgeInsets.only(right: 8),
                           padding: const EdgeInsets.symmetric(
@@ -577,13 +640,48 @@ class _TabSectoresState extends State<_TabSectores>
                     }).toList(),
                   ),
                 ),
+                // ── Sub-filtro sector ─────────────────────────────────────
+                Builder(builder: (ctx) {
+                  final subSecs = _sectores
+                      .where((s) => s['municipio'] == _filtroMun && s['parent_id'] == null)
+                      .toList()
+                    ..sort((a, b) => (a['nombre'] ?? '').toString()
+                        .compareTo((b['nombre'] ?? '').toString()));
+                  if (subSecs.isEmpty) return const SizedBox.shrink();
+                  return Container(
+                    color: const Color(0xFF0D0D0D),
+                    height: 34,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+                      children: [
+                        _subChipSec('Todos', _filtroSector == null,
+                            () => setState(() => _filtroSector = null)),
+                        ...subSecs.map((s) => _subChipSec(
+                            s['nombre']?.toString() ?? '',
+                            _filtroSector == s['id'],
+                            () => setState(() => _filtroSector = s['id'] as int))),
+                      ],
+                    ),
+                  );
+                }),
+                const Divider(height: 1, color: Colors.white12),
                 // ── Lista ─────────────────────────────────────────────────
                 Expanded(
                   child: Builder(builder: (ctx) {
-                    final filtrados = _sectores
+                    var filtrados = _sectores
                         .where((s) =>
-                            s['municipio']?.toString() == _filtroMun)
+                            s['municipio']?.toString() == _filtroMun &&
+                            s['parent_id'] == null)
                         .toList();
+                    if (_filtroSector != null) {
+                      filtrados = filtrados
+                          .where((s) => s['id'] == _filtroSector)
+                          .toList();
+                    }
+                    filtrados.sort((a, b) => (a['nombre'] ?? '')
+                        .toString()
+                        .compareTo((b['nombre'] ?? '').toString()));
                     if (filtrados.isEmpty) {
                       return Center(
                         child: Column(
@@ -607,17 +705,33 @@ class _TabSectoresState extends State<_TabSectores>
                         ),
                       );
                     }
+                    // Expandir: sectores raíz + sus barrios anidados
+                    final items = <Map<String, dynamic>>[];
+                    for (final s in filtrados) {
+                      items.add({...s, '_tipo': 'sector'});
+                      final barrios = _sectores
+                          .where((b) => b['parent_id'] == s['id'])
+                          .toList()
+                        ..sort((a, b) => (a['nombre'] ?? '').toString()
+                            .compareTo((b['nombre'] ?? '').toString()));
+                      for (final b in barrios) {
+                        items.add({...b, '_tipo': 'barrio'});
+                      }
+                    }
                     return ListView.separated(
                       padding: const EdgeInsets.fromLTRB(12, 12, 12, 100),
-                      itemCount: filtrados.length,
+                      itemCount: items.length,
                       separatorBuilder: (_, __) =>
-                          const SizedBox(height: 8),
+                          const SizedBox(height: 6),
                       itemBuilder: (ctx, i) {
-                        final s = filtrados[i];
+                        final s = items[i];
                         final sId = s['id'] as int;
                         final activo = s['activo'] != false;
                         final precio = _tarifas[sId];
-                        return Container(
+                        final esBarrio = s['_tipo'] == 'barrio';
+                        return Padding(
+                          padding: EdgeInsets.only(left: esBarrio ? 20 : 0),
+                          child: Container(
                           decoration: BoxDecoration(
                             color: activo
                                 ? const Color(0xFF1A1A1A)
@@ -632,22 +746,24 @@ class _TabSectoresState extends State<_TabSectores>
                           ),
                           child: ListTile(
                             leading: CircleAvatar(
+                              radius: esBarrio ? 14 : 18,
                               backgroundColor: activo
-                                  ? const Color(0xFF0070CC)
+                                  ? (esBarrio
+                                      ? const Color(0xFF002DA2).withValues(alpha: 0.25)
+                                      : const Color(0xFF0070CC))
                                   : Colors.grey[800],
-                              child: Icon(Icons.map,
-                                  color: activo
-                                      ? Colors.white
-                                      : Colors.white38,
-                                  size: 18),
+                              child: Icon(
+                                esBarrio ? Icons.location_city : Icons.map,
+                                color: activo ? Colors.white : Colors.white38,
+                                size: esBarrio ? 14 : 18,
+                              ),
                             ),
                             title: Text(
                               s['nombre']?.toString() ?? '',
                               style: TextStyle(
-                                color:
-                                    activo ? Colors.white : Colors.white38,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 13,
+                                color: activo ? Colors.white : Colors.white38,
+                                fontWeight: esBarrio ? FontWeight.normal : FontWeight.bold,
+                                fontSize: esBarrio ? 12 : 13,
                               ),
                             ),
                             subtitle: Row(
@@ -730,7 +846,8 @@ class _TabSectoresState extends State<_TabSectores>
                               ],
                             ),
                           ),
-                        );
+                        ), // Container
+                        ); // Padding
                       },
                     );
                   }),
@@ -762,6 +879,7 @@ class _TabDireccionesState extends State<_TabDirecciones>
   List<Map<String, dynamic>> _sectores = [];
   bool _cargando = true;
   String _filtroMun = 'Cúcuta';
+  int? _filtroSector;
 
   static const _municipios = ['Cúcuta', 'Los Patios', 'V. Rosario'];
 
@@ -779,6 +897,7 @@ class _TabDireccionesState extends State<_TabDirecciones>
     super.didUpdateWidget(old);
     if (old.sede['id'] != widget.sede['id']) {
       _filtroMun = 'Cúcuta';
+      _filtroSector = null;
       _cargar();
     }
   }
@@ -1201,29 +1320,29 @@ class _TabDireccionesState extends State<_TabDirecciones>
     }
   }
 
-  Widget _chip(String label, bool selected, VoidCallback onTap) {
+  Widget _chip(String label, bool selected, VoidCallback onTap, {bool small = false}) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        margin: const EdgeInsets.only(right: 8),
-        padding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        margin: EdgeInsets.only(right: small ? 6 : 8),
+        padding: small
+            ? const EdgeInsets.symmetric(horizontal: 10, vertical: 2)
+            : const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         decoration: BoxDecoration(
           color: selected
-              ? const Color(0xFF002DA2)
-              : const Color(0xFF1A1A1A),
+              ? small
+                  ? const Color(0xFF002DA2).withValues(alpha: 0.25)
+                  : const Color(0xFF002DA2)
+              : small ? Colors.transparent : const Color(0xFF1A1A1A),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-              color: selected
-                  ? const Color(0xFF002DA2)
-                  : Colors.white24),
+              color: selected ? const Color(0xFF002DA2) : Colors.white24),
         ),
         child: Text(label,
             style: TextStyle(
               color: selected ? Colors.white : Colors.white54,
-              fontSize: 12,
-              fontWeight:
-                  selected ? FontWeight.bold : FontWeight.normal,
+              fontSize: small ? 11 : 12,
+              fontWeight: selected ? FontWeight.bold : FontWeight.normal,
             )),
       ),
     );
@@ -1253,21 +1372,55 @@ class _TabDireccionesState extends State<_TabDirecciones>
                   height: 42,
                   child: ListView(
                     scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 6),
+                    padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
                     children: _municipios
                         .map((m) => _chip(m, _filtroMun == m,
-                            () => setState(() => _filtroMun = m)))
+                            () => setState(() { _filtroMun = m; _filtroSector = null; })))
                         .toList(),
                   ),
                 ),
+                // ── Sub-filtro sector ─────────────────────────────────────
+                Builder(builder: (ctx) {
+                  final subSecs = _sectores
+                      .where((s) => s['municipio'] == _filtroMun)
+                      .toList()
+                    ..sort((a, b) => (a['nombre'] ?? '').toString()
+                        .compareTo((b['nombre'] ?? '').toString()));
+                  if (subSecs.isEmpty) return const SizedBox.shrink();
+                  return Container(
+                    color: const Color(0xFF0D0D0D),
+                    height: 34,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+                      children: [
+                        _chip('Todos', _filtroSector == null,
+                            () => setState(() => _filtroSector = null), small: true),
+                        ...subSecs.map((s) => _chip(
+                            s['nombre']?.toString() ?? '',
+                            _filtroSector == s['id'],
+                            () => setState(() => _filtroSector = s['id'] as int),
+                            small: true)),
+                      ],
+                    ),
+                  );
+                }),
+                const Divider(height: 1, color: Colors.white12),
                 // ── Lista ─────────────────────────────────────────────────
                 Expanded(
                   child: Builder(builder: (ctx) {
-                    final filtradas = _dirs
+                    var filtradas = _dirs
                         .where((d) =>
                             d['municipio']?.toString() == _filtroMun)
                         .toList();
+                    if (_filtroSector != null) {
+                      filtradas = filtradas
+                          .where((d) => d['sector_id'] == _filtroSector)
+                          .toList();
+                    }
+                    filtradas.sort((a, b) => (a['nombre'] ?? '')
+                        .toString()
+                        .compareTo((b['nombre'] ?? '').toString()));
                     if (filtradas.isEmpty) {
                       return Center(
                         child: Column(
@@ -1280,13 +1433,15 @@ class _TabDireccionesState extends State<_TabDirecciones>
                                 style: const TextStyle(
                                     color: Colors.white38)),
                             const SizedBox(height: 8),
-                            TextButton.icon(
+                            ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF002DA2)),
                               onPressed: _abrirFormulario,
-                              icon: const Icon(Icons.add,
-                                  color: Color(0xFF002DA2)),
+                              icon: const Icon(Icons.add, color: Colors.white, size: 16),
                               label: const Text('Agregar primera dirección',
-                                  style:
-                                      TextStyle(color: Color(0xFF002DA2))),
+                                  style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold)),
                             ),
                           ],
                         ),
