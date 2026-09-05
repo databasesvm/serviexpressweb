@@ -417,34 +417,44 @@ class _TabSectoresState extends State<_TabSectores>
               onPressed: () async {
                 final nombre = ctrl.text.trim();
                 if (nombre.isEmpty) return;
-                int newSectorId;
-                if (sector == null) {
-                  final res = await widget.db
-                      .from('sectores')
-                      .insert({
-                        'nombre': nombre,
-                        'activo': true,
-                        if (municipio != null) 'municipio': municipio,
-                        if (parentId != null) 'parent_id': parentId,
-                      })
-                      .select('id')
-                      .single();
-                  newSectorId = res['id'] as int;
-                } else {
-                  await widget.db.from('sectores').update({
-                    'nombre': nombre,
-                    'activo': activo,
-                    'municipio': municipio,
-                    'parent_id': parentId,
-                  }).eq('id', sector['id']);
-                  newSectorId = sector['id'] as int;
+                final nav = Navigator.of(ctx);
+                try {
+                  int newSectorId;
+                  if (sector == null) {
+                    final res = await widget.db
+                        .from('sectores')
+                        .insert({
+                          'nombre': nombre,
+                          'activo': true,
+                          if (municipio != null) 'municipio': municipio,
+                          if (parentId != null) 'parent_id': parentId,
+                        })
+                        .select('id')
+                        .single();
+                    newSectorId = res['id'] as int;
+                  } else {
+                    await widget.db.from('sectores').update({
+                      'nombre': nombre,
+                      'activo': activo,
+                      'municipio': municipio,
+                      'parent_id': parentId,
+                    }).eq('id', sector['id']);
+                    newSectorId = sector['id'] as int;
+                  }
+                  // Guardar tarifa si se ingresó precio válido
+                  final precio = int.tryParse(precioCtrl.text.trim());
+                  if (precio != null && precio > 0) {
+                    await _guardarTarifa(newSectorId, precio);
+                  }
+                  nav.pop(true);
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text('Error al guardar: $e'),
+                      backgroundColor: Colors.red,
+                    ));
+                  }
                 }
-                // Guardar tarifa si se ingresó precio válido
-                final precio = int.tryParse(precioCtrl.text.trim());
-                if (precio != null && precio > 0) {
-                  await _guardarTarifa(newSectorId, precio);
-                }
-                if (ctx.mounted) Navigator.pop(ctx, true);
               },
               child: const Text('GUARDAR',
                   style: TextStyle(
@@ -491,12 +501,13 @@ class _TabSectoresState extends State<_TabSectores>
           if (precioActual != null)
             TextButton(
               onPressed: () async {
+                final nav = Navigator.of(ctx);
                 await widget.db
                     .from('fn_tarifas_sede')
                     .delete()
                     .eq('sede_id', widget.sede['id'])
                     .eq('sector_id', sId);
-                if (ctx.mounted) Navigator.pop(ctx, true);
+                nav.pop(true);
               },
               child: const Text('Quitar tarifa',
                   style: TextStyle(color: Colors.red)),
@@ -511,8 +522,9 @@ class _TabSectoresState extends State<_TabSectores>
             onPressed: () async {
               final precio = int.tryParse(ctrl.text.trim());
               if (precio == null || precio <= 0) return;
+              final nav = Navigator.of(ctx);
               await _guardarTarifa(sId, precio);
-              if (ctx.mounted) Navigator.pop(ctx, true);
+              nav.pop(true);
             },
             child: const Text('GUARDAR',
                 style: TextStyle(
@@ -1203,6 +1215,7 @@ class _TabDireccionesState extends State<_TabDirecciones>
                             Text('Nombre y dirección son obligatorios')));
                     return;
                   }
+                  final nav = Navigator.of(ctx);
                   int newDirId;
                   if (dir == null) {
                     final res = await widget.db
@@ -1252,7 +1265,7 @@ class _TabDireccionesState extends State<_TabDirecciones>
                       'precio': precio,
                     });
                   }
-                  if (ctx.mounted) Navigator.pop(ctx, true);
+                  nav.pop(true);
                 },
                 child: const Text('GUARDAR',
                     style: TextStyle(

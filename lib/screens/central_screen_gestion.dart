@@ -1841,19 +1841,29 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
               onPressed: () async {
                 final nombre = ctrl.text.trim();
                 if (nombre.isEmpty) return;
-                if (sector == null) {
-                  await _db.from('sectores').insert({
-                    'nombre': nombre, 'activo': true,
-                    if (municipio != null) 'municipio': municipio,
-                    if (parentId != null) 'parent_id': parentId,
-                  });
-                } else {
-                  await _db.from('sectores').update({
-                    'nombre': nombre, 'activo': activo, 'municipio': municipio,
-                    'parent_id': parentId,
-                  }).eq('id', sector['id']);
+                final nav = Navigator.of(ctx);
+                try {
+                  if (sector == null) {
+                    await _db.from('sectores').insert({
+                      'nombre': nombre, 'activo': true,
+                      if (municipio != null) 'municipio': municipio,
+                      if (parentId != null) 'parent_id': parentId,
+                    });
+                  } else {
+                    await _db.from('sectores').update({
+                      'nombre': nombre, 'activo': activo, 'municipio': municipio,
+                      'parent_id': parentId,
+                    }).eq('id', sector['id']);
+                  }
+                  nav.pop(true);
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text('Error al guardar: $e'),
+                      backgroundColor: Colors.red,
+                    ));
+                  }
                 }
-                if (ctx.mounted) Navigator.pop(ctx, true);
               },
               child: const Text('GUARDAR',
                   style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
@@ -1889,8 +1899,17 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
       ),
     );
     if (ok == true) {
-      await _db.from('sectores').delete().eq('id', s['id']);
-      await _cargarInicial();
+      try {
+        await _db.from('sectores').delete().eq('id', s['id']);
+        await _cargarInicial();
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Error al eliminar: $e'),
+            backgroundColor: Colors.red,
+          ));
+        }
+      }
     }
   }
 
