@@ -186,7 +186,10 @@ class _ServiMotoTaskHandler extends TaskHandler {
             final pos = await Geolocator.getCurrentPosition(
               locationSettings: AndroidSettings(
                 accuracy: LocationAccuracy.high,
-                timeLimit: const Duration(seconds: 12),
+                timeLimit: const Duration(seconds: 10),
+                // intervalDuration no aplica a getCurrentPosition (single-shot),
+                // pero sí ayuda al OS a saber que queremos respuesta rápida.
+                intervalDuration: const Duration(seconds: 5),
               ),
             );
             await Supabase.instance.client.from('usuarios').update({

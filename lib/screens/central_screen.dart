@@ -190,11 +190,11 @@ class _CentralScreenState extends State<CentralScreen>
         _listenerActivacion = (OSNotificationWillDisplayEvent event) {
           final extra = event.notification.additionalData;
           if (extra != null && extra['tipo'] == 'activacion_pendiente') {
-            final uid = extra['usuario_id']?.toString();
-            final nid = event.notification.androidNotificationId;
-            if (uid != null && nid != null) {
-              _activacionNotifIds[uid] = nid;
-            }
+            // En foreground: el canal Realtime ya dispara sonido + snackbar.
+            // Suprimimos el display del OS para evitar doble sonido.
+            // (La notif en bandeja es innecesaria si la app está abierta.)
+            event.preventDefault();
+            return;
           }
           event.notification.display();
         };
@@ -422,9 +422,10 @@ class _CentralScreenState extends State<CentralScreen>
                 backgroundColor: Colors.orange[800],
                 duration: const Duration(seconds: 6),
                 action: SnackBarAction(
-                  label: 'GESTIÓN',
+                  label: 'ACTIVAR',
                   textColor: Colors.white,
-                  onPressed: () => _abrirPanelGestion(context),
+                  // Ir directo a la pestaña "Por Activar" (tab 1)
+                  onPressed: () => _abrirGestionUsuarios(context, tabInicial: 1),
                 ),
               ));
             }
@@ -928,7 +929,10 @@ class _CentralScreenState extends State<CentralScreen>
                         backgroundColor: Colors.grey[850],
                         foregroundColor: Colors.white,
                       ),
-                      onPressed: () => _abrirPanelGestion(context),
+                      // Si hay pendientes de activación → ir directo a "Por Activar" (tab 1)
+                      onPressed: () => _usuariosPendientes > 0
+                          ? _abrirGestionUsuarios(context, tabInicial: 1)
+                          : _abrirPanelGestion(context),
                       icon: const Icon(Icons.admin_panel_settings_rounded, size: 18),
                       label: const Text(
                         'GESTIÓN',

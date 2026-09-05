@@ -727,8 +727,35 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
     ]),
   );
 
+  // ── Genera URL firmada (1h) para fotos del bucket privado movil-docs ──────
+  Future<String?> _getSignedUrl(String? pathOrUrl) async {
+    if (pathOrUrl == null || pathOrUrl.isEmpty) return null;
+    String path = pathOrUrl;
+    // Datos legacy: URL pública completa guardada — extraer solo el path
+    if (pathOrUrl.startsWith('http')) {
+      const marker = '/movil-docs/';
+      final idx = pathOrUrl.indexOf(marker);
+      if (idx == -1) return null;
+      path = pathOrUrl.substring(idx + marker.length);
+    }
+    try {
+      return await Supabase.instance.client.storage
+          .from('movil-docs')
+          .createSignedUrl(path, 3600);
+    } catch (_) {
+      return null;
+    }
+  }
+
   // ── Dialog: Ver registro completo del usuario ────────────────────────────
-  void _verRegistroDialog(Map<String, dynamic> u) {
+  void _verRegistroDialog(Map<String, dynamic> u) async {
+    // Pre-cargar URLs firmadas antes de abrir el dialog (bucket privado)
+    final perfilUrl  = await _getSignedUrl(u['doc_perfil_url']?.toString());
+    final cedulaUrl  = await _getSignedUrl(u['doc_cedula_url']?.toString());
+    final licenciaUrl = await _getSignedUrl(u['doc_licencia_url']?.toString());
+    final soatUrl    = await _getSignedUrl(u['doc_soat_url']?.toString());
+    if (!mounted) return;
+
     final plan = u['tipo_plan_movil']?.toString() ?? '';
     final numMovil = u['numero_movil']?.toString() ?? '';
 
@@ -836,7 +863,7 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
             const Text('📸 Selfie de verificación',
                 style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.bold)),
             const SizedBox(height: 6),
-            _selfieWidget(u['doc_perfil_url']?.toString()),
+            _selfieWidget(perfilUrl),
             const SizedBox(height: 16),
             const Divider(color: Colors.white12, height: 1),
             const SizedBox(height: 14),
@@ -862,13 +889,13 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                 style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.bold)),
             const SizedBox(height: 10),
             Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Expanded(child: _docGrid(u['doc_cedula_url']?.toString(), '🪪 Cédula')),
+              Expanded(child: _docGrid(cedulaUrl, '🪪 Cédula')),
               const SizedBox(width: 10),
-              Expanded(child: _docGrid(u['doc_licencia_url']?.toString(), '🚗 Licencia')),
+              Expanded(child: _docGrid(licenciaUrl, '🚗 Licencia')),
             ]),
             const SizedBox(height: 10),
             Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Expanded(child: _docGrid(u['doc_soat_url']?.toString(), '🛡️ SOAT')),
+              Expanded(child: _docGrid(soatUrl, '🛡️ SOAT')),
               const SizedBox(width: 10),
               const Expanded(child: SizedBox()), // espacio vacío si solo hay 3 docs
             ]),

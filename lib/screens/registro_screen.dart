@@ -507,10 +507,8 @@ class _RegistroScreenState extends State<RegistroScreen> {
                 .from('movil-docs')
                 .uploadBinary(path, bytes,
                     fileOptions: FileOptions(upsert: true));
-            final url = Supabase.instance.client.storage
-                .from('movil-docs')
-                .getPublicUrl(path);
-            docUrls[campo] = url;
+            // Guardamos el path (no la URL pública) para generar signed URLs al mostrar
+            docUrls[campo] = path;
           } catch (_) {}
         }
 
@@ -1147,8 +1145,8 @@ class _RegistroScreenState extends State<RegistroScreen> {
         ),
         const SizedBox(height: 8),
         const Text(
-          'Tómate una selfie con la cámara frontal. '
-          'La Central la usará para verificar tu identidad antes de activar tu cuenta.',
+          'Tómate una selfie con la cámara frontal. Sin gafas, sin gorra y con buena iluminación. '
+          'La Central la usará para verificar que eres tú antes de activar tu cuenta.',
           style: TextStyle(fontSize: 13, color: Colors.black54),
         ),
         const SizedBox(height: 24),
@@ -1245,7 +1243,7 @@ class _RegistroScreenState extends State<RegistroScreen> {
         const SizedBox(height: 20),
         _itemDocumento(
           titulo: 'Selfie de Verificación *',
-          subtitulo: 'Foto tuya con buena iluminación para verificar tu identidad.',
+          subtitulo: 'Foto de tu rostro con buena iluminación, sin gafas ni gorra. La Central la usará para confirmar que eres tú.',
           icono: Icons.face,
           archivo: _fotoPerfil,
           obligatorio: true,
@@ -1259,7 +1257,7 @@ class _RegistroScreenState extends State<RegistroScreen> {
         const SizedBox(height: 12),
         _itemDocumento(
           titulo: 'Cédula de Ciudadanía *',
-          subtitulo: 'Foto legible de tu cédula (ambos lados si puedes).',
+          subtitulo: 'Foto clara de tu cédula. Si puedes, incluye ambos lados en una sola foto.',
           icono: Icons.credit_card,
           archivo: _fotoCedula,
           obligatorio: true,
@@ -1273,7 +1271,7 @@ class _RegistroScreenState extends State<RegistroScreen> {
         const SizedBox(height: 12),
         _itemDocumento(
           titulo: 'Licencia de Conducción',
-          subtitulo: 'Opcional pero recomendada.',
+          subtitulo: 'Opcional pero recomendada. Agiliza tu activación si la subes desde el inicio.',
           icono: Icons.drive_eta,
           archivo: _fotoLicencia,
           obligatorio: false,
@@ -1287,7 +1285,7 @@ class _RegistroScreenState extends State<RegistroScreen> {
         const SizedBox(height: 12),
         _itemDocumento(
           titulo: 'SOAT',
-          subtitulo: 'Foto o captura del SOAT vigente.',
+          subtitulo: 'Foto o captura de pantalla del SOAT vigente de tu moto.',
           icono: Icons.shield_outlined,
           archivo: _fotoSoat,
           obligatorio: false,
@@ -1430,10 +1428,19 @@ class _RegistroScreenState extends State<RegistroScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        const Text(
+          'Necesitamos algunos datos para crear tu perfil.',
+          style: TextStyle(fontSize: 13, color: Colors.black54),
+        ),
+        const SizedBox(height: 16),
         TextField(
           controller: _nombreCtrl,
           textCapitalization: TextCapitalization.words,
-          decoration: _decoracion('Nombre completo', Icons.badge),
+          decoration: _decoracion(
+            'Nombre completo',
+            Icons.badge,
+            helper: 'Tal como aparece en tu cédula de ciudadanía',
+          ),
           inputFormatters: [FilteringTextInputFormatter.deny(_kRegexEmoji)],
         ),
         const SizedBox(height: 15),
@@ -1444,8 +1451,8 @@ class _RegistroScreenState extends State<RegistroScreen> {
               'Fecha de nacimiento',
               Icons.cake_outlined,
               helper: _rolSeleccionado == 'movil'
-                  ? 'Debes ser mayor de 18 años'
-                  : null,
+                  ? 'Debes ser mayor de 18 años para operar como móvil'
+                  : 'Requerida para verificar tu identidad',
             ),
             child: Text(
               _fechaNacimiento == null
@@ -1465,7 +1472,11 @@ class _RegistroScreenState extends State<RegistroScreen> {
         TextField(
           controller: _telefonoCtrl,
           keyboardType: TextInputType.phone,
-          decoration: _decoracion('Teléfono (WhatsApp)', Icons.phone),
+          decoration: _decoracion(
+            'Teléfono (WhatsApp)',
+            Icons.phone,
+            helper: 'Número celular con WhatsApp activo — así te contactará la Central',
+          ),
         ),
         const SizedBox(height: 15),
         TextField(
@@ -1474,7 +1485,7 @@ class _RegistroScreenState extends State<RegistroScreen> {
           decoration: _decoracion(
             'Correo electrónico',
             Icons.email_outlined,
-            helper: 'Lo usamos para recuperar tu cuenta y enviarte novedades',
+            helper: 'Para recuperar tu cuenta si olvidas tu contraseña',
           ),
         ),
       ],
@@ -1772,6 +1783,11 @@ class _RegistroScreenState extends State<RegistroScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        const Text(
+          'Crea las credenciales con las que ingresarás a la app.',
+          style: TextStyle(fontSize: 13, color: Colors.black54),
+        ),
+        const SizedBox(height: 16),
         if (_rolSeleccionado == 'movil' && _tipoMovil == 'suscripcion')
           // Suscripción: elige número manual 01-100
           Row(
@@ -1800,7 +1816,7 @@ class _RegistroScreenState extends State<RegistroScreen> {
                   decoration: _decoracion(
                     'Tu número (01-100)',
                     Icons.tag,
-                    helper: 'Elige el número disponible que quieres usar',
+                    helper: 'Pregunta a la Central qué números están disponibles',
                   ),
                   inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                 ),
@@ -1864,8 +1880,10 @@ class _RegistroScreenState extends State<RegistroScreen> {
           controller: _passwordCtrl,
           obscureText: !_verPassword,
           decoration: _decoracion(
-                  'Contraseña (mínimo 4 caracteres)', Icons.lock_outline)
-              .copyWith(
+            'Contraseña (mínimo 4 caracteres)',
+            Icons.lock_outline,
+            helper: 'Puede ser un número fácil de recordar, como tu teléfono',
+          ).copyWith(
             suffixIcon: IconButton(
               icon: Icon(_verPassword ? Icons.visibility_off : Icons.visibility,
                   color: Colors.black38),
@@ -1877,8 +1895,11 @@ class _RegistroScreenState extends State<RegistroScreen> {
         TextField(
           controller: _confirmarPasswordCtrl,
           obscureText: !_verConfirmarPassword,
-          decoration:
-              _decoracion('Confirmar contraseña', Icons.lock_outline).copyWith(
+          decoration: _decoracion(
+            'Confirmar contraseña',
+            Icons.lock_outline,
+            helper: 'Escribe la misma contraseña para confirmar',
+          ).copyWith(
             suffixIcon: IconButton(
               icon: Icon(
                   _verConfirmarPassword

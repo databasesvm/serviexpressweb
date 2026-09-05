@@ -859,7 +859,8 @@ extension CentralScreenFormularios on _CentralScreenState {
                                 titulo: '⚡ TURNO DE MASTER',
                                 mensaje: 'Nuevo servicio disponible en el radar',
                                 urgente: true,
-                                sonido: Sonidos.movilParadero,
+                                sonido: 'master',
+                                canalAndroidId: MotorNotificaciones.canalMasterId,
                               );
                             }
                           } catch (_) {}
@@ -2106,7 +2107,8 @@ extension CentralScreenFormularios on _CentralScreenState {
                                 mensaje:
                                     'Servicio Farmanorte · $zonaLabel',
                                 urgente: true,
-                                sonido: Sonidos.movilParadero,
+                                sonido: 'master',
+                                canalAndroidId: MotorNotificaciones.canalMasterId,
                               );
                             }
 

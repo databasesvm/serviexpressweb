@@ -382,6 +382,7 @@ class _FormularioTabState extends State<_FormularioTab> {
   bool _seleccionandoDestino = false;
 
   static const int _recargoDaatafonoCOP = 2000;
+  static const int _recargoLluviaCOP = 1000;
 
   /// Distancia Haversine en km entre dos puntos
   double _haversineKm(double lat1, double lng1, double lat2, double lng2) {
@@ -442,19 +443,22 @@ class _FormularioTabState extends State<_FormularioTab> {
     return total;
   }
 
-  /// Precio final = precio sugerido + recargo sedes extra + recargo datáfono
+  /// Precio final = precio sugerido + recargo sedes extra + recargo datáfono + recargo lluvia
   /// Retorna null si no hay precio sugerido O si hay sedes extra sin coordenadas
   double? get _tarifaEfectiva {
     if (_precioSugerido == null) return null;
     if (_haySedesExtraSinCoordenadas) return null;
     return _precioSugerido! +
         _recargoSedesExtra +
-        (_conDatafono ? _recargoDaatafonoCOP : 0);
+        (_conDatafono ? _recargoDaatafonoCOP : 0) +
+        (widget.altaDemanda ? _recargoLluviaCOP : 0);
   }
 
-  /// Recargo parcial (sedes extra + datáfono) incluso sin precio sugerido de destino
+  /// Recargo parcial (sedes extra + datáfono + lluvia) incluso sin precio sugerido de destino
   double get _recargoParcial =>
-      _recargoSedesExtra + (_conDatafono ? _recargoDaatafonoCOP : 0);
+      _recargoSedesExtra +
+      (_conDatafono ? _recargoDaatafonoCOP : 0) +
+      (widget.altaDemanda ? _recargoLluviaCOP : 0);
 
   // Sedes disponibles para seleccionar como recogida
   List<Map<String, dynamic>> _sedesDisponibles = [];
@@ -831,25 +835,35 @@ class _FormularioTabState extends State<_FormularioTab> {
       }
 
       // ── FASE 4 (T+90s): TODOS + Masters (SIN CUBRIR) ────────────────────────
-      // Push a absolutamente todos los conectados FN (incluidos los que ya
-      // recibieron FASE 3) + Masters como alerta crítica.
+      // Push separado: Masters con master.mp3, no-Masters con fnCotizacion.
       // Solo los Masters ven la card in-app con detalles y botón aceptar
       // (el radar limita puedeVer = esMaster en FASE 4 — ver movil_screen.dart).
-      final fase4Todos = [
+      final fase4NoMasters = [
         ...fase3Ids, // re-notificar los de 2km con alerta SIN CUBRIR
         ...fase4Ids, // no-Masters fuera de 2km
-        ...masterIds, // Masters re-alertados para que actúen
       ];
       String? id90s;
-      if (fase4Todos.isNotEmpty) {
+      if (fase4NoMasters.isNotEmpty) {
         id90s = await MotorNotificaciones.programarMisilRetardado(
-          externalIds: fase4Todos,
+          externalIds: fase4NoMasters,
           titulo: '🚨 FN SIN CUBRIR — $consec',
           mensaje: msg,
           segundosRetardo: 90,
           sonido: Sonidos.fnCotizacion,
         );
       }
+      // Masters re-alertados con master.mp3 (push separado para sonido correcto)
+      if (masterIds.isNotEmpty) {
+        await MotorNotificaciones.programarMisilRetardado(
+          externalIds: masterIds,
+          titulo: '🚨 FN SIN CUBRIR — $consec',
+          mensaje: msg,
+          segundosRetardo: 90,
+          sonido: 'master',
+          canalAndroidId: MotorNotificaciones.canalMasterId,
+        );
+      }
+      final fase4Todos = [...fase4NoMasters, ...masterIds];
 
       // Guardar IDs de notificaciones + arrays de notificados por fase
       final notifIds = <String, dynamic>{};
@@ -991,6 +1005,7 @@ class _FormularioTabState extends State<_FormularioTab> {
                 'fuente': 'red_fn',
                 'precio_red': _precioSugerido,
                 if (_conDatafono) 'recargo_datafono': _recargoDaatafonoCOP,
+                if (altaDemanda) 'recargo_lluvia': _recargoLluviaCOP,
               },
             },
             // Recargo parcial pre-calculado (sedes extra + datáfono) cuando no hay precio destino
@@ -1570,6 +1585,23 @@ class _FormularioTabState extends State<_FormularioTab> {
                               ),
                             ]),
                           ),
+                        // Lluvia
+                        if (widget.altaDemanda)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 3),
+                            child: Row(children: [
+                              const Icon(Icons.water_drop_rounded,
+                                  color: Colors.lightBlueAccent, size: 14),
+                              const SizedBox(width: 4),
+                              Text(
+                                '+\$${_miles(_recargoLluviaCOP)} lluvia',
+                                style: const TextStyle(
+                                    color: Colors.lightBlueAccent,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold),
+                              ),
+                            ]),
+                          ),
                         // Total parcial
                         Padding(
                           padding: const EdgeInsets.only(top: 5),
@@ -1697,8 +1729,25 @@ class _FormularioTabState extends State<_FormularioTab> {
                               ),
                             ]),
                           ),
+                        // Lluvia
+                        if (widget.altaDemanda)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 3),
+                            child: Row(children: [
+                              const Icon(Icons.water_drop_rounded,
+                                  color: Colors.lightBlueAccent, size: 14),
+                              const SizedBox(width: 4),
+                              Text(
+                                '+\$${_miles(_recargoLluviaCOP)} lluvia',
+                                style: const TextStyle(
+                                    color: Colors.lightBlueAccent,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold),
+                              ),
+                            ]),
+                          ),
                         // Total si hay algo adicional
-                        if (extras.isNotEmpty || _conDatafono)
+                        if (extras.isNotEmpty || _conDatafono || widget.altaDemanda)
                           Padding(
                             padding: const EdgeInsets.only(top: 5),
                             child: Row(children: [

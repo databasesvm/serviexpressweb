@@ -1028,7 +1028,11 @@ extension CentralScreenGestion on _CentralScreenState {
                       color: Colors.blue[600]!,
                       titulo: 'Gestión de Usuarios',
                       subtitulo: 'Solicitudes, activaciones, ascensos y registros',
-                      onTap: () => _abrirGestionUsuarios(context),
+                      // Si hay pendientes de activación → abrir directo en "Por Activar"
+                      onTap: () => _abrirGestionUsuarios(
+                        context,
+                        tabInicial: _usuariosPendientes > 0 ? 1 : 0,
+                      ),
                     ),
                     _tarjetaGestion(
                       icono: Icons.storefront,
@@ -1622,44 +1626,37 @@ class _PanelRedYSectores extends StatefulWidget {
 class _PanelRedYSectoresState extends State<_PanelRedYSectores>
     with SingleTickerProviderStateMixin {
   late final TabController _tab;
+  final _db = Supabase.instance.client;
 
   // ── Datos globales ──────────────────────────────────────────────────────────
   List<Map<String, dynamic>> _usuarios = [];
-  List<Map<String, dynamic>> _sectoresActivos = []; // para dropdowns
+  List<Map<String, dynamic>> _sectoresActivos = []; // catálogo global
   bool _cargandoInicial = true;
 
   // ── Usuario seleccionado ────────────────────────────────────────────────────
   Map<String, dynamic>? _userSel;
-  List<Map<String, dynamic>> _dirs    = [];
-  List<Map<String, dynamic>> _tarifas = [];
+  List<Map<String, dynamic>> _dirs = []; // red_dir_catalogo
+  Map<int, int> _preciosDir = {}; // dir_id → precio (se_precios_dir)
+  Map<int, int> _tarifaMap = {}; // sector_id → precio (tarifas_usuario_sector)
   bool _cargandoUser = false;
 
   // ── Filtros ─────────────────────────────────────────────────────────────────
-  String _filtroMun = 'Todos';
+  String _secFiltroMun = 'Cúcuta';
+  String _dirFiltroMun = 'Cúcuta';
 
-  // ── Tab Sectores (CRUD global) ───────────────────────────────────────────────
-  final _sNombreCtrl = TextEditingController();
-  final _sPrecioCtrl = TextEditingController();
-  String _sMunicipio = 'Cúcuta';
-  String _sFiltro    = 'Cúcuta';
-  late Future<List<Map<String, dynamic>>> _sectorsFuture;
-
-  static const _municipios = ['Todos', 'Cúcuta', 'Los Patios', 'V. Rosario'];
+  static const _municipios = ['Cúcuta', 'Los Patios', 'V. Rosario'];
 
   @override
   void initState() {
     super.initState();
-    _tab = TabController(length: 3, vsync: this);
+    _tab = TabController(length: 2, vsync: this);
     _tab.addListener(() => setState(() {}));
-    _sectorsFuture = _cargarSectoresGlobal();
     _cargarInicial();
   }
 
   @override
   void dispose() {
     _tab.dispose();
-    _sNombreCtrl.dispose();
-    _sPrecioCtrl.dispose();
     super.dispose();
   }
 
@@ -1667,49 +1664,59 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
   Future<void> _cargarInicial() async {
     setState(() => _cargandoInicial = true);
     try {
-      final usuarios = await Supabase.instance.client
+      final usuarios = await _db
           .from('usuarios')
           .select('id, nombre, rol, usuario')
           .inFilter('rol', ['local', 'cliente'])
           .eq('activo', true)
           .order('nombre');
-      final sectores = await Supabase.instance.client
+      final sectores = await _db
           .from('sectores')
-          .select('id, nombre, municipio')
-          .eq('activo', true)
+          .select('id, nombre, municipio, activo')
+          .order('municipio')
           .order('nombre');
       if (mounted) setState(() {
-        _usuarios         = List<Map<String, dynamic>>.from(usuarios);
-        _sectoresActivos  = List<Map<String, dynamic>>.from(sectores);
-        _cargandoInicial  = false;
+        _usuarios = List<Map<String, dynamic>>.from(usuarios);
+        _sectoresActivos = List<Map<String, dynamic>>.from(sectores);
+        _cargandoInicial = false;
       });
     } catch (_) {
       if (mounted) setState(() => _cargandoInicial = false);
     }
   }
 
-  Future<List<Map<String, dynamic>>> _cargarSectoresGlobal() =>
-      Supabase.instance.client.from('sectores')
-          .select('id, nombre, municipio, activo, precio_global')
-          .order('municipio').order('nombre');
-
   Future<void> _cargarUser(int userId) async {
     setState(() => _cargandoUser = true);
     try {
-      final dirs = await Supabase.instance.client
-          .from('red_dir_se')
-          .select('id, nombre, municipio, sector_id, precio, activo, sectores(nombre)')
-          .eq('usuario_id', userId)
+      final dirs = await _db
+          .from('red_dir_catalogo')
+          .select('id, nombre, alias, direccion, municipio, sector_id, activo, lat, lng')
+          .order('municipio')
           .order('nombre');
-      final tarifas = await Supabase.instance.client
+      final precios = await _db
+          .from('se_precios_dir')
+          .select('dir_id, precio')
+          .eq('usuario_id', userId);
+      final tarifas = await _db
           .from('tarifas_usuario_sector')
           .select('sector_id, precio')
           .eq('usuario_id', userId);
-      if (mounted) setState(() {
-        _dirs         = List<Map<String, dynamic>>.from(dirs);
-        _tarifas      = List<Map<String, dynamic>>.from(tarifas);
-        _cargandoUser = false;
-      });
+      if (mounted) {
+        final pm = <int, int>{};
+        for (final p in List<Map<String, dynamic>>.from(precios)) {
+          pm[p['dir_id'] as int] = (p['precio'] as num).toInt();
+        }
+        final tm = <int, int>{};
+        for (final t in List<Map<String, dynamic>>.from(tarifas)) {
+          tm[t['sector_id'] as int] = (t['precio'] as num).toInt();
+        }
+        setState(() {
+          _dirs = List<Map<String, dynamic>>.from(dirs);
+          _preciosDir = pm;
+          _tarifaMap = tm;
+          _cargandoUser = false;
+        });
+      }
     } catch (_) {
       if (mounted) setState(() => _cargandoUser = false);
     }
@@ -1732,120 +1739,376 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
     return buf.toString();
   }
 
-  // ── CRUD — Direcciones ──────────────────────────────────────────────────────
-  Future<void> _formDir({Map<String, dynamic>? existing}) async {
-    final nomCtrl    = TextEditingController(text: existing?['nombre'] ?? '');
-    final precioCtrl = TextEditingController(text: existing?['precio']?.toString() ?? '');
-    String mun      = existing?['municipio'] ?? 'Cúcuta';
-    int?   sectorId = existing?['sector_id'] as int?;
-
-    await showDialog<void>(
+  // ── CRUD Sectores globales ──────────────────────────────────────────────────
+  Future<void> _abrirFormSector({Map<String, dynamic>? sector}) async {
+    final ctrl = TextEditingController(text: sector?['nombre']?.toString() ?? '');
+    bool activo = sector?['activo'] != false;
+    String? municipio = sector?['municipio']?.toString() ?? _secFiltroMun;
+    final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => StatefulBuilder(builder: (ctx, setDlg) {
-        final sectoresFilt = _sectoresActivos.where((s) => s['municipio'] == mun).toList();
-        if (!sectoresFilt.any((s) => s['id'] == sectorId)) sectorId = null;
-        return AlertDialog(
-          backgroundColor: const Color(0xFF1A1A1A),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          backgroundColor: const Color(0xFF1A1A1A),
           title: Text(
-            existing != null ? 'Editar dirección' : 'Nueva dirección',
+            sector == null ? '➕ Nuevo sector' : '✏️ Editar sector',
             style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
           ),
-          content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
-            TextField(
-              controller: nomCtrl,
-              style: const TextStyle(color: Colors.white),
-              decoration: const InputDecoration(
-                labelText: 'Nombre / Dirección',
-                labelStyle: TextStyle(color: Colors.white54),
-                isDense: true, border: OutlineInputBorder(),
-                enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
-              ),
-            ),
-            const SizedBox(height: 10),
-            DropdownButtonFormField<String>(
-              value: mun,
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            DropdownButtonFormField<String?>(
+              value: municipio,
               dropdownColor: const Color(0xFF1A1A1A),
               style: const TextStyle(color: Colors.white),
               decoration: const InputDecoration(
                 labelText: 'Municipio', labelStyle: TextStyle(color: Colors.white54),
-                isDense: true, border: OutlineInputBorder(),
-                enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
-              ),
-              items: ['Cúcuta', 'Los Patios', 'V. Rosario']
-                  .map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
-              onChanged: (v) => setDlg(() { mun = v!; sectorId = null; }),
-            ),
-            const SizedBox(height: 10),
-            DropdownButtonFormField<int>(
-              value: sectorId,
-              dropdownColor: const Color(0xFF1A1A1A),
-              style: const TextStyle(color: Colors.white),
-              decoration: const InputDecoration(
-                labelText: 'Sector (opcional)', labelStyle: TextStyle(color: Colors.white54),
-                isDense: true, border: OutlineInputBorder(),
-                enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                border: OutlineInputBorder(), isDense: true,
               ),
               items: [
-                const DropdownMenuItem(value: null, child: Text('— Sin sector —')),
-                ...sectoresFilt.map((s) => DropdownMenuItem<int>(
-                  value: s['id'] as int,
-                  child: Text(s['nombre']?.toString() ?? ''),
-                )),
+                const DropdownMenuItem<String?>(value: null,
+                    child: Text('Sin definir', style: TextStyle(color: Colors.white54))),
+                ..._municipios.map((m) => DropdownMenuItem<String?>(
+                      value: m, child: Text(m, style: const TextStyle(color: Colors.white)))),
               ],
-              onChanged: (v) => setDlg(() => sectorId = v),
+              onChanged: (v) => setD(() => municipio = v),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             TextField(
-              controller: precioCtrl,
-              keyboardType: TextInputType.number,
+              controller: ctrl,
+              autofocus: true,
               style: const TextStyle(color: Colors.white),
+              textCapitalization: TextCapitalization.words,
               decoration: const InputDecoration(
-                labelText: 'Precio (\$)', labelStyle: TextStyle(color: Colors.white54),
-                isDense: true, border: OutlineInputBorder(),
-                enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
-                prefixIcon: Icon(Icons.attach_money, size: 18, color: Colors.white38),
+                labelText: 'Nombre del sector', labelStyle: TextStyle(color: Colors.white54),
+                hintText: 'Ej: Norte, Centro, Aeropuerto',
+                hintStyle: TextStyle(color: Colors.white24),
+                border: OutlineInputBorder(), isDense: true,
               ),
             ),
-          ])),
+            if (sector != null) ...[
+              const SizedBox(height: 12),
+              SwitchListTile(
+                value: activo,
+                onChanged: (v) => setD(() => activo = v),
+                title: const Text('Activo', style: TextStyle(color: Colors.white, fontSize: 13)),
+                dense: true, contentPadding: EdgeInsets.zero,
+              ),
+            ],
+          ]),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('CANCELAR', style: TextStyle(color: Colors.white54))),
+            TextButton(onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('CANCELAR', style: TextStyle(color: Colors.white54))),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: const Color(0xff3AF500)),
               onPressed: () async {
-                final nom    = nomCtrl.text.trim();
-                final precio = int.tryParse(precioCtrl.text.trim());
-                if (nom.isEmpty) return;
-                final userId = _userSel!['id'] as int;
-                final payload = {
-                  'usuario_id': userId, 'nombre': nom, 'municipio': mun,
-                  'sector_id': sectorId, 'precio': precio,
-                };
-                if (existing != null) {
-                  await Supabase.instance.client.from('red_dir_se').update(payload).eq('id', existing['id']);
+                final nombre = ctrl.text.trim();
+                if (nombre.isEmpty) return;
+                if (sector == null) {
+                  await _db.from('sectores').insert({
+                    'nombre': nombre, 'activo': true,
+                    if (municipio != null) 'municipio': municipio,
+                  });
                 } else {
-                  await Supabase.instance.client.from('red_dir_se').insert(payload);
+                  await _db.from('sectores').update({
+                    'nombre': nombre, 'activo': activo, 'municipio': municipio,
+                  }).eq('id', sector['id']);
                 }
-                if (ctx.mounted) Navigator.pop(ctx);
-                await _cargarUser(userId);
+                if (ctx.mounted) Navigator.pop(ctx, true);
               },
-              child: Text(existing != null ? 'GUARDAR' : 'AGREGAR',
-                  style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+              child: const Text('GUARDAR',
+                  style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
             ),
           ],
-        );
-      }),
+        ),
+      ),
     );
-    nomCtrl.dispose(); precioCtrl.dispose();
+    if (ok == true) await _cargarInicial();
   }
 
-  Future<void> _eliminarDir(int id) async {
+  Future<void> _eliminarSector(Map<String, dynamic> s) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        title: const Text('¿Eliminar sector?', style: TextStyle(color: Colors.white)),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(s['nombre'], style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          const Text('Se eliminará del catálogo global (todas las sedes y usuarios).',
+              style: TextStyle(color: Colors.orange, fontSize: 12)),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('NO', style: TextStyle(color: Colors.white54))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('ELIMINAR', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await _db.from('sectores').delete().eq('id', s['id']);
+      await _cargarInicial();
+    }
+  }
+
+  // ── CRUD Tarifas por usuario ────────────────────────────────────────────────
+  Future<void> _upsertTarifa(int sectorId, String val) async {
+    final precio = int.tryParse(val.trim());
+    if (precio == null || precio <= 0) return;
+    final userId = _userSel!['id'] as int;
+    await _db.from('tarifas_usuario_sector').upsert(
+      {'usuario_id': userId, 'sector_id': sectorId, 'precio': precio},
+      onConflict: 'usuario_id, sector_id',
+    );
+    await _cargarUser(userId);
+  }
+
+  Future<void> _eliminarTarifa(int sectorId) async {
+    final userId = _userSel!['id'] as int;
+    await _db.from('tarifas_usuario_sector')
+        .delete().eq('usuario_id', userId).eq('sector_id', sectorId);
+    await _cargarUser(userId);
+  }
+
+  // ── CRUD Direcciones ────────────────────────────────────────────────────────
+  static (double?, double?) _parseGps(String url) {
+    var m = RegExp(r'@(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)').firstMatch(url);
+    if (m != null) return (double.tryParse(m.group(1)!), double.tryParse(m.group(2)!));
+    m = RegExp(r'[?&]q=(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)').firstMatch(url);
+    if (m != null) return (double.tryParse(m.group(1)!), double.tryParse(m.group(2)!));
+    m = RegExp(r'll=(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)').firstMatch(url);
+    if (m != null) return (double.tryParse(m.group(1)!), double.tryParse(m.group(2)!));
+    m = RegExp(r'(-?\d{1,3}\.\d{4,}),(-?\d{1,3}\.\d{4,})').firstMatch(url);
+    if (m != null) return (double.tryParse(m.group(1)!), double.tryParse(m.group(2)!));
+    return (null, null);
+  }
+
+  Future<void> _formDir({Map<String, dynamic>? existing}) async {
+    final nombreCtrl = TextEditingController(text: existing?['nombre']?.toString() ?? '');
+    final aliasCtrl = TextEditingController(text: existing?['alias']?.toString() ?? '');
+    final direccionCtrl = TextEditingController(text: existing?['direccion']?.toString() ?? '');
+    final dId = existing?['id'] as int?;
+    final precioCtrl = TextEditingController(
+      text: dId != null && _preciosDir.containsKey(dId) ? _preciosDir[dId].toString() : '',
+    );
+    final gpsCtrl = TextEditingController();
+    String? municipio = existing?['municipio']?.toString() ?? _dirFiltroMun;
+    int? sectorId = existing?['sector_id'] as int?;
+    bool activo = existing?['activo'] != false;
+    double? gpsLat = (existing?['lat'] as num?)?.toDouble();
+    double? gpsLng = (existing?['lng'] as num?)?.toDouble();
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) {
+          final sectoresFilt = municipio == null
+              ? _sectoresActivos
+              : _sectoresActivos.where((s) => s['municipio'] == municipio).toList();
+          final sectorValido = sectoresFilt.any((s) => s['id'] == sectorId);
+          return AlertDialog(
+            backgroundColor: const Color(0xFF1A1A1A),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            title: Text(
+              existing != null ? '✏️ Editar dirección' : '➕ Nueva dirección',
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+            ),
+            content: SingleChildScrollView(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                // 1. Nombre/alias
+                TextField(
+                  controller: nombreCtrl,
+                  style: const TextStyle(color: Colors.white),
+                  textCapitalization: TextCapitalization.words,
+                  decoration: const InputDecoration(
+                    labelText: 'Nombre / alias', labelStyle: TextStyle(color: Colors.white54),
+                    hintText: 'Ej: Clínica Norte', hintStyle: TextStyle(color: Colors.white24),
+                    isDense: true, border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                // 2. Municipio
+                DropdownButtonFormField<String?>(
+                  value: municipio,
+                  dropdownColor: const Color(0xFF1A1A1A),
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(
+                    labelText: 'Municipio', labelStyle: TextStyle(color: Colors.white54),
+                    isDense: true, border: OutlineInputBorder(),
+                  ),
+                  items: [
+                    const DropdownMenuItem<String?>(value: null,
+                        child: Text('Sin definir', style: TextStyle(color: Colors.white54))),
+                    ..._municipios.map((m) => DropdownMenuItem<String?>(
+                          value: m, child: Text(m, style: const TextStyle(color: Colors.white)))),
+                  ],
+                  onChanged: (v) => setD(() { municipio = v; sectorId = null; }),
+                ),
+                const SizedBox(height: 10),
+                // 3. Sector (opcional)
+                DropdownButtonFormField<int?>(
+                  value: sectorValido ? sectorId : null,
+                  dropdownColor: const Color(0xFF1A1A1A),
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    labelText: 'Sector (opcional)', labelStyle: const TextStyle(color: Colors.white54),
+                    isDense: true, border: const OutlineInputBorder(),
+                    hintText: sectoresFilt.isEmpty ? 'Sin sectores' : null,
+                    hintStyle: const TextStyle(color: Colors.white38, fontSize: 12),
+                  ),
+                  items: [
+                    const DropdownMenuItem<int?>(value: null,
+                        child: Text('Sin sector', style: TextStyle(color: Colors.white54))),
+                    ...sectoresFilt.map((s) => DropdownMenuItem<int?>(
+                          value: s['id'] as int,
+                          child: Text(s['nombre'].toString(), style: const TextStyle(color: Colors.white)))),
+                  ],
+                  onChanged: (v) => setD(() => sectorId = v),
+                ),
+                const SizedBox(height: 10),
+                // 4. Dirección completa
+                TextField(
+                  controller: direccionCtrl,
+                  style: const TextStyle(color: Colors.white),
+                  maxLines: 2,
+                  textCapitalization: TextCapitalization.characters,
+                  decoration: const InputDecoration(
+                    labelText: 'Dirección completa', labelStyle: TextStyle(color: Colors.white54),
+                    hintText: 'Ej: Calle 10 # 5-20', hintStyle: TextStyle(color: Colors.white24),
+                    isDense: true, border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                // 5. Precio para este usuario
+                TextField(
+                  controller: precioCtrl,
+                  style: const TextStyle(color: Colors.white),
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Precio sugerido para este usuario (\$)',
+                    labelStyle: TextStyle(color: Colors.white54),
+                    hintText: 'Sin precio → no aparece en autocomplete',
+                    hintStyle: TextStyle(color: Colors.white24, fontSize: 11),
+                    isDense: true, border: OutlineInputBorder(),
+                    prefixText: '\$ ', prefixStyle: TextStyle(color: Colors.white70),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                // 6. GPS (opcional)
+                TextField(
+                  controller: gpsCtrl,
+                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                  decoration: InputDecoration(
+                    labelText: 'Link GPS (opcional)',
+                    labelStyle: const TextStyle(color: Colors.white54, fontSize: 13),
+                    hintText: 'Pega un link de Google Maps',
+                    hintStyle: const TextStyle(color: Colors.white24, fontSize: 12),
+                    isDense: true, border: const OutlineInputBorder(),
+                    suffixIcon: gpsLat != null
+                        ? const Icon(Icons.gps_fixed, color: Color(0xff3AF500), size: 18)
+                        : const Icon(Icons.gps_not_fixed, color: Colors.white38, size: 18),
+                  ),
+                  onChanged: (v) {
+                    if (v.trim().isEmpty) { setD(() { gpsLat = null; gpsLng = null; }); return; }
+                    final p = _parseGps(v.trim());
+                    setD(() { gpsLat = p.$1; gpsLng = p.$2; });
+                  },
+                ),
+                if (gpsLat != null)
+                  Padding(padding: const EdgeInsets.only(top: 4), child: Row(children: [
+                    const Icon(Icons.check_circle, color: Color(0xff3AF500), size: 13),
+                    const SizedBox(width: 4),
+                    Text('GPS: ${gpsLat!.toStringAsFixed(5)}, ${gpsLng!.toStringAsFixed(5)}',
+                        style: const TextStyle(color: Color(0xff3AF500), fontSize: 11)),
+                  ])),
+                if (existing != null) ...[
+                  const SizedBox(height: 10),
+                  SwitchListTile(
+                    value: activo,
+                    onChanged: (v) => setD(() => activo = v),
+                    title: const Text('Activa', style: TextStyle(color: Colors.white, fontSize: 13)),
+                    dense: true, contentPadding: EdgeInsets.zero,
+                  ),
+                ],
+              ]),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx),
+                  child: const Text('CANCELAR', style: TextStyle(color: Colors.white54))),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xff3AF500)),
+                onPressed: () async {
+                  final nombre = nombreCtrl.text.trim();
+                  final direccion = direccionCtrl.text.trim();
+                  if (nombre.isEmpty || direccion.isEmpty) {
+                    ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                        content: Text('Nombre y dirección son obligatorios')));
+                    return;
+                  }
+                  final userId = _userSel!['id'] as int;
+                  int newDirId;
+                  if (existing == null) {
+                    final res = await _db.from('red_dir_catalogo').insert({
+                      'nombre': nombre,
+                      if (aliasCtrl.text.trim().isNotEmpty) 'alias': aliasCtrl.text.trim(),
+                      'direccion': direccion.toUpperCase(),
+                      if (municipio != null) 'municipio': municipio,
+                      'sector_id': sectorId, 'activo': true,
+                      if (gpsLat != null) 'lat': gpsLat,
+                      if (gpsLng != null) 'lng': gpsLng,
+                    }).select('id').single();
+                    newDirId = res['id'] as int;
+                  } else {
+                    await _db.from('red_dir_catalogo').update({
+                      'nombre': nombre,
+                      'alias': aliasCtrl.text.trim().isEmpty ? null : aliasCtrl.text.trim(),
+                      'direccion': direccion.toUpperCase(),
+                      'municipio': municipio, 'sector_id': sectorId, 'activo': activo,
+                      'lat': gpsLat, 'lng': gpsLng,
+                    }).eq('id', existing['id']);
+                    newDirId = existing['id'] as int;
+                  }
+                  final precio = int.tryParse(precioCtrl.text.trim());
+                  if (precio != null && precio > 0) {
+                    await _db.from('se_precios_dir').delete()
+                        .eq('usuario_id', userId).eq('dir_id', newDirId);
+                    await _db.from('se_precios_dir').insert({
+                      'usuario_id': userId, 'dir_id': newDirId, 'precio': precio,
+                    });
+                  }
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  await _cargarUser(userId);
+                },
+                child: Text(existing != null ? 'GUARDAR' : 'AGREGAR',
+                    style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    nombreCtrl.dispose(); aliasCtrl.dispose(); direccionCtrl.dispose();
+    precioCtrl.dispose(); gpsCtrl.dispose();
+  }
+
+  Future<void> _eliminarDir(Map<String, dynamic> dir) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1A1A1A),
         title: const Text('¿Eliminar dirección?',
             style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(dir['nombre'], style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 4),
+          Text(dir['direccion']?.toString() ?? '',
+              style: const TextStyle(color: Colors.white70, fontSize: 12)),
+          const SizedBox(height: 8),
+          const Text('Se eliminará del catálogo global y de todos los usuarios.',
+              style: TextStyle(color: Colors.orange, fontSize: 12)),
+        ]),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false),
               child: const Text('CANCELAR', style: TextStyle(color: Colors.white54))),
@@ -1858,27 +2121,8 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
       ),
     );
     if (ok != true) return;
-    await Supabase.instance.client.from('red_dir_se').delete().eq('id', id);
+    await _db.from('red_dir_catalogo').delete().eq('id', dir['id']);
     await _cargarUser(_userSel!['id'] as int);
-  }
-
-  // ── CRUD — Tarifas ──────────────────────────────────────────────────────────
-  Future<void> _upsertTarifa(int sectorId, String val) async {
-    final precio = int.tryParse(val.trim());
-    if (precio == null || precio <= 0) return;
-    final userId = _userSel!['id'] as int;
-    await Supabase.instance.client.from('tarifas_usuario_sector').upsert(
-      {'usuario_id': userId, 'sector_id': sectorId, 'precio': precio},
-      onConflict: 'usuario_id, sector_id',
-    );
-    await _cargarUser(userId);
-  }
-
-  Future<void> _eliminarTarifa(int sectorId) async {
-    final userId = _userSel!['id'] as int;
-    await Supabase.instance.client.from('tarifas_usuario_sector')
-        .delete().eq('usuario_id', userId).eq('sector_id', sectorId);
-    await _cargarUser(userId);
   }
 
   // ── BUILD ───────────────────────────────────────────────────────────────────
@@ -1898,7 +2142,6 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
           indicatorColor: const Color(0xff3AF500),
           tabs: const [
             Tab(icon: Icon(Icons.grid_view_rounded, size: 16), text: 'Sectores'),
-            Tab(icon: Icon(Icons.price_change_outlined, size: 16), text: 'Tarifas'),
             Tab(icon: Icon(Icons.place_outlined, size: 16), text: 'Direcciones'),
           ],
         ),
@@ -1909,29 +2152,27 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
               _buildUserSelector(),
               Expanded(child: TabBarView(
                 controller: _tab,
-                children: [_tabSectores(), _tabTarifas(), _tabDirecciones()],
+                children: [_tabSectores(), _tabDirecciones()],
               )),
             ]),
-      floatingActionButton: _tab.index == 2 && _userSel != null
-          ? FloatingActionButton(
+      floatingActionButton: _tab.index == 0
+          ? FloatingActionButton.extended(
               backgroundColor: const Color(0xff3AF500),
-              onPressed: () => _formDir(),
-              child: const Icon(Icons.add_location_alt, color: Colors.black),
+              onPressed: _abrirFormSector,
+              icon: const Icon(Icons.add, color: Colors.black),
+              label: const Text('Nuevo sector',
+                  style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
             )
-          : _tab.index == 1 && _userSel != null
-              ? FloatingActionButton.small(
-                  backgroundColor: Colors.white12,
-                  onPressed: () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                    content: Text('Escribe el precio y presiona Enter para guardar. Toca ✓ para quitar la tarifa.'),
-                    backgroundColor: Colors.black87, duration: Duration(seconds: 4),
-                  )),
-                  child: const Icon(Icons.info_outline, color: Colors.white54, size: 18),
+          : _userSel != null
+              ? FloatingActionButton(
+                  backgroundColor: const Color(0xff3AF500),
+                  onPressed: () => _formDir(),
+                  child: const Icon(Icons.add_location_alt, color: Colors.black),
                 )
               : null,
     );
   }
 
-  // ── Selector de usuario ─────────────────────────────────────────────────────
   Widget _buildUserSelector() {
     return Container(
       color: const Color(0xFF111111),
@@ -1957,7 +2198,7 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
         )).toList(),
         onChanged: (id) {
           final u = _usuarios.firstWhere((u) => u['id'] == id);
-          setState(() { _userSel = u; _dirs = []; _tarifas = []; _filtroMun = 'Todos'; });
+          setState(() { _userSel = u; _dirs = []; _preciosDir = {}; _tarifaMap = {}; });
           _cargarUser(id!);
         },
         hint: const Text('Selecciona un usuario…', style: TextStyle(color: Colors.white38, fontSize: 13)),
@@ -1965,364 +2206,313 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
     );
   }
 
-  // ── Tab: Sectores (CRUD global) ─────────────────────────────────────────────
+  // ── Tab 0: Sectores + tarifas por usuario ───────────────────────────────────
   Widget _tabSectores() {
+    final filtrados = _sectoresActivos
+        .where((s) => s['municipio']?.toString() == _secFiltroMun)
+        .toList();
+
     return Column(children: [
-      Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-        child: Row(children: [
-          Expanded(child: TextField(
-            controller: _sNombreCtrl,
-            textCapitalization: TextCapitalization.words,
-            style: const TextStyle(color: Colors.white, fontSize: 13),
-            decoration: const InputDecoration(
-              labelText: 'Nombre del sector / barrio', labelStyle: TextStyle(color: Colors.white54),
-              isDense: true, border: OutlineInputBorder(),
-              enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
-            ),
-          )),
-          const SizedBox(width: 6),
-          SizedBox(width: 88, child: TextField(
-            controller: _sPrecioCtrl,
-            keyboardType: TextInputType.number,
-            style: const TextStyle(color: Colors.white, fontSize: 13),
-            decoration: const InputDecoration(
-              labelText: 'Precio \$', labelStyle: TextStyle(color: Colors.white54),
-              isDense: true, border: OutlineInputBorder(),
-              enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
-            ),
-          )),
-          const SizedBox(width: 6),
-          DropdownButton<String>(
-            value: _sMunicipio, isDense: true,
-            dropdownColor: const Color(0xFF1A1A1A),
-            style: const TextStyle(color: Colors.white, fontSize: 11),
-            items: ['Cúcuta', 'Los Patios', 'V. Rosario']
-                .map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
-            onChanged: (v) => setState(() => _sMunicipio = v ?? 'Cúcuta'),
-          ),
-          const SizedBox(width: 6),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xff3AF500),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12)),
-            onPressed: () async {
-              final n = _sNombreCtrl.text.trim();
-              if (n.isEmpty) return;
-              final precio = int.tryParse(_sPrecioCtrl.text.trim());
-              try {
-                await Supabase.instance.client.from('sectores').insert({
-                  'nombre': n, 'municipio': _sMunicipio,
-                  if (precio != null) 'precio_global': precio,
-                });
-                _sNombreCtrl.clear(); _sPrecioCtrl.clear();
-                setState(() { _sectorsFuture = _cargarSectoresGlobal(); });
-                await _cargarInicial();
-              } catch (e) {
-                if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
-              }
-            },
-            child: const Icon(Icons.add, color: Colors.black, size: 18),
-          ),
-        ]),
-      ),
-      SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
-        child: Row(children: ['Cúcuta', 'Los Patios', 'V. Rosario'].map((m) {
-          final sel = _sFiltro == m;
-          return Padding(padding: const EdgeInsets.only(right: 6), child: ChoiceChip(
-            label: Text(m, style: TextStyle(fontSize: 11, color: sel ? Colors.black : Colors.white70)),
-            selected: sel,
-            selectedColor: const Color(0xff3AF500),
-            backgroundColor: const Color(0xFF222222),
-            onSelected: (_) => setState(() => _sFiltro = m),
-          ));
-        }).toList()),
-      ),
-      const Divider(height: 1, color: Colors.white12),
-      Expanded(child: FutureBuilder<List<Map<String, dynamic>>>(
-        future: _sectorsFuture,
-        builder: (_, snap) {
-          if (snap.connectionState == ConnectionState.waiting)
-            return const Center(child: CircularProgressIndicator(color: Color(0xff3AF500)));
-          final lista = (snap.data ?? []).where((s) => s['municipio'].toString() == _sFiltro).toList();
-          if (lista.isEmpty) return Center(child: Text('Sin sectores en $_sFiltro.',
-              style: const TextStyle(color: Colors.white38)));
-          return ListView.builder(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 80),
-            itemCount: lista.length,
-            itemBuilder: (_, i) {
-              final s = lista[i];
-              final activo  = s['activo'] as bool? ?? true;
-              final precioG = s['precio_global'] as int?;
-              return Card(
-                color: const Color(0xFF1A1A1A),
-                margin: const EdgeInsets.only(bottom: 6),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                child: ListTile(
-                  dense: true,
-                  leading: Icon(Icons.location_city,
-                      color: activo ? const Color(0xff3AF500) : Colors.white24, size: 20),
-                  title: Text(s['nombre'].toString(),
-                      style: TextStyle(fontWeight: FontWeight.bold,
-                          color: activo ? Colors.white : Colors.white38)),
-                  subtitle: precioG != null
-                      ? Text('\$${_fmt(precioG)} global',
-                          style: const TextStyle(fontSize: 11, color: Color(0xff3AF500)))
-                      : null,
-                  trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                    GestureDetector(
-                      onTap: () async {
-                        final ctrl = TextEditingController(text: precioG?.toString() ?? '');
-                        final nuevo = await showDialog<int?>(
-                          context: context,
-                          builder: (_) => AlertDialog(
-                            backgroundColor: const Color(0xFF1A1A1A),
-                            title: const Text('Precio global del sector',
-                                style: TextStyle(color: Colors.white, fontSize: 14)),
-                            content: TextField(
-                              controller: ctrl, keyboardType: TextInputType.number, autofocus: true,
-                              style: const TextStyle(color: Colors.white),
-                              decoration: const InputDecoration(
-                                labelText: 'Precio \$', labelStyle: TextStyle(color: Colors.white54),
-                                border: OutlineInputBorder(),
-                                enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
-                              ),
-                            ),
-                            actions: [
-                              TextButton(onPressed: () => Navigator.pop(context),
-                                  child: const Text('Cancelar', style: TextStyle(color: Colors.white54))),
-                              ElevatedButton(
-                                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xff3AF500)),
-                                onPressed: () => Navigator.pop(context, int.tryParse(ctrl.text.trim())),
-                                child: const Text('Guardar', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-                              ),
-                            ],
-                          ),
-                        );
-                        if (nuevo != null) {
-                          await Supabase.instance.client.from('sectores')
-                              .update({'precio_global': nuevo}).eq('id', s['id']);
-                          setState(() { _sectorsFuture = _cargarSectoresGlobal(); });
-                        }
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: precioG != null ? Colors.green[900] : const Color(0xFF2A2A2A),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          precioG != null ? '\$${_fmt(precioG)}' : '\$—',
-                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold,
-                              color: precioG != null ? const Color(0xff3AF500) : Colors.white24),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    GestureDetector(
-                      onTap: () async {
-                        await Supabase.instance.client.from('sectores')
-                            .update({'activo': !activo}).eq('id', s['id']);
-                        setState(() { _sectorsFuture = _cargarSectoresGlobal(); });
-                        await _cargarInicial();
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: activo ? const Color(0xff3AF500).withValues(alpha: 0.15) : Colors.white10,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Text(activo ? 'ON' : 'OFF',
-                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold,
-                                color: activo ? const Color(0xff3AF500) : Colors.white38)),
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    IconButton(
-                      icon: const Icon(Icons.delete_outline, color: Colors.red, size: 18),
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                      onPressed: () async {
-                        await Supabase.instance.client.from('sectores').delete().eq('id', s['id']);
-                        setState(() { _sectorsFuture = _cargarSectoresGlobal(); });
-                        await _cargarInicial();
-                      },
-                    ),
-                  ]),
+      // Chips municipio
+      Container(
+        color: const Color(0xFF111111),
+        height: 42,
+        child: ListView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          children: _municipios.map((m) {
+            final sel = _secFiltroMun == m;
+            return GestureDetector(
+              onTap: () => setState(() => _secFiltroMun = m),
+              child: Container(
+                margin: const EdgeInsets.only(right: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                decoration: BoxDecoration(
+                  color: sel ? const Color(0xff3AF500) : const Color(0xFF1A1A1A),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: sel ? const Color(0xff3AF500) : Colors.white24),
                 ),
-              );
-            },
-          );
-        },
-      )),
-    ]);
-  }
-
-  // ── Tab: Tarifas por Sector (per user) ─────────────────────────────────────
-  Widget _tabTarifas() {
-    if (_userSel == null) return _noUserPlaceholder('Selecciona un usuario para gestionar\nsus tarifas por sector');
-    if (_cargandoUser) return const Center(child: CircularProgressIndicator(color: Color(0xff3AF500)));
-
-    final tarifaMap = { for (final t in _tarifas) t['sector_id'] as int: t['precio'] as int };
-    final municipios = _sectoresActivos.map((s) => s['municipio'] as String).toSet().toList()..sort();
-
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 80),
-      children: [
-        for (final mun in municipios) ...[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(4, 8, 4, 6),
-            child: Text(mun.toUpperCase(),
-                style: const TextStyle(color: Colors.white38, fontSize: 11, letterSpacing: 1.2)),
-          ),
-          ...(_sectoresActivos.where((s) => s['municipio'] == mun).map((s) {
-            final sId  = s['id'] as int;
-            final nom  = s['nombre']?.toString() ?? '';
-            final pre  = tarifaMap[sId];
-            final ctrl = TextEditingController(text: pre?.toString() ?? '');
-            return Card(
-              color: const Color(0xFF1A1A1A),
-              margin: const EdgeInsets.only(bottom: 6),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                child: Row(children: [
-                  Expanded(child: Text(nom, style: const TextStyle(color: Colors.white, fontSize: 13))),
-                  SizedBox(width: 90, child: TextField(
-                    controller: ctrl,
-                    keyboardType: TextInputType.number,
-                    style: const TextStyle(color: Colors.white, fontSize: 13),
-                    textAlign: TextAlign.right,
-                    decoration: InputDecoration(
-                      isDense: true,
-                      hintText: 'Sin tarifa',
-                      hintStyle: const TextStyle(color: Colors.white24, fontSize: 12),
-                      filled: true,
-                      fillColor: const Color(0xFF2A2A2A),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(6),
-                        borderSide: BorderSide(
-                          color: pre != null ? const Color(0xff3AF500).withValues(alpha: 0.4) : Colors.white12,
-                        ),
-                      ),
-                      prefixText: '\$ ',
-                      prefixStyle: const TextStyle(color: Colors.white54, fontSize: 12),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                    ),
-                    onSubmitted: (v) => _upsertTarifa(sId, v),
-                  )),
-                  const SizedBox(width: 4),
-                  IconButton(
-                    icon: Icon(
-                      pre != null ? Icons.check_circle : Icons.radio_button_unchecked,
-                      color: pre != null ? const Color(0xff3AF500) : Colors.white24,
-                      size: 18,
-                    ),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                    onPressed: pre != null ? () => _eliminarTarifa(sId) : null,
-                    tooltip: pre != null ? 'Quitar tarifa' : 'Sin tarifa',
-                  ),
-                ]),
+                child: Text(m, style: TextStyle(
+                  color: sel ? Colors.black : Colors.white54,
+                  fontSize: 12, fontWeight: sel ? FontWeight.bold : FontWeight.normal,
+                )),
               ),
             );
-          })),
-        ],
-      ],
-    );
-  }
-
-  // ── Tab: Direcciones (per user) ────────────────────────────────────────────
-  Widget _tabDirecciones() {
-    if (_userSel == null) return _noUserPlaceholder('Selecciona un usuario para gestionar\nsus direcciones guardadas');
-    if (_cargandoUser) return const Center(child: CircularProgressIndicator(color: Color(0xff3AF500)));
-
-    final filtrados = _filtroMun == 'Todos'
-        ? _dirs
-        : _dirs.where((d) => d['municipio'] == _filtroMun).toList();
-
-    return Column(children: [
-      SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
-        child: Row(children: _municipios.map((m) {
-          final sel = _filtroMun == m;
-          return Padding(padding: const EdgeInsets.only(right: 6), child: ChoiceChip(
-            label: Text(m, style: TextStyle(fontSize: 11, color: sel ? Colors.black : Colors.white70)),
-            selected: sel,
-            selectedColor: const Color(0xff3AF500),
-            backgroundColor: const Color(0xFF222222),
-            onSelected: (_) => setState(() => _filtroMun = m),
-          ));
-        }).toList()),
+          }).toList(),
+        ),
       ),
+      const Divider(height: 1, color: Colors.white12),
       Expanded(
         child: filtrados.isEmpty
-            ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                const Icon(Icons.add_location_alt, color: Colors.white24, size: 48),
+            ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.map_outlined, color: Colors.white24, size: 48),
                 const SizedBox(height: 12),
-                const Text('Sin direcciones guardadas', style: TextStyle(color: Colors.white38)),
+                Text('Sin sectores en $_secFiltroMun',
+                    style: const TextStyle(color: Colors.white38)),
                 const SizedBox(height: 8),
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xff3AF500)),
-                  onPressed: () => _formDir(),
-                  icon: const Icon(Icons.add, color: Colors.black, size: 16),
-                  label: const Text('Agregar', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                TextButton.icon(
+                  onPressed: _abrirFormSector,
+                  icon: const Icon(Icons.add, color: Color(0xff3AF500)),
+                  label: const Text('Crear primer sector',
+                      style: TextStyle(color: Color(0xff3AF500))),
                 ),
               ]))
             : ListView.builder(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 80),
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 100),
                 itemCount: filtrados.length,
                 itemBuilder: (_, i) {
-                  final d = filtrados[i];
-                  final sectorNom = (d['sectores'] as Map?)?['nombre']?.toString() ?? '';
-                  final precio    = d['precio'] as int?;
+                  final s = filtrados[i];
+                  final sId = s['id'] as int;
+                  final activo = s['activo'] as bool? ?? true;
+                  final tarifa = _tarifaMap[sId];
+                  final tCtrl = TextEditingController(text: tarifa?.toString() ?? '');
                   return Card(
                     color: const Color(0xFF1A1A1A),
                     margin: const EdgeInsets.only(bottom: 6),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    child: ListTile(
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-                      leading: CircleAvatar(
-                        backgroundColor: const Color(0xff3AF500).withValues(alpha: 0.15),
-                        child: const Icon(Icons.place, color: Color(0xff3AF500), size: 18),
-                      ),
-                      title: Text(d['nombre']?.toString() ?? '',
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
-                      subtitle: Text(
-                        [d['municipio'], if (sectorNom.isNotEmpty) sectorNom].join(' · '),
-                        style: const TextStyle(color: Colors.white54, fontSize: 11),
-                      ),
-                      trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                        if (precio != null)
-                          Container(
-                            margin: const EdgeInsets.only(right: 4),
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: Colors.green[900], borderRadius: BorderRadius.circular(6)),
-                            child: Text('\$${_fmt(precio)}',
-                                style: const TextStyle(color: Color(0xff3AF500), fontSize: 12, fontWeight: FontWeight.bold)),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Row(children: [
+                          Expanded(child: Text(s['nombre']?.toString() ?? '',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 13,
+                                color: activo ? Colors.white : Colors.white38,
+                              ))),
+                          // Toggle activo
+                          GestureDetector(
+                            onTap: () async {
+                              await _db.from('sectores').update({'activo': !activo}).eq('id', sId);
+                              await _cargarInicial();
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: activo
+                                    ? const Color(0xff3AF500).withValues(alpha: 0.15)
+                                    : Colors.white10,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text(activo ? 'ON' : 'OFF',
+                                  style: TextStyle(
+                                    fontSize: 11, fontWeight: FontWeight.bold,
+                                    color: activo ? const Color(0xff3AF500) : Colors.white38,
+                                  )),
+                            ),
                           ),
-                        IconButton(
-                          icon: const Icon(Icons.edit, color: Colors.blue, size: 18),
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
-                          onPressed: () => _formDir(existing: d),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.delete_outline, color: Colors.red, size: 18),
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
-                          onPressed: () => _eliminarDir(d['id'] as int),
-                        ),
+                          const SizedBox(width: 4),
+                          IconButton(
+                            icon: const Icon(Icons.edit_outlined, color: Color(0xff3AF500), size: 18),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                            onPressed: () => _abrirFormSector(sector: s),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline, color: Colors.red, size: 18),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                            onPressed: () => _eliminarSector(s),
+                          ),
+                        ]),
+                        if (_userSel != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Row(children: [
+                              Expanded(child: TextField(
+                                controller: tCtrl,
+                                keyboardType: TextInputType.number,
+                                style: const TextStyle(color: Colors.white, fontSize: 13),
+                                textAlign: TextAlign.right,
+                                decoration: InputDecoration(
+                                  isDense: true,
+                                  hintText: 'Sin tarifa',
+                                  hintStyle: const TextStyle(color: Colors.white24, fontSize: 12),
+                                  filled: true, fillColor: const Color(0xFF2A2A2A),
+                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+                                  enabledBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(6),
+                                    borderSide: BorderSide(
+                                      color: tarifa != null
+                                          ? const Color(0xff3AF500).withValues(alpha: 0.4)
+                                          : Colors.white12,
+                                    ),
+                                  ),
+                                  prefixText: '\$ ',
+                                  prefixStyle: const TextStyle(color: Colors.white54, fontSize: 12),
+                                  contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                ),
+                                onSubmitted: (v) => _upsertTarifa(sId, v),
+                              )),
+                              const SizedBox(width: 4),
+                              IconButton(
+                                icon: Icon(
+                                  tarifa != null ? Icons.check_circle : Icons.radio_button_unchecked,
+                                  color: tarifa != null ? const Color(0xff3AF500) : Colors.white24,
+                                  size: 18,
+                                ),
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                                onPressed: tarifa != null ? () => _eliminarTarifa(sId) : null,
+                                tooltip: tarifa != null ? 'Quitar tarifa' : 'Sin tarifa',
+                              ),
+                            ]),
+                          )
+                        else
+                          const Padding(
+                            padding: EdgeInsets.only(top: 4),
+                            child: Text('Selecciona un usuario para gestionar tarifas',
+                                style: TextStyle(color: Colors.white24, fontSize: 11)),
+                          ),
                       ]),
                     ),
                   );
                 },
               ),
+      ),
+    ]);
+  }
+
+  // ── Tab 1: Direcciones ──────────────────────────────────────────────────────
+  Widget _tabDirecciones() {
+    if (_cargandoUser) return const Center(child: CircularProgressIndicator(color: Color(0xff3AF500)));
+
+    final filtradas = _dirs
+        .where((d) => d['municipio']?.toString() == _dirFiltroMun)
+        .toList();
+
+    return Column(children: [
+      // Chips municipio
+      Container(
+        color: const Color(0xFF111111),
+        height: 42,
+        child: ListView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          children: _municipios.map((m) {
+            final sel = _dirFiltroMun == m;
+            return GestureDetector(
+              onTap: () => setState(() => _dirFiltroMun = m),
+              child: Container(
+                margin: const EdgeInsets.only(right: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                decoration: BoxDecoration(
+                  color: sel ? const Color(0xff3AF500) : const Color(0xFF1A1A1A),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: sel ? const Color(0xff3AF500) : Colors.white24),
+                ),
+                child: Text(m, style: TextStyle(
+                  color: sel ? Colors.black : Colors.white54,
+                  fontSize: 12, fontWeight: sel ? FontWeight.bold : FontWeight.normal,
+                )),
+              ),
+            );
+          }).toList(),
+        ),
+      ),
+      const Divider(height: 1, color: Colors.white12),
+      Expanded(
+        child: _dirs.isEmpty && _userSel == null
+            ? _noUserPlaceholder('Selecciona un usuario para ver\nsus direcciones')
+            : filtradas.isEmpty
+                ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    const Icon(Icons.add_location_alt, color: Colors.white24, size: 48),
+                    const SizedBox(height: 12),
+                    Text('Sin direcciones en $_dirFiltroMun',
+                        style: const TextStyle(color: Colors.white38)),
+                    const SizedBox(height: 8),
+                    if (_userSel != null)
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xff3AF500)),
+                        onPressed: () => _formDir(),
+                        icon: const Icon(Icons.add, color: Colors.black, size: 16),
+                        label: const Text('Agregar',
+                            style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                      ),
+                  ]))
+                : ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 100),
+                    itemCount: filtradas.length,
+                    itemBuilder: (_, i) {
+                      final d = filtradas[i];
+                      final dId = d['id'] as int;
+                      final activo = d['activo'] != false;
+                      final precio = _preciosDir[dId];
+                      final sectorNombre = d['sector_id'] != null
+                          ? _sectoresActivos
+                              .where((s) => s['id'] == d['sector_id'])
+                              .map((s) => s['nombre']?.toString())
+                              .firstOrNull
+                          : null;
+                      return Card(
+                        color: const Color(0xFF1A1A1A),
+                        margin: const EdgeInsets.only(bottom: 6),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        child: ListTile(
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                          leading: CircleAvatar(
+                            backgroundColor: activo
+                                ? const Color(0xff3AF500).withValues(alpha: 0.15)
+                                : Colors.white10,
+                            child: Icon(Icons.place,
+                                color: activo ? const Color(0xff3AF500) : Colors.white24, size: 18),
+                          ),
+                          title: Row(children: [
+                            Expanded(child: Text(d['nombre']?.toString() ?? '',
+                                style: TextStyle(
+                                  color: activo ? Colors.white : Colors.white38,
+                                  fontWeight: FontWeight.w600, fontSize: 13,
+                                ))),
+                            if (sectorNombre != null)
+                              Container(
+                                margin: const EdgeInsets.only(left: 6),
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xff3AF500).withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: const Color(0xff3AF500).withValues(alpha: 0.4)),
+                                ),
+                                child: Text(sectorNombre,
+                                    style: const TextStyle(color: Color(0xff3AF500), fontSize: 10)),
+                              ),
+                          ]),
+                          subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            if ((d['direccion']?.toString() ?? '').isNotEmpty)
+                              Text(d['direccion'].toString(),
+                                  style: TextStyle(
+                                    color: activo ? Colors.white54 : Colors.white24, fontSize: 11)),
+                            Row(children: [
+                              Icon(
+                                precio != null ? Icons.attach_money : Icons.money_off,
+                                size: 13,
+                                color: precio != null ? Colors.greenAccent : Colors.orange,
+                              ),
+                              Text(
+                                precio != null ? '\$${_fmt(precio)}' : 'Sin precio',
+                                style: TextStyle(
+                                  color: precio != null ? Colors.greenAccent : Colors.orange,
+                                  fontWeight: FontWeight.bold, fontSize: 12,
+                                ),
+                              ),
+                            ]),
+                          ]),
+                          trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                            IconButton(
+                              icon: const Icon(Icons.edit, color: Color(0xff3AF500), size: 18),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                              onPressed: () => _formDir(existing: d),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline, color: Colors.red, size: 18),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                              onPressed: () => _eliminarDir(d),
+                            ),
+                          ]),
+                        ),
+                      );
+                    },
+                  ),
       ),
     ]);
   }

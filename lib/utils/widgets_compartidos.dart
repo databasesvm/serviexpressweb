@@ -52,6 +52,14 @@ String movilLabel(Map<String, dynamic> u, {String fallback = '—'}) {
   return fallback;
 }
 
+// "Móvil 7 — Juan Pérez" — para identificación completa en chat y push
+String movilLabelConNombre(Map<String, dynamic> u) {
+  final label = movilLabel(u, fallback: 'Móvil');
+  final nombre = u['nombre']?.toString().trim() ?? '';
+  if (nombre.isEmpty) return label;
+  return '$label — $nombre';
+}
+
 // =========================================================================
 // PULSING PANICO BUTTON — Latido de corazón + borde/glow animado
 // Úsalo cuando un botón de pánico o convocatoria está ACTIVO.

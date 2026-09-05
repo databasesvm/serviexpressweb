@@ -1324,8 +1324,34 @@ extension CentralScreenPanelControl on _CentralScreenState {
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                       onPressed: () async {
+                        // 1. Fetch + reconexión de streams (datos frescos)
                         await _preCargarDatosIniciales();
                         _construirStreams();
+
+                        // 2. Push silencioso heartbeat a todos los móviles
+                        // conectados — les ordena reiniciar el GPS stream y
+                        // emitir su posición inmediatamente.
+                        try {
+                          final movilesOnline = await Supabase.instance.client
+                              .from('usuarios')
+                              .select('id')
+                              .eq('rol', 'movil')
+                              .eq('en_linea', true)
+                              .neq('suspendido', true);
+                          final ids = movilesOnline
+                              .map((m) => m['id'].toString())
+                              .toList();
+                          if (ids.isNotEmpty) {
+                            await MotorNotificaciones.dispararRafa(
+                              idsDestinos: ids,
+                              titulo: 'heartbeat',
+                              mensaje: 'heartbeat',
+                              urgente: false,
+                              data: {'tipo': 'heartbeat'},
+                            );
+                          }
+                        } catch (_) {}
+
                         if (mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(

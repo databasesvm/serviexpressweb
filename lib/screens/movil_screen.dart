@@ -307,9 +307,14 @@ class _MovilScreenState extends State<MovilScreen>
               // Nuevo servicio, asignación directa, suspensión, rehabilitación, etc.
               // Solo si está conectado y no suspendido.
               if (_estaEnLinea && !_estabaSuspendido) {
+                // Activar el mutex para que el StreamBuilder no reproduzca
+                // el mismo sonido cuando detecte el cambio en Supabase.
+                _reproduciendoAudio = true;
                 _sonidos.reproducir(Sonidos.alerta);
-                // El teléfono acaba de despertar → verificar geocerca del paradero.
                 _verificarGeocercaUnaVez();
+                Future.delayed(const Duration(seconds: 2), () {
+                  if (mounted) _reproduciendoAudio = false;
+                });
               }
           }
         }
@@ -1950,6 +1955,11 @@ class _MovilScreenState extends State<MovilScreen>
         // Con 0 el stream emite cada ~1-3s cuando hay señal — el mutex
         // _enviandoUbicacion evita que los writes se acumulen.
         distanceFilter: 0,
+        // intervalDuration: fuerza al LocationManager de Android a enviar
+        // actualizaciones al menos cada 5s aunque el dispositivo esté en
+        // background o el fabricante intente agrupar los eventos.
+        // Sin este parámetro, Android puede reducir la frecuencia a 1/min.
+        intervalDuration: const Duration(seconds: 5),
         foregroundNotificationConfig: const ForegroundNotificationConfig(
           notificationText: "ServiExpress está ejecutándose en segundo plano.",
           notificationTitle: "Radar ServiExpress Activo",
@@ -2648,14 +2658,16 @@ class _MovilScreenState extends State<MovilScreen>
         return;
       }
 
-      // ── WATCHDOG: reiniciar el stream si lleva >90s sin emitir ────────────
+      // ── WATCHDOG: reiniciar el stream si lleva >20s sin emitir ────────────
       // En fabricantes agresivos (Xiaomi MIUI, Samsung One UI con batería
       // restringida), el proveedor de ubicación puede morir silenciosamente
       // sin disparar onError ni onDone. Reiniciar el stream lo reactiva.
+      // Umbral 20s: con intervalDuration de 5s, si no hay emisión en 20s
+      // es señal clara de que el stream está muerto.
       if (!kIsWeb && !_reiniciandoGps) {
         final ahora = DateTime.now();
         final streamMudo = _ultimaEmisionGps == null ||
-            ahora.difference(_ultimaEmisionGps!).inSeconds > 30;
+            ahora.difference(_ultimaEmisionGps!).inSeconds > 20;
         if (streamMudo && _estaEnLinea) {
           _iniciarRastreoGps();
           // No hacemos return: igual intentamos getCurrentPosition abajo
@@ -2664,9 +2676,9 @@ class _MovilScreenState extends State<MovilScreen>
         }
       }
 
-      // Si el GPS stream emitió hace menos de 10s, ya está actualizado
+      // Si el GPS stream emitió hace menos de 8s, ya está actualizado
       if (_ultimoEnvioUbicacion != null &&
-          DateTime.now().difference(_ultimoEnvioUbicacion!).inSeconds < 10) {
+          DateTime.now().difference(_ultimoEnvioUbicacion!).inSeconds < 8) {
         return;
       }
       if (_enviandoUbicacion) return;
@@ -7139,7 +7151,7 @@ class _MovilScreenState extends State<MovilScreen>
                                           builder: (context) => ChatScreen(
                                             salaId: 'servicio_${servicio['id']}',
                                             miId: widget.usuario['id'],
-                                            miNombre: movilLabel(widget.usuario),
+                                            miNombre: movilLabelConNombre(widget.usuario),
                                             titulo: 'Chat $textoChat',
                                             servicioId: servicio['id'],
                                             alarmaLocal: 'chat_movil',
@@ -7189,11 +7201,7 @@ class _MovilScreenState extends State<MovilScreen>
                                         builder: (context) => ChatScreen(
                                           salaId: 'soporte_movil_${servicio['id']}',
                                           miId: widget.usuario['id'],
-                                          miNombre: () {
-                                            final usr = widget.usuario['usuario']?.toString() ?? '';
-                                            final num = RegExp(r'\d+').firstMatch(usr)?.group(0);
-                                            return num != null ? 'Móvil $num' : (widget.usuario['nombre'] ?? 'Móvil');
-                                          }(),
+                                          miNombre: movilLabelConNombre(widget.usuario),
                                           titulo: 'Soporte Central',
                                           servicioId: servicio['id'],
                                           alarmaLocal: 'chat_central_movil',
@@ -8831,7 +8839,7 @@ class _MovilScreenState extends State<MovilScreen>
                                     builder: (context) => ChatScreen(
                                       salaId: 'soporte_movil_${servicio['id']}',
                                       miId: widget.usuario['id'],
-                                      miNombre: widget.usuario['nombre'],
+                                      miNombre: movilLabelConNombre(widget.usuario),
                                       titulo: 'Soporte Central',
                                       servicioId: servicio['id'],
                                       alarmaLocal: 'chat_central_movil',
@@ -11711,7 +11719,7 @@ class _MovilScreenState extends State<MovilScreen>
                   builder: (_) => ChatScreen(
                     salaId: 'soporte_${widget.usuario['id']}',
                     miId: widget.usuario['id'] as int,
-                    miNombre: movilLabel(widget.usuario, fallback: 'Móvil'),
+                    miNombre: movilLabelConNombre(widget.usuario),
                     titulo: 'Central',
                     usuarioId: widget.usuario['id'] as int?,
                     alarmaLocal: 'chat_central',    // limpia flag en usuarios al abrir
@@ -12404,8 +12412,15 @@ class _MovilScreenState extends State<MovilScreen>
                               }
                               // Actualizamos la memoria del radar
                               _cantidadPendientesAnterior = pendientes.length;
-                              // Si no hubo nuevos servicios, igual limpiamos el flag
-                              _vieneDeBackground = false;
+                              // Limpiar el flag solo si la app está en primer
+                              // plano. En background el isolate Dart sigue vivo
+                              // y el StreamBuilder sigue disparando — si
+                              // reseteamos aquí, el flag llega vacío cuando el
+                              // moto abre la app y el OS ya había sonado.
+                              if (WidgetsBinding.instance.lifecycleState ==
+                                  AppLifecycleState.resumed) {
+                                _vieneDeBackground = false;
+                              }
                             }
                           });
 

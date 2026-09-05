@@ -4,7 +4,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FnRedDireccionesScreen
-// Administración Central: Sectores · Direcciones · Tarifas por Sector
+// Administración: Sectores + Tarifas por sede | Direcciones + Precio por sede
+// Sectores y direcciones son un catálogo global compartido entre FN y SE.
+// El precio vive por separado en fn_tarifas_sede y fn_precios_dir.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class FnRedDireccionesScreen extends StatefulWidget {
@@ -62,7 +64,7 @@ class _FnRedDireccionesScreenState extends State<FnRedDireccionesScreen> {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 3,
+      length: 2,
       child: Scaffold(
         backgroundColor: const Color(0xFF0A0A0A),
         appBar: AppBar(
@@ -74,29 +76,26 @@ class _FnRedDireccionesScreenState extends State<FnRedDireccionesScreen> {
                 color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
           ),
           bottom: const TabBar(
-            indicatorColor: const Color(0xFF008FFF),
+            indicatorColor: Colors.white,
             labelColor: Colors.white,
             unselectedLabelColor: Colors.white54,
             tabs: [
               Tab(icon: Icon(Icons.map, size: 18), text: 'Sectores'),
-              Tab(icon: Icon(Icons.price_change, size: 18), text: 'Tarifas'),
               Tab(icon: Icon(Icons.location_on, size: 18), text: 'Direcciones'),
             ],
           ),
         ),
         body: _cargandoSedes
             ? const Center(
-                child: CircularProgressIndicator(color: const Color(0xFF008FFF)))
+                child: CircularProgressIndicator(color: Color(0xFF008FFF)))
             : Column(
                 children: [
-                  // ── Selector de sede ──────────────────────────────────────
                   _SelectorSede(
                     sedes: _sedes,
                     sedeSeleccionada: _sedeSeleccionada,
                     labelSede: _labelSede,
                     onChanged: (s) => setState(() => _sedeSeleccionada = s),
                   ),
-                  // ── Tabs ──────────────────────────────────────────────────
                   Expanded(
                     child: _sedeSeleccionada == null
                         ? const Center(
@@ -105,8 +104,6 @@ class _FnRedDireccionesScreenState extends State<FnRedDireccionesScreen> {
                         : TabBarView(
                             children: [
                               _TabSectores(
-                                  sede: _sedeSeleccionada!, db: _db),
-                              _TabTarifas(
                                   sede: _sedeSeleccionada!, db: _db),
                               _TabDirecciones(
                                   sede: _sedeSeleccionada!, db: _db),
@@ -121,7 +118,7 @@ class _FnRedDireccionesScreenState extends State<FnRedDireccionesScreen> {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// Selector de sede (barra compartida entre tabs)
+// Selector de sede
 // ═════════════════════════════════════════════════════════════════════════════
 
 class _SelectorSede extends StatelessWidget {
@@ -158,8 +155,7 @@ class _SelectorSede extends StatelessWidget {
             .map((s) => DropdownMenuItem<int>(
                   value: s['id'] as int,
                   child: Text(labelSede(s),
-                      style:
-                          const TextStyle(color: Colors.white, fontSize: 13)),
+                      style: const TextStyle(color: Colors.white, fontSize: 13)),
                 ))
             .toList(),
         onChanged: (v) {
@@ -172,7 +168,8 @@ class _SelectorSede extends StatelessWidget {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// TAB 1 — SECTORES
+// TAB 1 — SECTORES + TARIFAS POR SEDE
+// Catálogo global (sectores) + precio por sede (fn_tarifas_sede)
 // ═════════════════════════════════════════════════════════════════════════════
 
 class _TabSectores extends StatefulWidget {
@@ -187,7 +184,11 @@ class _TabSectores extends StatefulWidget {
 class _TabSectoresState extends State<_TabSectores>
     with AutomaticKeepAliveClientMixin {
   List<Map<String, dynamic>> _sectores = [];
+  Map<int, int> _tarifas = {}; // sector_id → precio para esta sede
   bool _cargando = true;
+  String _filtroMun = 'Cúcuta';
+
+  static const _municipios = ['Cúcuta', 'Los Patios', 'V. Rosario'];
 
   @override
   bool get wantKeepAlive => true;
@@ -207,13 +208,23 @@ class _TabSectoresState extends State<_TabSectores>
   Future<void> _cargar() async {
     setState(() => _cargando = true);
     try {
-      final data = await widget.db
-          .from('fn_sectores')
+      final secs = await widget.db
+          .from('sectores')
           .select('id, nombre, activo, municipio')
+          .order('municipio')
           .order('nombre');
+      final tars = await widget.db
+          .from('fn_tarifas_sede')
+          .select('sector_id, precio')
+          .eq('sede_id', widget.sede['id']);
       if (mounted) {
+        final tarifaMap = <int, int>{};
+        for (final t in List<Map<String, dynamic>>.from(tars)) {
+          tarifaMap[t['sector_id'] as int] = (t['precio'] as num).toInt();
+        }
         setState(() {
-          _sectores = List<Map<String, dynamic>>.from(data);
+          _sectores = List<Map<String, dynamic>>.from(secs);
+          _tarifas = tarifaMap;
           _cargando = false;
         });
       }
@@ -222,76 +233,136 @@ class _TabSectoresState extends State<_TabSectores>
     }
   }
 
-  static const _municipios = ['Cúcuta', 'Los Patios', 'Villa del Rosario'];
+  String _miles(int v) {
+    final s = v.toString();
+    final buf = StringBuffer();
+    for (int i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) buf.write('.');
+      buf.write(s[i]);
+    }
+    return buf.toString();
+  }
+
+  // Guardar/actualizar tarifa para esta sede
+  Future<void> _guardarTarifa(int sectorId, int precio) async {
+    final existing = await widget.db
+        .from('fn_tarifas_sede')
+        .select('id')
+        .eq('sede_id', widget.sede['id'])
+        .eq('sector_id', sectorId)
+        .maybeSingle();
+    if (existing != null) {
+      await widget.db
+          .from('fn_tarifas_sede')
+          .update({'precio': precio}).eq('id', existing['id']);
+    } else {
+      await widget.db.from('fn_tarifas_sede').insert({
+        'sede_id': widget.sede['id'],
+        'sector_id': sectorId,
+        'precio': precio,
+      });
+    }
+  }
 
   Future<void> _abrirFormulario({Map<String, dynamic>? sector}) async {
-    final ctrl = TextEditingController(text: sector?['nombre']?.toString() ?? '');
+    final ctrl =
+        TextEditingController(text: sector?['nombre']?.toString() ?? '');
+    final sId = sector?['id'] as int?;
+    final precioCtrl = TextEditingController(
+      text: sId != null && _tarifas.containsKey(sId)
+          ? _tarifas[sId].toString()
+          : '',
+    );
     bool activo = sector?['activo'] != false;
-    String? municipio = sector?['municipio']?.toString();
+    String? municipio =
+        sector?['municipio']?.toString() ?? _filtroMun;
+
     final guardado = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setD) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           backgroundColor: const Color(0xFF1A1A1A),
           title: Text(
             sector == null ? '➕ Nuevo sector' : '✏️ Editar sector',
             style: const TextStyle(
                 color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
           ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: ctrl,
-                style: const TextStyle(color: Colors.white),
-                textCapitalization: TextCapitalization.words,
-                decoration: const InputDecoration(
-                  labelText: 'Nombre del sector / zona',
-                  labelStyle: TextStyle(color: Colors.white54),
-                  hintText: 'Ej: Norte, Centro, Aeropuerto',
-                  hintStyle: TextStyle(color: Colors.white24),
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String?>(
-                value: municipio,
-                dropdownColor: const Color(0xFF1A1A1A),
-                style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
-                  labelText: 'Municipio',
-                  labelStyle: TextStyle(color: Colors.white54),
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-                items: [
-                  const DropdownMenuItem<String?>(
-                    value: null,
-                    child: Text('Sin definir',
-                        style: TextStyle(color: Colors.white54)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // 1. Municipio
+                DropdownButtonFormField<String?>(
+                  value: municipio,
+                  dropdownColor: const Color(0xFF1A1A1A),
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(
+                    labelText: 'Municipio',
+                    labelStyle: TextStyle(color: Colors.white54),
+                    border: OutlineInputBorder(),
+                    isDense: true,
                   ),
-                  ..._municipios.map((m) => DropdownMenuItem<String?>(
-                        value: m,
-                        child: Text(m,
-                            style: const TextStyle(color: Colors.white)),
-                      )),
-                ],
-                onChanged: (v) => setD(() => municipio = v),
-              ),
-              if (sector != null) ...[
-                const SizedBox(height: 12),
-                SwitchListTile(
-                  value: activo,
-                  onChanged: (v) => setD(() => activo = v),
-                  title: const Text('Activo',
-                      style: TextStyle(color: Colors.white, fontSize: 13)),
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
+                  items: [
+                    const DropdownMenuItem<String?>(
+                      value: null,
+                      child: Text('Sin definir',
+                          style: TextStyle(color: Colors.white54)),
+                    ),
+                    ..._municipios.map((m) => DropdownMenuItem<String?>(
+                          value: m,
+                          child: Text(m,
+                              style: const TextStyle(color: Colors.white)),
+                        )),
+                  ],
+                  onChanged: (v) => setD(() => municipio = v),
                 ),
+                const SizedBox(height: 12),
+                // 2. Nombre
+                TextField(
+                  controller: ctrl,
+                  style: const TextStyle(color: Colors.white),
+                  textCapitalization: TextCapitalization.words,
+                  decoration: const InputDecoration(
+                    labelText: 'Nombre del sector',
+                    labelStyle: TextStyle(color: Colors.white54),
+                    hintText: 'Ej: Norte, Centro, Aeropuerto',
+                    hintStyle: TextStyle(color: Colors.white24),
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                // 3. Precio para esta sede
+                TextField(
+                  controller: precioCtrl,
+                  style: const TextStyle(color: Colors.white),
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Tarifa para esta sede (\$)',
+                    labelStyle: TextStyle(color: Colors.white54),
+                    hintText: 'Dejar vacío para no asignar aún',
+                    hintStyle: TextStyle(color: Colors.white24),
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                    prefixText: '\$ ',
+                    prefixStyle: TextStyle(color: Colors.white70),
+                  ),
+                ),
+                if (sector != null) ...[
+                  const SizedBox(height: 12),
+                  SwitchListTile(
+                    value: activo,
+                    onChanged: (v) => setD(() => activo = v),
+                    title: const Text('Activo',
+                        style: TextStyle(color: Colors.white, fontSize: 13)),
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
           actions: [
             TextButton(
@@ -299,23 +370,35 @@ class _TabSectoresState extends State<_TabSectores>
                 child: const Text('CANCELAR',
                     style: TextStyle(color: Colors.white54))),
             ElevatedButton(
-              style:
-                  ElevatedButton.styleFrom(backgroundColor: const Color(0xFF008FFF)),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF008FFF)),
               onPressed: () async {
                 final nombre = ctrl.text.trim();
                 if (nombre.isEmpty) return;
+                int newSectorId;
                 if (sector == null) {
-                  await widget.db.from('fn_sectores').insert({
-                    'nombre': nombre,
-                    'activo': true,
-                    if (municipio != null) 'municipio': municipio,
-                  });
+                  final res = await widget.db
+                      .from('sectores')
+                      .insert({
+                        'nombre': nombre,
+                        'activo': true,
+                        if (municipio != null) 'municipio': municipio,
+                      })
+                      .select('id')
+                      .single();
+                  newSectorId = res['id'] as int;
                 } else {
-                  await widget.db.from('fn_sectores').update({
+                  await widget.db.from('sectores').update({
                     'nombre': nombre,
                     'activo': activo,
                     'municipio': municipio,
                   }).eq('id', sector['id']);
+                  newSectorId = sector['id'] as int;
+                }
+                // Guardar tarifa si se ingresó precio válido
+                final precio = int.tryParse(precioCtrl.text.trim());
+                if (precio != null && precio > 0) {
+                  await _guardarTarifa(newSectorId, precio);
                 }
                 if (ctx.mounted) Navigator.pop(ctx, true);
               },
@@ -330,6 +413,73 @@ class _TabSectoresState extends State<_TabSectores>
     if (guardado == true) _cargar();
   }
 
+  Future<void> _editarPrecio(Map<String, dynamic> sector) async {
+    final sId = sector['id'] as int;
+    final precioActual = _tarifas[sId];
+    final ctrl = TextEditingController(
+        text: precioActual != null ? precioActual.toString() : '');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: Text(
+          'Tarifa — ${sector['nombre']}',
+          style: const TextStyle(
+              color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+        ),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          style: const TextStyle(color: Colors.white),
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: 'Precio (\$)',
+            labelStyle: TextStyle(color: Colors.white54),
+            border: OutlineInputBorder(),
+            isDense: true,
+            prefixText: '\$ ',
+            prefixStyle: TextStyle(color: Colors.white70),
+          ),
+        ),
+        actions: [
+          if (precioActual != null)
+            TextButton(
+              onPressed: () async {
+                await widget.db
+                    .from('fn_tarifas_sede')
+                    .delete()
+                    .eq('sede_id', widget.sede['id'])
+                    .eq('sector_id', sId);
+                if (ctx.mounted) Navigator.pop(ctx, true);
+              },
+              child: const Text('Quitar tarifa',
+                  style: TextStyle(color: Colors.red)),
+            ),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('CANCELAR',
+                  style: TextStyle(color: Colors.white54))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF008FFF)),
+            onPressed: () async {
+              final precio = int.tryParse(ctrl.text.trim());
+              if (precio == null || precio <= 0) return;
+              await _guardarTarifa(sId, precio);
+              if (ctx.mounted) Navigator.pop(ctx, true);
+            },
+            child: const Text('GUARDAR',
+                style: TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) _cargar();
+  }
+
   Future<void> _eliminar(Map<String, dynamic> sector) async {
     final ok = await showDialog<bool>(
       context: context,
@@ -337,8 +487,20 @@ class _TabSectoresState extends State<_TabSectores>
         backgroundColor: const Color(0xFF1A1A1A),
         title: const Text('¿Eliminar sector?',
             style: TextStyle(color: Colors.white)),
-        content: Text(sector['nombre'],
-            style: const TextStyle(color: Colors.white70)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(sector['nombre'],
+                style: const TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            const Text(
+              'Se eliminará del catálogo global (afecta todas las sedes y usuarios). No se puede deshacer.',
+              style: TextStyle(color: Colors.orange, fontSize: 12),
+            ),
+          ],
+        ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
@@ -353,7 +515,7 @@ class _TabSectoresState extends State<_TabSectores>
       ),
     );
     if (ok == true) {
-      await widget.db.from('fn_sectores').delete().eq('id', sector['id']);
+      await widget.db.from('sectores').delete().eq('id', sector['id']);
       _cargar();
     }
   }
@@ -372,114 +534,216 @@ class _TabSectoresState extends State<_TabSectores>
         onPressed: _abrirFormulario,
       ),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator(color: const Color(0xFF008FFF)))
-          : _sectores.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.map_outlined,
-                          color: Colors.white24, size: 48),
-                      const SizedBox(height: 12),
-                      const Text('Sin sectores para esta sede',
-                          style: TextStyle(color: Colors.white38)),
-                      const SizedBox(height: 8),
-                      TextButton.icon(
-                        onPressed: _abrirFormulario,
-                        icon: const Icon(Icons.add, color: const Color(0xFF008FFF)),
-                        label: const Text('Crear primer sector',
-                            style: TextStyle(color: const Color(0xFF008FFF))),
-                      ),
-                    ],
-                  ),
-                )
-              : ListView.separated(
-                  padding:
-                      const EdgeInsets.fromLTRB(12, 12, 12, 100),
-                  itemCount: _sectores.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (ctx, i) {
-                    final s = _sectores[i];
-                    final activo = s['activo'] != false;
-                    return Container(
-                      decoration: BoxDecoration(
-                        color: activo
-                            ? const Color(0xFF1A1A1A)
-                            : const Color(0xFF111111),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                          color: activo
-                              ? const Color(0xFF008FFF).withValues(alpha: 0.4)
-                              : Colors.white12,
-                        ),
-                      ),
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor:
-                              activo ? const Color(0xFF0070CC) : Colors.grey[800],
-                          child: Icon(Icons.map,
-                              color: activo ? Colors.white : Colors.white38,
-                              size: 18),
-                        ),
-                        title: Text(
-                          s['nombre']?.toString() ?? '',
-                          style: TextStyle(
-                            color: activo ? Colors.white : Colors.white38,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
+          ? const Center(
+              child: CircularProgressIndicator(color: Color(0xFF008FFF)))
+          : Column(
+              children: [
+                // ── Filtro municipio ──────────────────────────────────────
+                Container(
+                  color: const Color(0xFF111111),
+                  height: 42,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 6),
+                    children: _municipios.map((m) {
+                      final sel = _filtroMun == m;
+                      return GestureDetector(
+                        onTap: () => setState(() => _filtroMun = m),
+                        child: Container(
+                          margin: const EdgeInsets.only(right: 8),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: sel
+                                ? const Color(0xFF008FFF)
+                                : const Color(0xFF1A1A1A),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                                color: sel
+                                    ? const Color(0xFF008FFF)
+                                    : Colors.white24),
                           ),
-                        ),
-                        subtitle: Row(
-                          children: [
-                            Text(
-                              activo ? 'Activo' : 'Inactivo',
+                          child: Text(m,
                               style: TextStyle(
-                                color: activo ? const Color(0xFF008FFF) : Colors.red,
-                                fontSize: 11,
-                              ),
-                            ),
-                            if (s['municipio'] != null) ...[
-                              const SizedBox(width: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF008FFF).withValues(alpha: 0.15),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: const Color(0xFF008FFF).withValues(alpha: 0.4)),
-                                ),
-                                child: Text(
-                                  s['municipio'].toString(),
-                                  style: const TextStyle(color: Color(0xFF008FFF), fontSize: 10),
-                                ),
-                              ),
-                            ],
-                          ],
+                                color: sel ? Colors.white : Colors.white54,
+                                fontSize: 12,
+                                fontWeight: sel
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
+                              )),
                         ),
-                        trailing: Row(
+                      );
+                    }).toList(),
+                  ),
+                ),
+                // ── Lista ─────────────────────────────────────────────────
+                Expanded(
+                  child: Builder(builder: (ctx) {
+                    final filtrados = _sectores
+                        .where((s) =>
+                            s['municipio']?.toString() == _filtroMun)
+                        .toList();
+                    if (filtrados.isEmpty) {
+                      return Center(
+                        child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            IconButton(
-                              icon: const Icon(Icons.edit_outlined,
-                                  color: const Color(0xFF008FFF), size: 20),
-                              onPressed: () => _abrirFormulario(sector: s),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.delete_outline,
-                                  color: Colors.red, size: 20),
-                              onPressed: () => _eliminar(s),
+                            const Icon(Icons.map_outlined,
+                                color: Colors.white24, size: 48),
+                            const SizedBox(height: 12),
+                            Text('Sin sectores en $_filtroMun',
+                                style: const TextStyle(color: Colors.white38)),
+                            const SizedBox(height: 8),
+                            TextButton.icon(
+                              onPressed: _abrirFormulario,
+                              icon: const Icon(Icons.add,
+                                  color: Color(0xFF008FFF)),
+                              label: const Text('Crear primer sector',
+                                  style:
+                                      TextStyle(color: Color(0xFF008FFF))),
                             ),
                           ],
                         ),
-                      ),
+                      );
+                    }
+                    return ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 100),
+                      itemCount: filtrados.length,
+                      separatorBuilder: (_, __) =>
+                          const SizedBox(height: 8),
+                      itemBuilder: (ctx, i) {
+                        final s = filtrados[i];
+                        final sId = s['id'] as int;
+                        final activo = s['activo'] != false;
+                        final precio = _tarifas[sId];
+                        return Container(
+                          decoration: BoxDecoration(
+                            color: activo
+                                ? const Color(0xFF1A1A1A)
+                                : const Color(0xFF111111),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: activo
+                                  ? const Color(0xFF008FFF)
+                                      .withValues(alpha: 0.4)
+                                  : Colors.white12,
+                            ),
+                          ),
+                          child: ListTile(
+                            leading: CircleAvatar(
+                              backgroundColor: activo
+                                  ? const Color(0xFF0070CC)
+                                  : Colors.grey[800],
+                              child: Icon(Icons.map,
+                                  color: activo
+                                      ? Colors.white
+                                      : Colors.white38,
+                                  size: 18),
+                            ),
+                            title: Text(
+                              s['nombre']?.toString() ?? '',
+                              style: TextStyle(
+                                color:
+                                    activo ? Colors.white : Colors.white38,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                              ),
+                            ),
+                            subtitle: Row(
+                              children: [
+                                Text(
+                                  activo ? 'Activo' : 'Inactivo',
+                                  style: TextStyle(
+                                    color: activo
+                                        ? const Color(0xFF008FFF)
+                                        : Colors.red,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                // Badge de precio (tap para editar)
+                                GestureDetector(
+                                  onTap: () => _editarPrecio(s),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 7, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: precio != null
+                                          ? Colors.green
+                                              .withValues(alpha: 0.2)
+                                          : Colors.orange
+                                              .withValues(alpha: 0.15),
+                                      borderRadius:
+                                          BorderRadius.circular(8),
+                                      border: Border.all(
+                                          color: precio != null
+                                              ? Colors.green
+                                                  .withValues(alpha: 0.6)
+                                              : Colors.orange
+                                                  .withValues(alpha: 0.5)),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          precio != null
+                                              ? Icons.attach_money
+                                              : Icons.add,
+                                          size: 11,
+                                          color: precio != null
+                                              ? Colors.greenAccent
+                                              : Colors.orange,
+                                        ),
+                                        Text(
+                                          precio != null
+                                              ? '\$${_miles(precio)}'
+                                              : 'Asignar tarifa',
+                                          style: TextStyle(
+                                            color: precio != null
+                                                ? Colors.greenAccent
+                                                : Colors.orange,
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.edit_outlined,
+                                      color: Color(0xFF008FFF), size: 20),
+                                  onPressed: () =>
+                                      _abrirFormulario(sector: s),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.delete_outline,
+                                      color: Colors.red, size: 20),
+                                  onPressed: () => _eliminar(s),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
                     );
-                  },
+                  }),
                 ),
+              ],
+            ),
     );
   }
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// TAB 2 — DIRECCIONES
+// TAB 2 — DIRECCIONES (catálogo global + precio por sede)
+// red_dir_catalogo (global) + fn_precios_dir (precio por sede)
 // ═════════════════════════════════════════════════════════════════════════════
 
 class _TabDirecciones extends StatefulWidget {
@@ -493,12 +757,13 @@ class _TabDirecciones extends StatefulWidget {
 
 class _TabDireccionesState extends State<_TabDirecciones>
     with AutomaticKeepAliveClientMixin {
-  List<Map<String, dynamic>> _direcciones = [];
+  List<Map<String, dynamic>> _dirs = [];
+  Map<int, int> _precios = {}; // dir_id → precio para esta sede
   List<Map<String, dynamic>> _sectores = [];
   bool _cargando = true;
+  String _filtroMun = 'Cúcuta';
 
-  // Filtro por sector
-  int? _filtroSectorId;
+  static const _municipios = ['Cúcuta', 'Los Patios', 'V. Rosario'];
 
   @override
   bool get wantKeepAlive => true;
@@ -513,7 +778,7 @@ class _TabDireccionesState extends State<_TabDirecciones>
   void didUpdateWidget(_TabDirecciones old) {
     super.didUpdateWidget(old);
     if (old.sede['id'] != widget.sede['id']) {
-      _filtroSectorId = null;
+      _filtroMun = 'Cúcuta';
       _cargar();
     }
   }
@@ -522,18 +787,29 @@ class _TabDireccionesState extends State<_TabDirecciones>
     setState(() => _cargando = true);
     try {
       final dirs = await widget.db
-          .from('fn_red_direcciones')
-          .select('id, nombre, direccion, precio, activo, sector_id, fn_sectores(nombre)')
-          .eq('sede_id', widget.sede['id'])
+          .from('red_dir_catalogo')
+          .select(
+              'id, nombre, alias, direccion, municipio, sector_id, activo, lat, lng')
+          .order('municipio')
           .order('nombre');
+      final precios = await widget.db
+          .from('fn_precios_dir')
+          .select('dir_id, precio')
+          .eq('sede_id', widget.sede['id']);
       final secs = await widget.db
-          .from('fn_sectores')
-          .select('id, nombre')
+          .from('sectores')
+          .select('id, nombre, municipio')
           .eq('activo', true)
+          .order('municipio')
           .order('nombre');
       if (mounted) {
+        final precioMap = <int, int>{};
+        for (final p in List<Map<String, dynamic>>.from(precios)) {
+          precioMap[p['dir_id'] as int] = (p['precio'] as num).toInt();
+        }
         setState(() {
-          _direcciones = List<Map<String, dynamic>>.from(dirs);
+          _dirs = List<Map<String, dynamic>>.from(dirs);
+          _precios = precioMap;
           _sectores = List<Map<String, dynamic>>.from(secs);
           _cargando = false;
         });
@@ -553,682 +829,253 @@ class _TabDireccionesState extends State<_TabDirecciones>
     return buf.toString();
   }
 
+  static (double?, double?) _parsearUrlMaps(String url) {
+    var m = RegExp(r'@(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)').firstMatch(url);
+    if (m != null)
+      return (double.tryParse(m.group(1)!), double.tryParse(m.group(2)!));
+    m = RegExp(r'[?&]q=(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)').firstMatch(url);
+    if (m != null)
+      return (double.tryParse(m.group(1)!), double.tryParse(m.group(2)!));
+    m = RegExp(r'll=(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)').firstMatch(url);
+    if (m != null)
+      return (double.tryParse(m.group(1)!), double.tryParse(m.group(2)!));
+    m = RegExp(r'(-?\d{1,3}\.\d{4,}),(-?\d{1,3}\.\d{4,})').firstMatch(url);
+    if (m != null)
+      return (double.tryParse(m.group(1)!), double.tryParse(m.group(2)!));
+    return (null, null);
+  }
+
   Future<void> _abrirFormulario({Map<String, dynamic>? dir}) async {
-    final sedeId = widget.sede['id'];
     final nombreCtrl =
         TextEditingController(text: dir?['nombre']?.toString() ?? '');
+    final aliasCtrl =
+        TextEditingController(text: dir?['alias']?.toString() ?? '');
     final direccionCtrl =
         TextEditingController(text: dir?['direccion']?.toString() ?? '');
+    final dId = dir?['id'] as int?;
     final precioCtrl = TextEditingController(
-      text: dir != null ? (dir['precio'] as num).toInt().toString() : '',
+      text: dId != null && _precios.containsKey(dId)
+          ? _precios[dId].toString()
+          : '',
     );
+    final gpsCtrl = TextEditingController();
+    String? municipio = dir?['municipio']?.toString() ?? _filtroMun;
     int? sectorId = dir?['sector_id'] as int?;
     bool activo = dir?['activo'] != false;
     double? gpsLat = (dir?['lat'] as num?)?.toDouble();
     double? gpsLng = (dir?['lng'] as num?)?.toDouble();
-    final gpsCtrl = TextEditingController();
-
-    final guardado = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setD) => AlertDialog(
-          backgroundColor: const Color(0xFF1A1A1A),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          title: Text(
-            dir == null ? '➕ Nueva dirección' : '✏️ Editar dirección',
-            style: const TextStyle(
-                color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
-          ),
-          content: SingleChildScrollView(
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              // Nombre/alias
-              TextField(
-                controller: nombreCtrl,
-                style: const TextStyle(color: Colors.white),
-                textCapitalization: TextCapitalization.words,
-                decoration: const InputDecoration(
-                  labelText: 'Nombre / alias',
-                  labelStyle: TextStyle(color: Colors.white54),
-                  hintText: 'Ej: Clínica Norte',
-                  hintStyle: TextStyle(color: Colors.white24),
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-              ),
-              const SizedBox(height: 10),
-              // Sector
-              DropdownButtonFormField<int?>(
-                value: sectorId,
-                dropdownColor: const Color(0xFF1A1A1A),
-                style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
-                  labelText: 'Sector',
-                  labelStyle: TextStyle(color: Colors.white54),
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-                items: [
-                  const DropdownMenuItem<int?>(
-                      value: null,
-                      child: Text('Sin sector',
-                          style: TextStyle(color: Colors.white54))),
-                  ..._sectores.map((s) => DropdownMenuItem<int?>(
-                        value: s['id'] as int,
-                        child: Text(s['nombre'].toString(),
-                            style: const TextStyle(color: Colors.white)),
-                      )),
-                ],
-                onChanged: (v) => setD(() => sectorId = v),
-              ),
-              const SizedBox(height: 10),
-              // Dirección
-              TextField(
-                controller: direccionCtrl,
-                style: const TextStyle(color: Colors.white),
-                maxLines: 2,
-                textCapitalization: TextCapitalization.characters,
-                decoration: const InputDecoration(
-                  labelText: 'Dirección completa',
-                  labelStyle: TextStyle(color: Colors.white54),
-                  hintText: 'Ej: Calle 10 # 5-20, Barrio X',
-                  hintStyle: TextStyle(color: Colors.white24),
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-              ),
-              const SizedBox(height: 10),
-              // Precio
-              TextField(
-                controller: precioCtrl,
-                style: const TextStyle(color: Colors.white),
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'Precio sugerido (\$)',
-                  labelStyle: TextStyle(color: Colors.white54),
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                  prefixText: '\$ ',
-                  prefixStyle: TextStyle(color: Colors.white70),
-                ),
-              ),
-              const SizedBox(height: 10),
-              // GPS link
-              TextField(
-                controller: gpsCtrl,
-                style: const TextStyle(color: Colors.white, fontSize: 13),
-                decoration: InputDecoration(
-                  labelText: 'Link GPS (opcional)',
-                  labelStyle: const TextStyle(color: Colors.white54, fontSize: 13),
-                  hintText: 'Pega un link de Google Maps',
-                  hintStyle: const TextStyle(color: Colors.white24, fontSize: 12),
-                  border: const OutlineInputBorder(),
-                  isDense: true,
-                  suffixIcon: gpsLat != null
-                      ? const Icon(Icons.gps_fixed, color: const Color(0xFF008FFF), size: 18)
-                      : const Icon(Icons.gps_not_fixed, color: Colors.white38, size: 18),
-                ),
-                onChanged: (v) {
-                  if (v.trim().isEmpty) {
-                    setD(() { gpsLat = null; gpsLng = null; });
-                    return;
-                  }
-                  final (lat, lng) = _parsearUrlMaps(v.trim());
-                  setD(() { gpsLat = lat; gpsLng = lng; });
-                },
-              ),
-              if (gpsLat != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Row(children: [
-                    const Icon(Icons.check_circle, color: const Color(0xFF008FFF), size: 13),
-                    const SizedBox(width: 4),
-                    Text(
-                      'GPS detectado: ${gpsLat!.toStringAsFixed(5)}, ${gpsLng!.toStringAsFixed(5)}',
-                      style: const TextStyle(color: const Color(0xFF008FFF), fontSize: 11),
-                    ),
-                  ]),
-                )
-              else if (gpsCtrl.text.trim().isNotEmpty)
-                const Padding(
-                  padding: EdgeInsets.only(top: 4),
-                  child: Row(children: [
-                    Icon(Icons.warning_amber, color: Colors.orange, size: 13),
-                    SizedBox(width: 4),
-                    Text('No se pudo leer el GPS',
-                        style: TextStyle(color: Colors.orange, fontSize: 11)),
-                  ]),
-                ),
-              if (dir != null) ...[
-                const SizedBox(height: 10),
-                SwitchListTile(
-                  value: activo,
-                  onChanged: (v) => setD(() => activo = v),
-                  title: const Text('Activa',
-                      style: TextStyle(color: Colors.white, fontSize: 13)),
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                ),
-              ],
-            ]),
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('CANCELAR',
-                    style: TextStyle(color: Colors.white54))),
-            ElevatedButton(
-              style:
-                  ElevatedButton.styleFrom(backgroundColor: const Color(0xFF008FFF)),
-              onPressed: () async {
-                final nombre = nombreCtrl.text.trim();
-                final direccion = direccionCtrl.text.trim();
-                final precio = int.tryParse(precioCtrl.text.trim());
-                if (nombre.isEmpty ||
-                    direccion.isEmpty ||
-                    precio == null ||
-                    precio <= 0) {
-                  ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
-                      content: Text('Completa todos los campos')));
-                  return;
-                }
-                if (dir == null) {
-                  await widget.db.from('fn_red_direcciones').insert({
-                    'sede_id': sedeId,
-                    'nombre': nombre,
-                    'direccion': direccion.toUpperCase(),
-                    'precio': precio,
-                    'activo': true,
-                    'sector_id': sectorId,
-                    if (gpsLat != null) 'lat': gpsLat,
-                    if (gpsLng != null) 'lng': gpsLng,
-                  });
-                } else {
-                  await widget.db.from('fn_red_direcciones').update({
-                    'nombre': nombre,
-                    'direccion': direccion.toUpperCase(),
-                    'precio': precio,
-                    'activo': activo,
-                    'sector_id': sectorId,
-                    'lat': gpsLat,
-                    'lng': gpsLng,
-                  }).eq('id', dir['id']);
-                }
-                if (ctx.mounted) Navigator.pop(ctx, true);
-              },
-              child: const Text('GUARDAR',
-                  style: TextStyle(
-                      color: Colors.white, fontWeight: FontWeight.bold)),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (guardado == true) _cargar();
-  }
-
-  static (double?, double?) _parsearUrlMaps(String url) {
-    var m = RegExp(r'@(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)').firstMatch(url);
-    if (m != null) return (double.tryParse(m.group(1)!), double.tryParse(m.group(2)!));
-    m = RegExp(r'[?&]q=(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)').firstMatch(url);
-    if (m != null) return (double.tryParse(m.group(1)!), double.tryParse(m.group(2)!));
-    m = RegExp(r'll=(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)').firstMatch(url);
-    if (m != null) return (double.tryParse(m.group(1)!), double.tryParse(m.group(2)!));
-    m = RegExp(r'(-?\d{1,3}\.\d{4,}),(-?\d{1,3}\.\d{4,})').firstMatch(url);
-    if (m != null) return (double.tryParse(m.group(1)!), double.tryParse(m.group(2)!));
-    return (null, null);
-  }
-
-  Future<void> _eliminar(Map<String, dynamic> dir) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1A1A),
-        title: const Text('¿Eliminar dirección?',
-            style: TextStyle(color: Colors.white)),
-        content: Text('${dir['nombre']} — ${dir['direccion']}',
-            style: const TextStyle(color: Colors.white70)),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('NO', style: TextStyle(color: Colors.white54))),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('ELIMINAR',
-                style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
-    if (ok == true) {
-      await widget.db.from('fn_red_direcciones').delete().eq('id', dir['id']);
-      _cargar();
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    super.build(context);
-
-    // Filtrar por sector seleccionado
-    final filtradas = _filtroSectorId == null
-        ? _direcciones
-        : _direcciones
-            .where((d) => d['sector_id'] == _filtroSectorId)
-            .toList();
-
-    return Scaffold(
-      backgroundColor: const Color(0xFF0A0A0A),
-      floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: const Color(0xFF008FFF),
-        icon: const Icon(Icons.add_location_alt, color: Colors.white),
-        label: const Text('Agregar',
-            style:
-                TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        onPressed: _abrirFormulario,
-      ),
-      body: Column(
-        children: [
-          // ── Filtro por sector ─────────────────────────────────────────
-          if (_sectores.isNotEmpty)
-            Container(
-              color: const Color(0xFF111111),
-              height: 42,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                children: [
-                  _chipFiltro('Todos', _filtroSectorId == null,
-                      () => setState(() => _filtroSectorId = null)),
-                  ..._sectores.map((s) => _chipFiltro(
-                        s['nombre'].toString(),
-                        _filtroSectorId == s['id'],
-                        () => setState(
-                            () => _filtroSectorId = s['id'] as int),
-                      )),
-                ],
-              ),
-            ),
-          // ── Lista ─────────────────────────────────────────────────────
-          Expanded(
-            child: _cargando
-                ? const Center(
-                    child: CircularProgressIndicator(color: const Color(0xFF008FFF)))
-                : filtradas.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.location_off,
-                                color: Colors.white24, size: 48),
-                            const SizedBox(height: 12),
-                            const Text('Sin direcciones',
-                                style: TextStyle(color: Colors.white38)),
-                            const SizedBox(height: 8),
-                            TextButton.icon(
-                              onPressed: _abrirFormulario,
-                              icon: const Icon(Icons.add, color: const Color(0xFF008FFF)),
-                              label: const Text('Agregar primera dirección',
-                                  style: TextStyle(color: const Color(0xFF008FFF))),
-                            ),
-                          ],
-                        ),
-                      )
-                    : ListView.separated(
-                        padding: const EdgeInsets.fromLTRB(12, 12, 12, 100),
-                        itemCount: filtradas.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 8),
-                        itemBuilder: (ctx, i) {
-                          final dir = filtradas[i];
-                          final activo = dir['activo'] != false;
-                          final sectorNombre =
-                              (dir['fn_sectores'] as Map?)?['nombre']
-                                  ?.toString();
-                          return Container(
-                            decoration: BoxDecoration(
-                              color: activo
-                                  ? const Color(0xFF1A1A1A)
-                                  : const Color(0xFF111111),
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(
-                                color: activo
-                                    ? const Color(0xFF008FFF).withValues(alpha: 0.4)
-                                    : Colors.white12,
-                              ),
-                            ),
-                            child: ListTile(
-                              leading: CircleAvatar(
-                                backgroundColor: activo
-                                    ? const Color(0xFF0070CC)
-                                    : Colors.grey[800],
-                                child: Icon(Icons.location_on,
-                                    color: activo ? Colors.white : Colors.white38,
-                                    size: 18),
-                              ),
-                              title: Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      dir['nombre']?.toString() ?? '',
-                                      style: TextStyle(
-                                        color: activo
-                                            ? Colors.white
-                                            : Colors.white38,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 13,
-                                      ),
-                                    ),
-                                  ),
-                                  if (sectorNombre != null)
-                                    Container(
-                                      margin: const EdgeInsets.only(left: 6),
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 6, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFF008FFF).withValues(alpha: 0.2),
-                                        borderRadius:
-                                            BorderRadius.circular(10),
-                                        border: Border.all(
-                                            color: const Color(0xFF008FFF).withValues(alpha: 0.5)),
-                                      ),
-                                      child: Text(
-                                        sectorNombre,
-                                        style: const TextStyle(
-                                            color: const Color(0xFF008FFF),
-                                            fontSize: 10),
-                                      ),
-                                    ),
-                                ],
-                              ),
-                              subtitle: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    dir['direccion']?.toString() ?? '',
-                                    style: TextStyle(
-                                        color: activo
-                                            ? Colors.white60
-                                            : Colors.white24,
-                                        fontSize: 12),
-                                  ),
-                                  Row(children: [
-                                    Icon(Icons.attach_money,
-                                        size: 13,
-                                        color: activo
-                                            ? Colors.greenAccent
-                                            : Colors.white24),
-                                    Text(
-                                      '\$${_miles((dir['precio'] as num).toInt())}',
-                                      style: TextStyle(
-                                        color: activo
-                                            ? Colors.greenAccent
-                                            : Colors.white24,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                    if (!activo) ...[
-                                      const SizedBox(width: 8),
-                                      const Text('INACTIVA',
-                                          style: TextStyle(
-                                              color: Colors.red,
-                                              fontSize: 10,
-                                              fontWeight: FontWeight.bold)),
-                                    ],
-                                  ]),
-                                ],
-                              ),
-                              trailing: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  IconButton(
-                                    icon: const Icon(Icons.edit_outlined,
-                                        color: const Color(0xFF008FFF), size: 20),
-                                    onPressed: () =>
-                                        _abrirFormulario(dir: dir),
-                                  ),
-                                  IconButton(
-                                    icon: const Icon(Icons.delete_outline,
-                                        color: Colors.red, size: 20),
-                                    onPressed: () => _eliminar(dir),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _chipFiltro(String label, bool selected, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        margin: const EdgeInsets.only(right: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-        decoration: BoxDecoration(
-          color:
-              selected ? const Color(0xFF008FFF) : const Color(0xFF1A1A1A),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-              color: selected ? const Color(0xFF008FFF) : Colors.white24),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: selected ? Colors.white : Colors.white54,
-            fontSize: 12,
-            fontWeight:
-                selected ? FontWeight.bold : FontWeight.normal,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// TAB 3 — TARIFAS POR SECTOR
-// ═════════════════════════════════════════════════════════════════════════════
-
-class _TabTarifas extends StatefulWidget {
-  final Map<String, dynamic> sede;
-  final SupabaseClient db;
-  const _TabTarifas({required this.sede, required this.db});
-
-  @override
-  State<_TabTarifas> createState() => _TabTarifasState();
-}
-
-class _TabTarifasState extends State<_TabTarifas> {
-  List<Map<String, dynamic>> _tarifas = [];
-  List<Map<String, dynamic>> _sectores = [];
-  bool _cargando = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _cargar();
-  }
-
-  @override
-  void didUpdateWidget(_TabTarifas old) {
-    super.didUpdateWidget(old);
-    if (old.sede['id'] != widget.sede['id']) _cargar();
-  }
-
-  Future<void> _cargar() async {
-    setState(() => _cargando = true);
-    try {
-      final tarifas = await widget.db
-          .from('fn_tarifas_sede')
-          .select('id, precio, sector_id, fn_sectores(nombre)')
-          .eq('sede_id', widget.sede['id'])
-          .order('precio', ascending: true);
-      final sectores = await widget.db
-          .from('fn_sectores')
-          .select('id, nombre, municipio')
-          .eq('activo', true)
-          .order('nombre');
-      if (mounted) {
-        setState(() {
-          _tarifas = List<Map<String, dynamic>>.from(tarifas);
-          _sectores = List<Map<String, dynamic>>.from(sectores);
-          _cargando = false;
-        });
-      }
-    } catch (_) {
-      if (mounted) setState(() => _cargando = false);
-    }
-  }
-
-  String _miles(int v) {
-    final s = v.toString();
-    final buf = StringBuffer();
-    for (int i = 0; i < s.length; i++) {
-      if (i > 0 && (s.length - i) % 3 == 0) buf.write('.');
-      buf.write(s[i]);
-    }
-    return buf.toString();
-  }
-
-  static const _municipios = ['Cúcuta', 'Los Patios', 'Villa del Rosario'];
-
-  Future<void> _abrirFormulario({Map<String, dynamic>? tarifa}) async {
-    // Sectores ya configurados (excluir al agregar nuevo)
-    final yaConfigurados = _tarifas
-        .where((t) => t['id'] != tarifa?['id'])
-        .map((t) => t['sector_id'] as int?)
-        .toSet();
-
-    final disponibles = tarifa != null
-        ? _sectores
-        : _sectores.where((s) => !yaConfigurados.contains(s['id'])).toList();
-
-    if (disponibles.isEmpty && tarifa == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Todos los sectores ya tienen tarifa configurada.'),
-        backgroundColor: Colors.orange,
-      ));
-      return;
-    }
-
-    // Al editar: pre-cargar municipio del sector actual
-    int? sectorId = tarifa?['sector_id'] as int?;
-    String? municipioSel = sectorId != null
-        ? (_sectores.firstWhere(
-            (s) => s['id'] == sectorId,
-            orElse: () => {},
-          )['municipio'] as String?)
-        : null;
-
-    final precioCtrl = TextEditingController(
-        text: tarifa != null ? '${tarifa['precio']}' : '');
 
     final guardado = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setD) {
-          // Sectores del municipio seleccionado (o todos si no hay municipio)
-          final sectoresFiltrados = municipioSel == null
-              ? disponibles
-              : disponibles
-                  .where((s) => s['municipio'] == municipioSel)
-                  .toList();
-
-          // Si el sector seleccionado no pertenece al nuevo municipio, limpiar
-          final sectorValido = sectoresFiltrados.any((s) => s['id'] == sectorId);
+          final sectoresFiltrados = municipio == null
+              ? _sectores
+              : _sectores.where((s) => s['municipio'] == municipio).toList();
+          final sectorValido =
+              sectoresFiltrados.any((s) => s['id'] == sectorId);
 
           return AlertDialog(
             backgroundColor: const Color(0xFF1A1A1A),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12)),
             title: Text(
-              tarifa == null ? '➕ Nueva tarifa' : '✏️ Editar tarifa',
+              dir == null ? '➕ Nueva dirección' : '✏️ Editar dirección',
               style: const TextStyle(
-                  color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15),
             ),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // ── Municipio ──
-                DropdownButtonFormField<String?>(
-                  value: municipioSel,
-                  dropdownColor: const Color(0xFF1A1A1A),
-                  style: const TextStyle(color: Colors.white),
-                  decoration: const InputDecoration(
-                    labelText: 'Municipio',
-                    labelStyle: TextStyle(color: Colors.white54),
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                  items: [
-                    const DropdownMenuItem<String?>(
-                      value: null,
-                      child: Text('Selecciona municipio',
-                          style: TextStyle(color: Colors.white54)),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // 1. Nombre / alias
+                  TextField(
+                    controller: nombreCtrl,
+                    style: const TextStyle(color: Colors.white),
+                    textCapitalization: TextCapitalization.words,
+                    decoration: const InputDecoration(
+                      labelText: 'Nombre / alias',
+                      labelStyle: TextStyle(color: Colors.white54),
+                      hintText: 'Ej: Clínica Norte, Tennis Park',
+                      hintStyle: TextStyle(color: Colors.white24),
+                      border: OutlineInputBorder(),
+                      isDense: true,
                     ),
-                    ..._municipios.map((m) => DropdownMenuItem<String?>(
-                          value: m,
-                          child: Text(m,
-                              style: const TextStyle(color: Colors.white)),
-                        )),
-                  ],
-                  onChanged: tarifa == null
-                      ? (v) => setD(() {
-                            municipioSel = v;
-                            sectorId = null; // reset sector al cambiar municipio
-                          })
-                      : null,
-                ),
-                const SizedBox(height: 12),
-                // ── Sector (filtrado por municipio) ──
-                DropdownButtonFormField<int>(
-                  value: sectorValido ? sectorId : null,
-                  dropdownColor: const Color(0xFF1A1A1A),
-                  style: const TextStyle(color: Colors.white),
-                  decoration: InputDecoration(
-                    labelText: 'Sector',
-                    labelStyle: const TextStyle(color: Colors.white54),
-                    border: const OutlineInputBorder(),
-                    isDense: true,
-                    hintText: municipioSel == null
-                        ? 'Selecciona municipio primero'
-                        : sectoresFiltrados.isEmpty
-                            ? 'Sin sectores en este municipio'
-                            : null,
-                    hintStyle: const TextStyle(color: Colors.white38, fontSize: 12),
                   ),
-                  items: sectoresFiltrados
-                      .map((s) => DropdownMenuItem<int>(
+                  const SizedBox(height: 10),
+                  // 2. Municipio
+                  DropdownButtonFormField<String?>(
+                    value: municipio,
+                    dropdownColor: const Color(0xFF1A1A1A),
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                      labelText: 'Municipio',
+                      labelStyle: TextStyle(color: Colors.white54),
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    items: [
+                      const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('Sin definir',
+                            style: TextStyle(color: Colors.white54)),
+                      ),
+                      ..._municipios.map((m) => DropdownMenuItem<String?>(
+                            value: m,
+                            child: Text(m,
+                                style:
+                                    const TextStyle(color: Colors.white)),
+                          )),
+                    ],
+                    onChanged: (v) => setD(() {
+                      municipio = v;
+                      sectorId = null;
+                    }),
+                  ),
+                  const SizedBox(height: 10),
+                  // 3. Sector (opcional)
+                  DropdownButtonFormField<int?>(
+                    value: sectorValido ? sectorId : null,
+                    dropdownColor: const Color(0xFF1A1A1A),
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      labelText: 'Sector (opcional)',
+                      labelStyle: const TextStyle(color: Colors.white54),
+                      border: const OutlineInputBorder(),
+                      isDense: true,
+                      hintText: sectoresFiltrados.isEmpty
+                          ? 'Sin sectores en este municipio'
+                          : null,
+                      hintStyle: const TextStyle(
+                          color: Colors.white38, fontSize: 12),
+                    ),
+                    items: [
+                      const DropdownMenuItem<int?>(
+                        value: null,
+                        child: Text('Sin sector',
+                            style: TextStyle(color: Colors.white54)),
+                      ),
+                      ...sectoresFiltrados.map((s) => DropdownMenuItem<int?>(
                             value: s['id'] as int,
                             child: Text(s['nombre'].toString(),
-                                style: const TextStyle(color: Colors.white)),
-                          ))
-                      .toList(),
-                  onChanged: (tarifa == null && municipioSel != null)
-                      ? (v) => setD(() => sectorId = v)
-                      : null,
-                ),
-                const SizedBox(height: 12),
-                // ── Precio ──
-                TextField(
-                  controller: precioCtrl,
-                  style: const TextStyle(color: Colors.white),
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Tarifa (\$)',
-                    labelStyle: TextStyle(color: Colors.white54),
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                    prefixText: '\$ ',
-                    prefixStyle: TextStyle(color: Colors.white70),
+                                style:
+                                    const TextStyle(color: Colors.white)),
+                          )),
+                    ],
+                    onChanged: (v) => setD(() => sectorId = v),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 10),
+                  // 4. Dirección completa
+                  TextField(
+                    controller: direccionCtrl,
+                    style: const TextStyle(color: Colors.white),
+                    maxLines: 2,
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: const InputDecoration(
+                      labelText: 'Dirección completa',
+                      labelStyle: TextStyle(color: Colors.white54),
+                      hintText: 'Ej: Calle 10 # 5-20, Barrio X',
+                      hintStyle: TextStyle(color: Colors.white24),
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  // 5. Precio para esta sede
+                  TextField(
+                    controller: precioCtrl,
+                    style: const TextStyle(color: Colors.white),
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Precio sugerido para esta sede (\$)',
+                      labelStyle: TextStyle(color: Colors.white54),
+                      hintText: 'Sin precio → no aparece en autocomplete',
+                      hintStyle:
+                          TextStyle(color: Colors.white24, fontSize: 11),
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                      prefixText: '\$ ',
+                      prefixStyle: TextStyle(color: Colors.white70),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  // 6. GPS link (opcional)
+                  TextField(
+                    controller: gpsCtrl,
+                    style:
+                        const TextStyle(color: Colors.white, fontSize: 13),
+                    decoration: InputDecoration(
+                      labelText: 'Link GPS (opcional)',
+                      labelStyle: const TextStyle(
+                          color: Colors.white54, fontSize: 13),
+                      hintText: 'Pega un link de Google Maps',
+                      hintStyle: const TextStyle(
+                          color: Colors.white24, fontSize: 12),
+                      border: const OutlineInputBorder(),
+                      isDense: true,
+                      suffixIcon: gpsLat != null
+                          ? const Icon(Icons.gps_fixed,
+                              color: Color(0xFF008FFF), size: 18)
+                          : const Icon(Icons.gps_not_fixed,
+                              color: Colors.white38, size: 18),
+                    ),
+                    onChanged: (v) {
+                      if (v.trim().isEmpty) {
+                        setD(() {
+                          gpsLat = null;
+                          gpsLng = null;
+                        });
+                        return;
+                      }
+                      final (lat, lng) = _parsearUrlMaps(v.trim());
+                      setD(() {
+                        gpsLat = lat;
+                        gpsLng = lng;
+                      });
+                    },
+                  ),
+                  if (gpsLat != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Row(children: [
+                        const Icon(Icons.check_circle,
+                            color: Color(0xFF008FFF), size: 13),
+                        const SizedBox(width: 4),
+                        Text(
+                          'GPS: ${gpsLat!.toStringAsFixed(5)}, ${gpsLng!.toStringAsFixed(5)}',
+                          style: const TextStyle(
+                              color: Color(0xFF008FFF), fontSize: 11),
+                        ),
+                      ]),
+                    )
+                  else if (gpsCtrl.text.trim().isNotEmpty)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 4),
+                      child: Row(children: [
+                        Icon(Icons.warning_amber,
+                            color: Colors.orange, size: 13),
+                        SizedBox(width: 4),
+                        Text('No se pudo leer el GPS',
+                            style: TextStyle(
+                                color: Colors.orange, fontSize: 11)),
+                      ]),
+                    ),
+                  if (dir != null) ...[
+                    const SizedBox(height: 10),
+                    SwitchListTile(
+                      value: activo,
+                      onChanged: (v) => setD(() => activo = v),
+                      title: const Text('Activa',
+                          style: TextStyle(
+                              color: Colors.white, fontSize: 13)),
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ],
+                ],
+              ),
             ),
             actions: [
               TextButton(
@@ -1237,24 +1084,64 @@ class _TabTarifasState extends State<_TabTarifas> {
                       style: TextStyle(color: Colors.white54))),
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.indigo[700]),
+                    backgroundColor: const Color(0xFF008FFF)),
                 onPressed: () async {
-                  final precio = int.tryParse(precioCtrl.text.trim());
-                  if (sectorId == null || precio == null || precio <= 0) {
+                  final nombre = nombreCtrl.text.trim();
+                  final direccion = direccionCtrl.text.trim();
+                  if (nombre.isEmpty || direccion.isEmpty) {
                     ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
-                        content: Text('Selecciona municipio, sector e ingresa precio')));
+                        content:
+                            Text('Nombre y dirección son obligatorios')));
                     return;
                   }
-                  if (tarifa == null) {
-                    await widget.db.from('fn_tarifas_sede').insert({
-                      'sede_id': widget.sede['id'],
+                  int newDirId;
+                  if (dir == null) {
+                    final res = await widget.db
+                        .from('red_dir_catalogo')
+                        .insert({
+                          'nombre': nombre,
+                          if (aliasCtrl.text.trim().isNotEmpty)
+                            'alias': aliasCtrl.text.trim(),
+                          'direccion': direccion.toUpperCase(),
+                          if (municipio != null) 'municipio': municipio,
+                          'sector_id': sectorId,
+                          'activo': true,
+                          if (gpsLat != null) 'lat': gpsLat,
+                          if (gpsLng != null) 'lng': gpsLng,
+                        })
+                        .select('id')
+                        .single();
+                    newDirId = res['id'] as int;
+                  } else {
+                    await widget.db.from('red_dir_catalogo').update({
+                      'nombre': nombre,
+                      'alias': aliasCtrl.text.trim().isEmpty
+                          ? null
+                          : aliasCtrl.text.trim(),
+                      'direccion': direccion.toUpperCase(),
+                      'municipio': municipio,
                       'sector_id': sectorId,
+                      'activo': activo,
+                      'lat': gpsLat,
+                      'lng': gpsLng,
+                    }).eq('id', dir['id']);
+                    newDirId = dir['id'] as int;
+                  }
+                  // Guardar precio para esta sede
+                  final precio = int.tryParse(precioCtrl.text.trim());
+                  if (precio != null && precio > 0) {
+                    // PK en fn_precios_dir es (sede_id, dir_id) →
+                    // borrar y reinsertar es seguro
+                    await widget.db
+                        .from('fn_precios_dir')
+                        .delete()
+                        .eq('sede_id', widget.sede['id'])
+                        .eq('dir_id', newDirId);
+                    await widget.db.from('fn_precios_dir').insert({
+                      'sede_id': widget.sede['id'],
+                      'dir_id': newDirId,
                       'precio': precio,
                     });
-                  } else {
-                    await widget.db.from('fn_tarifas_sede').update({
-                      'precio': precio,
-                    }).eq('id', tarifa['id']);
                   }
                   if (ctx.mounted) Navigator.pop(ctx, true);
                 },
@@ -1270,16 +1157,30 @@ class _TabTarifasState extends State<_TabTarifas> {
     if (guardado == true) _cargar();
   }
 
-  Future<void> _eliminar(Map<String, dynamic> tarifa) async {
+  Future<void> _eliminar(Map<String, dynamic> dir) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1A1A1A),
-        title: const Text('¿Eliminar tarifa?',
+        title: const Text('¿Eliminar dirección?',
             style: TextStyle(color: Colors.white)),
-        content: Text(
-          '${(tarifa['fn_sectores'] as Map?)?['nombre'] ?? 'Sector'} — \$${_miles((tarifa['precio'] as num).toInt())}',
-          style: const TextStyle(color: Colors.white70),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(dir['nombre'],
+                style: const TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            Text(dir['direccion']?.toString() ?? '',
+                style:
+                    const TextStyle(color: Colors.white70, fontSize: 12)),
+            const SizedBox(height: 8),
+            const Text(
+              'Se eliminará del catálogo global y de todas las sedes. No se puede deshacer.',
+              style: TextStyle(color: Colors.orange, fontSize: 12),
+            ),
+          ],
         ),
         actions: [
           TextButton(
@@ -1295,158 +1196,253 @@ class _TabTarifasState extends State<_TabTarifas> {
       ),
     );
     if (ok == true) {
-      await widget.db.from('fn_tarifas_sede').delete().eq('id', tarifa['id']);
+      await widget.db.from('red_dir_catalogo').delete().eq('id', dir['id']);
       _cargar();
     }
   }
 
+  Widget _chip(String label, bool selected, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.only(right: 8),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        decoration: BoxDecoration(
+          color: selected
+              ? const Color(0xFF008FFF)
+              : const Color(0xFF1A1A1A),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+              color: selected
+                  ? const Color(0xFF008FFF)
+                  : Colors.white24),
+        ),
+        child: Text(label,
+            style: TextStyle(
+              color: selected ? Colors.white : Colors.white54,
+              fontSize: 12,
+              fontWeight:
+                  selected ? FontWeight.bold : FontWeight.normal,
+            )),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
       floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: Colors.indigo[700],
-        icon: const Icon(Icons.add, color: Colors.white),
-        label: const Text('Nueva tarifa',
+        backgroundColor: const Color(0xFF008FFF),
+        icon: const Icon(Icons.add_location_alt, color: Colors.white),
+        label: const Text('Nueva dirección',
             style:
                 TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         onPressed: _abrirFormulario,
       ),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator(color: Colors.indigo))
+          ? const Center(
+              child: CircularProgressIndicator(color: Color(0xFF008FFF)))
           : Column(
               children: [
-                // ── Cabecera informativa ──────────────────────────────────
+                // ── Filtro municipio ──────────────────────────────────────
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  color: const Color(0xFF0F0F0F),
-                  child: Row(children: [
-                    const Icon(Icons.info_outline,
-                        color: Colors.white38, size: 16),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Precio base por sector para ${_labelSede(widget.sede)}. Se aplica automáticamente al seleccionar una dirección del sector.',
-                        style: const TextStyle(
-                            color: Colors.white38, fontSize: 11),
-                      ),
-                    ),
-                  ]),
+                  color: const Color(0xFF111111),
+                  height: 42,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 6),
+                    children: _municipios
+                        .map((m) => _chip(m, _filtroMun == m,
+                            () => setState(() => _filtroMun = m)))
+                        .toList(),
+                  ),
                 ),
                 // ── Lista ─────────────────────────────────────────────────
                 Expanded(
-                  child: _sectores.isEmpty
-                      ? const Center(
-                          child: Text(
-                            'Crea primero sectores en la pestaña Sectores',
-                            style: TextStyle(color: Colors.white38),
-                            textAlign: TextAlign.center,
-                          ),
-                        )
-                      : _tarifas.isEmpty
-                          ? Center(
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(Icons.price_change,
-                                      color: Colors.white24, size: 48),
-                                  const SizedBox(height: 12),
-                                  const Text('Sin tarifas configuradas',
-                                      style:
-                                          TextStyle(color: Colors.white38)),
-                                  const SizedBox(height: 8),
-                                  TextButton.icon(
-                                    onPressed: _abrirFormulario,
-                                    icon: const Icon(Icons.add,
-                                        color: Colors.indigo),
-                                    label: const Text('Agregar primera tarifa',
-                                        style:
-                                            TextStyle(color: Colors.indigo)),
-                                  ),
-                                ],
-                              ),
-                            )
-                          : ListView.separated(
-                              padding: const EdgeInsets.fromLTRB(
-                                  12, 12, 12, 100),
-                              itemCount: _tarifas.length,
-                              separatorBuilder: (_, __) =>
-                                  const SizedBox(height: 8),
-                              itemBuilder: (ctx, i) {
-                                final t = _tarifas[i];
-                                final sNombre =
-                                    (t['fn_sectores'] as Map?)?['nombre']
-                                        ?.toString() ??
-                                        'Sector';
-                                return Container(
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFF1A1A1A),
-                                    borderRadius: BorderRadius.circular(10),
-                                    border: Border.all(
-                                        color: Colors.indigo
-                                            .withValues(alpha: 0.4)),
-                                  ),
-                                  child: ListTile(
-                                    leading: CircleAvatar(
-                                      backgroundColor: Colors.indigo[800],
-                                      child: const Icon(Icons.map,
-                                          color: Colors.white,
-                                          size: 18),
-                                    ),
-                                    title: Text(
-                                      sNombre,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 14,
-                                      ),
-                                    ),
-                                    subtitle: Row(children: [
-                                      const Icon(Icons.attach_money,
-                                          size: 14,
-                                          color: Colors.greenAccent),
-                                      Text(
-                                        '\$${_miles((t['precio'] as num).toInt())}',
-                                        style: const TextStyle(
-                                          color: Colors.greenAccent,
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 13,
-                                        ),
-                                      ),
-                                    ]),
-                                    trailing: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        IconButton(
-                                          icon: const Icon(Icons.edit_outlined,
-                                              color: Colors.indigo, size: 20),
-                                          onPressed: () =>
-                                              _abrirFormulario(tarifa: t),
-                                        ),
-                                        IconButton(
-                                          icon: const Icon(
-                                              Icons.delete_outline,
-                                              color: Colors.red,
-                                              size: 20),
-                                          onPressed: () => _eliminar(t),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                );
-                              },
+                  child: Builder(builder: (ctx) {
+                    final filtradas = _dirs
+                        .where((d) =>
+                            d['municipio']?.toString() == _filtroMun)
+                        .toList();
+                    if (filtradas.isEmpty) {
+                      return Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.location_off,
+                                color: Colors.white24, size: 48),
+                            const SizedBox(height: 12),
+                            Text('Sin direcciones en $_filtroMun',
+                                style: const TextStyle(
+                                    color: Colors.white38)),
+                            const SizedBox(height: 8),
+                            TextButton.icon(
+                              onPressed: _abrirFormulario,
+                              icon: const Icon(Icons.add,
+                                  color: Color(0xFF008FFF)),
+                              label: const Text('Agregar primera dirección',
+                                  style:
+                                      TextStyle(color: Color(0xFF008FFF))),
                             ),
+                          ],
+                        ),
+                      );
+                    }
+                    return ListView.separated(
+                      padding:
+                          const EdgeInsets.fromLTRB(12, 12, 12, 100),
+                      itemCount: filtradas.length,
+                      separatorBuilder: (_, __) =>
+                          const SizedBox(height: 8),
+                      itemBuilder: (ctx, i) {
+                        final d = filtradas[i];
+                        final dId = d['id'] as int;
+                        final activo = d['activo'] != false;
+                        final precio = _precios[dId];
+                        final sectorNombre = d['sector_id'] != null
+                            ? _sectores
+                                .where((s) => s['id'] == d['sector_id'])
+                                .map((s) => s['nombre']?.toString())
+                                .firstOrNull
+                            : null;
+                        return Container(
+                          decoration: BoxDecoration(
+                            color: activo
+                                ? const Color(0xFF1A1A1A)
+                                : const Color(0xFF111111),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: activo
+                                  ? const Color(0xFF008FFF)
+                                      .withValues(alpha: 0.4)
+                                  : Colors.white12,
+                            ),
+                          ),
+                          child: ListTile(
+                            leading: CircleAvatar(
+                              backgroundColor: activo
+                                  ? const Color(0xFF0070CC)
+                                  : Colors.grey[800],
+                              child: Icon(Icons.location_on,
+                                  color: activo
+                                      ? Colors.white
+                                      : Colors.white38,
+                                  size: 18),
+                            ),
+                            title: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    d['nombre']?.toString() ?? '',
+                                    style: TextStyle(
+                                      color: activo
+                                          ? Colors.white
+                                          : Colors.white38,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ),
+                                if (sectorNombre != null)
+                                  Container(
+                                    margin:
+                                        const EdgeInsets.only(left: 6),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF008FFF)
+                                          .withValues(alpha: 0.2),
+                                      borderRadius:
+                                          BorderRadius.circular(10),
+                                      border: Border.all(
+                                          color: const Color(0xFF008FFF)
+                                              .withValues(alpha: 0.5)),
+                                    ),
+                                    child: Text(sectorNombre,
+                                        style: const TextStyle(
+                                            color: Color(0xFF008FFF),
+                                            fontSize: 10)),
+                                  ),
+                              ],
+                            ),
+                            subtitle: Column(
+                              crossAxisAlignment:
+                                  CrossAxisAlignment.start,
+                              children: [
+                                if ((d['direccion']?.toString() ?? '')
+                                    .isNotEmpty)
+                                  Text(
+                                    d['direccion'].toString(),
+                                    style: TextStyle(
+                                        color: activo
+                                            ? Colors.white60
+                                            : Colors.white24,
+                                        fontSize: 12),
+                                  ),
+                                Row(children: [
+                                  Icon(
+                                    precio != null
+                                        ? Icons.attach_money
+                                        : Icons.money_off,
+                                    size: 13,
+                                    color: precio != null
+                                        ? Colors.greenAccent
+                                        : Colors.orange,
+                                  ),
+                                  Text(
+                                    precio != null
+                                        ? '\$${_miles(precio)}'
+                                        : 'Sin precio',
+                                    style: TextStyle(
+                                      color: precio != null
+                                          ? Colors.greenAccent
+                                          : Colors.orange,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  if (!activo) ...[
+                                    const SizedBox(width: 8),
+                                    const Text('INACTIVA',
+                                        style: TextStyle(
+                                            color: Colors.red,
+                                            fontSize: 10,
+                                            fontWeight:
+                                                FontWeight.bold)),
+                                  ],
+                                ]),
+                              ],
+                            ),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.edit_outlined,
+                                      color: Color(0xFF008FFF), size: 20),
+                                  onPressed: () =>
+                                      _abrirFormulario(dir: d),
+                                ),
+                                IconButton(
+                                  icon: const Icon(
+                                      Icons.delete_outline,
+                                      color: Colors.red,
+                                      size: 20),
+                                  onPressed: () => _eliminar(d),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    );
+                  }),
                 ),
               ],
             ),
     );
-  }
-
-  String _labelSede(Map<String, dynamic> s) {
-    final tipo = s['tipo']?.toString() ?? '';
-    final num = s['numero']?.toString() ?? '';
-    final nombre = s['nombre']?.toString() ?? '';
-    return nombre.isNotEmpty ? '$tipo$num – $nombre' : '$tipo$num';
   }
 }

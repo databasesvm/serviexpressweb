@@ -807,7 +807,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                       final nombre = (d['nombre'] ?? '').toString();
                       final nomLower = nombre.toLowerCase();
                       final mun = (d['municipio'] ?? '').toString();
-                      final sec = d['sectores'] as Map<String, dynamic>?;
+                      final sec = (d['sectores'] as Map?)?.cast<String, dynamic>();
                       bool hay = nomLower.contains(textoLimpio) ||
                           textoLimpio.contains(nomLower) ||
                           palabrasDigitadas.any((w) => nomLower.contains(w));
@@ -1015,7 +1015,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                           .trim()
                           .toUpperCase();
                       bool esSoloElBarrio = listaPrecios.any((item) {
-                        final s = item['sectores'] as Map<String, dynamic>?;
+                        final s = (item['sectores'] as Map?)?.cast<String, dynamic>();
                         if (s == null) return false;
                         return '${s['nombre']} (${s['municipio']})'.toUpperCase() == destinoFinal;
                       });
@@ -1762,7 +1762,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                               : destinoMayus;
 
                           bool yaEstaGuardado = listaPrecios.any((item) {
-                            final s = item['sectores'] as Map<String, dynamic>?;
+                            final s = (item['sectores'] as Map?)?.cast<String, dynamic>();
                             if (s == null) return false;
                             final clave = '${s['nombre']} (${s['municipio']})'.toUpperCase();
                             return barrioExtraido == clave ||
