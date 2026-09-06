@@ -1301,12 +1301,14 @@ extension CentralScreenFormularios on _CentralScreenState {
     if (!context.mounted) return;
 
     // ── Modo de envío FN ──────────────────────────────────────────────────────
-    String modoAsignacion = 'radar'; // 'radar' | 'directa'
+    String modoAsignacion = 'radar'; // 'radar' | 'paradero' | 'directa'
     String? movilDirectoId;
     String? movilDirectoNombre;
     bool movilDirectoSobreLimite = false;
     List<Map<String, dynamic>> movilesDirectaCache = [];
     bool cargandoMovilesDirecta = false;
+    // Paradero seleccionado en modo 'paradero'
+    String? paraderoFN;
 
     // Helper: dropdown de sedes ordenadas
     Widget dropdownSede({
@@ -1718,6 +1720,7 @@ extension CentralScreenFormularios on _CentralScreenState {
 
                     // ── Modo de envío FN ─────────────────────────────────────
                     // RADAR: cascada 3 fases (Master→Cercano→Todos)
+                    // PARADERO: asigna al #1 del paradero elegido
                     // DIRECTO: la central asigna a un móvil específico
                     const Text('Modo de envío:',
                         style: TextStyle(
@@ -1758,7 +1761,41 @@ extension CentralScreenFormularios on _CentralScreenState {
                             ),
                           ),
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: procesando
+                                ? null
+                                : () => setDialogState(() {
+                                      modoAsignacion = 'paradero';
+                                      paraderoFN ??= 'EXPUENTE';
+                                    }),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: 9, horizontal: 4),
+                              decoration: BoxDecoration(
+                                color: modoAsignacion == 'paradero'
+                                    ? Colors.teal[700]
+                                    : Colors.grey[100],
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                    color: Colors.teal[700]!, width: 1.5),
+                              ),
+                              child: Text(
+                                '📍  PARADERO',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: modoAsignacion == 'paradero'
+                                      ? Colors.white
+                                      : Colors.teal[700],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
                         Expanded(
                           child: GestureDetector(
                             onTap: procesando
@@ -1859,6 +1896,40 @@ extension CentralScreenFormularios on _CentralScreenState {
                         ),
                       ],
                     ),
+
+                    // Selector de paradero — solo en modo paradero
+                    if (modoAsignacion == 'paradero') ...[
+                      const SizedBox(height: 10),
+                      const Text('Paradero destino:',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black54,
+                              fontSize: 12)),
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        children: ['EXPUENTE', 'MEMOS', 'BOCONO', 'NOCTURNO']
+                            .map((p) {
+                          final bool sel = paraderoFN == p;
+                          return ChoiceChip(
+                            label: Text(p,
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    color: sel ? Colors.white : Colors.teal[700])),
+                            selected: sel,
+                            selectedColor: Colors.teal[700],
+                            backgroundColor: Colors.grey[100],
+                            side: BorderSide(color: Colors.teal[700]!, width: 1.5),
+                            onSelected: procesando
+                                ? null
+                                : (v) => setDialogState(
+                                    () => paraderoFN = v ? p : paraderoFN),
+                          );
+                        }).toList(),
+                      ),
+                    ],
 
                     // Selector de móvil — solo en modo directa
                     if (modoAsignacion == 'directa') ...[
@@ -2124,6 +2195,109 @@ extension CentralScreenFormularios on _CentralScreenState {
                                     'FN asignado directamente a ${movilDirectoNombre ?? movilDirectoId}',
                                   ),
                                   backgroundColor: Colors.orange[700],
+                                ),
+                              );
+                            }
+                          } else if (modoAsignacion == 'paradero') {
+                            // ══════════════════════════════════════════════════
+                            // ASIGNACIÓN A PARADERO — la central elige el paradero.
+                            // Se busca el #1 de la fila y se asigna directamente.
+                            // El card llega como asignación manual (no radar).
+                            // ══════════════════════════════════════════════════
+                            if (paraderoFN == null) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                    content: Text('Selecciona un paradero'),
+                                    backgroundColor: Colors.orange),
+                              );
+                              setDialogState(() => procesando = false);
+                              return;
+                            }
+
+                            // 1. Buscar el #1 del paradero (menor ingreso_fila, en línea, activo)
+                            final filaParadero = await Supabase.instance.client
+                                .from('usuarios')
+                                .select('id, usuario, ingreso_fila')
+                                .eq('rol', 'movil')
+                                .eq('en_linea', true)
+                                .eq('activo', true)
+                                .eq('tiene_fn', true)
+                                .eq('paradero_actual', paraderoFN!)
+                                .not('suspendido', 'is', true)
+                                .order('ingreso_fila', ascending: true)
+                                .limit(5);
+
+                            String? paraderoMovilId;
+                            String? paraderoMovilNombre;
+                            for (final m in (filaParadero as List)) {
+                              paraderoMovilId = m['id'].toString();
+                              final usr = m['usuario']?.toString() ?? '';
+                              final num = RegExp(r'\d+').firstMatch(usr)?.group(0);
+                              paraderoMovilNombre = num != null ? 'Móvil $num' : usr;
+                              break; // solo el primero
+                            }
+
+                            if (paraderoMovilId == null) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                      'No hay móviles FN en el paradero $paraderoFN'),
+                                  backgroundColor: Colors.red[700],
+                                ),
+                              );
+                              setDialogState(() => procesando = false);
+                              return;
+                            }
+
+                            final ahora = DateTime.now().toUtc().toIso8601String();
+
+                            await Supabase.instance.client
+                                .from('servicios')
+                                .insert({
+                              'origen': nombreSede,
+                              'destino': destinoCtrl.text.trim().toUpperCase(),
+                              'tarifa': tarifa,
+                              'estado': 'en_ruta_origen',
+                              'creador': 'Central FN',
+                              'tipo_servicio': 'FARMANORTE',
+                              'tipo_fn': true,
+                              'zona_fn': zona,
+                              'fn_sede_id': sede['id'],
+                              'recogidas': recogidasList,
+                              'metodo_pago': vaConDatafono ? 'Datafono' : 'Efectivo',
+                              'archivado': false,
+                              'movil_id': int.tryParse(paraderoMovilId),
+                              'accepted_at': ahora,
+                              'fn_asignacion_tipo': 'paradero',
+                              'paradero_origen': paraderoFN,
+                              'fn_asignado_por': 'Central',
+                              if (sLat != null) 'origen_lat': sLat,
+                              if (sLng != null) 'origen_lng': sLng,
+                              if (sede['telefono_whatsapp'] != null &&
+                                  (sede['telefono_whatsapp'] as String).isNotEmpty)
+                                'fn_whatsapp': sede['telefono_whatsapp'] as String,
+                              if (instruccionesCtrl.text.trim().isNotEmpty)
+                                'instrucciones_especiales': instruccionesCtrl.text.trim(),
+                            });
+
+                            // Notificación al #1 del paradero
+                            await MotorNotificaciones.dispararRafa(
+                              idsDestinos: [paraderoMovilId],
+                              titulo: '📍 TURNO FN — PARADERO $paraderoFN',
+                              mensaje:
+                                  'La central te asignó un turno Farmanorte · $zonaLabel',
+                              urgente: true,
+                              sonido: Sonidos.movilParadero,
+                            );
+
+                            if (context.mounted) {
+                              Navigator.pop(context);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    'FN asignado al #1 de $paraderoFN ($paraderoMovilNombre)',
+                                  ),
+                                  backgroundColor: Colors.teal[700],
                                 ),
                               );
                             }
@@ -2394,7 +2568,9 @@ extension CentralScreenFormularios on _CentralScreenState {
                     : Text(
                         modoAsignacion == 'directa'
                             ? 'ASIGNAR DIRECTO'
-                            : 'ENVIAR AL RADAR',
+                            : modoAsignacion == 'paradero'
+                                ? 'ASIGNAR A PARADERO'
+                                : 'ENVIAR AL RADAR',
                         style: const TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.bold)),

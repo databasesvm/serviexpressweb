@@ -61,10 +61,6 @@ class _MovilScreenState extends State<MovilScreen>
 
   List<Map<String, dynamic>> _serviciosActivosData = [];
   final Set<int> _serviciosOcultosLocales = {};
-  DateTime _ultimaActividadUtc = DateTime.now().toUtc();
-  bool _alertaInactividadMostrada = false;
-  bool _alerta4hMostrada = false;
-  bool _avisoDesconexionDialogAbierto = false; // true mientras el diálogo de 5h45 está visible
 
   // --- VARIABLES DE ESTADO TÁCTICAS ---
   final Set<int> _serviciosExpandidos = {}; // cuáles están abiertos ahora
@@ -229,8 +225,6 @@ class _MovilScreenState extends State<MovilScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    // Receptor de mensajes del foreground service (aviso de desconexión)
-    if (!kIsWeb) addBgDataCallback(_onBgServiceData);
 
     // PERMISOS CRÍTICOS — chequeo SILENCIOSO primero, sin mostrar nada.
     // Antes esta pantalla aparecía SIEMPRE al abrir la app, incluso con
@@ -254,10 +248,6 @@ class _MovilScreenState extends State<MovilScreen>
       if (mounted) await _chequearPermisosCriticos();
       // OTA: verificar actualización (solo Android/iOS, no aplica en web)
       if (!kIsWeb && mounted) await OtaUpdater.verificar(context);
-      // ── MOTIVO DE ÚLTIMA DESCONEXIÓN FORZADA ─────────────────────────────
-      // Si el background service desconectó al moto por inactividad mientras
-      // la app estaba cerrada, lo avisamos al abrirla por primera vez.
-      if (!kIsWeb && mounted) await _mostrarMotivoDesconexionSiExiste();
     });
 
     Future.microtask(() async {
@@ -276,18 +266,7 @@ class _MovilScreenState extends State<MovilScreen>
         final tipo = event.notification.additionalData?['tipo']?.toString();
         if (tipo == 'heartbeat') {
           event.preventDefault();
-          if (mounted && _estaEnLinea) {
-            _iniciarRastreoGps();
-            if (!kIsWeb) resetBgInactivityTimer();
-          }
-          return;
-        }
-
-        // Push de aviso de inactividad (5h45min) — suprimir sin sonido de alarma.
-        // El diálogo ya se muestra vía sendDataToMain; el push solo sirve si
-        // la app estaba en background y el moto necesita verlo en la bandeja.
-        if (tipo == 'aviso_inactividad_push') {
-          event.preventDefault();
+          if (mounted && _estaEnLinea) _iniciarRastreoGps();
           return;
         }
 
@@ -1264,7 +1243,7 @@ class _MovilScreenState extends State<MovilScreen>
     // silenciar() en lugar de dispose(): SonidoManager es singleton —
     // dispose() destruiría los AudioPlayers para todas las pantallas activas.
     _sonidos.silenciar();
-    if (!kIsWeb) removeBgDataCallback(_onBgServiceData);
+
     super.dispose();
   }
 
@@ -1498,8 +1477,6 @@ class _MovilScreenState extends State<MovilScreen>
     switch (state) {
       case AppLifecycleState.resumed:
         // App vuelve al frente — reconstruir streams y reiniciar heartbeat.
-        // También reseteamos el timer de inactividad del foreground service
-        // para que las 2h cuenten desde que el moto está activo en la app.
         if (mounted) {
           _construirStreams();
           _verificarPanicoPendiente();
@@ -1507,8 +1484,10 @@ class _MovilScreenState extends State<MovilScreen>
           if (_estaEnLinea) {
             _iniciarHeartbeat();
             if (!kIsWeb) {
-              resetBgInactivityTimer();
-              // Restaurar texto normal de notificación si se había puesto la advertencia
+              // Si Android mató el foreground service mientras la app seguía
+              // "en línea" en memoria, relanzarlo silenciosamente.
+              asegurarServicioActivo(widget.usuario['id'].toString())
+                  .catchError((_) {});
               if (!_notifReconexionActiva) {
                 updateForegroundNotification('Conectado · recibiendo servicios');
               }
@@ -1951,7 +1930,6 @@ class _MovilScreenState extends State<MovilScreen>
           DateTime.now().toUtc().isBefore(_panicoUbicacionExpiraAt!);
 
       if (_estaEnLinea || compartiendoPanico) {
-        _ultimaActividadUtc = DateTime.now().toUtc();
         _iniciarRastreoGps();
         if (_estaEnLinea) _iniciarHeartbeatUbicacion();
       }
@@ -2474,30 +2452,6 @@ class _MovilScreenState extends State<MovilScreen>
       // El ban check se movió al timer de 30s para no hacer 12 queries/min.
       if (mounted) _radarTick.value++;
 
-      // 3. Control de Inactividad (360 min desconecta, avisos a 120 y 240 min)
-      // Solo aplica si no tiene servicios activos Y no está en paradero.
-      final enParadero = _miParaderoCache != null;
-      if (_estaEnLinea && _serviciosActivosData.isEmpty && !enParadero) {
-        final inactividad = DateTime.now()
-            .toUtc()
-            .difference(_ultimaActividadUtc)
-            .inMinutes;
-        if (inactividad >= 360) {
-          _autoDesconectarPorInactividad();
-          return;
-        } else if (inactividad >= 240 && !_alerta4hMostrada) {
-          _alerta4hMostrada = true;
-          _mostrarAlertaSigoActivo('4 horas');
-        } else if (inactividad >= 120 && !_alertaInactividadMostrada) {
-          _alertaInactividadMostrada = true;
-          _mostrarAlertaSigoActivo('2 horas');
-        }
-      } else if (_estaEnLinea && (_serviciosActivosData.isNotEmpty || enParadero)) {
-        _ultimaActividadUtc = DateTime.now().toUtc();
-        _alertaInactividadMostrada = false;
-        _alerta4hMostrada = false;
-      }
-
       // 4. Supervisión estricta de demoras en pedidos activos
       // Umbral: 30 min desde picked_up_at para en_ruta_destino
       //         20 min desde accepted_at  para en_ruta_origen
@@ -2613,60 +2567,6 @@ class _MovilScreenState extends State<MovilScreen>
             child: const Text(
               'ENTENDIDO',
               style: TextStyle(color: Color(0xff3AF500)),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _mostrarAlertaSigoActivo([String horas = '2 horas']) {
-    if (!mounted) return;
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-          side: BorderSide(color: Colors.orange[800]!, width: 2.5),
-        ),
-        title: Text(
-          '⚠️ REPORTE DE ACTIVIDAD',
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            color: Colors.orange[800],
-          ),
-        ),
-        content: Text(
-          'Llevas $horas sin tomar servicios. ¿Sigues disponible?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _autoDesconectarPorInactividad();
-            },
-            child: const Text(
-              'DESCONECTARME',
-              style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold),
-            ),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.black),
-            onPressed: () {
-              setState(() {
-                _ultimaActividadUtc = DateTime.now().toUtc();
-                _alertaInactividadMostrada = false;
-                _alerta4hMostrada = false;
-              });
-              Navigator.pop(context);
-            },
-            child: const Text(
-              'SIGO ACTIVO',
-              style: TextStyle(
-                color: Color(0xff3AF500),
-                fontWeight: FontWeight.bold,
-              ),
             ),
           ),
         ],
@@ -3038,119 +2938,6 @@ class _MovilScreenState extends State<MovilScreen>
     } catch (_) {}
   }
 
-  // Receptor de mensajes del foreground service.
-  // Se llama cuando el servicio envía sendDataToMain() — p.ej. aviso de desconexión.
-  void _onBgServiceData(Object data) {
-    if (!mounted) return;
-    if (data is! Map) return;
-    final tipo = data['tipo'];
-
-    // Los avisos de 2h y 4h fueron eliminados — solo existe el aviso final a 5h45min.
-    if (tipo == 'aviso_desconexion') {
-      _mostrarAvisoDesconexionInminente(data['minutos'] as int? ?? 15);
-      return;
-    }
-
-    // Desconexión forzada por inactividad desde el foreground service.
-    // Llegamos aquí ANTES de que el servicio modifique la BD, para que
-    // el _vigilanteDeConexion no interprete el cambio como zombie-cleanup
-    // y reafirme la conexión anulando la desconexión intencional.
-    if (tipo == 'desconexion_forzada_inactividad') {
-      _cerrarAvisoDesconexionSiAbierto();
-      _autoDesconectarPorInactividad();
-    }
-  }
-
-  /// Muestra el diálogo de "serás desconectado en X minutos".
-  /// Cierra automáticamente cualquier diálogo previo si estaba abierto,
-  /// para que el moto nunca tenga que quitar 2 avisos al abrir la app.
-  void _mostrarAvisoDesconexionInminente(int minutos) {
-    if (!mounted) return;
-    // Si ya hay un diálogo de inactividad abierto, cerrarlo primero.
-    if (_avisoDesconexionDialogAbierto) {
-      Navigator.of(context, rootNavigator: false).maybePop();
-    }
-    _avisoDesconexionDialogAbierto = true;
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        backgroundColor: const Color(0xFF1A1A1A),
-        title: const Text(
-          '⏱️ Inactividad detectada',
-          style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 16),
-        ),
-        content: Text(
-          'Llevas 5h45min conectado sin tomar ningún servicio.\n\n'
-          'Serás desconectado automáticamente en $minutos minutos.\n'
-          'Presiona el botón para seguir recibiendo servicios.',
-          style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
-        ),
-        actions: [
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xff3AF500),
-              foregroundColor: Colors.black,
-            ),
-            onPressed: () {
-              _avisoDesconexionDialogAbierto = false;
-              Navigator.pop(ctx);
-              if (!kIsWeb) resetBgInactivityTimer();
-            },
-            child: const Text('SEGUIR CONECTADO', style: TextStyle(fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
-    ).whenComplete(() => _avisoDesconexionDialogAbierto = false);
-  }
-
-  /// Cierra el diálogo de desconexión inminente si está visible.
-  /// Llamar antes de mostrar el estado de desconexión forzada.
-  void _cerrarAvisoDesconexionSiAbierto() {
-    if (_avisoDesconexionDialogAbierto && mounted) {
-      _avisoDesconexionDialogAbierto = false;
-      Navigator.of(context, rootNavigator: false).maybePop();
-    }
-  }
-
-  /// Revisa si el background service guardó un motivo de desconexión forzada.
-  /// Si existe, muestra un SnackBar explicativo y borra el flag para que
-  /// no vuelva a aparecer en próximas aperturas de la app.
-  Future<void> _mostrarMotivoDesconexionSiExiste() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final motivo = prefs.getString(kBgMotivoDesconexion);
-      if (motivo == null || !mounted) return;
-      await prefs.remove(kBgMotivoDesconexion);
-
-      String mensaje;
-      if (motivo == 'inactividad_6h') {
-        mensaje =
-            '⏱️ Tu sesión fue cerrada automáticamente por 6 horas sin tomar ningún servicio.';
-      } else {
-        mensaje = '⚠️ Tu sesión fue cerrada automáticamente ($motivo).';
-      }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            mensaje,
-            style: const TextStyle(color: Colors.white, fontSize: 13),
-          ),
-          backgroundColor: const Color(0xFF2A2A2A),
-          duration: const Duration(seconds: 8),
-          action: SnackBarAction(
-            label: 'OK',
-            textColor: const Color(0xff3AF500),
-            onPressed: () =>
-                ScaffoldMessenger.of(context).hideCurrentSnackBar(),
-          ),
-        ),
-      );
-    } catch (_) {}
-  }
-
   Future<void> _enviarPing() async {
     try {
       await Supabase.instance.client
@@ -3158,57 +2945,6 @@ class _MovilScreenState extends State<MovilScreen>
           .update({'ultimo_ping': DateTime.now().toUtc().toIso8601String()})
           .eq('id', widget.usuario['id']);
     } catch (_) {} // silencioso — el cron tiene margen de 2 min
-  }
-
-  Future<void> _autoDesconectarPorInactividad() async {
-    _alertaInactividadMostrada = false;
-    _alerta4hMostrada = false;
-    try {
-      await Supabase.instance.client
-          .from('usuarios')
-          .update({
-            'en_linea': false,
-            'paradero_actual': null,
-            'ingreso_fila': null,
-          })
-          .eq('id', widget.usuario['id']);
-      _cerrarSesion(); // cierra sesión de tiempo activo
-      _detenerHeartbeat(); // ← Opción A
-      _notifReconexionActiva = false; // reset al desconectar
-      if (!kIsWeb) stopForegroundService().catchError((_) {}); // ← Opción B
-      if (mounted) {
-        setState(() {
-          _estaEnLinea = false;
-        });
-        // Cerrar el diálogo de REPORTE DE ACTIVIDAD si sigue abierto —
-        // sin esto el moto puede tocar "SIGO ACTIVO" después del corte
-        // y el timer se resetea aunque Supabase ya lo desconectó.
-        if (Navigator.of(context).canPop()) Navigator.of(context).pop();
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (context) => AlertDialog(
-            title: const Text(
-              '⚠️ DESCONEXIÓN AUTOMÁTICA',
-              style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
-            ),
-            content: const Text(
-              'El sistema te ha desconectado tras 6 horas de inactividad total.',
-            ),
-            actions: [
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.black),
-                onPressed: () => Navigator.pop(context),
-                child: const Text(
-                  'ENTENDIDO',
-                  style: TextStyle(color: Color(0xff3AF500)),
-                ),
-              ),
-            ],
-          ),
-        );
-      }
-    } catch (e) {}
   }
 
   Future<void> _cambiarEstado() async {
@@ -3482,9 +3218,6 @@ class _MovilScreenState extends State<MovilScreen>
       setState(() {
         _estaEnLinea = nuevoEstado;
         if (nuevoEstado) {
-          _ultimaActividadUtc = DateTime.now().toUtc();
-          _alertaInactividadMostrada = false;
-          _alerta4hMostrada = false;
           _iniciarRastreoGps();
           _iniciarHeartbeat(); // ← Opción A
           _iniciarHeartbeatUbicacion(); // Fallback GPS
@@ -3513,6 +3246,11 @@ class _MovilScreenState extends State<MovilScreen>
         try {
           if (nuevoEstado) {
             await startForegroundService(widget.usuario['id'].toString());
+            // Solicita exención de optimización de batería al conectarse.
+            // Aparece el diálogo del sistema solo si aún no está exenta.
+            // Evita que ROMs agresivos (Xiaomi, Samsung, Huawei) maten
+            // el foreground service cuando la app está en segundo plano.
+            await pedirExencionBateria();
           } else {
             await stopForegroundService();
           }
@@ -3605,7 +3343,6 @@ class _MovilScreenState extends State<MovilScreen>
                       'observacion': 'PRÓRROGA | $arg',
                     })
                     .eq('id', servicioId);
-                _ultimaActividadUtc = DateTime.now().toUtc();
                 if (context.mounted) Navigator.pop(context);
               },
               child: Text(
@@ -3683,7 +3420,6 @@ class _MovilScreenState extends State<MovilScreen>
                 canalAndroidId: MotorNotificaciones.canalDemoraId,
               );
 
-              _ultimaActividadUtc = DateTime.now().toUtc();
               if (context.mounted) Navigator.pop(context);
             },
             child: Text(
@@ -3874,8 +3610,6 @@ class _MovilScreenState extends State<MovilScreen>
           );
       }
 
-      _ultimaActividadUtc = DateTime.now().toUtc();
-
       // ── MULTI-RUTA: avisar si hay siguiente parada ─────────────────────
       if (!tieneProblema && servicio['multi_ruta_id'] != null) {
         final rutaId = servicio['multi_ruta_id'].toString();
@@ -3990,7 +3724,6 @@ class _MovilScreenState extends State<MovilScreen>
                     .from('servicios')
                     .update({'estado': 'problema', 'observacion': text})
                     .eq('id', servicioId);
-                _ultimaActividadUtc = DateTime.now().toUtc();
                 if (context.mounted) Navigator.pop(context);
               },
               child: Text(
@@ -7729,16 +7462,14 @@ class _MovilScreenState extends State<MovilScreen>
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      isDismissible: false,
-      enableDrag: false,
+      isDismissible: true,
+      enableDrag: true,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) => PopScope(
-          canPop: false,
-          child: Padding(
+        builder: (ctx, setSheet) => Padding(
           padding: EdgeInsets.only(
             left: 20,
             right: 20,
@@ -7972,84 +7703,97 @@ class _MovilScreenState extends State<MovilScreen>
                   const SizedBox(height: 12),
                 ],
 
-                // ── Botón enviar ─────────────────────────────────────────────
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _enviandoForm
-                          ? Colors.grey[400]
-                          : const Color(0xFF00a650),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
-                      elevation: 3,
+                // ── Botones ──────────────────────────────────────────────────
+                Row(
+                  children: [
+                    // Omitir — cierra sin enviar
+                    TextButton(
+                      onPressed: _enviandoForm
+                          ? null
+                          : () => Navigator.of(ctx).pop(),
+                      child: const Text(
+                        'Omitir',
+                        style: TextStyle(color: Colors.black38, fontSize: 14),
+                      ),
                     ),
-                    onPressed: _enviandoForm
-                        ? null
-                        : () async {
-                            final factura = facturaCtrl.text.trim();
-                            if (factura.isEmpty) {
-                              setSheet(() {
-                                _errorTextoForm =
-                                    'Ingresa el número de factura';
-                              });
-                              return;
-                            }
-                            setSheet(() {
-                              _enviandoForm = true;
-                              _errorTextoForm = null;
-                            });
-                            String? imgB64;
-                            if (_fotoForm != null) {
-                              final bytes = await _fotoForm!.readAsBytes();
-                              imgB64 =
-                                  'data:image/jpeg;base64,${base64Encode(bytes)}';
-                            }
-                            try {
-                              await _enviarReporteFN(
-                                servicio: servicio,
-                                factura: factura,
-                                recogidasStr: recogidasStr,
-                                movilCodigo: movilCodigo,
-                                sedeCodigo: sedeCodigo,
-                                destino: destino,
-                                tarifa: tarifa,
-                                imagenBase64: imgB64,
-                              );
-                              if (ctx.mounted) Navigator.of(ctx).pop();
-                            } catch (_) {
-                              if (ctx.mounted) {
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _enviandoForm
+                              ? Colors.grey[400]
+                              : const Color(0xFF00a650),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                          elevation: 3,
+                        ),
+                        onPressed: _enviandoForm
+                            ? null
+                            : () async {
+                                final factura = facturaCtrl.text.trim();
+                                if (factura.isEmpty) {
+                                  setSheet(() {
+                                    _errorTextoForm =
+                                        'Ingresa el número de factura';
+                                  });
+                                  return;
+                                }
                                 setSheet(() {
-                                  _enviandoForm = false;
-                                  _errorTextoForm =
-                                      'Sin señal. Intenta de nuevo.';
+                                  _enviandoForm = true;
+                                  _errorTextoForm = null;
                                 });
-                              }
-                            }
-                          },
-                    child: _enviandoForm
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(
-                                color: Colors.white, strokeWidth: 2.5),
-                          )
-                        : const Text('REPORTAR FACTURA',
-                            style: TextStyle(
-                                fontWeight: FontWeight.w800,
-                                fontSize: 15,
-                                letterSpacing: 0.5)),
-                  ),
+                                String? imgB64;
+                                if (_fotoForm != null) {
+                                  final bytes = await _fotoForm!.readAsBytes();
+                                  imgB64 =
+                                      'data:image/jpeg;base64,${base64Encode(bytes)}';
+                                }
+                                try {
+                                  await _enviarReporteFN(
+                                    servicio: servicio,
+                                    factura: factura,
+                                    recogidasStr: recogidasStr,
+                                    movilCodigo: movilCodigo,
+                                    sedeCodigo: sedeCodigo,
+                                    destino: destino,
+                                    tarifa: tarifa,
+                                    imagenBase64: imgB64,
+                                  );
+                                  if (ctx.mounted) Navigator.of(ctx).pop();
+                                } catch (_) {
+                                  if (ctx.mounted) {
+                                    setSheet(() {
+                                      _enviandoForm = false;
+                                      _errorTextoForm =
+                                          'Sin señal. Intenta de nuevo.';
+                                    });
+                                  }
+                                }
+                              },
+                        child: _enviandoForm
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(
+                                    color: Colors.white, strokeWidth: 2.5),
+                              )
+                            : const Text('REPORTAR FACTURA',
+                                style: TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 15,
+                                    letterSpacing: 0.5)),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
           ),
         ),
       ),
-    ),
-  );
+    );
     facturaCtrl.dispose();
   }
 
