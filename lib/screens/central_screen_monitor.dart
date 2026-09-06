@@ -1141,10 +1141,13 @@ extension CentralScreenMonitor on _CentralScreenState {
     };
     final btns = <Widget>[];
 
-    // 💰 PRECIO (solo cotizacion — el tap normal ya lo hace pero aquí queda explícito)
-    if (estado == 'cotizacion') {
+    // 💰 PRECIO (cotizacion y renegociación FN)
+    if (estado == 'cotizacion' || estado == 'fn_renegociando') {
       final esFnSede = servicio['fn_origen']?.toString() == 'sede';
-      btns.add(_botonCard('PRECIO', Icons.attach_money, Colors.orange[700]!,
+      btns.add(_botonCard(
+          estado == 'fn_renegociando' ? 'RENEGOCIAR' : 'PRECIO',
+          Icons.attach_money,
+          estado == 'fn_renegociando' ? Colors.deepOrange[700]! : Colors.orange[700]!,
           esFnSede
               ? () => _mostrarDialogoCotizacionFn(servicio)
               : () => _cotizarRapido(context, servicio)));
@@ -2001,6 +2004,7 @@ extension CentralScreenMonitor on _CentralScreenState {
     const labels = <String, String>{
       'pendiente': 'LIBRE',
       'cotizacion': 'COTIZ.',
+      'fn_renegociando': 'RENEG.',
       'cotizada': 'ENVIADA',
       'cotizacion_aprobada': 'APROB.',
       'programado': 'PROGR.',

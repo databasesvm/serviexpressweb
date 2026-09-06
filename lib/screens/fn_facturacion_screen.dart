@@ -1,14 +1,12 @@
 // ignore_for_file: use_build_context_synchronously
 import 'dart:io';
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:excel/excel.dart' hide Border;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -374,120 +372,6 @@ class _FnFacturacionScreenState extends State<FnFacturacionScreen> {
     }
   }
 
-  // ── Exportar Excel (.xlsx) ─────────────────────────────────────────────────
-  Future<void> _exportarExcel() async {
-    setState(() => _exportando = true);
-    try {
-      final excel = Excel.createExcel();
-      final sheet = excel['Facturación FN'];
-      excel.delete('Sheet1'); // quitar hoja por defecto si existe
-
-      // Estilo encabezado
-      final hStyle = CellStyle(
-        bold: true,
-        horizontalAlign: HorizontalAlign.Center,
-        backgroundColorHex: ExcelColor.fromHexString('#1A237E'),
-        fontColorHex: ExcelColor.fromHexString('#FFFFFF'),
-      );
-
-      final headers = [
-        'Fecha/Hora', 'Sede', 'Consecutivo', 'N° Factura',
-        'Domicilio', 'Valor producto', 'Recogidas',
-        'Móvil', 'Llegada a sede', 'Estado', 'Editado',
-      ];
-
-      // Fila de encabezados
-      for (var col = 0; col < headers.length; col++) {
-        final cell = sheet.cell(CellIndex.indexByColumnRow(columnIndex: col, rowIndex: 0));
-        cell.value = TextCellValue(headers[col]);
-        cell.cellStyle = hStyle;
-      }
-
-      int rowIdx = 1;
-      for (final s in _filtrados) {
-        final estado = s['estado']?.toString() ?? '';
-        final tarifa = (s['tarifa'] as num?)?.toInt() ?? 0;
-        final valProd = s['fn_factura_valor'] != null
-            ? (s['fn_factura_valor'] as num).toInt()
-            : 0;
-        final editado = _editados.contains(s['id']) ? 'Sí' : 'No';
-
-        // Color de fila según estado
-        String? bgHex;
-        if (estado == 'cancelado' || estado == 'fn_rechazado') bgHex = '#FFEBEE';
-        else if (estado != 'finalizado') bgHex = '#FFF8E1';
-
-        final rowValues = [
-          TextCellValue(_fecha(s['created_at']?.toString())),
-          TextCellValue(_codigoSede(s['fn_sede_solicitante_id'])),
-          TextCellValue(s['fn_consecutivo']?.toString() ?? '#${s['id']}'),
-          TextCellValue(s['fn_factura_numero']?.toString() ?? ''),
-          IntCellValue(tarifa),
-          IntCellValue(valProd),
-          TextCellValue(_recogidas(s)),
-          TextCellValue(_movilNumero(s)),
-          TextCellValue(_llegada(s)),
-          TextCellValue(_labelEstado(estado)),
-          TextCellValue(editado),
-        ];
-
-        for (var col = 0; col < rowValues.length; col++) {
-          final cell = sheet.cell(CellIndex.indexByColumnRow(columnIndex: col, rowIndex: rowIdx));
-          cell.value = rowValues[col];
-          if (bgHex != null) {
-            cell.cellStyle = CellStyle(backgroundColorHex: ExcelColor.fromHexString(bgHex));
-          }
-        }
-        rowIdx++;
-      }
-
-      // Fila de totales
-      rowIdx++;
-      final totalDom = _filtrados
-          .where((s) => s['estado'] == 'finalizado')
-          .fold<int>(0, (sum, s) => sum + ((s['tarifa'] as num?)?.toInt() ?? 0));
-
-      final tStyle = CellStyle(bold: true, backgroundColorHex: ExcelColor.fromHexString('#E8EAF6'));
-      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: rowIdx))
-        ..value = TextCellValue('TOTAL ENTREGADOS')
-        ..cellStyle = tStyle;
-      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: rowIdx))
-        ..value = IntCellValue(totalDom)
-        ..cellStyle = tStyle;
-
-      // Anchos de columna aproximados
-      final anchos = [18, 8, 12, 14, 12, 14, 18, 10, 12, 14, 8];
-      for (var i = 0; i < anchos.length; i++) {
-        sheet.setColumnWidth(i, anchos[i].toDouble());
-      }
-
-      final Uint8List bytes = Uint8List.fromList(excel.encode()!);
-      final fecha = _fecha(DateTime.now().toIso8601String(), corta: true)
-          .replaceAll('/', '-');
-      const mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-      final nombreArchivo = 'facturacion_fn_$fecha.xlsx';
-
-      if (kIsWeb) {
-        descargarArchivosWeb(bytes, nombreArchivo, mime);
-      } else {
-        final dir = await getTemporaryDirectory();
-        final file = File('${dir.path}/$nombreArchivo');
-        await file.writeAsBytes(bytes);
-        await Share.shareXFiles(
-          [XFile(file.path, mimeType: mime)],
-          subject: 'Facturación FN — $fecha',
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error exportando Excel: $e')));
-      }
-    } finally {
-      if (mounted) setState(() => _exportando = false);
-    }
-  }
-
   // ── Exportar Relación de cobro (HTML → imprimible como PDF) ───────────────
   Future<void> _exportarRelacion() async {
     setState(() => _exportando = true);
@@ -645,12 +529,6 @@ Total entregados período: <strong>\$${_miles(totalDom)}</strong>
         final metodo = _labelMetodo(s['metodo_pago']?.toString() ?? '');
         final fechaTirilla = _fecha(s['created_at']?.toString(), corta: true);
 
-        // Sede
-        final sede = _sedes.firstWhere(
-          (sd) => sd['id'].toString() == s['fn_sede_solicitante_id']?.toString(),
-          orElse: () => <String, dynamic>{},
-        );
-        final sedeNombre = sede['nombre']?.toString() ?? '';
         final sedeCodigo = _codigoSede(s['fn_sede_solicitante_id']);
 
         pdfDoc.addPage(pw.Page(
@@ -718,15 +596,9 @@ Total entregados período: <strong>\$${_miles(totalDom)}</strong>
               pw.Text('Punto de Recogida:',
                   style: pw.TextStyle(fontSize: cuerpo, fontWeight: pw.FontWeight.bold),
                   textAlign: pw.TextAlign.center),
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text(sedeNombre.isNotEmpty ? sedeNombre : sedeCodigo,
-                      style: pw.TextStyle(fontSize: cuerpo)),
-                  pw.Text(sedeCodigo,
-                      style: pw.TextStyle(fontSize: cuerpo)),
-                ],
-              ),
+              pw.Text(sedeCodigo,
+                  style: pw.TextStyle(fontSize: cuerpo, fontWeight: pw.FontWeight.bold),
+                  textAlign: pw.TextAlign.center),
               if (metodo.isNotEmpty)
                 pw.Text(metodo,
                     style: pw.TextStyle(fontSize: cuerpo),
@@ -867,9 +739,6 @@ Total entregados período: <strong>\$${_miles(totalDom)}</strong>
             : [
                 _btnExport('CSV', Icons.grid_on, const Color(0xFF4B5563),
                     filtrados.isEmpty ? null : _exportarCSV),
-                const SizedBox(width: 8),
-                _btnExport('Excel', Icons.table_chart, const Color(0xFF15803D),
-                    filtrados.isEmpty ? null : _exportarExcel),
                 const SizedBox(width: 8),
                 _btnExport('Relación', Icons.picture_as_pdf_outlined, const Color(0xFFB91C1C),
                     filtrados.isEmpty ? null : _exportarRelacion),

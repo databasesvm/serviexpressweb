@@ -258,6 +258,7 @@ class _CentralScreenState extends State<CentralScreen>
                   _sonidos.reproducir(Sonidos.centralRadar);
                   break;
                 case 'cotizacion':
+                case 'fn_renegociando':
                   _sonidos.reproducir(Sonidos.centralCotizacion);
                   break;
                 case 'cancelado':

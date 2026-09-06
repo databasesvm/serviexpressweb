@@ -187,6 +187,8 @@ class _MovilScreenState extends State<MovilScreen>
   // de la pestaña de Perfil el radar no muestre spinner sino el dato previo.
   List<Map<String, dynamic>>? _cacheUsuarios;
   List<Map<String, dynamic>>? _cacheServicios;
+  // #91: true cuando el stream falló pero tenemos caché — muestra overlay suave
+  bool _conexionPerdida = false;
   StreamSubscription<List<Map<String, dynamic>>>? _subUsuarios;
   StreamSubscription<List<Map<String, dynamic>>>? _subServicios;
   RealtimeChannel? _canalUpdateServicios; // refresh inmediato al cambiar estado
@@ -1027,6 +1029,60 @@ class _MovilScreenState extends State<MovilScreen>
     );
   }
 
+  // #91: overlay semi-transparente cuando hay error de conexión pero tenemos caché.
+  // No bloquea la UI — las cards del servicio siguen visibles de fondo.
+  Widget _overlayDesconexion() => Positioned.fill(
+        child: Container(
+          color: Colors.black.withValues(alpha: 0.50),
+          child: Center(
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 40),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1A1A1A),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.white12),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.wifi_off_rounded,
+                      color: Colors.orangeAccent, size: 32),
+                  const SizedBox(height: 10),
+                  const Text(
+                    'Has perdido la conexión',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Viendo datos en caché. Reconectando...',
+                    style: TextStyle(color: Colors.white54, fontSize: 12),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 14),
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: const BorderSide(color: Colors.white24),
+                    ),
+                    icon: const Icon(Icons.refresh_rounded, size: 16),
+                    label: const Text('Reintentar'),
+                    onPressed: () {
+                      setState(() => _conexionPerdida = false);
+                      _construirStreams();
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+
   Widget _buildTarjetaDomicilio() {
     final p = _pedidoDomicilioActivo;
     if (p == null) return const SizedBox.shrink();
@@ -1316,18 +1372,31 @@ class _MovilScreenState extends State<MovilScreen>
         if (!_ctrlUsuarios.isClosed) _ctrlUsuarios.add(data);
       },
       onError: (e) {
-        if (!_ctrlUsuarios.isClosed) _ctrlUsuarios.addError(e);
+        // #91: si hay caché, mantenerlo visible; no propagar el error al StreamBuilder
+        if (_cacheUsuarios != null && !_ctrlUsuarios.isClosed) {
+          _ctrlUsuarios.add(_cacheUsuarios!);
+        } else if (!_ctrlUsuarios.isClosed) {
+          _ctrlUsuarios.addError(e);
+        }
       },
     );
     _subServicios = crudoServicios.listen(
       (data) {
         _cacheServicios = data;
         _ultimaEmisionServicios = DateTime.now(); // Fix #2
+        if (_conexionPerdida && mounted) setState(() => _conexionPerdida = false);
         if (!_ctrlServicios.isClosed) _ctrlServicios.add(data);
         _verificarTransferenciaEntrante(List<Map<String, dynamic>>.from(data));
       },
       onError: (e) {
-        if (!_ctrlServicios.isClosed) _ctrlServicios.addError(e);
+        // #91: si hay caché, mantenerlo visible; no propagar el error al StreamBuilder.
+        // Activamos el overlay suave para que el usuario sepa que hay problema de señal.
+        if (_cacheServicios != null && !_ctrlServicios.isClosed) {
+          _ctrlServicios.add(_cacheServicios!);
+          if (!_conexionPerdida && mounted) setState(() => _conexionPerdida = true);
+        } else if (!_ctrlServicios.isClosed) {
+          _ctrlServicios.addError(e);
+        }
       },
     );
 
@@ -3693,7 +3762,7 @@ class _MovilScreenState extends State<MovilScreen>
     if (raw == null) return 0; // servicio sin timestamp → no bloquear
     try {
       final llegada = DateTime.parse(raw).toUtc();
-      const minMinutos = 10;
+      const minMinutos = 5;
       final habilitadoEn = llegada.add(const Duration(minutes: minMinutos));
       final faltan = habilitadoEn.difference(DateTime.now().toUtc()).inSeconds;
       return faltan > 0 ? faltan : 0;
@@ -3706,7 +3775,7 @@ class _MovilScreenState extends State<MovilScreen>
     Map<String, dynamic> servicio,
     bool tieneProblema,
   ) async {
-    // Guardia: no se puede finalizar antes de 10 min desde llegada a sede
+    // Guardia: no se puede finalizar antes de 5 min desde llegada a sede
     if (_segundosParaFinalizar(servicio) > 0) {
       if (mounted) {
         showDialog(
@@ -3720,7 +3789,7 @@ class _MovilScreenState extends State<MovilScreen>
             ]),
             content: const Text(
               'Estás dentro del límite de tiempo de entrega.\n\n'
-              'Debes esperar al menos 10 minutos desde tu llegada a la sede antes de finalizar el servicio.',
+              'Debes esperar al menos 5 minutos desde tu llegada a la sede antes de finalizar el servicio.',
               style: TextStyle(fontSize: 13, height: 1.5),
             ),
             actions: [
@@ -7348,6 +7417,8 @@ class _MovilScreenState extends State<MovilScreen>
     final bool pagarProducto = servicio['fn_pagar_producto'] == true;
 
     XFile? _fotoSede;
+    bool _enviando = false;
+    String? _errorEnvio;
 
     await showDialog(
       context: context,
@@ -7549,46 +7620,72 @@ class _MovilScreenState extends State<MovilScreen>
                           ),
                   ),
                 ),
+                if (_errorEnvio != null) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.red[50],
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: Colors.red[300]!),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.wifi_off, color: Colors.red, size: 16),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            'Sin señal. Intenta de nuevo.',
+                            style: TextStyle(fontSize: 11, color: Colors.red[700]),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 8),
               ],
             ),
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text('OMITIR',
-                  style: TextStyle(
-                      color: Colors.grey[600], fontWeight: FontWeight.w600)),
-            ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF00a650),
                 foregroundColor: Colors.white,
               ),
-              onPressed: facturaCtrl.text.trim().isEmpty
+              onPressed: (_enviando || facturaCtrl.text.trim().isEmpty)
                   ? null
                   : () async {
+                      setS(() { _enviando = true; _errorEnvio = null; });
                       String? imgB64;
                       if (_fotoSede != null) {
                         final bytes = await _fotoSede!.readAsBytes();
                         imgB64 =
                             'data:image/jpeg;base64,${base64Encode(bytes)}';
                       }
-                      if (!ctx.mounted) return;
-                      Navigator.pop(ctx);
-                      await _enviarReporteFN(
-                        servicio: servicio,
-                        factura: facturaCtrl.text.trim(),
-                        recogidasStr: recogidasStr,
-                        movilCodigo: movilCodigo,
-                        sedeCodigo: sedeCodigo,
-                        destino: destino,
-                        tarifa: tarifa,
-                        imagenBase64: imgB64,
-                      );
+                      try {
+                        await _enviarReporteFN(
+                          servicio: servicio,
+                          factura: facturaCtrl.text.trim(),
+                          recogidasStr: recogidasStr,
+                          movilCodigo: movilCodigo,
+                          sedeCodigo: sedeCodigo,
+                          destino: destino,
+                          tarifa: tarifa,
+                          imagenBase64: imgB64,
+                        );
+                        if (ctx.mounted) Navigator.pop(ctx);
+                      } catch (_) {
+                        if (ctx.mounted) setS(() { _enviando = false; _errorEnvio = 'error'; });
+                      }
                     },
-              child: const Text('REPORTAR FACTURA',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              child: _enviando
+                  ? const SizedBox(
+                      width: 16, height: 16,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white))
+                  : const Text('REPORTAR FACTURA',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
             ),
           ],
         ),
@@ -7600,6 +7697,8 @@ class _MovilScreenState extends State<MovilScreen>
   Future<void> _mostrarFormularioFactura(Map<String, dynamic> servicio) async {
     final facturaCtrl = TextEditingController();
     XFile? _fotoForm;
+    bool _enviandoForm = false;
+    String? _errorTextoForm;
 
     // ── Datos del servicio ───────────────────────────────────────────────────
     final recogidasRaw = servicio['recogidas'];
@@ -7630,12 +7729,16 @@ class _MovilScreenState extends State<MovilScreen>
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      isDismissible: false,
+      enableDrag: false,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) => Padding(
+        builder: (ctx, setSheet) => PopScope(
+          canPop: false,
+          child: Padding(
           padding: EdgeInsets.only(
             left: 20,
             right: 20,
@@ -7837,52 +7940,107 @@ class _MovilScreenState extends State<MovilScreen>
                 ),
                 const SizedBox(height: 24),
 
+                // ── Error inline ─────────────────────────────────────────────
+                if (_errorTextoForm != null) ...[
+                  const SizedBox(height: 4),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.red[50],
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.red[300]!),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.signal_wifi_off_rounded,
+                            color: Colors.red, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _errorTextoForm!,
+                            style: const TextStyle(
+                                color: Colors.red,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+
                 // ── Botón enviar ─────────────────────────────────────────────
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF00a650),
+                      backgroundColor: _enviandoForm
+                          ? Colors.grey[400]
+                          : const Color(0xFF00a650),
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12)),
                       elevation: 3,
                     ),
-                    onPressed: () async {
-                      final factura = facturaCtrl.text.trim();
-                      if (factura.isEmpty) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Ingresa el número de factura'),
-                            backgroundColor: Colors.red,
-                          ),
-                        );
-                        return;
-                      }
-                      String? imgB64;
-                      if (_fotoForm != null) {
-                        final bytes = await _fotoForm!.readAsBytes();
-                        imgB64 =
-                            'data:image/jpeg;base64,${base64Encode(bytes)}';
-                      }
-                      Navigator.of(ctx).pop();
-                      await _enviarReporteFN(
-                        servicio: servicio,
-                        factura: factura,
-                        recogidasStr: recogidasStr,
-                        movilCodigo: movilCodigo,
-                        sedeCodigo: sedeCodigo,
-                        destino: destino,
-                        tarifa: tarifa,
-                        imagenBase64: imgB64,
-                      );
-                    },
-                    child: const Text('REPORTAR FACTURA',
-                        style: TextStyle(
-                            fontWeight: FontWeight.w800,
-                            fontSize: 15,
-                            letterSpacing: 0.5)),
+                    onPressed: _enviandoForm
+                        ? null
+                        : () async {
+                            final factura = facturaCtrl.text.trim();
+                            if (factura.isEmpty) {
+                              setSheet(() {
+                                _errorTextoForm =
+                                    'Ingresa el número de factura';
+                              });
+                              return;
+                            }
+                            setSheet(() {
+                              _enviandoForm = true;
+                              _errorTextoForm = null;
+                            });
+                            String? imgB64;
+                            if (_fotoForm != null) {
+                              final bytes = await _fotoForm!.readAsBytes();
+                              imgB64 =
+                                  'data:image/jpeg;base64,${base64Encode(bytes)}';
+                            }
+                            try {
+                              await _enviarReporteFN(
+                                servicio: servicio,
+                                factura: factura,
+                                recogidasStr: recogidasStr,
+                                movilCodigo: movilCodigo,
+                                sedeCodigo: sedeCodigo,
+                                destino: destino,
+                                tarifa: tarifa,
+                                imagenBase64: imgB64,
+                              );
+                              if (ctx.mounted) Navigator.of(ctx).pop();
+                            } catch (_) {
+                              if (ctx.mounted) {
+                                setSheet(() {
+                                  _enviandoForm = false;
+                                  _errorTextoForm =
+                                      'Sin señal. Intenta de nuevo.';
+                                });
+                              }
+                            }
+                          },
+                    child: _enviandoForm
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(
+                                color: Colors.white, strokeWidth: 2.5),
+                          )
+                        : const Text('REPORTAR FACTURA',
+                            style: TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 15,
+                                letterSpacing: 0.5)),
                   ),
                 ),
               ],
@@ -7890,7 +8048,8 @@ class _MovilScreenState extends State<MovilScreen>
           ),
         ),
       ),
-    );
+    ),
+  );
     facturaCtrl.dispose();
   }
 
@@ -11738,7 +11897,9 @@ class _MovilScreenState extends State<MovilScreen>
       // está en Perfil — sin spinner al volver.
       // OPTIMIZACIÓN: Column y banner FUERA del ValueListenableBuilder para que
       // el banner no se reconstruya cada 5s. Solo el IndexedStack hace rebuild.
-      body: Column(
+      body: Stack(
+        children: [
+          Column(
         children: [
           // ── Banner de permisos — solo reacciona a setState, no al radarTick ──
           if (_permisosCriticosFaltantes && !kIsWeb)
@@ -12730,6 +12891,10 @@ class _MovilScreenState extends State<MovilScreen>
         ),  // Expanded
         ],
       ), // Column
+      // #91: overlay "Has perdido la conexión" — solo cuando stream falla con caché disponible
+      if (_conexionPerdida) _overlayDesconexion(),
+        ], // Stack children
+      ), // Stack
     bottomNavigationBar: BottomNavigationBar(
       currentIndex: _tabActual,
       onTap: _cambiarTab,

@@ -1240,6 +1240,7 @@ extension CentralScreenGestion on _CentralScreenState {
   void _abrirMenuFiltroMonitor(BuildContext context) {
     final opciones = {
       'problemas': '⚠️ Reportes de problema',
+      'renegociaciones': '🔄 Renegociaciones FN',
       'cotizaciones': '❓ Cotizaciones pendientes',
       'cotizadas': '✉️ Cotizaciones enviadas',
       'programados': '⏰ Servicios programados',

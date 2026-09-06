@@ -1229,7 +1229,7 @@ extension CentralScreenFormularios on _CentralScreenState {
   String _fnLabelSede(Map<String, dynamic> s) {
     final tipo = s['tipo'] as String;
     final nombre = s['nombre'] as String;
-    if (tipo == 'FN') return 'FN #${s['numero']} – $nombre';
+    if (tipo == 'FN') return 'FN${s['numero']} – $nombre';
     return '$tipo – $nombre';
   }
 
@@ -1284,6 +1284,22 @@ extension CentralScreenFormularios on _CentralScreenState {
     final instruccionesCtrl = TextEditingController();
     bool vaConDatafono = false;
     bool procesando = false;
+
+    // ── Estado de lluvia (leído una vez al abrir el form) ─────────────────────
+    bool lluviaActiva = false;
+    int recargoLluvia = 1000;
+    try {
+      final cfg = await Supabase.instance.client
+          .from('config_sistema')
+          .select('lluvia_activa, recargo_lluvia')
+          .eq('id', 1)
+          .single();
+      lluviaActiva = cfg['lluvia_activa'] as bool? ?? false;
+      recargoLluvia = (cfg['recargo_lluvia'] as num?)?.toInt() ?? 1000;
+    } catch (_) {}
+
+    if (!context.mounted) return;
+
     // ── Modo de envío FN ──────────────────────────────────────────────────────
     String modoAsignacion = 'radar'; // 'radar' | 'directa'
     String? movilDirectoId;
@@ -1502,6 +1518,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                     TextField(
                       controller: tarifaCtrl,
                       keyboardType: TextInputType.number,
+                      onChanged: (_) => setDialogState(() {}),
                       decoration: InputDecoration(
                         hintText: 'Mínimo \$4.000',
                         prefixIcon: const Icon(Icons.attach_money),
@@ -1549,6 +1566,132 @@ extension CentralScreenFormularios on _CentralScreenState {
                             : (v) => setDialogState(() => vaConDatafono = v),
                       ),
                     ),
+                    const SizedBox(height: 8),
+
+                    // ── Resumen de cobro ─────────────────────────────────────
+                    Builder(builder: (_) {
+                      final base = double.tryParse(
+                              tarifaCtrl.text.replaceAll(',', '.')) ??
+                          0;
+                      final extraRecogidas =
+                          recogidasSel.where((s) => s != null).length - 1;
+                      final recDatafono = vaConDatafono ? 2000 : 0;
+                      final recLluvia = lluviaActiva ? recargoLluvia : 0;
+                      final total = base + recDatafono + recLluvia;
+                      final fmt = (double v) {
+                        final n = v.toInt();
+                        final s = n.toString();
+                        final buf = StringBuffer();
+                        for (int i = 0; i < s.length; i++) {
+                          if (i > 0 &&
+                              (s.length - i) % 3 == 0) buf.write('.');
+                          buf.write(s[i]);
+                        }
+                        return '\$${buf.toString()}';
+                      };
+                      if (base <= 0 && !vaConDatafono && !lluviaActiva) {
+                        return const SizedBox.shrink();
+                      }
+                      return Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: Colors.indigo[50],
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.indigo[200]!),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Resumen de cobro',
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.indigo)),
+                            const SizedBox(height: 6),
+                            Row(
+                              mainAxisAlignment:
+                                  MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text('Base',
+                                    style: TextStyle(fontSize: 12)),
+                                Text(fmt(base),
+                                    style: const TextStyle(fontSize: 12)),
+                              ],
+                            ),
+                            if (vaConDatafono) ...[
+                              const SizedBox(height: 2),
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text('+ Datáfono',
+                                      style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.blue)),
+                                  Text(fmt(2000),
+                                      style: const TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.blue)),
+                                ],
+                              ),
+                            ],
+                            if (lluviaActiva) ...[
+                              const SizedBox(height: 2),
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text('+ Lluvia 🌧️',
+                                      style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.blue[700])),
+                                  Text(fmt(recargoLluvia.toDouble()),
+                                      style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.blue[700])),
+                                ],
+                              ),
+                            ],
+                            if (extraRecogidas > 0) ...[
+                              const SizedBox(height: 2),
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                      '+ $extraRecogidas recogida${extraRecogidas > 1 ? 's' : ''} extra',
+                                      style: const TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.orange)),
+                                  const Text('(incluir en base)',
+                                      style: TextStyle(
+                                          fontSize: 11,
+                                          color: Colors.orange,
+                                          fontStyle: FontStyle.italic)),
+                                ],
+                              ),
+                            ],
+                            const Divider(height: 10),
+                            Row(
+                              mainAxisAlignment:
+                                  MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text('TOTAL',
+                                    style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.bold)),
+                                Text(fmt(total),
+                                    style: const TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.indigo)),
+                              ],
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
                     const SizedBox(height: 12),
 
                     // ── Instrucciones especiales ─────────────────────────────
@@ -1831,10 +1974,13 @@ extension CentralScreenFormularios on _CentralScreenState {
                           );
                           return;
                         }
-                        final tarifa = double.tryParse(
+                        final tarifaBase = double.tryParse(
                                 tarifaCtrl.text.replaceAll(',', '.')) ??
                             0;
-                        if (tarifa < 4000) {
+                        final tarifa = tarifaBase +
+                            (vaConDatafono ? 2000 : 0) +
+                            (lluviaActiva ? recargoLluvia : 0);
+                        if (tarifaBase < 4000) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
                               content: Text('La tarifa mínima es \$4.000'),

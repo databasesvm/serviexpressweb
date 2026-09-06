@@ -60,6 +60,11 @@ extension CentralScreenFn on _CentralScreenState {
     // Recargo pre-calculado por la sede (sedes extra + datáfono, sin precio destino)
     final recargoCalculado = (servicio['fn_recargo_calculado'] as num?)?.toInt();
 
+    // Recargos individuales (guardados por la sede al crear el servicio)
+    final recargoLluvia = (servicio['recargo_lluvia'] as num?)?.toInt();
+    final recargoDatafono = (servicio['recargo_datafono'] as num?)?.toInt();
+    final esDatafono = servicio['metodo_pago']?.toString() == 'Datafono';
+
     // Precio sugerido si viene de renegociación
     final precioSugerido = (servicio['fn_precio_sugerido_sede'] as num?)?.toInt();
 
@@ -206,11 +211,14 @@ extension CentralScreenFn on _CentralScreenState {
                           fontSize: 12, color: Colors.black54)),
                 ],
 
-                // Datos de factura
-                if (facturaNum.isNotEmpty || facturaVal != null || pagarProducto) ...[
+                // Datos de factura + recargos activos
+                if (facturaNum.isNotEmpty || facturaVal != null ||
+                    pagarProducto || esDatafono ||
+                    (recargoLluvia != null && recargoLluvia > 0)) ...[
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 6,
+                    runSpacing: 4,
                     children: [
                       if (facturaNum.isNotEmpty)
                         _chipFn('Fac. $facturaNum', Colors.blueGrey),
@@ -218,8 +226,18 @@ extension CentralScreenFn on _CentralScreenState {
                         _chipFn('\$${_milesStr(facturaVal)}', Colors.blueGrey),
                       if (pagarProducto)
                         _chipFn('PAGAR PRODUCTO', Colors.red[800]!),
-                      if (servicio['metodo_pago'] == 'Datafono')
-                        _chipFn('DATÁFONO', Colors.blue[800]!),
+                      if (esDatafono)
+                        _chipFn(
+                          recargoDatafono != null
+                              ? 'DATÁFONO +\$${_milesStr(recargoDatafono)}'
+                              : 'DATÁFONO',
+                          Colors.blue[800]!,
+                        ),
+                      if (recargoLluvia != null && recargoLluvia > 0)
+                        _chipFn(
+                          '🌧️ LLUVIA +\$${_milesStr(recargoLluvia)}',
+                          Colors.teal[700]!,
+                        ),
                     ],
                   ),
                 ],

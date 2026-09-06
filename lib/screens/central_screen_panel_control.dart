@@ -1630,6 +1630,7 @@ extension CentralScreenPanelControl on _CentralScreenState {
 
                 final problemas = _asc(todos.where((s) => s['estado'] == 'problema'));
                 final cotizaciones = _asc(todos.where((s) => s['estado'] == 'cotizacion'));
+                final renegociaciones = _asc(todos.where((s) => s['estado'] == 'fn_renegociando'));
                 final cotizadas = _asc(todos.where((s) => s['estado'] == 'cotizada'));
                 final cotizacionesAprobadas = _asc(todos.where((s) => s['estado'] == 'cotizacion_aprobada'));
                 final finalizadosDemora = _asc(todos.where((s) => s['estado'] == 'finalizado_por_demora'));
@@ -1753,6 +1754,14 @@ extension CentralScreenPanelControl on _CentralScreenState {
                                 Colors.red[700]!,
                                 Icons.warning_rounded,
                                 visible: !_seccionesOcultasMonitor.contains('problemas'),
+                              ),
+                              _construirBloqueServicios(
+                                context,
+                                '🔄 RENEGOCIACIONES FN',
+                                _filtrar(renegociaciones),
+                                Colors.deepOrange[700]!,
+                                Icons.sync_rounded,
+                                visible: !_seccionesOcultasMonitor.contains('renegociaciones'),
                               ),
                               _construirBloqueServicios(
                                 context,

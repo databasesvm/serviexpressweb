@@ -29,6 +29,8 @@ class _SedeFnScreenState extends State<SedeFnScreen>
   final _db = Supabase.instance.client;
   final _sonidos = SonidoManager();
   late final TabController _tab;
+  // Notifica a _HistorialTab que cargue solo cuando el usuario toca esa pestaña
+  final _historialActivo = ValueNotifier<bool>(false);
 
   // Datos de la sede vinculada a este usuario
   Map<String, dynamic>? _sede;
@@ -52,18 +54,55 @@ class _SedeFnScreenState extends State<SedeFnScreen>
   void initState() {
     super.initState();
     _tab = TabController(length: 3, vsync: this);
+    // Activa la carga del historial solo cuando el usuario toca esa pestaña (tab 2)
+    _tab.addListener(() {
+      if (_tab.index == 2 && !_historialActivo.value) {
+        _historialActivo.value = true;
+      }
+    });
     OneSignal.login(widget.usuario['id'].toString());
     OneSignal.User.addTagWithKey('rol', 'sede_fn');
     _cargarSede();
     _cargarAltaDemanda();
+    _preCargarActivos(); // ← REST inmediato solo con estados activos (mucho más rápido)
     _construirStream();
     _iniciarCanalRealtime();
     _iniciarReconexion();
   }
 
+  /// Pre-carga instantánea solo de servicios activos via REST (no stream).
+  /// El stream llega después y reemplaza este caché con datos completos.
+  /// Evita la pantalla en blanco mientras el stream establece la conexión.
+  Future<void> _preCargarActivos() async {
+    final sedeId = widget.usuario['fn_sede_id'];
+    if (sedeId == null) return;
+    try {
+      final data = await _db
+          .from('servicios')
+          .select()
+          .eq('fn_sede_solicitante_id', sedeId)
+          .inFilter('estado', const [
+            'cotizacion',
+            'cotizada',
+            'pendiente',
+            'en_ruta_origen',
+            'en_origen',
+            'en_ruta_destino',
+            'fn_renegociando',
+          ])
+          .order('id', ascending: false)
+          .limit(50);
+      if (!mounted || _cacheServicios != null) return; // stream ya llegó primero
+      final lista = List<Map<String, dynamic>>.from(data as List);
+      _cacheServicios = lista;
+      if (!_ctrlServicios.isClosed) _ctrlServicios.add(lista);
+    } catch (_) {}
+  }
+
   @override
   void dispose() {
     _tab.dispose();
+    _historialActivo.dispose();
     _subServicios?.cancel();
     _canalEstados?.unsubscribe();
     _canalConfig?.unsubscribe();
@@ -110,6 +149,9 @@ class _SedeFnScreenState extends State<SedeFnScreen>
     final sedeId = widget.usuario['fn_sede_id'];
     if (sedeId == null) return;
 
+    // Filtro de 30 días para reducir drásticamente el volumen del stream.
+    // Los servicios activos siempre son recientes; el historial tiene su propia
+    // query independiente en _HistorialTab.
     final crudo = _db
         .from('servicios')
         .stream(primaryKey: ['id'])
@@ -118,8 +160,14 @@ class _SedeFnScreenState extends State<SedeFnScreen>
 
     _subServicios = crudo.listen(
       (data) {
-        _cacheServicios = data;
-        if (!_ctrlServicios.isClosed) _ctrlServicios.add(data);
+        final limite = DateTime.now().subtract(const Duration(days: 30));
+        final filtrado = data.where((s) {
+          final c = s['created_at']?.toString();
+          if (c == null) return true;
+          return (DateTime.tryParse(c) ?? limite).isAfter(limite);
+        }).toList();
+        _cacheServicios = filtrado;
+        if (!_ctrlServicios.isClosed) _ctrlServicios.add(filtrado);
       },
       onError: (_) {},
     );
@@ -311,6 +359,7 @@ class _SedeFnScreenState extends State<SedeFnScreen>
                 _HistorialTab(
                   usuario: widget.usuario,
                   sede: _sede,
+                  trigger: _historialActivo,
                 ),
               ],
             ),
@@ -467,6 +516,7 @@ class _FormularioTabState extends State<_FormularioTab> {
   // Red de direcciones de esta sede
   List<Map<String, dynamic>> _redDirecciones = [];
   Map<int, int> _tarifasSede = {}; // sector_id → precio (de fn_tarifas_sede)
+  Map<int, int> _mapaPreciosDir = {}; // dir_id → precio (de fn_precios_dir, esta sede)
   Map<int, int> _parentMap = {}; // barrio_id → parent_sector_id (para fallback)
   List<Map<String, dynamic>> _sectoresSede = []; // sectores con nombre y precio
   double? _precioSugerido; // precio de la dirección seleccionada de la red
@@ -593,12 +643,18 @@ class _FormularioTabState extends State<_FormularioTab> {
     if (sedeId == null) return;
     try {
       final results = await Future.wait([
+        // Nueva fuente: catálogo global de direcciones
         _db
-            .from('fn_red_direcciones')
-            .select('id, nombre, direccion, precio, sector_id')
-            .eq('sede_id', sedeId)
+            .from('red_dir_catalogo')
+            .select('id, nombre, alias, direccion, sector_id')
             .eq('activo', true)
             .order('nombre'),
+        // Precios específicos de esta sede por dirección
+        _db
+            .from('fn_precios_dir')
+            .select('dir_id, precio')
+            .eq('sede_id', sedeId),
+        // Precios por sector para esta sede
         _db
             .from('fn_tarifas_sede')
             .select('sector_id, precio')
@@ -606,25 +662,59 @@ class _FormularioTabState extends State<_FormularioTab> {
         _db.from('sectores').select('id, nombre, parent_id').eq('activo', true),
       ]);
       if (!mounted) return;
-      final data = results[0] as List;
-      final tarifas = results[1] as List;
-      final sectData = results[2] as List;
+      final catalogo = results[0] as List;
+      final preciosDir = results[1] as List;
+      final tarifas = results[2] as List;
+      final sectData = results[3] as List;
 
+      // dir_id → precio para esta sede
+      final mapaPreciosDir = <int, int>{};
+      for (final t in List<Map<String, dynamic>>.from(preciosDir)) {
+        final did = t['dir_id'] as int?;
+        final p = t['precio'] as int?;
+        if (did != null && p != null) mapaPreciosDir[did] = p;
+      }
+
+      // sector_id → precio para esta sede
       final mapa = <int, int>{};
       for (final t in List<Map<String, dynamic>>.from(tarifas)) {
         final sid = t['sector_id'] as int?;
         final p = t['precio'] as int?;
         if (sid != null && p != null) mapa[sid] = p;
       }
-      // Mapa barrio_id → parent_sector_id para fallback de precio
+
+      // barrio_id → parent_sector_id para fallback de precio
       final parentMapa = <int, int>{};
       for (final s in List<Map<String, dynamic>>.from(sectData)) {
         final sid = s['id'] as int?;
         final pid = s['parent_id'] as int?;
         if (sid != null && pid != null) parentMapa[sid] = pid;
       }
-      // Construir lista de sectores con precio:
-      // incluye sectores raíz con tarifa propia + barrios que heredan del padre
+
+      // Enriquecer catálogo con precio resuelto
+      final redList = <Map<String, dynamic>>[];
+      for (final d in List<Map<String, dynamic>>.from(catalogo)) {
+        final dirId = d['id'] as int?;
+        final sectorId = d['sector_id'] as int?;
+        int? precio = dirId != null ? mapaPreciosDir[dirId] : null;
+        if (precio == null && sectorId != null) {
+          precio = mapa[sectorId];
+          if (precio == null) {
+            final parentId = parentMapa[sectorId];
+            if (parentId != null) precio = mapa[parentId];
+          }
+        }
+        redList.add({
+          'id': dirId,
+          'nombre': d['nombre'],
+          'alias': d['alias'],
+          'direccion': d['direccion'],
+          'sector_id': sectorId,
+          'precio': precio ?? 0,
+        });
+      }
+
+      // Sectores con precio efectivo para sugerir como sector general
       final sects = <Map<String, dynamic>>[];
       for (final s in List<Map<String, dynamic>>.from(sectData)) {
         final sid = s['id'] as int?;
@@ -640,8 +730,10 @@ class _FormularioTabState extends State<_FormularioTab> {
           });
         }
       }
+
       setState(() {
-        _redDirecciones = List<Map<String, dynamic>>.from(data);
+        _redDirecciones = redList;
+        _mapaPreciosDir = mapaPreciosDir;
         _tarifasSede = mapa;
         _parentMap = parentMapa;
         _sectoresSede = sects;
@@ -649,8 +741,12 @@ class _FormularioTabState extends State<_FormularioTab> {
     } catch (_) {}
   }
 
-  /// Precio efectivo de una dirección: tarifa barrio → tarifa sector padre → precio directo.
+  /// Precio efectivo: precio específico por dir > tarifa sector > tarifa sector padre.
   double _precioDeDir(Map<String, dynamic> dir) {
+    final dirId = dir['id'] as int?;
+    if (dirId != null && _mapaPreciosDir.containsKey(dirId)) {
+      return _mapaPreciosDir[dirId]!.toDouble();
+    }
     final sectorId = dir['sector_id'] as int?;
     if (sectorId != null) {
       if (_tarifasSede.containsKey(sectorId)) {
@@ -661,7 +757,8 @@ class _FormularioTabState extends State<_FormularioTab> {
         return _tarifasSede[parentId]!.toDouble();
       }
     }
-    return (dir['precio'] as num).toDouble();
+    final p = (dir['precio'] as num?)?.toDouble() ?? 0;
+    return p;
   }
 
   /// Filtra la red de direcciones y sectores por texto escrito.
@@ -669,10 +766,12 @@ class _FormularioTabState extends State<_FormularioTab> {
     if (texto.trim().isEmpty) return [];
     final palabras = texto.toLowerCase().trim().split(RegExp(r'\s+'));
 
-    // ── 1. Coincidencias exactas en red de direcciones ──────────────────────
+    // ── 1. Coincidencias en red de direcciones (nombre + alias + dirección) ──
     final redMatches = _redDirecciones
         .where((dir) {
-          final haystack = '${dir['nombre']} ${dir['direccion']}'.toLowerCase();
+          final alias = dir['alias']?.toString() ?? '';
+          final haystack =
+              '${dir['nombre']} $alias ${dir['direccion']}'.toLowerCase();
           return palabras.every((p) => haystack.contains(p));
         })
         .take(6)
@@ -3035,7 +3134,7 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
                 ),
                 child: Text(
                   'Tu precio sugerido: \$${_miles((s['fn_precio_sugerido_sede'] as num).toInt())} — esperando respuesta de la central',
-                  style: const TextStyle(color: Colors.purple, fontSize: 12),
+                  style: const TextStyle(color: Colors.white, fontSize: 12),
                 ),
               ),
             ],
@@ -3286,8 +3385,13 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
 class _HistorialTab extends StatefulWidget {
   final Map<String, dynamic> usuario;
   final Map<String, dynamic>? sede;
+  final ValueNotifier<bool> trigger;
 
-  const _HistorialTab({required this.usuario, required this.sede});
+  const _HistorialTab({
+    required this.usuario,
+    required this.sede,
+    required this.trigger,
+  });
 
   @override
   State<_HistorialTab> createState() => _HistorialTabState();
@@ -3296,7 +3400,7 @@ class _HistorialTab extends StatefulWidget {
 class _HistorialTabState extends State<_HistorialTab> {
   final _db = Supabase.instance.client;
   List<Map<String, dynamic>> _servicios = [];
-  bool _cargando = true;
+  bool _cargando = false; // no carga hasta que el trigger lo active
   DateTimeRange? _rango;
   String _filtroEstado = 'todos';
 
@@ -3327,10 +3431,30 @@ class _HistorialTabState extends State<_HistorialTab> {
     return tipo == 'FN' && num.isNotEmpty ? 'FN$num' : nombre;
   }
 
+  bool _cargado = false;
+
   @override
   void initState() {
     super.initState();
-    _cargar();
+    widget.trigger.addListener(_onTrigger);
+    // Si ya está activo al construirse (e.g. tab preseleccionada), carga de una
+    if (widget.trigger.value) {
+      _cargado = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _cargar());
+    }
+  }
+
+  void _onTrigger() {
+    if (widget.trigger.value && !_cargado && mounted) {
+      _cargado = true;
+      _cargar();
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.trigger.removeListener(_onTrigger);
+    super.dispose();
   }
 
   Future<void> _cargar() async {
@@ -3416,6 +3540,21 @@ class _HistorialTabState extends State<_HistorialTab> {
 
   @override
   Widget build(BuildContext context) {
+    // Placeholder hasta que el usuario toque la pestaña
+    if (!_cargado) {
+      return const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.history_rounded, color: Colors.white24, size: 40),
+            SizedBox(height: 12),
+            Text('Toca esta pestaña para cargar el historial',
+                style: TextStyle(color: Colors.white38, fontSize: 13),
+                textAlign: TextAlign.center),
+          ],
+        ),
+      );
+    }
     return Column(
       children: [
         // ── Filtros ───────────────────────────────────────────────────────
@@ -3695,24 +3834,22 @@ class _HistorialTabState extends State<_HistorialTab> {
                                                 fontSize: 10),
                                           ),
                                         ],
-                                        const Spacer(),
-                                        if (recogidas is List &&
-                                            recogidas.isNotEmpty)
-                                          Flexible(
-                                            child: Text(
-                                              recogidas
-                                                  .cast<Map<String, dynamic>>()
-                                                  .map((r) =>
-                                                      _labelRecogidaCorto(r))
-                                                  .join(' · '),
-                                              style: const TextStyle(
-                                                  color: Colors.white38,
-                                                  fontSize: 10),
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ),
                                       ],
                                     ),
+                                    if (recogidas is List &&
+                                        recogidas.isNotEmpty) ...[
+                                      const SizedBox(height: 3),
+                                      Text(
+                                        recogidas
+                                            .cast<Map<String, dynamic>>()
+                                            .map((r) => _labelRecogidaCorto(r))
+                                            .join(' · '),
+                                        style: const TextStyle(
+                                            color: Colors.white38,
+                                            fontSize: 10),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ],
                                   ],
                                 ),
                               ),
@@ -3854,27 +3991,6 @@ class _HistorialTabState extends State<_HistorialTab> {
                       _filaDetalle('Instrucciones',
                           s['instrucciones_especiales'].toString()),
                     const SizedBox(height: 12),
-                    // ── Editar factura (sec. 7 de la especificación) ─────────
-                    if (['finalizado', 'finalizado_con_problema']
-                        .contains(estado))
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          icon: const Icon(Icons.edit_note,
-                              size: 16, color: Colors.indigo),
-                          label: const Text('Editar datos de factura',
-                              style: TextStyle(
-                                  color: Colors.indigo, fontSize: 13)),
-                          style: OutlinedButton.styleFrom(
-                            side: const BorderSide(color: Colors.indigo),
-                            padding: const EdgeInsets.symmetric(vertical: 10),
-                          ),
-                          onPressed: () {
-                            Navigator.pop(context);
-                            _editarFactura(s);
-                          },
-                        ),
-                      ),
                     // ── Auditoría de cambios ──────────────────────────────────
                     FutureBuilder<List<Map<String, dynamic>>>(
                       future: _db
@@ -3919,98 +4035,6 @@ class _HistorialTabState extends State<_HistorialTab> {
         ),
       ),
     );
-  }
-
-  // ── Editar N° factura con auditoría ────────────────────────────────────────
-  Future<void> _editarFactura(Map<String, dynamic> s) async {
-    final numCtrl =
-        TextEditingController(text: s['fn_factura_numero']?.toString() ?? '');
-
-    final confirmar = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1A2E),
-        title: const Text('Editar N° de factura',
-            style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 15)),
-        content: TextField(
-          controller: numCtrl,
-          style: const TextStyle(color: Colors.white),
-          decoration: const InputDecoration(
-            labelText: 'N° de factura',
-            labelStyle: TextStyle(color: Colors.white54),
-            enabledBorder: UnderlineInputBorder(
-                borderSide: BorderSide(color: Colors.white24)),
-          ),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar',
-                  style: TextStyle(color: Colors.white54))),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Guardar', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
-
-    numCtrl.dispose();
-    if (confirmar != true || !mounted) return;
-
-    try {
-      final nuevoNum = numCtrl.text.trim().isEmpty ? null : numCtrl.text.trim();
-
-      if (nuevoNum == s['fn_factura_numero']?.toString()) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Sin cambios que guardar')));
-        return;
-      }
-
-      final editorId = widget.usuario['id'];
-
-      await _db.from('servicios').update({
-        'fn_factura_numero': nuevoNum,
-      }).eq('id', s['id']);
-
-      await _db.from('fn_auditorias_factura').insert({
-        'servicio_id': s['id'],
-        'editor_id': editorId,
-        'editor_tipo': 'sede_fn',
-        'campo': 'fn_factura_numero',
-        'valor_anterior': s['fn_factura_numero']?.toString(),
-        'valor_nuevo': nuevoNum,
-      });
-
-      setState(() {
-        final idx = _servicios.indexWhere((x) => x['id'] == s['id']);
-        if (idx >= 0) {
-          _servicios[idx] = {
-            ..._servicios[idx],
-            'fn_factura_numero': nuevoNum,
-          };
-        }
-      });
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content:
-                Text('✅ N° de factura actualizado y registrado en auditoría'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error: $e')));
-      }
-    }
   }
 
   Widget _filaDetalle(String label, String valor) => Padding(
