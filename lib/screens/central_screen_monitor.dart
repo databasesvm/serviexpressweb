@@ -311,6 +311,14 @@ extension CentralScreenMonitor on _CentralScreenState {
                         child: const Text('👑 VIP', style: TextStyle(color: Colors.black, fontSize: 10, fontWeight: FontWeight.bold)),
                       ),
                     ],
+                    if (servicio['es_punto_a_punto'] == true) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                        decoration: BoxDecoration(color: Colors.purple[700], borderRadius: BorderRadius.circular(4)),
+                        child: const Text('🏁 P.A.P', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                      ),
+                    ],
                   ]),
                   const SizedBox(height: 8),
                   Text('📍 Origen: ${servicio['origen']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
@@ -935,7 +943,7 @@ extension CentralScreenMonitor on _CentralScreenState {
     const metodosPago  = ['Efectivo', 'Datafono', 'Nequi', 'Daviplata', 'Transferencia'];
     const tiposServicio = [
       'domicilio', 'mototaxi', 'PAQUETERÍA', 'COMIDA',
-      'FARMANORTE', 'RECOGIDA LOCAL',
+      'FARMACIA', 'BEBIDAS', 'FARMANORTE', 'RECOGIDA LOCAL',
     ];
 
     await showDialog(

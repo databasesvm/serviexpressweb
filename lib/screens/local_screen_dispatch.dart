@@ -77,12 +77,14 @@ mixin _DispatchMixin on State<LocalScreen> {
         .select('id')
         .eq('rol', 'movil')
         .eq('en_linea', true)
+        .eq('tiene_se', true)
         .inFilter('rango_movil', ['MASTER']);
     final leyendas = await Supabase.instance.client
         .from('usuarios')
         .select('id, ingreso_fila')
         .eq('rol', 'movil')
         .eq('en_linea', true)
+        .eq('tiene_se', true)
         .eq('rango_movil', 'LEYENDA')
         .not('paradero_actual', 'is', null)
         .order('ingreso_fila', ascending: true);
@@ -267,7 +269,7 @@ mixin _DispatchMixin on State<LocalScreen> {
                 final double? _oLng = (coords?['lng'] as num?)?.toDouble();
                 final movilesStd = await Supabase.instance.client
                     .from('usuarios').select('id, latitud, longitud')
-                    .eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true)
+                    .eq('rol', 'movil').eq('en_linea', true).eq('tiene_se', true).neq('suspendido', true)
                     .not('rango_movil', 'in', '("MASTER")');
                 final idsZonaStd = movilesStd.where((u) {
                   final id = u['id'].toString();
@@ -702,6 +704,7 @@ mixin _DispatchMixin on State<LocalScreen> {
             .select('id, paradero_actual, ingreso_fila')
             .eq('rol', 'movil')
             .eq('en_linea', true)
+            .eq('tiene_se', true)
             .not('paradero_actual', 'is', null);
 
         Map<String, List<Map<String, dynamic>>> gruposParaderos = {};
@@ -822,7 +825,7 @@ mixin _DispatchMixin on State<LocalScreen> {
           List<String> todosIds = [];
           final movilesActivos = await Supabase.instance.client
               .from('usuarios').select('id, latitud, longitud')
-              .eq('rol', 'movil').eq('en_linea', true);
+              .eq('rol', 'movil').eq('en_linea', true).eq('tiene_se', true);
           for (var m in movilesActivos) {
             final idStr = m['id'].toString();
             todosIds.add(idStr);
@@ -866,7 +869,7 @@ mixin _DispatchMixin on State<LocalScreen> {
           final double? _oLng3 = (servicio['origen_lng'] as num?)?.toDouble();
           final movilesInm3 = await Supabase.instance.client
               .from('usuarios').select('id, latitud, longitud')
-              .eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true)
+              .eq('rol', 'movil').eq('en_linea', true).eq('tiene_se', true).neq('suspendido', true)
               .not('rango_movil', 'in', '("MASTER")');
           final idsZona3 = movilesInm3.where((u) {
             final id = u['id'].toString();

@@ -17,6 +17,19 @@ mixin _CardsMixin on State<LocalScreen> {
     super.dispose();
   }
 
+  // ── Helper: formatea ISO timestamp a "HH:mm" local ───────────────────────
+  String _fmtHora(dynamic iso) {
+    if (iso == null) return '';
+    try {
+      final dt = DateTime.parse(iso.toString()).toLocal();
+      final h = dt.hour.toString().padLeft(2, '0');
+      final m = dt.minute.toString().padLeft(2, '0');
+      return ' · $h:$m';
+    } catch (_) {
+      return '';
+    }
+  }
+
   // ── Abstract stubs (implementados en otros mixins) ─────────────────────────
   Future<String?> _programarMisilRetardado({
     required List<String> externalIds,
@@ -346,7 +359,7 @@ mixin _CardsMixin on State<LocalScreen> {
                 // T+30s: Paradero #1 actual del local
                 final movilesLibres = await db.from('usuarios')
                     .select('id, paradero_actual, ingreso_fila')
-                    .eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true)
+                    .eq('rol', 'movil').eq('en_linea', true).eq('tiene_se', true).neq('suspendido', true)
                     .not('paradero_actual', 'is', null);
                 final Map<String, List<Map<String, dynamic>>> grupos = {};
                 for (var m in movilesLibres) {
@@ -384,7 +397,7 @@ mixin _CardsMixin on State<LocalScreen> {
                 final oLat = (servicio['origen_lat'] as num?)?.toDouble();
                 final oLng = (servicio['origen_lng'] as num?)?.toDouble();
                 final movilesStd = await db.from('usuarios').select('id, latitud, longitud')
-                    .eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true)
+                    .eq('rol', 'movil').eq('en_linea', true).eq('tiene_se', true).neq('suspendido', true)
                     .not('rango_movil', 'in', '("MASTER")');
                 final idsZona = movilesStd.where((u) {
                   final id = u['id'].toString();
@@ -428,8 +441,8 @@ mixin _CardsMixin on State<LocalScreen> {
         }
       }
     } else if (estado == 'pendiente') {
-      bordeColor = Colors.black54;
-      fondoColor = Colors.grey[100]!;
+      bordeColor = Colors.amber[700]!;
+      fondoColor = const Color(0xFFFFF9C4);
       textoEstado = 'BUSCANDO MÓVIL...';
       iconoEstado = Icons.radar;
     } else if (estado == 'en_origen') {
@@ -437,19 +450,15 @@ mixin _CardsMixin on State<LocalScreen> {
       fondoColor = Colors.orange[50]!;
       textoEstado = 'MÓVIL ESPERANDO EN EL LOCAL';
       iconoEstado = Icons.storefront;
-    } else if (estado == 'en_curso' ||
-        estado == 'en_ruta_origen' ||
-        estado == 'en_ruta_destino') {
+    } else if (estado == 'en_curso' || estado == 'en_ruta_origen') {
       bordeColor = const Color(0xff3AF500);
       fondoColor = const Color(0xfff0fff0);
-
-      if (estado == 'en_ruta_origen') {
-        textoEstado = 'MÓVIL EN CAMINO AL LOCAL';
-      } else if (estado == 'en_ruta_destino') {
-        textoEstado = 'EN RUTA DE ENTREGA';
-      } else {
-        textoEstado = 'MÓVIL ASIGNADO';
-      }
+      textoEstado = estado == 'en_ruta_origen' ? 'MÓVIL EN CAMINO AL LOCAL' : 'MÓVIL ASIGNADO';
+      iconoEstado = Icons.motorcycle;
+    } else if (estado == 'en_ruta_destino') {
+      bordeColor = const Color(0xff3AF500);
+      fondoColor = const Color(0xFFDCEEFF);
+      textoEstado = 'EN RUTA DE ENTREGA';
       iconoEstado = Icons.motorcycle;
     } else if (estado == 'problema') {
       bordeColor = Colors.red;
@@ -499,14 +508,41 @@ mixin _CardsMixin on State<LocalScreen> {
       iconoEstado = Icons.help_outline;
     }
 
+    // ── Timestamps por estado ──────────────────────────────────────────────
+    if (estado == 'programado') {
+      // ya muestra hora de liberación en el textoEstado
+    } else if (estado == 'cotizacion') {
+      textoEstado += _fmtHora(servicio['created_at']);
+    } else if (estado == 'cotizada') {
+      textoEstado += _fmtHora(servicio['updated_at']);
+    } else if (estado == 'cotizacion_aprobada') {
+      textoEstado += _fmtHora(servicio['updated_at']);
+    } else if (estado == 'pendiente') {
+      textoEstado += _fmtHora(servicio['created_at']);
+    } else if (estado == 'en_ruta_origen') {
+      textoEstado += _fmtHora(servicio['accepted_at']);
+    } else if (estado == 'en_origen') {
+      textoEstado += _fmtHora(servicio['updated_at']);
+    } else if (estado == 'en_ruta_destino') {
+      textoEstado += _fmtHora(servicio['picked_up_at']);
+    } else if (estado == 'finalizado') {
+      textoEstado += _fmtHora(servicio['updated_at']);
+    } else if (estado == 'caducado' || estado == 'finalizado_por_demora' ||
+        estado == 'finalizado_con_problema' || estado == 'cancelado') {
+      textoEstado += _fmtHora(servicio['updated_at']);
+    }
+
     String? ticketPOS = servicio['ticket_factura']?.toString();
     String? telCliente = servicio['telefono_receptor']?.toString();
 
-    return AnimatedSize(
-      duration: const Duration(milliseconds: 260),
-      curve: Curves.easeInOut,
-      alignment: Alignment.topCenter,
-      child: Card(
+    // Tarifa compacta para el header colapsado
+    final _tarifaDisplay = () {
+      final t = servicio['tarifa'];
+      if (t != null && (t as num) > 0) return fmtPeso(t);
+      return '';
+    }();
+
+    return Card(
       elevation: esHistorial ? 1 : 3,
       margin: const EdgeInsets.only(bottom: 12),
       color: fondoColor,
@@ -525,26 +561,22 @@ mixin _CardsMixin on State<LocalScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Row(
                 children: [
-                  // Badge de estado (anima con AnimatedSwitcher cuando cambia)
-                  AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 280),
-                    child: Row(
-                      key: ValueKey('estado_$svcId$textoEstado'),
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(iconoEstado, color: bordeColor, size: 18),
-                        const SizedBox(width: 6),
-                        Text(
-                          textoEstado,
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: bordeColor,
-                            fontSize: 12,
-                            letterSpacing: 0.4,
-                          ),
+                  // Badge de estado (sin animación)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(iconoEstado, color: bordeColor, size: 18),
+                      const SizedBox(width: 6),
+                      Text(
+                        textoEstado,
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: bordeColor,
+                          fontSize: 12,
+                          letterSpacing: 0.4,
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                   const SizedBox(width: 8),
                   // Destino truncado (solo si está colapsado)
@@ -559,6 +591,18 @@ mixin _CardsMixin on State<LocalScreen> {
                         maxLines: 1,
                       ),
                     ),
+                    if (_tarifaDisplay.isNotEmpty) ...[
+                      const SizedBox(width: 4),
+                      Text(
+                        _tarifaDisplay,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.green[700],
+                        ),
+                      ),
+                      const SizedBox(width: 2),
+                    ],
                   ] else
                     const Spacer(),
                   Text(
@@ -1225,8 +1269,7 @@ mixin _CardsMixin on State<LocalScreen> {
       ),                // if (estaExpandida) Padding
       ],                // outer Card.Column.children
     ),                  // outer Card.Column
-  ),                    // Card
-);                      // AnimatedSize + return
+  );                    // Card + return
   }
 
   // -----------------------------------------------------------------------

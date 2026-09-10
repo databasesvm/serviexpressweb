@@ -39,6 +39,7 @@ extension CentralScreenFormularios on _CentralScreenState {
         .select('id, nombre, usuario, rango_movil')
         .eq('rol', 'movil')
         .eq('en_linea', true)
+        .eq('tiene_se', true)
         .order('usuario', ascending: true)
         .then((data) {
       movilesConectados = List<Map<String, dynamic>>.from(data)
@@ -609,8 +610,8 @@ extension CentralScreenFormularios on _CentralScreenState {
                                   // completamente libre — el cupo de 2/3
                                   // pedidos no aplica al turno inicial.
                                   'p_solo_completamente_libres': true,
-                                  // Solo suscripción — prediarios/postdia son FN exclusivo
-                                  'p_tipo_plan': 'suscripcion',
+                                  // Solo móviles con SE habilitado
+                                  'p_tiene_se': true,
                                 },
                               );
                           idsElegiblesPorCapacidad = (elegibles as List)
@@ -646,6 +647,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                               .select('id, paradero_actual, ingreso_fila')
                               .eq('rol', 'movil')
                               .eq('en_linea', true)
+                              .eq('tiene_se', true)
                               .not('paradero_actual', 'is', null);
 
                           Map<String, List<Map<String, dynamic>>>
@@ -805,6 +807,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                                   .eq('rol', 'movil')
                                   .eq('en_linea', true)
                                   .eq('activo', true)
+                                  .eq('tiene_se', true)
                                   .eq('paradero_actual', paraderoOrigen!)
                                   .not('suspendido', 'is', true)
                                   .order('ingreso_fila', ascending: true);
@@ -847,7 +850,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                                   params: {
                                     'p_solo_master': true,
                                     'p_solo_completamente_libres': false,
-                                    'p_tipo_plan': 'suscripcion',
+                                    'p_tiene_se': true,
                                   },
                                 );
                             idsMasters = (mastersResp as List)
@@ -896,7 +899,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                                 'p_solo_master': false,
                                 'p_solo_completamente_libres': false,
                                 'p_radio_metros': 2000.0,
-                                'p_tipo_plan': 'suscripcion',
+                                'p_tiene_se': true,
                               };
                               if (oLat != null) params3['p_origen_lat'] = oLat;
                               if (oLng != null) params3['p_origen_lng'] = oLng;
@@ -916,7 +919,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                                 params: {
                                   'p_solo_master': false,
                                   'p_solo_completamente_libres': false,
-                                  'p_tipo_plan': 'suscripcion',
+                                  'p_tiene_se': true,
                                 },
                               );
                               idsTodosC = (resp4 as List)

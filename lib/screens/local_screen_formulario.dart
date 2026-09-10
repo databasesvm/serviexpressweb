@@ -22,22 +22,6 @@ mixin _FormularioMixin on State<LocalScreen> {
     required String titulo,
     required String mensaje,
   });
-  Future<void> _verificarFallbackVip({
-    required int servicioId,
-    required String destino,
-    required List<String> pilotosParadero,
-    required bool esPuntoAPunto,
-    required Map<String, dynamic>? coords,
-    required double tarifaConVip,
-  });
-  Future<void> _mostrarDialogoFallbackVip({
-    required int servicioId,
-    required String destino,
-    required List<String> pilotosParadero,
-    required bool esPuntoAPunto,
-    required Map<String, dynamic>? coords,
-    required double tarifaConVip,
-  });
 
   // ── HELPER: busca o crea un sector por nombre+municipio ───────────────────
   Future<int> _buscarOCrearSector(String nombre, String municipio) async {
@@ -54,6 +38,60 @@ mixin _FormularioMixin on State<LocalScreen> {
         .select('id')
         .single();
     return nuevo['id'] as int;
+  }
+
+  // ── HELPER: guarda/actualiza dirección en red_dir_catalogo + se_precios_dir ─
+  Future<int> _guardarEnRedSE({
+    required String nombre,
+    required String municipio,
+    required int sectorId,
+    required int precio,
+    String? telefono, // si viene del CRM, asocia a ese cliente
+  }) async {
+    final db = Supabase.instance.client;
+    final userId = widget.usuario['id'] as int;
+
+    // 1. Buscar o crear en catálogo global
+    final existe = await db
+        .from('red_dir_catalogo')
+        .select('id')
+        .eq('nombre', nombre)
+        .eq('municipio', municipio)
+        .eq('sector_id', sectorId)
+        .maybeSingle();
+    int dirId;
+    if (existe != null) {
+      dirId = existe['id'] as int;
+    } else {
+      final nuevo = await db
+          .from('red_dir_catalogo')
+          .insert({'nombre': nombre, 'municipio': municipio, 'sector_id': sectorId, 'activo': true})
+          .select('id')
+          .single();
+      dirId = nuevo['id'] as int;
+    }
+
+    // 2. Upsert precio para este usuario
+    await db.from('se_precios_dir').upsert(
+      {'usuario_id': userId, 'dir_id': dirId, 'precio': precio},
+      onConflict: 'usuario_id,dir_id',
+    );
+
+    // 3. Asociar al CRM del cliente si hay teléfono
+    final tel = telefono?.trim() ?? '';
+    if (tel.length >= 7) {
+      await db.from('crm_cliente_dirs').upsert(
+        {
+          'local_id': userId,
+          'telefono': tel,
+          'dir_id': dirId,
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+        onConflict: 'local_id,telefono,dir_id',
+      );
+    }
+
+    return dirId;
   }
 
   // ── MÓDULO TÁCTICO: GESTOR DE TARIFAS DEL LOCAL ────────────────────────────
@@ -230,25 +268,24 @@ mixin _FormularioMixin on State<LocalScreen> {
                                       .replaceAll('.', '')
                                       .replaceAll(',', '')
                                       .trim();
+                                  final precio = int.tryParse(tarLimpia) ?? 0;
+                                  if (precio <= 0) return;
 
+                                  final munNorm = zonaSeleccionada == 'CÚCUTA'
+                                      ? 'Cúcuta'
+                                      : zonaSeleccionada == 'LOS PATIOS'
+                                          ? 'Los Patios'
+                                          : 'V. Rosario';
                                   final sectorId = await _buscarOCrearSector(
                                     palabraCtrl.text.trim().toUpperCase(),
-                                    zonaSeleccionada,
+                                    munNorm,
                                   );
-
-                                  await Supabase.instance.client
-                                      .from('red_dir_se')
-                                      .insert({
-                                        'usuario_id': widget.usuario['id'],
-                                        'nombre': palabraCtrl.text.trim().toUpperCase(),
-                                        'municipio': zonaSeleccionada == 'CÚCUTA'
-                                            ? 'Cúcuta'
-                                            : zonaSeleccionada == 'LOS PATIOS'
-                                                ? 'Los Patios'
-                                                : 'V. Rosario',
-                                        'sector_id': sectorId,
-                                        'precio': int.tryParse(tarLimpia),
-                                      });
+                                  await _guardarEnRedSE(
+                                    nombre: palabraCtrl.text.trim().toUpperCase(),
+                                    municipio: munNorm,
+                                    sectorId: sectorId,
+                                    precio: precio,
+                                  );
 
                                   if (ctxAdd.mounted) {
                                     Navigator.pop(ctxAdd);
@@ -273,18 +310,33 @@ mixin _FormularioMixin on State<LocalScreen> {
                 Expanded(
                   child: FutureBuilder<List<Map<String, dynamic>>>(
                     future: Supabase.instance.client
-                        .from('red_dir_se')
-                        .select('id, nombre, municipio, sector_id, precio, sectores(nombre)')
+                        .from('se_precios_dir')
+                        .select('precio, red_dir_catalogo!inner(id, nombre, municipio, sector_id, activo, sectores(nombre))')
                         .eq('usuario_id', widget.usuario['id'])
-                        .eq('activo', true)
-                        .order('nombre', ascending: true),
+                        .eq('red_dir_catalogo.activo', true),
                     builder: (context, snapshot) {
                       if (snapshot.connectionState == ConnectionState.waiting)
                         return const Center(
                           child: CircularProgressIndicator(color: Colors.black),
                         );
 
-                      final datos = snapshot.data ?? [];
+                      // Normalizar resultado al formato esperado
+                      final raw = snapshot.data ?? [];
+                      final datos = raw.map<Map<String, dynamic>>((row) {
+                        final dir = Map<String, dynamic>.from(row['red_dir_catalogo'] as Map? ?? {});
+                        return {
+                          'id': dir['id'],
+                          'nombre': dir['nombre'],
+                          'municipio': dir['municipio'],
+                          'sector_id': dir['sector_id'],
+                          'precio': row['precio'],
+                          'activo': dir['activo'],
+                          'sectores': dir['sectores'],
+                        };
+                      }).toList()
+                        ..sort((a, b) => (a['nombre'] ?? '').toString()
+                            .compareTo((b['nombre'] ?? '').toString()));
+
                       final filtrados = datos.where((d) {
                         final nom = (d['nombre'] ?? '').toString().toLowerCase();
                         return nom.contains(filtroActual);
@@ -326,10 +378,12 @@ mixin _FormularioMixin on State<LocalScreen> {
                                   color: Colors.red,
                                 ),
                                 onPressed: () async {
+                                  // Quitar precio (no borra el catálogo global)
                                   await Supabase.instance.client
-                                      .from('red_dir_se')
-                                      .update({'activo': false})
-                                      .eq('id', item['id']);
+                                      .from('se_precios_dir')
+                                      .delete()
+                                      .eq('usuario_id', widget.usuario['id'])
+                                      .eq('dir_id', item['id']);
                                   setModalState(() {});
                                 },
                               ),
@@ -352,24 +406,34 @@ mixin _FormularioMixin on State<LocalScreen> {
   void _abrirFormularioPedido(
     BuildContext context, {
     bool esPuntoAPunto = false,
-    bool esCotizacion = false,
-    bool esVip = false,
     required Map<String, dynamic> perfilEnVivo,
     String? telefonoPrellenado, // Viene del botón "NUEVO PEDIDO" en el CRM
   }) async {
     // --- CONSULTA ESPEJO CON "MI LOCAL" ---
     List<Map<String, dynamic>> listaPrecios = [];
 
-    // Carga red_dir_se del local (también en modo cotización)
+    // Carga red SE del local (red_dir_catalogo + se_precios_dir)
     if (!esPuntoAPunto) {
       try {
         final data = await Supabase.instance.client
-            .from('red_dir_se')
-            .select('id, nombre, municipio, sector_id, precio, activo, sectores(nombre)')
+            .from('se_precios_dir')
+            .select('precio, red_dir_catalogo!inner(id, nombre, municipio, sector_id, activo, sectores(nombre))')
             .eq('usuario_id', widget.usuario['id'])
-            .eq('activo', true)
-            .order('nombre', ascending: true);
-        listaPrecios = List<Map<String, dynamic>>.from(data);
+            .eq('red_dir_catalogo.activo', true);
+        listaPrecios = List<Map<String, dynamic>>.from(data).map<Map<String, dynamic>>((row) {
+          final dir = Map<String, dynamic>.from(row['red_dir_catalogo'] as Map? ?? {});
+          return {
+            'id': dir['id'],
+            'nombre': dir['nombre'],
+            'municipio': dir['municipio'],
+            'sector_id': dir['sector_id'],
+            'precio': row['precio'],
+            'activo': dir['activo'],
+            'sectores': dir['sectores'],
+          };
+        }).toList()
+          ..sort((a, b) => (a['nombre'] ?? '').toString()
+              .compareTo((b['nombre'] ?? '').toString()));
       } catch (_) {}
     }
 
@@ -400,11 +464,30 @@ mixin _FormularioMixin on State<LocalScreen> {
     String? destinoBase; // dirección exacta seleccionada (preserva precio al escribir detalles)
     String? sectorBase;  // sector seleccionado (preserva precio al escribir detalles)
 
+    // Tipo de servicio: desde perfil del local, override mototaxi por pedido
+    final String _tipoDefecto =
+        widget.usuario['tipo_servicio_defecto']?.toString() ?? 'PAQUETERÍA';
+    bool _esMototaxi = false;
+
+    // Modo dinámico: cotización si tarifa vacía, solicitar si tiene precio
+    bool _esCot = true;
+    bool _esLluvia = false;
+    void Function(VoidCallback)? _setDS;
+    tarifaController.addListener(() {
+      _setDS?.call(() {
+        _esCot = tarifaController.text.trim().isEmpty;
+        // resetear lluvia si vuelve a modo cotización
+        if (_esCot) _esLluvia = false;
+      });
+    });
+
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
+        builder: (context, setDialogState) {
+          _setDS = setDialogState;
+          return AlertDialog(
           insetPadding: const EdgeInsets.symmetric(
             horizontal: 12,
             vertical: 24,
@@ -412,38 +495,17 @@ mixin _FormularioMixin on State<LocalScreen> {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
-          title: esVip
-              ? ShaderMask(
-                  shaderCallback: (bounds) => const LinearGradient(
-                    colors: [
-                      Color(0xFFB8860B),
-                      Color(0xFFFFD700),
-                      Color(0xFFFFF0A0),
-                      Color(0xFFFFD700),
-                      Color(0xFFB8860B),
-                    ],
-                    stops: [0.0, 0.25, 0.5, 0.75, 1.0],
-                  ).createShader(bounds),
-                  child: Text(
-                    '👑 SERVICIO VIP',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                      letterSpacing: 1,
-                    ),
-                  ),
-                )
-              : Text(
-                  esCotizacion
-                      ? 'COTIZAR SERVICIO'
-                      : (esPuntoAPunto ? 'PUNTO A PUNTO' : 'SOLICITAR MÓVIL'),
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: esCotizacion
-                        ? Colors.orange[800]
-                        : (esPuntoAPunto ? Colors.purple : Colors.black),
-                  ),
-                ),
+          title: Text(
+              _esCot
+                  ? 'COTIZAR SERVICIO'
+                  : (esPuntoAPunto ? 'PUNTO A PUNTO' : 'SOLICITAR MÓVIL'),
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: _esCot
+                    ? Colors.orange[800]
+                    : (esPuntoAPunto ? Colors.purple : Colors.black),
+              ),
+            ),
           content: SizedBox(
             width: double.maxFinite,
             child: SingleChildScrollView(
@@ -451,72 +513,31 @@ mixin _FormularioMixin on State<LocalScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (esVip)
-                  Container(
+                Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [
-                          Color(0xFF3D2B00),
-                          Color(0xFF7A5500),
-                          Color(0xFF3D2B00),
-                        ],
-                      ),
-                      borderRadius: BorderRadius.circular(6),
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(0xFFFFD700).withValues(alpha: 0.35),
-                          blurRadius: 8,
-                          spreadRadius: 1,
-                        ),
-                      ],
-                    ),
-                    child: const Row(
-                      children: [
-                        Text('👑', style: TextStyle(fontSize: 16)),
-                        SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Solo llega a Leyendas y Masters · +\$3.000 automático',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFFFFD700),
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                else
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: esCotizacion
+                      color: _esCot
                           ? Colors.orange[50]
                           : (esPuntoAPunto
                                 ? Colors.purple[50]
                                 : Colors.grey[200]),
                       borderRadius: BorderRadius.circular(6),
-                      border: esCotizacion
+                      border: _esCot
                           ? Border.all(color: Colors.orange[300]!)
                           : (esPuntoAPunto
                                 ? Border.all(color: Colors.purple[200]!)
                                 : null),
                     ),
                     child: Text(
-                      esCotizacion
+                      _esCot
                           ? 'Central fijará la tarifa para esta ruta.'
                           : (esPuntoAPunto
                                 ? '🏁 Destino final: ${widget.usuario['nombre']}'
                                 : '📍 Local: ${widget.usuario['nombre']}'),
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        color: esCotizacion
+                        color: _esCot
                             ? Colors.orange[900]
                             : (esPuntoAPunto
                                   ? Colors.purple[800]
@@ -739,8 +760,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                                             onTap: () {
                                               final lbl = (item['nombre'] ?? '').toString().toUpperCase();
                                               destinoController.text = '$lbl - ';
-                                              // Solo pega el precio si no es cotización
-                                              if (!esCotizacion && tarifaStr.isNotEmpty)
+                                              if (tarifaStr.isNotEmpty)
                                                 tarifaController.text = tarifaStr;
 
                                               setDialogState(
@@ -801,7 +821,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                         .where((w) => w.length > 2)
                         .toList();
 
-                    // --- Sugerencias de red_dir_se (propias, en verde) ---
+                    // --- Sugerencias de Red SE (red_dir_catalogo + se_precios_dir, en verde) ---
                     List<Map<String, dynamic>> encontradas = [];
                     for (var d in listaPrecios) {
                       final nombre = (d['nombre'] ?? '').toString();
@@ -864,8 +884,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                               InkWell(
                                 onTap: () {
                                   final palabra = sug['palabra'].toString();
-                                  if (!esCotizacion)
-                                    tarifaController.text = sug['tarifaStr'];
+                                  tarifaController.text = sug['tarifaStr'];
                                   if (destinoController.text.length <= palabra.length)
                                     destinoController.text = '$palabra - ';
                                   destinoBase = null;
@@ -913,10 +932,10 @@ mixin _FormularioMixin on State<LocalScreen> {
                           keyboardType: TextInputType.number,
                           inputFormatters: [CurrencyInputFormatter()],
                           decoration: InputDecoration(
-                            labelText: esCotizacion
-                                ? 'Tarifa (Se calculará)'
+                            labelText: _esCot
+                                ? 'Tarifa (Central la fijará)'
                                 : 'Tarifa (\$)',
-                            enabled: !esCotizacion,
+                            enabled: true,
                             border: const OutlineInputBorder(),
                             prefixIcon: const Icon(Icons.attach_money),
                           ),
@@ -924,7 +943,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 8),
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 10,
@@ -960,6 +979,63 @@ mixin _FormularioMixin on State<LocalScreen> {
                       ),
                     ),
                   ),
+                  const SizedBox(height: 10),
+                  // Chips de servicio: Mototaxi y Lluvia en la misma fila
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: [
+                      FilterChip(
+                        label: const Text('🏍 Mototaxi'),
+                        selected: _esMototaxi,
+                        selectedColor: Colors.orange[100],
+                        checkmarkColor: Colors.orange[800],
+                        labelStyle: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                          color: _esMototaxi ? Colors.orange[800] : Colors.black54,
+                        ),
+                        onSelected: (v) => _setDS?.call(() => _esMototaxi = v),
+                      ),
+                      if (!_esCot)
+                        FilterChip(
+                          label: const Text('🌧️ Lluvia +\$1.000'),
+                          selected: _esLluvia,
+                          selectedColor: Colors.blue[100],
+                          checkmarkColor: Colors.blue[800],
+                          labelStyle: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                            color: _esLluvia ? Colors.blue[800] : Colors.black54,
+                          ),
+                          onSelected: (v) => _setDS?.call(() => _esLluvia = v),
+                        ),
+                    ],
+                  ),
+                  // Desglose lluvia
+                  if (_esLluvia && !_esCot) ...[
+                    const SizedBox(height: 6),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.blue[50],
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: Colors.blue[200]!),
+                      ),
+                      child: () {
+                        final tarifaLimpiaDesglose = tarifaController.text
+                            .replaceAll('\$', '').replaceAll('.', '').replaceAll(',', '').trim();
+                        final double baseDesglose = double.tryParse(tarifaLimpiaDesglose) ?? 0.0;
+                        final double totalDesglose = baseDesglose + 1000;
+                        String fmt(double v) => '\$${v.toStringAsFixed(0).replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+$)'), (m) => '${m[1]}.')}';
+                        return Text(
+                          '${fmt(baseDesglose)} base  +  \$1.000 lluvia  =  ${fmt(totalDesglose)}',
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.blue[800]),
+                        );
+                      }(),
+                    ),
+                  ],
                   const SizedBox(height: 12),
                 ],
 
@@ -989,9 +1065,9 @@ mixin _FormularioMixin on State<LocalScreen> {
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: esCotizacion
+                backgroundColor: _esCot
                     ? Colors.orange[800]
-                    : (esPuntoAPunto ? Colors.purple[800] : Colors.black),
+                    : (esPuntoAPunto ? Colors.purple[800] : const Color(0xff3AF500)),
                 padding: const EdgeInsets.symmetric(
                   horizontal: 20,
                   vertical: 12,
@@ -1010,6 +1086,36 @@ mixin _FormularioMixin on State<LocalScreen> {
                         return;
                       }
 
+                      // ---> COTIZACIÓN PREVIA OBLIGATORIA <---
+                      // Si hay lista de precios y el local intenta enviar en modo
+                      // solicitar directo, el destino DEBE tener precio guardado.
+                      if (!_esCot && !esPuntoAPunto && !_esMototaxi &&
+                          listaPrecios.isNotEmpty) {
+                        final String destinoEscrito =
+                            destinoController.text.trim().toUpperCase();
+                        final bool tienePrecios = listaPrecios.any((item) {
+                          final s = (item['sectores'] as Map?)
+                              ?.cast<String, dynamic>();
+                          if (s == null) return false;
+                          final barrio =
+                              '${s['nombre']} (${s['municipio']})'.toUpperCase();
+                          return destinoEscrito.startsWith(barrio) ||
+                              barrio == destinoEscrito;
+                        });
+                        if (!tienePrecios) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                '⚠️ Este destino no tiene tarifa guardada. Cotiza primero con Central (deja la tarifa vacía).',
+                              ),
+                              backgroundColor: Colors.orange,
+                              duration: Duration(seconds: 4),
+                            ),
+                          );
+                          return;
+                        }
+                      }
+
                       // ---> REGLA DE DISCIPLINA: FILTRO ANTICIEGOS (NOMENCLATURA) <---
                       String destinoFinal = destinoController.text
                           .trim()
@@ -1021,7 +1127,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                       });
 
                       if (!esPuntoAPunto &&
-                          !esCotizacion &&
+                          !_esCot &&
                           (esSoloElBarrio || destinoFinal.length <= 8)) {
                         showDialog(
                           context: context,
@@ -1079,7 +1185,7 @@ mixin _FormularioMixin on State<LocalScreen> {
 
                       if (!esPuntoAPunto &&
                           telefonoController.text.trim().isEmpty &&
-                          !esCotizacion) {
+                          !_esCot) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
                             content: Text('Falta WhatsApp.'),
@@ -1115,7 +1221,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                             .toUtc()
                             .add(Duration(minutes: retardoProgramado))
                             .toIso8601String();
-                        String estadoFinal = esCotizacion
+                        String estadoFinal = _esCot
                             ? 'cotizacion'
                             : (retardoProgramado > 0
                                   ? 'programado'
@@ -1151,11 +1257,11 @@ mixin _FormularioMixin on State<LocalScreen> {
                             .replaceAll('.', '')
                             .replaceAll(',', '')
                             .trim();
-                        double tarifaNueva = (esPuntoAPunto || esCotizacion)
+                        double tarifaNueva = (esPuntoAPunto || _esCot)
                             ? 0.0
                             : (double.tryParse(tarifaLimpia) ?? 0.0);
-                        if (esVip && !esCotizacion && tarifaNueva > 0) {
-                          tarifaNueva += 3000;
+                        if (_esLluvia && !_esCot && !esPuntoAPunto) {
+                          tarifaNueva += 1000;
                         }
                         final destinoNuevo = destinoController.text.trim();
 
@@ -1173,7 +1279,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                         // --- ENRUTAR (antes "Doble Enganche") ---
                         String? rutaGrupoIdParaNuevo;
                         if (!esPuntoAPunto &&
-                            !esCotizacion &&
+                            !_esCot &&
                             retardoProgramado == 0) {
                           final pendientes = await Supabase.instance.client
                               .from('servicios')
@@ -1264,7 +1370,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                         List<String> pilotosSeleccionadosIds = [];
 
                         // --- ENRUTAR CON MÓVIL ACTIVO ---
-                        if (!esCotizacion &&
+                        if (!_esCot &&
                             !esPuntoAPunto &&
                             retardoProgramado == 0 &&
                             rutaGrupoIdParaNuevo == null) {
@@ -1364,7 +1470,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                         }
 
                         // --- MOTOR MULTI-PARADERO ---
-                        if (!esCotizacion && !esPuntoAPunto && exclusivoIdCampo == null) {
+                        if (!_esCot && !esPuntoAPunto && exclusivoIdCampo == null) {
                           final serviciosPendientes = await Supabase
                               .instance
                               .client
@@ -1387,6 +1493,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                               .select('id, paradero_actual, ingreso_fila')
                               .eq('rol', 'movil')
                               .eq('en_linea', true)
+                              .eq('tiene_se', true)
                               .not('paradero_actual', 'is', null);
 
                           Map<String, List<Map<String, dynamic>>>
@@ -1488,14 +1595,14 @@ mixin _FormularioMixin on State<LocalScreen> {
                               'observacion': observacionFinal,
                               'estado': estadoFinal,
                               'creador': widget.usuario['nombre'],
-                              'tipo_servicio': 'PAQUETERÍA',
+                              'tipo_servicio': _esMototaxi ? 'mototaxi' : _tipoDefecto,
                               if (rutaGrupoIdParaNuevo != null)
                                 'ruta_grupo_id': int.tryParse(
                                   rutaGrupoIdParaNuevo,
                                 ),
                               'local_id': widget.usuario['id'],
                               'es_punto_a_punto': esPuntoAPunto,
-                              'es_vip': esVip,
+                              'es_vip': false,
                               'exclusivo_id': exclusivoIdCampo,
                               'ticket_factura': ticketNum.isEmpty
                                   ? null
@@ -1508,91 +1615,87 @@ mixin _FormularioMixin on State<LocalScreen> {
                         final int nuevoServicioId =
                             respuestaServicio['id'] as int;
 
+                        // Registrar uso de P.A.P en BD (límite 1 por día)
+                        if (esPuntoAPunto) {
+                          await Supabase.instance.client
+                              .from('usuarios')
+                              .update({
+                                'ultimo_punto_a_punto':
+                                    DateTime.now().toIso8601String(),
+                              })
+                              .eq('id', widget.usuario['id']);
+                        }
+
                         // Sonido de confirmación según tipo de servicio
-                        if (esCotizacion) {
+                        if (_esCot) {
                           _sonidos.reproducirSuave(Sonidos.localCotizacion);
                         } else {
                           _sonidos.reproducirSuave(Sonidos.localAccion);
                         }
 
                         // DISPAROS ONESIGNAL
-                        if (esCotizacion) {
+                        if (_esCot) {
                           await MotorNotificaciones.dispararACentral(
-                            titulo: esVip ? '👑 COTIZACIÓN VIP' : '❓ NUEVA COTIZACIÓN',
-                            mensaje: esVip
-                                ? 'Cotización VIP pendiente de respuesta'
-                                : 'Un local solicita cotización de tarifa',
+                            titulo: '❓ NUEVA COTIZACIÓN',
+                            mensaje: 'Un local solicita cotización de tarifa',
                             urgente: true,
                           );
-                        } else if (esVip) {
-                          const String mensajeVip =
-                              'Servicio VIP disponible — revisa el radar';
-
-                          final mastersVip = await Supabase.instance.client
-                              .from('usuarios')
-                              .select('id')
-                              .eq('rol', 'movil')
-                              .eq('en_linea', true)
-                              .inFilter('rango_movil', ['MASTER']);
-                          final List<String> masterVipIds = mastersVip
-                              .map((u) => u['id'].toString())
+                        } else if (esPuntoAPunto) {
+                          // P.A.P: notificar SOLO al #1 del paradero del local
+                          final String paraderosRaw =
+                              widget.usuario['paradero_exclusivo']?.toString() ?? '';
+                          final List<String> paraderosDelLocal = paraderosRaw
+                              .split(',')
+                              .map((e) => e.trim().toLowerCase())
+                              .where((e) => e.isNotEmpty)
                               .toList();
 
-                          final leyendasVip = await Supabase.instance.client
-                              .from('usuarios')
-                              .select('id, paradero_actual, ingreso_fila')
-                              .eq('rol', 'movil')
-                              .eq('en_linea', true)
-                              .eq('rango_movil', 'LEYENDA')
-                              .not('paradero_actual', 'is', null)
-                              .order('ingreso_fila', ascending: true);
+                          if (paraderosDelLocal.isNotEmpty) {
+                            final movilesParadero = await Supabase.instance.client
+                                .from('usuarios')
+                                .select('id, paradero_actual, ingreso_fila, ticket_prioridad')
+                                .eq('rol', 'movil')
+                                .eq('en_linea', true)
+                                .eq('tiene_se', true)
+                                .not('paradero_actual', 'is', null);
 
-                          final List<String> leyendaVipIds =
-                              leyendasVip.isNotEmpty
-                              ? [leyendasVip.first['id'].toString()]
-                              : [];
+                            String? numeroUnoId;
+                            for (final pLocal in paraderosDelLocal) {
+                              final enParadero = movilesParadero
+                                  .where((m) =>
+                                      m['paradero_actual']
+                                          .toString()
+                                          .trim()
+                                          .toLowerCase() ==
+                                      pLocal)
+                                  .toList();
+                              if (enParadero.isEmpty) continue;
+                              enParadero.sort((a, b) {
+                                final tA = (a['ticket_prioridad'] == true) ? 0 : 1;
+                                final tB = (b['ticket_prioridad'] == true) ? 0 : 1;
+                                if (tA != tB) return tA.compareTo(tB);
+                                return DateTime.parse(
+                                  a['ingreso_fila'] ??
+                                      DateTime.now().toIso8601String(),
+                                ).compareTo(
+                                  DateTime.parse(
+                                    b['ingreso_fila'] ??
+                                        DateTime.now().toIso8601String(),
+                                  ),
+                                );
+                              });
+                              numeroUnoId = enParadero.first['id'].toString();
+                              break;
+                            }
 
-                          if (masterVipIds.isEmpty && leyendaVipIds.isEmpty) {
-                            _mostrarDialogoFallbackVip(
-                              servicioId: nuevoServicioId,
-                              destino: destinoNuevo,
-                              pilotosParadero: pilotosSeleccionadosIds,
-                              esPuntoAPunto: esPuntoAPunto,
-                              coords: coords,
-                              tarifaConVip: (respuestaServicio['tarifa'] as num?)?.toDouble() ?? 0.0,
-                            );
-                          } else {
-                            if (masterVipIds.isNotEmpty) {
+                            if (numeroUnoId != null) {
                               await _dispararMisilInmediato(
-                                externalIds: masterVipIds,
-                                titulo: '👑 SERVICIO VIP',
-                                mensaje: mensajeVip,
+                                externalIds: [numeroUnoId],
+                                titulo: '🏁 PUNTO A PUNTO',
+                                mensaje:
+                                    'Tienes un servicio punto a punto — revisa el radar',
                               );
                             }
-                            if (leyendaVipIds.isNotEmpty) {
-                              final id30sVip = await _programarMisilRetardado(
-                                externalIds: leyendaVipIds,
-                                titulo: '👑 SERVICIO VIP',
-                                mensaje: mensajeVip,
-                                segundosRetardo: 30,
-                              );
-                              if (id30sVip != null) {
-                                await Supabase.instance.client
-                                    .from('servicios')
-                                    .update({'onesignal_30s': id30sVip})
-                                    .eq('id', nuevoServicioId);
-                              }
-                            }
-                            Future.delayed(const Duration(minutes: 3), () {
-                              _verificarFallbackVip(
-                                servicioId: nuevoServicioId,
-                                destino: destinoNuevo,
-                                pilotosParadero: pilotosSeleccionadosIds,
-                                esPuntoAPunto: esPuntoAPunto,
-                                coords: coords,
-                                tarifaConVip: (respuestaServicio['tarifa'] as num?)?.toDouble() ?? 0.0,
-                              );
-                            });
                           }
                         } else {
                           const String mensajeAlarma =
@@ -1661,7 +1764,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                               final movilesActivos = await Supabase
                                   .instance.client.from('usuarios')
                                   .select('id, latitud, longitud')
-                                  .eq('rol', 'movil').eq('en_linea', true);
+                                  .eq('rol', 'movil').eq('en_linea', true).eq('tiene_se', true);
                               for (var m in movilesActivos) {
                                 final idStr = m['id'].toString();
                                 todosIds.add(idStr);
@@ -1706,7 +1809,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                               final double? _oLng2 = (coords['lng'] as num?)?.toDouble();
                               final movilesInm = await Supabase.instance.client
                                   .from('usuarios').select('id, latitud, longitud')
-                                  .eq('rol', 'movil').eq('en_linea', true)
+                                  .eq('rol', 'movil').eq('en_linea', true).eq('tiene_se', true)
                                   .neq('suspendido', true)
                                   .not('rango_movil', 'in', '("MASTER")');
                               final idsZona60 = movilesInm.where((u) {
@@ -1772,7 +1875,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                           });
 
                           if (!esPuntoAPunto &&
-                              !esCotizacion &&
+                              !_esCot &&
                               !yaEstaGuardado) {
                             final barrioCtrl = TextEditingController(
                               text: barrioExtraido,
@@ -1880,25 +1983,22 @@ mixin _FormularioMixin on State<LocalScreen> {
                                                 () => guardandoLista = true,
                                               );
                                               try {
-                                                final sectorId = await _buscarOCrearSector(
-                                                  barrioCtrl.text.trim().toUpperCase(),
-                                                  zonaSeleccionada,
-                                                );
-
                                                 final munNorm = zonaSeleccionada == 'CÚCUTA'
                                                     ? 'Cúcuta'
                                                     : zonaSeleccionada == 'LOS PATIOS'
                                                         ? 'Los Patios'
                                                         : 'V. Rosario';
-                                                await Supabase.instance.client
-                                                    .from('red_dir_se')
-                                                    .insert({
-                                                      'usuario_id': widget.usuario['id'],
-                                                      'nombre': barrioCtrl.text.trim().toUpperCase(),
-                                                      'municipio': munNorm,
-                                                      'sector_id': sectorId,
-                                                      'precio': tarifaNueva.toInt(),
-                                                    });
+                                                final sectorId = await _buscarOCrearSector(
+                                                  barrioCtrl.text.trim().toUpperCase(),
+                                                  munNorm,
+                                                );
+                                                await _guardarEnRedSE(
+                                                  nombre: barrioCtrl.text.trim().toUpperCase(),
+                                                  municipio: munNorm,
+                                                  sectorId: sectorId,
+                                                  precio: tarifaNueva.toInt(),
+                                                  telefono: telefonoController.text,
+                                                );
 
                                                 if (ctxSave.mounted) {
                                                   Navigator.pop(ctxSave);
@@ -1973,15 +2073,16 @@ mixin _FormularioMixin on State<LocalScreen> {
                       ),
                     )
                   : Text(
-                      esCotizacion ? 'ENVIAR A CENTRAL' : 'ENVIAR PEDIDO',
+                      _esCot ? 'ENVIAR A CENTRAL' : 'ENVIAR PEDIDO',
                       style: const TextStyle(
-                        color: Color(0xff3AF500),
+                        color: Colors.white,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
             ),
           ],
-        ),
+        );
+      },
       ),
     );
   }

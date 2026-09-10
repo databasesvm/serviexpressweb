@@ -55,6 +55,7 @@ class _MovilScreenState extends State<MovilScreen>
   Timer? _heartbeatTimer; // Opción A: ping cada 60s → cron Supabase limpia zombis
   Timer? _ubicacionHeartbeatTimer; // Fallback: envía ubicación cada 20s aunque GPS stream esté silencioso
   bool _enviandoUbicacion = false; // Mutex: evita writes de ubicación simultáneos
+  Position? _pendingPosition;      // Última posición recibida mientras había write en curso
   DateTime? _ultimoEnvioUbicacion; // Para el heartbeat: evita doble-write si GPS ya emitió
   DateTime? _ultimaEmisionGps;     // Última vez que el stream GPS emitió — watchdog lo reinicia si lleva >90s mudo
   bool _reiniciandoGps = false;    // Evita reinicios simultáneos del stream
@@ -132,6 +133,10 @@ class _MovilScreenState extends State<MovilScreen>
   bool _vieneDeBackground = false;
 
   bool _sonidoSoporteReproducido = false;
+
+  // Estadísticas semanales del perfil (#124) — future cacheado para evitar
+  // re-queries en cada rebuild. Se refresca al abrir la pestaña de Perfil.
+  Future<List<dynamic>>? _futureEstadisticasSemana;
 
   // PRODUCCIÓN — cargados una vez al abrir la pantalla para evitar el
   // parpadeo "Cargando..." de FutureBuilder dentro de StreamBuilder.
@@ -305,6 +310,7 @@ class _MovilScreenState extends State<MovilScreen>
     });
 
     _estaEnLinea = widget.usuario['en_linea'] ?? false;
+    _futureEstadisticasSemana = _cargarEstadisticasSemana(); // cargado una vez al iniciar
     _perfilTelefonoCtrl = TextEditingController(
       text: widget.usuario['telefono']?.toString() ?? '',
     );
@@ -421,6 +427,10 @@ class _MovilScreenState extends State<MovilScreen>
 
   void _cambiarTab(int index) {
     if (!mounted || index == _tabActual) return;
+    // Refrescar estadísticas semanales cada vez que se abre el Perfil
+    if (index == 1) {
+      _futureEstadisticasSemana = _cargarEstadisticasSemana();
+    }
     setState(() => _tabActual = index);
   }
 
@@ -735,8 +745,7 @@ class _MovilScreenState extends State<MovilScreen>
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
+                    Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
                         color: esFM ? Colors.green[50] : Colors.red[50],
@@ -2003,10 +2012,10 @@ class _MovilScreenState extends State<MovilScreen>
         // _enviandoUbicacion evita que los writes se acumulen.
         distanceFilter: 0,
         // intervalDuration: fuerza al LocationManager de Android a enviar
-        // actualizaciones al menos cada 5s aunque el dispositivo esté en
+        // actualizaciones al menos cada 2s aunque el dispositivo esté en
         // background o el fabricante intente agrupar los eventos.
         // Sin este parámetro, Android puede reducir la frecuencia a 1/min.
-        intervalDuration: const Duration(seconds: 5),
+        intervalDuration: const Duration(seconds: 2),
         foregroundNotificationConfig: const ForegroundNotificationConfig(
           notificationText: "ServiExpress está ejecutándose en segundo plano.",
           notificationTitle: "Radar ServiExpress Activo",
@@ -2029,15 +2038,21 @@ class _MovilScreenState extends State<MovilScreen>
 
           if (pos != null && _estaEnLinea) {
             _ultimaPosicionConocida = pos; // <-- RADAR ACTUALIZADO
-            // Mutex: si ya hay un write en curso, saltamos este tick
+            _pendingPosition = pos;        // siempre guardamos la más reciente
+            // Si ya hay un write en curso, el bucle de abajo lo usará
             if (_enviandoUbicacion) return;
             _enviandoUbicacion = true;
             try {
-              await Supabase.instance.client
-                  .from('usuarios')
-                  .update({'latitud': pos.latitude, 'longitud': pos.longitude})
-                  .eq('id', widget.usuario['id']);
-              _ultimoEnvioUbicacion = DateTime.now();
+              // Drena _pendingPosition: escribe hasta que no quede posición nueva
+              while (_pendingPosition != null) {
+                final toWrite = _pendingPosition!;
+                _pendingPosition = null;
+                await Supabase.instance.client
+                    .from('usuarios')
+                    .update({'latitud': toWrite.latitude, 'longitud': toWrite.longitude})
+                    .eq('id', widget.usuario['id']);
+                _ultimoEnvioUbicacion = DateTime.now();
+              }
             } catch (e) {
             } finally {
               _enviandoUbicacion = false;
@@ -3745,6 +3760,21 @@ class _MovilScreenState extends State<MovilScreen>
   // teléfono + métodos de pago. Todo lo nuevo del registro (correo,
   // fecha de nacimiento, usuario) nunca llegaba a mostrarse en ningún
   // lado. Ahora es su propia pestaña, completa: identidad, datos
+  // Estadísticas semanales: servicios finalizados desde el lunes actual.
+  // Cacheado en _futureEstadisticasSemana — se refresca al abrir Perfil.
+  Future<List<dynamic>> _cargarEstadisticasSemana() {
+    final ahora = DateTime.now();
+    final diasDesdeLunes = (ahora.weekday - 1) % 7;
+    final inicioSemana =
+        DateTime(ahora.year, ahora.month, ahora.day - diasDesdeLunes);
+    return Supabase.instance.client
+        .from('servicios')
+        .select('tarifa')
+        .eq('movil_id', widget.usuario['id'])
+        .eq('estado', 'finalizado')
+        .gte('updated_at', inicioSemana.toIso8601String());
+  }
+
   // personales, contacto editable, rango y beneficios, documentos
   // (próximamente), y las acciones de cuenta que antes vivían
   // amontonadas en el AppBar (Ranking, Cerrar sesión).
@@ -3972,6 +4002,104 @@ class _MovilScreenState extends State<MovilScreen>
               ),
 
               const SizedBox(height: 16),
+
+              // ── ESTADÍSTICAS SEMANALES (#124) ─────────────────────────────
+              FutureBuilder<List<dynamic>>(
+                future: _futureEstadisticasSemana,
+                builder: (_, snap) {
+                  if (!snap.hasData) return const SizedBox.shrink();
+                  final rows = List<Map<String, dynamic>>.from(snap.data!);
+                  final count = rows.length;
+                  int total = 0;
+                  for (final r in rows) {
+                    total += ((r['tarifa'] as num?)?.toInt() ?? 0);
+                  }
+                  String _milesP(int n) {
+                    final s = n.toString();
+                    final buf = StringBuffer();
+                    for (int i = 0; i < s.length; i++) {
+                      if (i > 0 && (s.length - i) % 3 == 0) buf.write('.');
+                      buf.write(s[i]);
+                    }
+                    return buf.toString();
+                  }
+                  return Container(
+                    margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    decoration: BoxDecoration(
+                      color: Colors.black,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: Colors.white12),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(children: [
+                            const Icon(Icons.calendar_today_rounded,
+                                color: Colors.white38, size: 14),
+                            const SizedBox(width: 8),
+                            const Text(
+                              'ESTA SEMANA',
+                              style: TextStyle(
+                                  color: Colors.white38,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 1.2),
+                            ),
+                          ]),
+                          const SizedBox(height: 12),
+                          Row(children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '\$${_milesP(total)}',
+                                    style: const TextStyle(
+                                      color: Color(0xFF3AF500),
+                                      fontSize: 22,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const Text(
+                                    'en ganancias',
+                                    style: TextStyle(
+                                        color: Colors.white38, fontSize: 11),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 10),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.06),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Column(children: [
+                                Text(
+                                  '$count',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const Text(
+                                  'servicios',
+                                  style: TextStyle(
+                                      color: Colors.white38, fontSize: 11),
+                                ),
+                              ]),
+                            ),
+                          ]),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
 
               // ── WALLET (solo prediario / postdia) ─────────────────────────
               Builder(builder: (_) {
@@ -4375,7 +4503,7 @@ class _MovilScreenState extends State<MovilScreen>
                     onExpansionChanged: (expanded) {
                       if (expanded) {
                         Future.delayed(const Duration(milliseconds: 200), () {
-                          Scrollable.ensureVisible(bCtx, duration: const Duration(milliseconds: 400), curve: Curves.easeInOut, alignment: 0.5);
+                          Scrollable.ensureVisible(bCtx, duration: Duration.zero, alignment: 0.5);
                         });
                       }
                     },
@@ -4508,7 +4636,7 @@ class _MovilScreenState extends State<MovilScreen>
                       onExpansionChanged: (expanded) {
                         if (expanded) {
                           Future.delayed(const Duration(milliseconds: 200), () {
-                            Scrollable.ensureVisible(bCtx, duration: const Duration(milliseconds: 400), curve: Curves.easeInOut, alignment: 0.5);
+                            Scrollable.ensureVisible(bCtx, duration: Duration.zero, alignment: 0.5);
                           });
                         }
                       },
@@ -5304,8 +5432,7 @@ class _MovilScreenState extends State<MovilScreen>
                 Future.delayed(const Duration(milliseconds: 200), () {
                   Scrollable.ensureVisible(
                     builderCtx,
-                    duration: const Duration(milliseconds: 400),
-                    curve: Curves.easeInOut,
+                    duration: Duration.zero,
                     alignment: 0.5,
                   );
                 });
@@ -6082,9 +6209,9 @@ class _MovilScreenState extends State<MovilScreen>
             ),
           ),
 
-          // DETALLE — animado al expandir/colapsar
+          // DETALLE — expandir/colapsar sin animación
           AnimatedSize(
-            duration: const Duration(milliseconds: 250),
+            duration: Duration.zero,
             curve: Curves.easeInOut,
             child: _filaVirtualExpandida
                 ? Padding(
@@ -6127,7 +6254,7 @@ class _MovilScreenState extends State<MovilScreen>
                 final String calTexto = calRaw == null ? '-' : '★ ${(calRaw as num).toDouble().toStringAsFixed(1)}';
                 final int cap = _limitePorRango(rango);
                 final String texCap = cap >= 999 ? '∞' : '$cap';
-                return FadeSlideIn(
+                return KeyedSubtree(
                   key: ValueKey('fila_${movil['id']}'),
                   child: Padding(
                   padding: const EdgeInsets.only(bottom: 6),
@@ -6274,7 +6401,7 @@ class _MovilScreenState extends State<MovilScreen>
 
     if (!estaExpandida) {
       return AnimatedSwitcher(
-        duration: const Duration(milliseconds: 220),
+        duration: Duration.zero,
         child: Card(
         key: ValueKey('collapsed_${servicio['id']}_$estado'),
         elevation: 2,
@@ -6559,9 +6686,38 @@ class _MovilScreenState extends State<MovilScreen>
               ],
             ),
 
+            // Banner P.A.P
+            if (servicio['es_punto_a_punto'] == true) ...[
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.purple[50],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.purple[300]!),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.flash_on, size: 16, color: Colors.purple),
+                    SizedBox(width: 6),
+                    Text(
+                      'PUNTO A PUNTO — Tarifa gratuita',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.purple,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
             // ---> INYECCIÓN: RELOJ BIFURCADO Y FASE DE ESPERA <---
             AnimatedSwitcher(
-              duration: const Duration(milliseconds: 300),
+              duration: Duration.zero,
               transitionBuilder: (child, anim) => FadeTransition(
                 opacity: anim,
                 child: SizeTransition(sizeFactor: anim, child: child),
@@ -7052,7 +7208,7 @@ class _MovilScreenState extends State<MovilScreen>
               ),
             // --------------------------------------------------------------------------
             AnimatedSwitcher(
-              duration: const Duration(milliseconds: 280),
+              duration: Duration.zero,
               transitionBuilder: (child, anim) => FadeTransition(
                 opacity: anim,
                 child: ScaleTransition(scale: Tween(begin: 0.92, end: 1.0).animate(anim), child: child),
@@ -7954,7 +8110,7 @@ class _MovilScreenState extends State<MovilScreen>
     // ── Colapsada ────────────────────────────────────────────────────────────
     if (!estaExpandida) {
       return AnimatedSwitcher(
-        duration: const Duration(milliseconds: 220),
+        duration: Duration.zero,
         child: Card(
           key: ValueKey('fn_col_${servicio['id']}_$estado'),
           elevation: 2,
@@ -8838,7 +8994,7 @@ class _MovilScreenState extends State<MovilScreen>
 
             // ── Botón de acción principal ─────────────────────────────────
             AnimatedSwitcher(
-              duration: const Duration(milliseconds: 280),
+              duration: Duration.zero,
               transitionBuilder: (child, anim) => FadeTransition(
                 opacity: anim,
                 child: ScaleTransition(
@@ -10397,7 +10553,7 @@ class _MovilScreenState extends State<MovilScreen>
         final mastersData = await Supabase.instance.client
             .from('usuarios')
             .select('id, rol, rango_movil')
-            .or('rol.eq.central,rol.eq.master,rango_movil.eq.MASTER')
+            .or('rol.eq.central,rol.eq.master,and(rango_movil.eq.MASTER,tiene_se.eq.true)')
             .eq('activo', true)
             .neq('suspendido', true);
         final centralIds2 = mastersData
@@ -10458,6 +10614,7 @@ class _MovilScreenState extends State<MovilScreen>
             .select('id, latitud, longitud')
             .eq('rol', 'movil')
             .eq('en_linea', true)
+            .eq('tiene_se', true)
             .neq('suspendido', true)
             .not('rango_movil', 'in', '("MASTER")');
         final idsZona60 = movilesLib.where((u) {
@@ -11788,10 +11945,8 @@ class _MovilScreenState extends State<MovilScreen>
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                   child: Row(
                     children: [
-                      // Ícono de estado en círculo de color — anima al cambiar
-                      AnimatedContainer(
-                        duration: const Duration(milliseconds: 350),
-                        curve: Curves.easeOut,
+                      // Ícono de estado en círculo de color
+                      Container(
                         width: 44,
                         height: 44,
                         decoration: BoxDecoration(
@@ -11799,7 +11954,7 @@ class _MovilScreenState extends State<MovilScreen>
                           shape: BoxShape.circle,
                         ),
                         child: AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 300),
+                          duration: Duration.zero,
                           child: Icon(
                             key: ValueKey(_statusLabel),
                             _estaEnLinea
@@ -11816,7 +11971,7 @@ class _MovilScreenState extends State<MovilScreen>
                       // Estado + paradero
                       Expanded(
                         child: AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 300),
+                          duration: Duration.zero,
                           transitionBuilder: (child, anim) => FadeTransition(
                             opacity: anim,
                             child: SlideTransition(
@@ -11850,10 +12005,8 @@ class _MovilScreenState extends State<MovilScreen>
                           ),
                         ),
                       ),
-                      // Botón conectar/desconectar — anima color + texto
-                      AnimatedContainer(
-                        duration: const Duration(milliseconds: 350),
-                        curve: Curves.easeOut,
+                      // Botón conectar/desconectar
+                      Container(
                         decoration: BoxDecoration(
                           color: _estaEnLinea ? Colors.red[800] : Colors.black,
                           borderRadius: BorderRadius.circular(8),
@@ -11870,7 +12023,7 @@ class _MovilScreenState extends State<MovilScreen>
                           ),
                           onPressed: _procesando ? null : _cambiarEstado,
                           child: AnimatedSwitcher(
-                            duration: const Duration(milliseconds: 220),
+                            duration: Duration.zero,
                             child: _procesando
                                 ? SizedBox(
                                     key: ValueKey('loading'),
@@ -11902,7 +12055,7 @@ class _MovilScreenState extends State<MovilScreen>
 
               Expanded(
                 child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 400),
+                  duration: Duration.zero,
                   switchInCurve: Curves.easeOut,
                   switchOutCurve: Curves.easeIn,
                   transitionBuilder: (child, anim) => FadeTransition(
@@ -12520,17 +12673,11 @@ class _MovilScreenState extends State<MovilScreen>
                                   ]),
                                 ),
                                 ..._serviciosActivosData.map(
-                                  (servicio) => AnimatedSize(
-                                    key: ValueKey('size_activa_${servicio['id']}'),
-                                    duration: const Duration(milliseconds: 280),
-                                    curve: Curves.easeInOut,
-                                    alignment: Alignment.topCenter,
-                                    child: FadeSlideIn(
-                                      key: ValueKey('activa_${servicio['id']}'),
-                                      child: _construirTarjetaActiva(
-                                        servicio,
-                                        esMaster: esMaster,
-                                      ),
+                                  (servicio) => KeyedSubtree(
+                                    key: ValueKey('activa_${servicio['id']}'),
+                                    child: _construirTarjetaActiva(
+                                      servicio,
+                                      esMaster: esMaster,
                                     ),
                                   ),
                                 ),
@@ -12565,7 +12712,7 @@ class _MovilScreenState extends State<MovilScreen>
                                   )
                                 else
                                   ...pendientes.map(
-                                    (servicio) => FadeSlideIn(
+                                    (servicio) => KeyedSubtree(
                                       key: ValueKey('pendiente_${servicio['id']}'),
                                       child: _construirTarjetaPendiente(
                                         servicio,

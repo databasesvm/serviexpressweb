@@ -71,7 +71,7 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
         final mastersData = await Supabase.instance.client
             .from('usuarios')
             .select('id')
-            .or('rol.eq.central,rol.eq.master,rango_movil.eq.MASTER')
+            .or('rol.eq.central,rol.eq.master,and(rango_movil.eq.MASTER,tiene_se.eq.true)')
             .neq('suspendido', true);
         final masterIds = mastersData.map((u) => u['id'].toString()).toList();
         if (masterIds.isNotEmpty) {
@@ -110,7 +110,7 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
         // T=+60s y T=+90s — misiles server-side (pre-fetch al aprobar cotización)
         final movilesG = await Supabase.instance.client
             .from('usuarios').select('id, latitud, longitud')
-            .eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true)
+            .eq('rol', 'movil').eq('en_linea', true).eq('tiene_se', true).neq('suspendido', true)
             .not('rango_movil', 'in', '("MASTER")');
         final idsZonaG = movilesG.where((u) {
           final id = u['id'].toString();

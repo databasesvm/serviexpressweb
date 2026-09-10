@@ -17,8 +17,6 @@ mixin _DialogsMixin on State<LocalScreen> {
   void _abrirFormularioPedido(
     BuildContext ctx, {
     bool esPuntoAPunto = false,
-    bool esCotizacion = false,
-    bool esVip = false,
     required Map<String, dynamic> perfilEnVivo,
     String? telefonoPrellenado,
   });
@@ -180,26 +178,54 @@ mixin _DialogsMixin on State<LocalScreen> {
     String telefono,
   ) async {
     try {
-      final res = await Supabase.instance.client
+      final db = Supabase.instance.client;
+      final userId = widget.usuario['id'];
+
+      // 1. CRM estructurado: direcciones explícitamente guardadas para este cliente
+      final crmRows = await db
+          .from('crm_cliente_dirs')
+          .select('dir_id, updated_at')
+          .eq('local_id', userId)
+          .eq('telefono', telefono.trim())
+          .not('dir_id', 'is', null)
+          .order('updated_at', ascending: false)
+          .limit(5);
+
+      if (crmRows.isNotEmpty) {
+        final dirIds = crmRows.map((r) => r['dir_id']).toList();
+        final precios = await db
+            .from('se_precios_dir')
+            .select('precio, dir_id, red_dir_catalogo(id, nombre, municipio)')
+            .eq('usuario_id', userId)
+            .inFilter('dir_id', dirIds);
+
+        if (precios.isNotEmpty) {
+          return precios.map<Map<String, dynamic>>((row) {
+            final dir = Map<String, dynamic>.from(row['red_dir_catalogo'] as Map? ?? {});
+            return {'destino': dir['nombre'] ?? '', 'tarifa': row['precio']};
+          }).toList();
+        }
+      }
+
+      // 2. Fallback: historial de servicios anteriores
+      final res = await db
           .from('servicios')
           .select('destino, tarifa')
-          .eq('telefono_receptor', telefono)
-          .eq('local_id', widget.usuario['id'])
+          .eq('telefono_receptor', telefono.trim())
+          .eq('local_id', userId)
           .not('destino', 'is', null)
           .order('id', ascending: false)
           .limit(20);
 
       if (res.isEmpty) return [];
 
-      // Filtro anti-duplicados — normaliza a mayúsculas
       final mapUnicos = <String, Map<String, dynamic>>{};
       for (var r in res) {
-        String destinoNormalizado = r['destino'].toString().trim().toUpperCase();
-        if (!mapUnicos.containsKey(destinoNormalizado)) {
-          mapUnicos[destinoNormalizado] = r;
+        String destinoNorm = r['destino'].toString().trim().toUpperCase();
+        if (!mapUnicos.containsKey(destinoNorm)) {
+          mapUnicos[destinoNorm] = r;
         }
       }
-      // Corte táctico a las 3 más recientes
       return mapUnicos.values.take(3).toList();
     } catch (_) {
       return [];
@@ -740,7 +766,6 @@ mixin _DialogsMixin on State<LocalScreen> {
                           Navigator.pop(context);
                           _abrirFormularioPedido(
                             context,
-                            esCotizacion: false,
                             perfilEnVivo: perfilEnVivo,
                             telefonoPrellenado: cliente['telefono'].toString(),
                           );

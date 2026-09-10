@@ -1,6 +1,9 @@
 // ignore_for_file: use_build_context_synchronously
 import 'dart:async';
 import 'dart:math' as math;
+// ignore: avoid_web_libraries_in_flutter
+import 'dart:html' as html show window;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
@@ -53,7 +56,7 @@ class _SedeFnScreenState extends State<SedeFnScreen>
   @override
   void initState() {
     super.initState();
-    _tab = TabController(length: 3, vsync: this);
+    _tab = TabController(length: 3, vsync: this, animationDuration: Duration.zero);
     // Activa la carga del historial solo cuando el usuario toca esa pestaña (tab 2)
     _tab.addListener(() {
       if (_tab.index == 2 && !_historialActivo.value) {
@@ -140,7 +143,7 @@ class _SedeFnScreenState extends State<SedeFnScreen>
       _movilPreselId = movilId;
       _movilPreselNum = movilNum;
     });
-    _tab.animateTo(0);
+    _tab.index = 0;
   }
 
   // ── Stream antiparpadeo de servicios de esta sede ──────────────────────────
@@ -336,12 +339,13 @@ class _SedeFnScreenState extends State<SedeFnScreen>
           Expanded(
             child: TabBarView(
               controller: _tab,
+              physics: const NeverScrollableScrollPhysics(),
               children: [
                 _FormularioTab(
                   usuario: widget.usuario,
                   sede: _sede,
                   altaDemanda: _altaDemanda,
-                  onServicioCreado: () => _tab.animateTo(1),
+                  onServicioCreado: () => _tab.index = 1,
                   movilPreselId: _movilPreselId,
                   movilPreselNum: _movilPreselNum,
                   onPreselLimpiado: () => setState(() {
@@ -492,12 +496,15 @@ class _FormularioTabState extends State<_FormularioTab> {
     return total;
   }
 
-  /// Precio final = precio sugerido + recargo sedes extra + recargo datáfono + recargo lluvia
-  /// Retorna null si no hay precio sugerido O si hay sedes extra sin coordenadas
+  /// Precio final = precio base (particular o convenio) + recargo sedes extra + datáfono + lluvia
+  /// Retorna null si no hay precio base O si hay sedes extra sin coordenadas
   double? get _tarifaEfectiva {
-    if (_precioSugerido == null) return null;
+    final base = (_esConvenio && _precioConvenio != null)
+        ? _precioConvenio
+        : _precioSugerido;
+    if (base == null) return null;
     if (_haySedesExtraSinCoordenadas) return null;
-    return _precioSugerido! +
+    return base +
         _recargoSedesExtra +
         (_conDatafono ? _recargoDaatafonoCOP : 0) +
         (widget.altaDemanda ? _recargoLluviaCOP : 0);
@@ -518,7 +525,12 @@ class _FormularioTabState extends State<_FormularioTab> {
   Map<int, int> _tarifasSede = {}; // sector_id → precio (de fn_tarifas_sede)
   Map<int, int> _mapaPreciosDir = {}; // dir_id → precio (de fn_precios_dir, esta sede)
   Map<int, int> _parentMap = {}; // barrio_id → parent_sector_id (para fallback)
-  List<Map<String, dynamic>> _sectoresSede = []; // sectores con nombre y precio
+  Map<int, String> _sectorNombresMap = {}; // sector_id → nombre (para mostrar en tile)
+  Map<int, int> _mapaPreciosConvenioDir = {}; // dir_id → precio_convenio
+  Map<int, int> _tarifasSedeConvenio = {}; // sector_id → precio_convenio
+  bool _esConvenio = false; // toggle convenio activo
+  double? _precioConvenio; // precio convenio de la dirección seleccionada
+  List<Map<String, dynamic>> _sectoresSede = []; // sectores con nombre y precio (puede ser null = sin precio)
   double? _precioSugerido; // precio de la dirección seleccionada de la red
   int? _redDireccionSelId; // id del registro seleccionado (negativo = sector)
   String? _destinoBase; // dirección exacta de la red que se seleccionó (para permitir añadir detalles)
@@ -570,6 +582,8 @@ class _FormularioTabState extends State<_FormularioTab> {
       _sectorBase = null;
       _redDireccionSelId = null;
       _precioSugerido = null;
+      _precioConvenio = null;
+      _esConvenio = false;
       _sugerencias = v.trim().isEmpty ? [] : _filtrarDirecciones(v);
     });
   }
@@ -652,12 +666,12 @@ class _FormularioTabState extends State<_FormularioTab> {
         // Precios específicos de esta sede por dirección
         _db
             .from('fn_precios_dir')
-            .select('dir_id, precio')
+            .select('dir_id, precio, precio_convenio')
             .eq('sede_id', sedeId),
         // Precios por sector para esta sede
         _db
             .from('fn_tarifas_sede')
-            .select('sector_id, precio')
+            .select('sector_id, precio, precio_convenio')
             .eq('sede_id', sedeId),
         _db.from('sectores').select('id, nombre, parent_id').eq('activo', true),
       ]);
@@ -667,20 +681,26 @@ class _FormularioTabState extends State<_FormularioTab> {
       final tarifas = results[2] as List;
       final sectData = results[3] as List;
 
-      // dir_id → precio para esta sede
+      // dir_id → precio y precio_convenio para esta sede
       final mapaPreciosDir = <int, int>{};
+      final mapaConvenioDir = <int, int>{};
       for (final t in List<Map<String, dynamic>>.from(preciosDir)) {
         final did = t['dir_id'] as int?;
         final p = t['precio'] as int?;
+        final pc = t['precio_convenio'] as int?;
         if (did != null && p != null) mapaPreciosDir[did] = p;
+        if (did != null && pc != null) mapaConvenioDir[did] = pc;
       }
 
-      // sector_id → precio para esta sede
+      // sector_id → precio y precio_convenio para esta sede
       final mapa = <int, int>{};
+      final mapaConvenioSector = <int, int>{};
       for (final t in List<Map<String, dynamic>>.from(tarifas)) {
         final sid = t['sector_id'] as int?;
         final p = t['precio'] as int?;
+        final pc = t['precio_convenio'] as int?;
         if (sid != null && p != null) mapa[sid] = p;
+        if (sid != null && pc != null) mapaConvenioSector[sid] = pc;
       }
 
       // barrio_id → parent_sector_id para fallback de precio
@@ -714,7 +734,15 @@ class _FormularioTabState extends State<_FormularioTab> {
         });
       }
 
-      // Sectores con precio efectivo para sugerir como sector general
+      // Mapa sector_id → nombre para mostrar contexto en tiles
+      final sectorNombres = <int, String>{};
+      for (final s in List<Map<String, dynamic>>.from(sectData)) {
+        final sid = s['id'] as int?;
+        final nombre = s['nombre']?.toString();
+        if (sid != null && nombre != null) sectorNombres[sid] = nombre;
+      }
+
+      // Todos los sectores para sugerir como sector general (con o sin precio)
       final sects = <Map<String, dynamic>>[];
       for (final s in List<Map<String, dynamic>>.from(sectData)) {
         final sid = s['id'] as int?;
@@ -722,26 +750,47 @@ class _FormularioTabState extends State<_FormularioTab> {
         final precioPropio = mapa[sid];
         final parentId = parentMapa[sid];
         final precioEfectivo = precioPropio ?? (parentId != null ? mapa[parentId] : null);
-        if (precioEfectivo != null) {
-          sects.add({
-            'id': sid,
-            'nombre': s['nombre']?.toString() ?? '',
-            'precio_efectivo': precioEfectivo,
-          });
-        }
+        sects.add({
+          'id': sid,
+          'nombre': s['nombre']?.toString() ?? '',
+          'precio_efectivo': precioEfectivo, // null = sin precio configurado
+          'parent_id': parentId,
+        });
       }
 
       setState(() {
         _redDirecciones = redList;
         _mapaPreciosDir = mapaPreciosDir;
+        _mapaPreciosConvenioDir = mapaConvenioDir;
         _tarifasSede = mapa;
+        _tarifasSedeConvenio = mapaConvenioSector;
         _parentMap = parentMapa;
+        _sectorNombresMap = sectorNombres;
         _sectoresSede = sects;
       });
     } catch (_) {}
   }
 
   /// Precio efectivo: precio específico por dir > tarifa sector > tarifa sector padre.
+  // Precio convenio de una dirección (null = no tiene convenio)
+  double? _precioConvenioDeDir(Map<String, dynamic> dir) {
+    final dirId = dir['id'] as int?;
+    if (dirId != null && _mapaPreciosConvenioDir.containsKey(dirId)) {
+      return _mapaPreciosConvenioDir[dirId]!.toDouble();
+    }
+    final sectorId = dir['sector_id'] as int?;
+    if (sectorId != null) {
+      if (_tarifasSedeConvenio.containsKey(sectorId)) {
+        return _tarifasSedeConvenio[sectorId]!.toDouble();
+      }
+      final parentId = _parentMap[sectorId];
+      if (parentId != null && _tarifasSedeConvenio.containsKey(parentId)) {
+        return _tarifasSedeConvenio[parentId]!.toDouble();
+      }
+    }
+    return null;
+  }
+
   double _precioDeDir(Map<String, dynamic> dir) {
     final dirId = dir['id'] as int?;
     if (dirId != null && _mapaPreciosDir.containsKey(dirId)) {
@@ -782,8 +831,7 @@ class _FormularioTabState extends State<_FormularioTab> {
     for (final sect in _sectoresSede) {
       final sectorNombre = sect['nombre'].toString().toLowerCase();
       final sectorId = sect['id'] as int;
-      final precio = ((sect['precio_efectivo'] as int?) ?? 0).toDouble();
-      if (precio == 0) continue;
+      final precio = (sect['precio_efectivo'] as int?)?.toDouble(); // null = sin precio
 
       // Coincidencia: alguna palabra del texto está contenida en el nombre del sector
       // o el nombre del sector está contenido en alguna palabra del texto
@@ -794,12 +842,16 @@ class _FormularioTabState extends State<_FormularioTab> {
               sectorNombre.contains(p)));
 
       if (coincide) {
+        final parentId = sect['parent_id'] as int?;
+        final parentNombre = parentId != null ? _sectorNombresMap[parentId] : null;
         sectorMatches.add({
           'tipo': 'sector',
-          'id': sectorId, // ID negativo para distinguir de fn_red_direcciones
+          'id': sectorId,
           'nombre': sect['nombre'],
           'direccion': 'Sector ${sect['nombre']} — precio estimado',
-          'precio': precio,
+          'precio': precio ?? 0.0,
+          'tiene_precio': precio != null,
+          'parent_nombre': parentNombre,
           'sector_id': sectorId,
         });
       }
@@ -1236,6 +1288,8 @@ class _FormularioTabState extends State<_FormularioTab> {
           ..add(TextEditingController());
         _conDatafono = false;
         _precioSugerido = null;
+        _precioConvenio = null;
+        _esConvenio = false;
         _redDireccionSelId = null;
         _destinoBase = null;
         _sectorBase = null;
@@ -1554,15 +1608,52 @@ class _FormularioTabState extends State<_FormularioTab> {
                       final precio = esSector
                           ? (dir['precio'] as num).toDouble()
                           : _precioDeDir(dir);
+                      final tienePrecio = esSector
+                          ? (dir['tiene_precio'] as bool? ?? precio > 0)
+                          : precio > 0;
+
+                      // Subtítulo con contexto geográfico (#98)
+                      String subtitulo;
+                      if (esSector) {
+                        final parentNombre = dir['parent_nombre'] as String?;
+                        subtitulo = parentNombre != null
+                            ? parentNombre
+                            : 'Sector general';
+                      } else {
+                        final sectorId = dir['sector_id'] as int?;
+                        final sectorNombre = sectorId != null
+                            ? _sectorNombresMap[sectorId]
+                            : null;
+                        subtitulo = sectorNombre ??
+                            (dir['direccion']?.toString() ?? '');
+                      }
+
                       return InkWell(
                         onTap: () {
                           _seleccionandoDestino = true;
                           setState(() {
-                            // Sector: conservar texto escrito; red: reemplazar con dirección exacta
                             _redDireccionSelId = esSector
                                 ? -(dir['id'] as int)
                                 : dir['id'] as int;
-                            _precioSugerido = precio;
+                            // Sin precio → null para que la central cotice (#95)
+                            _precioSugerido = tienePrecio ? precio : null;
+                            // Precio convenio para el item seleccionado (#110)
+                            if (esSector) {
+                              final sId = dir['id'] as int?;
+                              final pcSector = sId != null
+                                  ? _tarifasSedeConvenio[sId]
+                                  : null;
+                              final parentId =
+                                  sId != null ? _parentMap[sId] : null;
+                              final pcParent = parentId != null
+                                  ? _tarifasSedeConvenio[parentId]
+                                  : null;
+                              _precioConvenio =
+                                  (pcSector ?? pcParent)?.toDouble();
+                            } else {
+                              _precioConvenio = _precioConvenioDeDir(dir);
+                            }
+                            _esConvenio = false; // reset al seleccionar nuevo destino
                             if (!esSector) {
                               _destinoBase =
                                   dir['direccion'].toString().toUpperCase();
@@ -1605,7 +1696,7 @@ class _FormularioTabState extends State<_FormularioTab> {
                                 children: [
                                   Text(
                                     esSector
-                                        ? 'Sector ${dir['nombre']}'
+                                        ? dir['nombre'].toString()
                                         : dir['nombre'].toString(),
                                     style: TextStyle(
                                         color: esSector
@@ -1614,31 +1705,40 @@ class _FormularioTabState extends State<_FormularioTab> {
                                         fontSize: 13,
                                         fontWeight: FontWeight.bold),
                                   ),
-                                  Text(
-                                    esSector
-                                        ? 'Precio estimado por sector'
-                                        : dir['direccion'].toString(),
-                                    style: TextStyle(
-                                        color: esSector
-                                            ? Colors.indigoAccent
-                                                .withValues(alpha: 0.7)
-                                            : Colors.white54,
-                                        fontSize: 11),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
+                                  if (subtitulo.isNotEmpty)
+                                    Text(
+                                      subtitulo,
+                                      style: TextStyle(
+                                          color: esSector
+                                              ? Colors.indigoAccent
+                                                  .withValues(alpha: 0.7)
+                                              : Colors.white54,
+                                          fontSize: 11),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
                                 ],
                               ),
                             ),
-                            Text(
-                              '\$${_miles(precio.toInt())}',
-                              style: TextStyle(
-                                  color: esSector
-                                      ? Colors.indigoAccent
-                                      : Colors.greenAccent,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold),
-                            ),
+                            // Precio o "Sin precio" (#95)
+                            if (tienePrecio)
+                              Text(
+                                '\$${_miles(precio.toInt())}',
+                                style: TextStyle(
+                                    color: esSector
+                                        ? Colors.indigoAccent
+                                        : Colors.greenAccent,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold),
+                              )
+                            else
+                              Text(
+                                'Sin precio',
+                                style: TextStyle(
+                                    color: Colors.white38,
+                                    fontSize: 11,
+                                    fontStyle: FontStyle.italic),
+                              ),
                           ]),
                         ),
                       );
@@ -1749,7 +1849,7 @@ class _FormularioTabState extends State<_FormularioTab> {
                 ),
 
               // ── Precio sugerido (tras seleccionar) ─────────────────────────
-              if (_precioSugerido != null)
+              if (_precioSugerido != null || (_esConvenio && _precioConvenio != null))
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: Builder(builder: (_) {
@@ -1788,15 +1888,22 @@ class _FormularioTabState extends State<_FormularioTab> {
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Precio base ruta
+                        // Precio base ruta (particular o convenio)
                         Row(children: [
-                          const Icon(Icons.flash_on,
-                              color: Colors.greenAccent, size: 14),
+                          Icon(Icons.flash_on,
+                              color: _esConvenio
+                                  ? Colors.amberAccent
+                                  : Colors.greenAccent,
+                              size: 14),
                           const SizedBox(width: 4),
                           Text(
-                            'Direccion Destino: \$${_miles(_precioSugerido!.toInt())}',
-                            style: const TextStyle(
-                                color: Colors.greenAccent,
+                            _esConvenio && _precioConvenio != null
+                                ? 'Destino (convenio): \$${_miles(_precioConvenio!.toInt())}'
+                                : 'Direccion Destino: \$${_miles(_precioSugerido!.toInt())}',
+                            style: TextStyle(
+                                color: _esConvenio
+                                    ? Colors.amberAccent
+                                    : Colors.greenAccent,
                                 fontSize: 11,
                                 fontWeight: FontWeight.bold),
                           ),
@@ -1900,6 +2007,67 @@ class _FormularioTabState extends State<_FormularioTab> {
                   }),
                 ),
 
+              // ── Toggle Convenio (visible solo si el destino tiene precio convenio) ──
+              if (_precioConvenio != null && _redDireccionSelId != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: GestureDetector(
+                    onTap: () => setState(() => _esConvenio = !_esConvenio),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: _esConvenio
+                            ? Colors.amber[900]!.withValues(alpha: 0.25)
+                            : Colors.white10,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: _esConvenio
+                              ? Colors.amberAccent
+                              : Colors.white24,
+                        ),
+                      ),
+                      child: Row(children: [
+                        Icon(
+                          _esConvenio
+                              ? Icons.handshake
+                              : Icons.handshake_outlined,
+                          color: _esConvenio
+                              ? Colors.amberAccent
+                              : Colors.white38,
+                          size: 16,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _esConvenio
+                                ? 'Convenio: \$${_miles(_precioConvenio!.toInt())}'
+                                : 'Tarifa convenio disponible — toca para activar',
+                            style: TextStyle(
+                              color: _esConvenio
+                                  ? Colors.amberAccent
+                                  : Colors.white38,
+                              fontSize: 12,
+                              fontWeight: _esConvenio
+                                  ? FontWeight.bold
+                                  : FontWeight.normal,
+                            ),
+                          ),
+                        ),
+                        Icon(
+                          _esConvenio
+                              ? Icons.check_circle
+                              : Icons.radio_button_unchecked,
+                          color: _esConvenio
+                              ? Colors.amberAccent
+                              : Colors.white24,
+                          size: 16,
+                        ),
+                      ]),
+                    ),
+                  ),
+                ),
+
               const SizedBox(height: 16),
 
               // ── Condiciones de pago ─────────────────────────────────────────
@@ -1945,7 +2113,11 @@ class _FormularioTabState extends State<_FormularioTab> {
                 width: double.infinity,
                 child: ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF002DA2),
+                    backgroundColor: _enviando
+                        ? null
+                        : (_movilPreselId != null || _tarifaEfectiva != null)
+                            ? const Color(0xFF002DA2)   // azul → servicio directo
+                            : const Color(0xFFE65100),  // naranja → cotización
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(
@@ -1958,7 +2130,9 @@ class _FormularioTabState extends State<_FormularioTab> {
                           height: 18,
                           child: CircularProgressIndicator(
                               color: Colors.white, strokeWidth: 2))
-                      : const Icon(Icons.send_rounded),
+                      : Icon(_movilPreselId != null || _tarifaEfectiva != null
+                            ? Icons.send_rounded
+                            : Icons.request_quote_outlined),
                   label: Text(
                     _enviando
                         ? 'Enviando...'
@@ -2991,8 +3165,12 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
                       onTap: () {
                         final tel =
                             _movilTelefono!.replaceAll(RegExp(r'\D'), '');
-                        launchUrl(Uri.parse('https://wa.me/57$tel'),
-                            mode: LaunchMode.externalApplication);
+                        if (kIsWeb) {
+                          html.window.open('https://wa.me/57$tel', 'whatsapp');
+                        } else {
+                          launchUrl(Uri.parse('https://wa.me/57$tel'),
+                              mode: LaunchMode.externalApplication);
+                        }
                       },
                       child: Container(
                         padding: const EdgeInsets.symmetric(

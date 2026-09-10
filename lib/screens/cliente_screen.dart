@@ -315,7 +315,7 @@ class _ClienteScreenState extends State<ClienteScreen>
       final mastersData = await Supabase.instance.client
           .from('usuarios')
           .select('id')
-          .or('rol.eq.central,rol.eq.master,rango_movil.eq.MASTER')
+          .or('rol.eq.central,rol.eq.master,and(rango_movil.eq.MASTER,tiene_se.eq.true)')
           .neq('suspendido', true);
       final masterIds = mastersData.map((u) => u['id'].toString()).toList();
       if (masterIds.isNotEmpty) {
@@ -355,7 +355,7 @@ class _ClienteScreenState extends State<ClienteScreen>
       final double? origLng = (servicio['origen_lng'] as num?)?.toDouble();
       final movilesK = await Supabase.instance.client
           .from('usuarios').select('id, latitud, longitud')
-          .eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true)
+          .eq('rol', 'movil').eq('en_linea', true).eq('tiene_se', true).neq('suspendido', true)
           .not('rango_movil', 'in', '("MASTER")');
       final idsZonaK = movilesK.where((u) {
         final uid = u['id'].toString();

@@ -248,8 +248,10 @@ class _LocalScreenState extends State<LocalScreen>
     if (s.contains('comida') || s.contains('restaurante') ||
         s.contains('panader') || s.contains('pastel')) return 'COMIDA';
     if (s.contains('bebidas') || s.contains('licores')) return 'BEBIDAS';
+    if (s.contains('farmacia') || s.contains('drogueria') ||
+        s.contains('medicamento')) return 'FARMACIA';
     if (s.contains('paquete')) return 'PAQUETERÍA';
-    return 'COMPRAS';
+    return 'PAQUETERÍA';
   }
 
   bool _localEstaAbierto(Map<String, dynamic> perfil) {
@@ -432,7 +434,8 @@ class _LocalScreenState extends State<LocalScreen>
             appBar: AppBar(
               title: Text(
                 'Panel | ${perfilEnVivo['nombre']}',
-                style: TextStyle(
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
                 ),
@@ -559,93 +562,72 @@ class _LocalScreenState extends State<LocalScreen>
                           color: Colors.white,
                           child: Column(
                             children: [
-                              // Fila 1: Solicitar + Cotizar
-                              Row(children: [
-                                Expanded(
-                                  child: ElevatedButton.icon(
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: const Color(0xff3AF500),
-                                      foregroundColor: Colors.black,
-                                      padding: const EdgeInsets.symmetric(vertical: 11),
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                    ),
-                                    onPressed: () => _abrirFormularioPedido(context,
-                                        esCotizacion: false, perfilEnVivo: perfilEnVivo),
-                                    icon: const Icon(Icons.motorcycle, size: 18),
-                                    label: const Text('SOLICITAR MÓVIL',
-                                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                              // Fila 1: NUEVO PEDIDO (ancho completo)
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton.icon(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xff3AF500),
+                                    foregroundColor: Colors.black,
+                                    padding: const EdgeInsets.symmetric(vertical: 11),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                   ),
+                                  onPressed: () => _abrirFormularioPedido(context,
+                                      perfilEnVivo: perfilEnVivo),
+                                  icon: const Icon(Icons.motorcycle, size: 18),
+                                  label: const Text('NUEVO PEDIDO',
+                                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
                                 ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: OutlinedButton.icon(
-                                    style: OutlinedButton.styleFrom(
-                                      foregroundColor: Colors.orange[800],
-                                      side: BorderSide(color: Colors.orange[800]!),
-                                      padding: const EdgeInsets.symmetric(vertical: 11),
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                    ),
-                                    onPressed: () => _abrirFormularioPedido(context,
-                                        esCotizacion: true, perfilEnVivo: perfilEnVivo),
-                                    icon: const Icon(Icons.request_quote, size: 18),
-                                    label: const Text('COTIZAR',
-                                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                                  ),
-                                ),
-                              ]),
+                              ),
                               const SizedBox(height: 8),
-                              // Fila 2: Punto a Punto + VIP
-                              Row(children: [
-                                Expanded(
-                                  child: ElevatedButton.icon(
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: puedeVip ? Colors.purple[800] : Colors.grey[300],
-                                      foregroundColor: puedeVip ? Colors.white : Colors.grey[600],
-                                      padding: const EdgeInsets.symmetric(vertical: 10),
-                                      elevation: puedeVip ? 2 : 0,
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                    ),
-                                    onPressed: puedeVip
-                                        ? () => _abrirFormularioPedido(context,
-                                            esPuntoAPunto: true, perfilEnVivo: perfilEnVivo)
-                                        : null,
-                                    icon: const Icon(Icons.flash_on, size: 17),
-                                    label: Text(
-                                      puedeVip ? 'PUNTO A PUNTO' : 'P.A.P AGOTADO',
-                                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
-                                    ),
+                              // Fila 2: PUNTO A PUNTO (ancho completo)
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton.icon(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: puedeVip ? Colors.purple[800] : Colors.grey[300],
+                                    foregroundColor: puedeVip ? Colors.white : Colors.grey[600],
+                                    padding: const EdgeInsets.symmetric(vertical: 10),
+                                    elevation: puedeVip ? 2 : 0,
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  ),
+                                  onPressed: puedeVip
+                                      ? () => _abrirFormularioPedido(context,
+                                          esPuntoAPunto: true, perfilEnVivo: perfilEnVivo)
+                                      : null,
+                                  icon: const Icon(Icons.flash_on, size: 17),
+                                  label: Text(
+                                    puedeVip ? 'PUNTO A PUNTO' : 'P.A.P AGOTADO',
+                                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
                                   ),
                                 ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: OutlinedButton.icon(
-                                    style: OutlinedButton.styleFrom(
-                                      foregroundColor: const Color(0xFFB8860B),
-                                      side: const BorderSide(color: Color(0xFFB8860B)),
-                                      padding: const EdgeInsets.symmetric(vertical: 10),
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                    ),
-                                    onPressed: () => _abrirFormularioPedido(context,
-                                        esVip: true, perfilEnVivo: perfilEnVivo),
-                                    icon: const Text('👑', style: TextStyle(fontSize: 14)),
-                                    label: const Text('VIP · +\$3.000',
-                                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
-                                  ),
-                                ),
-                              ]),
+                              ),
                             ],
                           ),
                         ),
                         const Divider(height: 1, color: Colors.black26),
                         Expanded(
                           child: activos.isEmpty
-                              ? const Center(
-                                  child: Text(
-                                    'No tienes servicios en curso.',
-                                    style: TextStyle(
-                                      color: Colors.black54,
-                                      fontWeight: FontWeight.bold,
-                                    ),
+                              ? Center(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.inbox_outlined, size: 52, color: Colors.black12),
+                                      const SizedBox(height: 12),
+                                      const Text(
+                                        'Sin servicios activos',
+                                        style: TextStyle(
+                                          color: Colors.black45,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 15,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      const Text(
+                                        'Toca NUEVO PEDIDO para empezar',
+                                        style: TextStyle(color: Colors.black38, fontSize: 12),
+                                      ),
+                                    ],
                                   ),
                                 )
                               : ValueListenableBuilder<int>(
@@ -654,10 +636,8 @@ class _LocalScreenState extends State<LocalScreen>
                                     padding: const EdgeInsets.all(12),
                                     itemCount: activos.length,
                                     itemBuilder: (c, i) => RepaintBoundary(
-                                      child: FadeSlideIn(
-                                        key: ValueKey('activo_local_${activos[i]['id']}'),
-                                        child: _construirTarjetaServicio(activos[i]),
-                                      ),
+                                      key: ValueKey('activo_local_${activos[i]['id']}'),
+                                      child: _construirTarjetaServicio(activos[i]),
                                     ),
                                   ),
                                 ),
@@ -699,15 +679,13 @@ class _LocalScreenState extends State<LocalScreen>
                                     padding: const EdgeInsets.all(12),
                                     itemCount: historial.length,
                                     itemBuilder: (c, i) => RepaintBoundary(
-                                      child: FadeSlideIn(
-                                        key: ValueKey('hist_local_${historial[i]['id']}'),
-                                        child: _construirTarjetaServicio(
-                                          historial[i],
-                                          esHistorial: true,
-                                          onOcultar: () => setState(
-                                            () => _serviciosOcultosLocal.add(
-                                              historial[i]['id'],
-                                            ),
+                                      key: ValueKey('hist_local_${historial[i]['id']}'),
+                                      child: _construirTarjetaServicio(
+                                        historial[i],
+                                        esHistorial: true,
+                                        onOcultar: () => setState(
+                                          () => _serviciosOcultosLocal.add(
+                                            historial[i]['id'],
                                           ),
                                         ),
                                       ),
@@ -1018,7 +996,7 @@ class _LocalScreenState extends State<LocalScreen>
                                     child: DropdownButton<String>(
                                       value: _tipoServicioDefecto,
                                       isExpanded: true,
-                                      items: ['COMIDA', 'BEBIDAS', 'COMPRAS', 'PAQUETERÍA']
+                                      items: ['PAQUETERÍA', 'COMIDA', 'FARMACIA', 'BEBIDAS']
                                           .map((v) => DropdownMenuItem(
                                                 value: v,
                                                 child: Text(v,
