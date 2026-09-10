@@ -769,7 +769,16 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
           child: GestureDetector(
             onTap: () => Navigator.pop(ctx),
             child: InteractiveViewer(
-              child: Image.network(url, fit: BoxFit.contain),
+              child: Image.network(url, fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) => const Padding(
+                  padding: EdgeInsets.all(32),
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.broken_image_rounded, color: Colors.white30, size: 48),
+                    SizedBox(height: 12),
+                    Text('No se pudo cargar la imagen', style: TextStyle(color: Colors.white38, fontSize: 13)),
+                  ]),
+                ),
+              ),
             ),
           ),
         ),
@@ -1566,7 +1575,15 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
             InkWell(
               onTap: () => showDialog(
                 context: context,
-                builder: (_) => Dialog(child: Image.network(comprUrl, fit: BoxFit.contain)),
+                builder: (_) => Dialog(
+                  backgroundColor: Colors.black,
+                  child: Image.network(comprUrl, fit: BoxFit.contain,
+                    errorBuilder: (_, __, ___) => const Padding(
+                      padding: EdgeInsets.all(32),
+                      child: Icon(Icons.broken_image_rounded, color: Colors.white30, size: 48),
+                    ),
+                  ),
+                ),
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(8),

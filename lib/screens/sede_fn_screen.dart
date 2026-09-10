@@ -1,9 +1,8 @@
 // ignore_for_file: use_build_context_synchronously
 import 'dart:async';
 import 'dart:math' as math;
-// ignore: avoid_web_libraries_in_flutter
-import 'dart:html' as html show window;
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:serviexpress_app/utils/web_utils.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
@@ -3166,7 +3165,7 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
                         final tel =
                             _movilTelefono!.replaceAll(RegExp(r'\D'), '');
                         if (kIsWeb) {
-                          html.window.open('https://wa.me/57$tel', 'whatsapp');
+                          openWhatsAppTab('https://wa.me/57$tel');
                         } else {
                           launchUrl(Uri.parse('https://wa.me/57$tel'),
                               mode: LaunchMode.externalApplication);
