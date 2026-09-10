@@ -119,7 +119,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                   width: 40,
                   height: 5,
                   decoration: BoxDecoration(
-                    color: Colors.grey[300],
+                    color: Colors.white24,
                     borderRadius: BorderRadius.circular(10),
                   ),
                 ),
@@ -136,11 +136,16 @@ mixin _FormularioMixin on State<LocalScreen> {
 
                 // BARRA DE BÚSQUEDA
                 TextField(
+                  style: const TextStyle(color: Colors.white),
                   decoration: const InputDecoration(
-                    labelText:
-                        'Buscar Barrio / Sector / Cond. / Conj. o Palabra Clave',
+                    labelText: 'Buscar Barrio / Sector / Cond. / Conj. o Palabra Clave',
+                    labelStyle: TextStyle(color: Colors.white54),
                     border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.search),
+                    enabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: Colors.white24)),
+                    focusedBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: Color(0xff3AF500))),
+                    prefixIcon: Icon(Icons.search, color: Colors.white54),
                     isDense: true,
                   ),
                   onChanged: (val) =>
@@ -304,7 +309,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                     },
                   ),
                 ),
-                const Divider(height: 24),
+                const Divider(height: 24, color: Colors.white12),
 
                 // LISTADO DE TARIFAS
                 Expanded(
@@ -317,7 +322,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                     builder: (context, snapshot) {
                       if (snapshot.connectionState == ConnectionState.waiting)
                         return const Center(
-                          child: CircularProgressIndicator(color: Colors.black),
+                          child: CircularProgressIndicator(color: Colors.white),
                         );
 
                       // Normalizar resultado al formato esperado
@@ -344,7 +349,8 @@ mixin _FormularioMixin on State<LocalScreen> {
 
                       if (filtrados.isEmpty)
                         return const Center(
-                          child: Text('No hay direcciones guardadas.'),
+                          child: Text('No hay direcciones guardadas.',
+                              style: TextStyle(color: Colors.white54)),
                         );
 
                       return ListView.builder(
@@ -357,6 +363,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                           final precio = item['precio'] as int?;
                           return Card(
                             elevation: 1,
+                            color: const Color(0xFF1E1E1E),
                             margin: const EdgeInsets.only(bottom: 8),
                             child: ListTile(
                               leading: const Icon(
@@ -367,10 +374,12 @@ mixin _FormularioMixin on State<LocalScreen> {
                                 nom,
                                 style: const TextStyle(
                                   fontWeight: FontWeight.bold,
+                                  color: Colors.white,
                                 ),
                               ),
                               subtitle: Text(
                                 precio != null ? '$mun · ${fmtPeso(precio)}' : mun,
+                                style: const TextStyle(color: Colors.white54),
                               ),
                               trailing: IconButton(
                                 icon: const Icon(

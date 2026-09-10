@@ -744,22 +744,32 @@ mixin _CardsMixin on State<LocalScreen> {
                             ),
                           ],
                         ),
-                        if (data != null &&
-                            ((data['pago_nequi']?.toString().isNotEmpty ?? false) ||
-                                (data['pago_daviplata']?.toString().isNotEmpty ?? false) ||
-                                (data['pago_bancolombia']?.toString().isNotEmpty ?? false)))
+                        if (data != null)
                           Padding(
-                            padding: const EdgeInsets.only(top: 6, left: 46),
-                            child: Wrap(
-                              spacing: 6,
-                              runSpacing: 4,
+                            padding: const EdgeInsets.only(top: 8, left: 46),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                if (data['pago_nequi']?.toString().isNotEmpty ?? false)
-                                  _chipPagoLocal('Nequi', const Color(0xFFE5007D), Colors.white, data['pago_nequi']),
-                                if (data['pago_daviplata']?.toString().isNotEmpty ?? false)
-                                  _chipPagoLocal('Daviplata', const Color(0xFFEE2A24), Colors.white, data['pago_daviplata']),
-                                if (data['pago_bancolombia']?.toString().isNotEmpty ?? false)
-                                  _chipPagoLocal('Bancolombia', const Color(0xFFFFCC00), Colors.black, data['pago_bancolombia']),
+                                const Text('💳 Métodos de pago:',
+                                    style: TextStyle(fontSize: 11, color: Colors.black54, fontWeight: FontWeight.bold)),
+                                const SizedBox(height: 4),
+                                Wrap(
+                                  spacing: 6,
+                                  runSpacing: 4,
+                                  children: [
+                                    if (data['pago_nequi']?.toString().isNotEmpty ?? false)
+                                      _chipPagoLocal('Nequi', const Color(0xFFE5007D), Colors.white, data['pago_nequi']),
+                                    if (data['pago_daviplata']?.toString().isNotEmpty ?? false)
+                                      _chipPagoLocal('Daviplata', const Color(0xFFEE2A24), Colors.white, data['pago_daviplata']),
+                                    if (data['pago_bancolombia']?.toString().isNotEmpty ?? false)
+                                      _chipPagoLocal('Bancolombia', const Color(0xFFFFCC00), Colors.black, data['pago_bancolombia']),
+                                    if (!(data['pago_nequi']?.toString().isNotEmpty ?? false) &&
+                                        !(data['pago_daviplata']?.toString().isNotEmpty ?? false) &&
+                                        !(data['pago_bancolombia']?.toString().isNotEmpty ?? false))
+                                      const Text('No registrados',
+                                          style: TextStyle(fontSize: 11, color: Colors.black38, fontStyle: FontStyle.italic)),
+                                  ],
+                                ),
                               ],
                             ),
                           ),
@@ -1285,7 +1295,7 @@ mixin _CardsMixin on State<LocalScreen> {
     Widget? secondaryAction,
   }) {
     return Material(
-      color: Colors.white,
+      color: const Color(0xFF1C1C1C),
       borderRadius: BorderRadius.circular(14),
       child: InkWell(
         onTap: onTap,
@@ -1296,7 +1306,7 @@ mixin _CardsMixin on State<LocalScreen> {
             borderRadius: BorderRadius.circular(14),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.05),
+                color: Colors.black.withValues(alpha: 0.3),
                 blurRadius: 6,
                 offset: const Offset(0, 2),
               ),
@@ -1320,11 +1330,12 @@ mixin _CardsMixin on State<LocalScreen> {
                   children: [
                     Text(title,
                         style: const TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 15)),
+                            fontWeight: FontWeight.bold, fontSize: 15,
+                            color: Colors.white)),
                     const SizedBox(height: 2),
                     Text(subtitle,
-                        style: TextStyle(
-                            fontSize: 12, color: Colors.grey[600])),
+                        style: const TextStyle(
+                            fontSize: 12, color: Colors.white54)),
                     if (secondaryAction != null) ...[
                       const SizedBox(height: 10),
                       secondaryAction,
@@ -1333,7 +1344,7 @@ mixin _CardsMixin on State<LocalScreen> {
                 ),
               ),
               const SizedBox(width: 8),
-              const Icon(Icons.chevron_right, color: Colors.black26, size: 22),
+              const Icon(Icons.chevron_right, color: Colors.white24, size: 22),
             ],
           ),
         ),
@@ -1348,18 +1359,46 @@ mixin _CardsMixin on State<LocalScreen> {
     String? subtitle,
     required VoidCallback onTap,
   }) {
-    return ListTile(
-      leading: Icon(icon, color: iconColor, size: 22),
-      title: Text(title,
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-      subtitle: subtitle != null
-          ? Text(subtitle,
-              style:
-                  const TextStyle(fontSize: 10, color: Colors.black54))
-          : null,
-      trailing: const Icon(Icons.chevron_right, size: 18),
-      onTap: onTap,
-      dense: true,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: iconColor.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: iconColor, size: 24),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 14)),
+                    if (subtitle != null) ...[
+                      const SizedBox(height: 2),
+                      Text(subtitle,
+                          style: const TextStyle(
+                              fontSize: 12, color: Colors.white54)),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Icon(Icons.chevron_right, size: 22, color: Colors.white24),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -1572,7 +1611,10 @@ mixin _CardsMixin on State<LocalScreen> {
               const SizedBox(width: 4),
               Text(tel, style: const TextStyle(fontSize: 13)),
             ]),
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
+            const Text('💳 Métodos de pago',
+                style: TextStyle(fontSize: 11, color: Colors.black54, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 6),
             Wrap(spacing: 6, runSpacing: 4, children: [
               if (moto['pago_nequi'] != null && moto['pago_nequi'].toString().isNotEmpty)
                 _chipPagoLocal('Nequi', const Color(0xFFE5007D), Colors.white, moto['pago_nequi']),
@@ -1580,6 +1622,11 @@ mixin _CardsMixin on State<LocalScreen> {
                 _chipPagoLocal('Daviplata', const Color(0xFFEE2A24), Colors.white, moto['pago_daviplata']),
               if (moto['pago_bancolombia'] != null && moto['pago_bancolombia'].toString().isNotEmpty)
                 _chipPagoLocal('Bancolombia', const Color(0xFFFFCC00), Colors.black, moto['pago_bancolombia']),
+              if ((moto['pago_nequi'] == null || moto['pago_nequi'].toString().isEmpty) &&
+                  (moto['pago_daviplata'] == null || moto['pago_daviplata'].toString().isEmpty) &&
+                  (moto['pago_bancolombia'] == null || moto['pago_bancolombia'].toString().isEmpty))
+                const Text('No registrados',
+                    style: TextStyle(fontSize: 11, color: Colors.black38, fontStyle: FontStyle.italic)),
             ]),
           ],
         ),

@@ -290,14 +290,18 @@ mixin _DialogsMixin on State<LocalScreen> {
               ),
 
               Expanded(
-                child: FutureBuilder<List<Map<String, dynamic>>>(
-                  future: Supabase.instance.client
-                      .from('servicios')
-                      .select(
-                        'id, destino, estado, created_at, telefono_receptor',
-                      )
-                      .eq('local_id', widget.usuario['id'])
-                      .not('telefono_receptor', 'is', null),
+                child: FutureBuilder<List<dynamic>>(
+                  future: Future.wait([
+                    Supabase.instance.client
+                        .from('servicios')
+                        .select('id, destino, estado, created_at, telefono_receptor')
+                        .eq('local_id', widget.usuario['id'])
+                        .not('telefono_receptor', 'is', null),
+                    Supabase.instance.client
+                        .from('crm_clientes_info')
+                        .select('telefono, nombre, notas')
+                        .eq('local_id', widget.usuario['id']),
+                  ]),
                   builder: (context, snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting) {
                       return const Center(
@@ -305,7 +309,11 @@ mixin _DialogsMixin on State<LocalScreen> {
                       );
                     }
 
-                    final servicios = snapshot.data ?? [];
+                    final servicios = ((snapshot.data?[0] as List?)?.cast<Map<String, dynamic>>()) ?? [];
+                    final infoRows = ((snapshot.data?[1] as List?)?.cast<Map<String, dynamic>>()) ?? [];
+                    final Map<String, Map<String, dynamic>> infoMap = {
+                      for (final r in infoRows) r['telefono'].toString(): r,
+                    };
                     if (servicios.isEmpty) {
                       return const Center(
                         child: Text(
@@ -394,6 +402,9 @@ mixin _DialogsMixin on State<LocalScreen> {
                       itemCount: listaClientes.length,
                       itemBuilder: (ctx, i) {
                         final cliente = listaClientes[i];
+                        final infoCliente = infoMap[cliente['telefono'].toString()];
+                        final nombreGuardado = infoCliente?['nombre']?.toString();
+                        final notasGuardadas = infoCliente?['notas']?.toString();
 
                         Map<String, int> dirs = cliente['direcciones'];
                         String dirFavorita = 'Sin registrar';
@@ -436,6 +447,8 @@ mixin _DialogsMixin on State<LocalScreen> {
                               cliente,
                               dirFavorita,
                               perfilEnVivo,
+                              nombreInicial: nombreGuardado,
+                              notasIniciales: notasGuardadas,
                             ),
                             child: Padding(
                               padding: const EdgeInsets.all(12),
@@ -444,11 +457,12 @@ mixin _DialogsMixin on State<LocalScreen> {
                                   CircleAvatar(
                                     radius: 22,
                                     backgroundColor: badgeColor.withValues(alpha: 0.1),
-                                    child: Icon(
-                                      Icons.person,
-                                      color: badgeColor,
-                                      size: 24,
-                                    ),
+                                    child: nombreGuardado != null
+                                        ? Text(
+                                            nombreGuardado.substring(0, 1).toUpperCase(),
+                                            style: TextStyle(color: badgeColor, fontWeight: FontWeight.bold, fontSize: 16),
+                                          )
+                                        : Icon(Icons.person, color: badgeColor, size: 24),
                                   ),
                                   const SizedBox(width: 12),
                                   Expanded(
@@ -459,7 +473,7 @@ mixin _DialogsMixin on State<LocalScreen> {
                                         Row(
                                           children: [
                                             Text(
-                                              cliente['telefono'],
+                                              nombreGuardado ?? cliente['telefono'],
                                               style: const TextStyle(
                                                 fontWeight: FontWeight.bold,
                                                 fontSize: 16,
@@ -488,6 +502,13 @@ mixin _DialogsMixin on State<LocalScreen> {
                                             ),
                                           ],
                                         ),
+                                        if (nombreGuardado != null) ...[
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            cliente['telefono'],
+                                            style: const TextStyle(fontSize: 11, color: Colors.black45),
+                                          ),
+                                        ],
                                         const SizedBox(height: 4),
                                         Text(
                                           '📍 $dirFavorita',
@@ -583,8 +604,13 @@ mixin _DialogsMixin on State<LocalScreen> {
     BuildContext context,
     Map<String, dynamic> cliente,
     String dirFavorita,
-    Map<String, dynamic> perfilEnVivo,
-  ) {
+    Map<String, dynamic> perfilEnVivo, {
+    String? nombreInicial,
+    String? notasIniciales,
+  }) {
+    String? nombreActual = nombreInicial;
+    String? notasActuales = notasIniciales;
+
     final DateTime? ultimaFecha = cliente['ultima_fecha'];
     final String fechaStr = ultimaFecha != null
         ? "${ultimaFecha.day}/${ultimaFecha.month}/${ultimaFecha.year}"
@@ -598,19 +624,40 @@ mixin _DialogsMixin on State<LocalScreen> {
 
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         title: Row(
           children: [
             const Icon(Icons.contact_phone, color: Colors.blue),
             const SizedBox(width: 8),
             Expanded(
-              child: Text(
-                'CLIENTE: ${cliente['telefono']}',
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    nombreActual ?? cliente['telefono'],
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                  if (nombreActual != null)
+                    Text(cliente['telefono'],
+                        style: const TextStyle(fontSize: 12, color: Colors.black45, fontWeight: FontWeight.normal)),
+                ],
+              ),
+            ),
+            IconButton(
+              tooltip: 'Editar datos del cliente',
+              icon: const Icon(Icons.edit_rounded, color: Colors.blue, size: 20),
+              onPressed: () => _editarDatosCliente(
+                ctx,
+                cliente['telefono'].toString(),
+                nombreActual,
+                notasActuales,
+                (nuevoNombre, nuevasNotas) => setDialogState(() {
+                  nombreActual = nuevoNombre;
+                  notasActuales = nuevasNotas;
+                }),
               ),
             ),
           ],
@@ -693,6 +740,29 @@ mixin _DialogsMixin on State<LocalScreen> {
                   fontWeight: FontWeight.bold,
                 ),
               ),
+              if (notasActuales != null && notasActuales!.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.amber[50],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.amber[200]!),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.sticky_note_2_rounded, size: 14, color: Colors.amber),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(notasActuales!,
+                            style: const TextStyle(fontSize: 12, color: Colors.black87)),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 12),
 
               const Text(
@@ -808,6 +878,105 @@ mixin _DialogsMixin on State<LocalScreen> {
             ),
           ),
         ],
+      ),
+      ),  // StatefulBuilder
+    );
+  }
+
+  // =========================================================================
+  // EDITOR DE DATOS DEL CLIENTE CRM
+  // =========================================================================
+  void _editarDatosCliente(
+    BuildContext ctx,
+    String telefono,
+    String? nombreActual,
+    String? notasActuales,
+    void Function(String? nombre, String? notas) onGuardado,
+  ) {
+    final nombreCtrl = TextEditingController(text: nombreActual ?? '');
+    final notasCtrl = TextEditingController(text: notasActuales ?? '');
+    bool guardando = false;
+
+    showDialog(
+      context: ctx,
+      builder: (dCtx) => StatefulBuilder(
+        builder: (dCtx, setDs) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          title: Row(children: [
+            const Icon(Icons.edit_rounded, color: Colors.blue, size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                const Text('EDITAR CLIENTE', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                Text(telefono, style: const TextStyle(fontSize: 12, color: Colors.black45, fontWeight: FontWeight.normal)),
+              ]),
+            ),
+          ]),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextField(
+              controller: nombreCtrl,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: 'Nombre / Alias del cliente',
+                hintText: 'Ej: María del edificio azul',
+                prefixIcon: Icon(Icons.person_rounded),
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: notasCtrl,
+              maxLines: 3,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                labelText: 'Notas internas',
+                hintText: 'Ej: paga con Nequi, prefiere llamar antes...',
+                prefixIcon: Icon(Icons.sticky_note_2_rounded),
+                border: OutlineInputBorder(),
+                alignLabelWithHint: true,
+              ),
+            ),
+          ]),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dCtx),
+              child: const Text('CANCELAR', style: TextStyle(color: Colors.black45)),
+            ),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue[700],
+                foregroundColor: Colors.white,
+              ),
+              icon: guardando
+                  ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                  : const Icon(Icons.save_rounded, size: 16),
+              label: const Text('GUARDAR', style: TextStyle(fontWeight: FontWeight.bold)),
+              onPressed: guardando ? null : () async {
+                setDs(() => guardando = true);
+                final nuevoNombre = nombreCtrl.text.trim().isEmpty ? null : nombreCtrl.text.trim();
+                final nuevasNotas = notasCtrl.text.trim().isEmpty ? null : notasCtrl.text.trim();
+                try {
+                  await Supabase.instance.client.from('crm_clientes_info').upsert({
+                    'local_id': widget.usuario['id'],
+                    'telefono': telefono,
+                    'nombre': nuevoNombre,
+                    'notas': nuevasNotas,
+                    'updated_at': DateTime.now().toIso8601String(),
+                  }, onConflict: 'local_id,telefono');
+                  if (dCtx.mounted) Navigator.pop(dCtx);
+                  onGuardado(nuevoNombre, nuevasNotas);
+                } catch (e) {
+                  setDs(() => guardando = false);
+                  if (dCtx.mounted) {
+                    ScaffoldMessenger.of(dCtx).showSnackBar(
+                      SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+                    );
+                  }
+                }
+              },
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -430,7 +430,7 @@ class _LocalScreenState extends State<LocalScreen>
           }
 
           return Scaffold(
-            backgroundColor: const Color(0xFFF5F5F5),
+            backgroundColor: const Color(0xFF0D0D0D),
             appBar: AppBar(
               title: Text(
                 'Panel | ${perfilEnVivo['nombre']}',
@@ -559,7 +559,7 @@ class _LocalScreenState extends State<LocalScreen>
                         Container(
                           width: double.infinity,
                           padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-                          color: Colors.white,
+                          color: const Color(0xFF141414),
                           child: Column(
                             children: [
                               // Fila 1: NUEVO PEDIDO (ancho completo)
@@ -605,19 +605,19 @@ class _LocalScreenState extends State<LocalScreen>
                             ],
                           ),
                         ),
-                        const Divider(height: 1, color: Colors.black26),
+                        const Divider(height: 1, color: Colors.white12),
                         Expanded(
                           child: activos.isEmpty
                               ? Center(
                                   child: Column(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      Icon(Icons.inbox_outlined, size: 52, color: Colors.black12),
+                                      Icon(Icons.inbox_outlined, size: 52, color: Colors.white12),
                                       const SizedBox(height: 12),
                                       const Text(
                                         'Sin servicios activos',
                                         style: TextStyle(
-                                          color: Colors.black45,
+                                          color: Colors.white54,
                                           fontWeight: FontWeight.bold,
                                           fontSize: 15,
                                         ),
@@ -625,7 +625,7 @@ class _LocalScreenState extends State<LocalScreen>
                                       const SizedBox(height: 4),
                                       const Text(
                                         'Toca NUEVO PEDIDO para empezar',
-                                        style: TextStyle(color: Colors.black38, fontSize: 12),
+                                        style: TextStyle(color: Colors.white38, fontSize: 12),
                                       ),
                                     ],
                                   ),
@@ -651,7 +651,7 @@ class _LocalScreenState extends State<LocalScreen>
                             child: Text(
                               'Tu historial está limpio.',
                               style: TextStyle(
-                                color: Colors.black54,
+                                color: Colors.white54,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
@@ -660,17 +660,17 @@ class _LocalScreenState extends State<LocalScreen>
                             children: [
                               // ── KPI BAR ─────────────────────────────
                               Container(
-                                color: Colors.white,
+                                color: const Color(0xFF141414),
                                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
                                 child: Row(
                                   children: [
-                                    kpiBar('${historial.length}', 'Total hoy', Colors.black87),
-                                    kpiBar('$histFinalizados', 'Entregados', Colors.green[700]!),
-                                    kpiBar('$histCancelados', 'Cancelados', Colors.red[700]!),
+                                    kpiBar('${historial.length}', 'Total hoy', Colors.white70),
+                                    kpiBar('$histFinalizados', 'Entregados', Colors.green[400]!),
+                                    kpiBar('$histCancelados', 'Cancelados', Colors.red[400]!),
                                   ],
                                 ),
                               ),
-                              const Divider(height: 1, color: Colors.black12),
+                              const Divider(height: 1, color: Colors.white12),
                               // ── LISTA ────────────────────────────────
                               Expanded(
                                 child: ValueListenableBuilder<int>(
@@ -855,7 +855,7 @@ class _LocalScreenState extends State<LocalScreen>
                                     fontSize: 11,
                                     fontWeight: FontWeight.bold,
                                     letterSpacing: 1.3,
-                                    color: Colors.black45)),
+                                    color: Colors.white38)),
                           ),
                           _hubCard(
                             icon: Icons.restaurant_menu,
@@ -873,37 +873,16 @@ class _LocalScreenState extends State<LocalScreen>
                                 ),
                               ),
                             ),
-                            secondaryAction: Wrap(
-                              spacing: 8,
-                              runSpacing: 4,
-                              children: [
-                                OutlinedButton.icon(
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: Colors.teal,
-                                    side: const BorderSide(color: Colors.teal),
-                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                    minimumSize: Size.zero,
-                                  ),
-                                  icon: const Icon(Icons.qr_code_2, size: 14),
-                                  label: const Text('Compartir QR', style: TextStyle(fontSize: 11)),
-                                  onPressed: () => _mostrarQrCarta(perfilEnVivo),
-                                ),
-                                OutlinedButton.icon(
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: Colors.green[700],
-                                    side: BorderSide(color: Colors.green[300]!),
-                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                    minimumSize: Size.zero,
-                                  ),
-                                  icon: const Icon(Icons.menu_book_rounded, size: 14),
-                                  label: const Text('Lista precios', style: TextStyle(fontSize: 11)),
-                                  onPressed: () => _abrirPanelTarifario(context),
-                                ),
-                              ],
+                            secondaryAction: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Colors.teal,
+                                side: const BorderSide(color: Colors.teal),
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                              icon: const Icon(Icons.qr_code_2, size: 16),
+                              label: const Text('Compartir QR', style: TextStyle(fontSize: 13)),
+                              onPressed: () => _mostrarQrCarta(perfilEnVivo),
                             ),
                           ),
                           const SizedBox(height: 18),
@@ -916,7 +895,7 @@ class _LocalScreenState extends State<LocalScreen>
                                     fontSize: 11,
                                     fontWeight: FontWeight.bold,
                                     letterSpacing: 1.3,
-                                    color: Colors.black45)),
+                                    color: Colors.white38)),
                           ),
                           _hubCard(
                             icon: Icons.delivery_dining,
@@ -940,13 +919,11 @@ class _LocalScreenState extends State<LocalScreen>
                                   style: OutlinedButton.styleFrom(
                                     foregroundColor: Colors.deepPurple,
                                     side: const BorderSide(color: Colors.deepPurple),
-                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                    minimumSize: Size.zero,
                                   ),
-                                  icon: const Icon(Icons.tune, size: 14),
-                                  label: const Text('Config. domicilios', style: TextStyle(fontSize: 11)),
+                                  icon: const Icon(Icons.tune, size: 16),
+                                  label: const Text('Config. domicilios', style: TextStyle(fontSize: 13)),
                                   onPressed: () => _abrirConfigDomicilios(perfilEnVivo),
                                 ),
                               ],
@@ -962,15 +939,15 @@ class _LocalScreenState extends State<LocalScreen>
                                     fontSize: 11,
                                     fontWeight: FontWeight.bold,
                                     letterSpacing: 1.3,
-                                    color: Colors.black45)),
+                                    color: Colors.white38)),
                           ),
                           Container(
                             decoration: BoxDecoration(
-                              color: Colors.white,
+                              color: const Color(0xFF1C1C1C),
                               borderRadius: BorderRadius.circular(14),
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.05),
+                                  color: Colors.black.withValues(alpha: 0.3),
                                   blurRadius: 6,
                                   offset: const Offset(0, 2),
                                 ),
@@ -984,25 +961,29 @@ class _LocalScreenState extends State<LocalScreen>
                                     style: TextStyle(
                                         fontSize: 12,
                                         fontWeight: FontWeight.bold,
-                                        color: Colors.black54)),
+                                        color: Colors.white54)),
                                 const SizedBox(height: 6),
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 12),
                                   decoration: BoxDecoration(
-                                    border: Border.all(color: Colors.grey[300]!),
+                                    border: Border.all(color: Colors.white24),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
                                   child: DropdownButtonHideUnderline(
                                     child: DropdownButton<String>(
                                       value: _tipoServicioDefecto,
                                       isExpanded: true,
+                                      dropdownColor: const Color(0xFF2A2A2A),
+                                      iconEnabledColor: Colors.white54,
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
                                       items: ['PAQUETERÍA', 'COMIDA', 'FARMACIA', 'BEBIDAS']
                                           .map((v) => DropdownMenuItem(
                                                 value: v,
                                                 child: Text(v,
                                                     style: const TextStyle(
                                                         fontWeight: FontWeight.bold,
-                                                        fontSize: 13)),
+                                                        fontSize: 13,
+                                                        color: Colors.white)),
                                               ))
                                           .toList(),
                                       onChanged: (v) {
@@ -1015,24 +996,40 @@ class _LocalScreenState extends State<LocalScreen>
                                 TextField(
                                   controller: _telLocalController,
                                   keyboardType: TextInputType.phone,
+                                  style: const TextStyle(color: Colors.white),
                                   decoration: InputDecoration(
                                     labelText: 'WhatsApp del Local',
+                                    labelStyle: const TextStyle(color: Colors.white54),
                                     border: OutlineInputBorder(
                                         borderRadius: BorderRadius.circular(8)),
-                                    prefixIcon: const Icon(Icons.phone),
-                                    isDense: true,
+                                    enabledBorder: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(8),
+                                        borderSide: const BorderSide(color: Colors.white24)),
+                                    focusedBorder: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(8),
+                                        borderSide: const BorderSide(color: Color(0xff3AF500))),
+                                    prefixIcon: const Icon(Icons.phone, color: Colors.white54),
                                   ),
                                 ),
                                 const SizedBox(height: 12),
                                 TextField(
                                   controller: _instruccionesController,
                                   maxLines: 2,
+                                  style: const TextStyle(color: Colors.white),
                                   decoration: InputDecoration(
                                     labelText: 'Instrucciones de Recogida',
+                                    labelStyle: const TextStyle(color: Colors.white54),
                                     hintText: 'Ej: Quitarse el casco, etc...',
+                                    hintStyle: const TextStyle(color: Colors.white24),
                                     border: OutlineInputBorder(
                                         borderRadius: BorderRadius.circular(8)),
-                                    prefixIcon: const Icon(Icons.assignment),
+                                    enabledBorder: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(8),
+                                        borderSide: const BorderSide(color: Colors.white24)),
+                                    focusedBorder: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(8),
+                                        borderSide: const BorderSide(color: Color(0xff3AF500))),
+                                    prefixIcon: const Icon(Icons.assignment, color: Colors.white54),
                                   ),
                                 ),
                                 const SizedBox(height: 14),
@@ -1101,21 +1098,29 @@ class _LocalScreenState extends State<LocalScreen>
                                     fontSize: 11,
                                     fontWeight: FontWeight.bold,
                                     letterSpacing: 1.3,
-                                    color: Colors.black45)),
+                                    color: Colors.white38)),
                           ),
                           Container(
                             decoration: BoxDecoration(
-                              color: Colors.white,
+                              color: const Color(0xFF1C1C1C),
                               borderRadius: BorderRadius.circular(14),
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.04),
+                                  color: Colors.black.withValues(alpha: 0.3),
                                   blurRadius: 4,
                                 ),
                               ],
                             ),
                             child: Column(
                               children: [
+                                _hubListTile(
+                                  icon: Icons.menu_book_rounded,
+                                  iconColor: Colors.green,
+                                  title: 'Lista de Precios',
+                                  subtitle: 'Buscar o agregar tarifas por barrio/sector',
+                                  onTap: () => _abrirPanelTarifario(context),
+                                ),
+                                const Divider(height: 1, color: Colors.white12),
                                 Builder(builder: (ctx) {
                                   final apertura = perfilEnVivo['horario_apertura']?.toString();
                                   final cierre = perfilEnVivo['horario_cierre']?.toString();
@@ -1130,14 +1135,14 @@ class _LocalScreenState extends State<LocalScreen>
                                     onTap: () => _abrirConfigDomicilios(perfilEnVivo),
                                   );
                                 }),
-                                const Divider(height: 1),
+                                const Divider(height: 1, color: Colors.white12),
                                 _hubListTile(
                                   icon: Icons.folder_shared,
                                   iconColor: Colors.grey,
                                   title: 'Bóveda Historial General',
                                   onTap: () => _mostrarHistorialGlobal(context),
                                 ),
-                                const Divider(height: 1),
+                                const Divider(height: 1, color: Colors.white12),
                                 _hubListTile(
                                   icon: Icons.people_alt,
                                   iconColor: Colors.purple,
@@ -1145,14 +1150,14 @@ class _LocalScreenState extends State<LocalScreen>
                                   subtitle: 'Compras, estadísticas y retargeting',
                                   onTap: () => _abrirCRMLocal(context, perfilEnVivo),
                                 ),
-                                const Divider(height: 1),
+                                const Divider(height: 1, color: Colors.white12),
                                 _hubListTile(
                                   icon: Icons.add_location_alt,
                                   iconColor: Colors.orangeAccent,
                                   title: 'Configurar Ubicación del Local',
                                   onTap: () => _abrirMenuUbicacion(),
                                 ),
-                                const Divider(height: 1),
+                                const Divider(height: 1, color: Colors.white12),
                                 Builder(
                                   builder: (ctx) {
                                     final tieneAlarma = perfilEnVivo['chat_central'] == true;
@@ -1194,11 +1199,11 @@ class _LocalScreenState extends State<LocalScreen>
                           // ── CUENTA ──────────────────────────────────
                           Container(
                             decoration: BoxDecoration(
-                              color: Colors.white,
+                              color: const Color(0xFF1C1C1C),
                               borderRadius: BorderRadius.circular(14),
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.04),
+                                  color: Colors.black.withValues(alpha: 0.3),
                                   blurRadius: 4,
                                 ),
                               ],
@@ -1211,7 +1216,7 @@ class _LocalScreenState extends State<LocalScreen>
                                   title: 'Eliminar Mi Cuenta',
                                   onTap: () => _eliminarMiCuenta(context),
                                 ),
-                                const Divider(height: 1),
+                                const Divider(height: 1, color: Colors.white12),
                                 _hubListTile(
                                   icon: Icons.power_settings_new,
                                   iconColor: Colors.redAccent,
