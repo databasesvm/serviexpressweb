@@ -191,9 +191,7 @@ Deno.serve(async () => {
       const asignado = await autoAsignar(
         srv.id,
         movilId,
-        [], // No cancelamos onesignal_2m / onesignal_5m — si el móvil estaba libre y acepta,
-            // los receptores de fase3/4 verán el servicio ya asignado y no podrán aceptar.
-            // Cancelar requeriría llamadas extras; los mobiles simplemente ignorarán la notif.
+        [srv.onesignal_2m, srv.onesignal_5m], // Cancelar Fase 3/4 para no spamear a otros móviles
         '📍 TU TURNO EN EL PARADERO',
         'Un servicio está esperando por ti',
       );

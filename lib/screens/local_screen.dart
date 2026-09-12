@@ -580,27 +580,44 @@ class _LocalScreenState extends State<LocalScreen>
                                 ),
                               ),
                               const SizedBox(height: 8),
-                              // Fila 2: PUNTO A PUNTO (ancho completo)
-                              SizedBox(
-                                width: double.infinity,
-                                child: ElevatedButton.icon(
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: puedeVip ? Colors.purple[800] : Colors.grey[300],
-                                    foregroundColor: puedeVip ? Colors.white : Colors.grey[600],
-                                    padding: const EdgeInsets.symmetric(vertical: 10),
-                                    elevation: puedeVip ? 2 : 0,
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              // Fila 2: PUNTO A PUNTO + SOLICITAR MÓVIL (dos columnas)
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: ElevatedButton.icon(
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: puedeVip ? Colors.purple[800] : Colors.grey[300],
+                                        foregroundColor: puedeVip ? Colors.white : Colors.grey[600],
+                                        padding: const EdgeInsets.symmetric(vertical: 10),
+                                        elevation: puedeVip ? 2 : 0,
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                      ),
+                                      onPressed: puedeVip
+                                          ? () => _abrirFormularioPedido(context,
+                                              esPuntoAPunto: true, perfilEnVivo: perfilEnVivo)
+                                          : null,
+                                      icon: const Icon(Icons.flash_on, size: 17),
+                                      label: Text(
+                                        puedeVip ? 'PUNTO A PUNTO' : 'P.A.P AGOTADO',
+                                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                                      ),
+                                    ),
                                   ),
-                                  onPressed: puedeVip
-                                      ? () => _abrirFormularioPedido(context,
-                                          esPuntoAPunto: true, perfilEnVivo: perfilEnVivo)
-                                      : null,
-                                  icon: const Icon(Icons.flash_on, size: 17),
-                                  label: Text(
-                                    puedeVip ? 'PUNTO A PUNTO' : 'P.A.P AGOTADO',
-                                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                                  const SizedBox(width: 8),
+                                  // ── TEMPORAL: solicitud directa al radar ──
+                                  ElevatedButton.icon(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.orange[800],
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                    ),
+                                    onPressed: () => _solicitarMovilDirecto(context),
+                                    icon: const Icon(Icons.store, size: 16),
+                                    label: const Text('SOLICITAR MÓVIL',
+                                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                                   ),
-                                ),
+                                ],
                               ),
                             ],
                           ),

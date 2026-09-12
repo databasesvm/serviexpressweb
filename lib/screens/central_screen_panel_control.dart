@@ -1673,7 +1673,7 @@ extension CentralScreenPanelControl on _CentralScreenState {
                       if ((s['observacion'] ?? '').toString().toLowerCase().contains(q)) return true;
                       // buscar por #moto (ej: "5" o "#5")
                       final movEntry = _movilesCache.firstWhere(
-                        (m) => m['id'] == s['movil_id'], orElse: () => {});
+                        (m) => m['id'] == s['movil_id'], orElse: () => <String, dynamic>{});
                       if (movEntry.isNotEmpty) {
                         final usuario = movEntry['usuario']?.toString() ?? '';
                         if (usuario.toLowerCase().contains(q)) return true;

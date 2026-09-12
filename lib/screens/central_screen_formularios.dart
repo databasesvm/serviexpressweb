@@ -159,11 +159,11 @@ extension CentralScreenFormularios on _CentralScreenState {
                     contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                     prefixIcon: Icon(Icons.person_pin, size: 18),
                   ),
-                  hint: const Text('— Cascada normal —', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                  hint: const Text('Seleccionar', style: TextStyle(fontSize: 12, color: Colors.black54)),
                   items: [
                     const DropdownMenuItem<String?>(
                       value: null,
-                      child: Text('— Cascada normal —', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                      child: Text('Seleccionar', style: TextStyle(fontSize: 12, color: Colors.black54)),
                     ),
                     ...movilesConectados.map((m) => DropdownMenuItem<String?>(
                       value: m['id'].toString(),
@@ -179,7 +179,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                     movilDirectoServimotoNombre = v == null
                         ? null
                         : _formatearNombreCentral(movilesConectados
-                            .firstWhere((m) => m['id'].toString() == v, orElse: () => {}));
+                            .firstWhere((m) => m['id'].toString() == v, orElse: () => <String, dynamic>{}));
                   }),
                 ),
                 const SizedBox(height: 12),
@@ -592,110 +592,6 @@ extension CentralScreenFormularios on _CentralScreenState {
                       try {
                         // ---> UNIFICACIÓN: ESCÁNER MULTI-PARADERO DESDE CENTRAL <---
                         String? exclusivoIdCampo;
-                        List<String> pilotosSeleccionadosIds = [];
-
-                        // Regla de capacidad por rango (igual que dentro de
-                        // la app): NOVATO/PRO no reciben nada si ya tienen
-                        // un servicio activo; ELITE/LEYENDA/MASTER mientras
-                        // les quede cupo. Se resuelve en SQL para no
-                        // repetir esta lógica en cada ola por separado.
-                        Set<String> idsElegiblesPorCapacidad = {};
-                        try {
-                          final elegibles = await Supabase.instance.client
-                              .rpc(
-                                'moviles_elegibles_notificacion',
-                                params: {
-                                  'p_solo_master': false,
-                                  // T=0: el #1 de paradero debe estar
-                                  // completamente libre — el cupo de 2/3
-                                  // pedidos no aplica al turno inicial.
-                                  'p_solo_completamente_libres': true,
-                                  // Solo móviles con SE habilitado
-                                  'p_tiene_se': true,
-                                },
-                              );
-                          idsElegiblesPorCapacidad = (elegibles as List)
-                              .map((e) => e['id'].toString())
-                              .toSet();
-                        } catch (_) {
-                          // Si la función no existe todavía (falta correr
-                          // el SQL), no bloqueamos el despacho — solo no
-                          // filtramos por capacidad esta vez.
-                        }
-
-                        if (tarifaFinal > 0) {
-                          final serviciosPendientes = await Supabase
-                              .instance
-                              .client
-                              .from('servicios')
-                              .select('exclusivo_id')
-                              .eq('estado', 'pendiente')
-                              .not('exclusivo_id', 'is', null);
-
-                          List<String> ocupados = [];
-                          for (var s in serviciosPendientes) {
-                            ocupados.addAll(
-                              s['exclusivo_id']
-                                  .toString()
-                                  .split(',')
-                                  .map((e) => e.trim()),
-                            );
-                          }
-
-                          final movilesLibres = await Supabase.instance.client
-                              .from('usuarios')
-                              .select('id, paradero_actual, ingreso_fila')
-                              .eq('rol', 'movil')
-                              .eq('en_linea', true)
-                              .eq('tiene_se', true)
-                              .not('paradero_actual', 'is', null);
-
-                          Map<String, List<Map<String, dynamic>>>
-                          gruposParaderos = {};
-                          for (var m in movilesLibres) {
-                            String pName = m['paradero_actual']
-                                .toString()
-                                .trim()
-                                .toLowerCase();
-                            gruposParaderos.putIfAbsent(pName, () => []).add(m);
-                          }
-
-                          // Extraemos el #1 de cada paradero disponible que
-                          // no esté ocupado NI bloqueado por capacidad de
-                          // su rango — si el #1 es Novato/Pro y está
-                          // ocupado, pasamos al siguiente de la fila.
-                          gruposParaderos.forEach((pName, listaFila) {
-                            listaFila.sort(
-                              (a, b) =>
-                                  DateTime.parse(
-                                    a['ingreso_fila'] ??
-                                        DateTime.now().toIso8601String(),
-                                  ).compareTo(
-                                    DateTime.parse(
-                                      b['ingreso_fila'] ??
-                                          DateTime.now().toIso8601String(),
-                                    ),
-                                  ),
-                            );
-
-                            for (var candidato in listaFila) {
-                              String candId = candidato['id'].toString();
-                              final bool elegible =
-                                  idsElegiblesPorCapacidad.isEmpty ||
-                                  idsElegiblesPorCapacidad.contains(candId);
-                              if (!ocupados.contains(candId) && elegible) {
-                                pilotosSeleccionadosIds.add(candId);
-                                break;
-                              }
-                            }
-                          });
-
-                          if (pilotosSeleccionadosIds.isNotEmpty) {
-                            exclusivoIdCampo = pilotosSeleccionadosIds.join(
-                              ',',
-                            );
-                          }
-                        }
 
                         // FALLBACK DE UBICACIÓN — si el autocompletado no
                         // encontró un local con base sellada, usamos las
@@ -729,15 +625,13 @@ extension CentralScreenFormularios on _CentralScreenState {
                               'telefono_receptor': telReceptor.isEmpty
                                   ? null
                                   : telReceptor,
-                              if (tipoServicio != 'RECOGIDA LOCAL') ...{
+                              if (tipoServicio != 'RECOGIDA LOCAL' && tarifaFinal > 0) ...{
                                 'tarifa': tarifaFinal,
                                 'tarifa_detalle': detalleActual ??
                                     {'total': tarifaFinal, 'fuente': 'central'},
                               },
                               'observacion': observacionFinal,
-                              'estado': tipoServicio == 'RECOGIDA LOCAL' || tarifaFinal > 0
-                                  ? 'pendiente'
-                                  : 'cotizacion',
+                              'estado': 'pendiente',
                               'creador': 'Central',
                               'tipo_servicio': tipoServicio,
                               'metodo_pago': 'Efectivo',
@@ -787,7 +681,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                             urgente: true,
                             sonido: Sonidos.movilParadero,
                           );
-                        } else if (tipoServicio == 'RECOGIDA LOCAL' || tarifaFinal > 0) {
+                        } else {
                           // ══════════════════════════════════════════════════
                           // CASCADA 4 FASES (no-FN):
                           //  FASE 1 (0–30s)  → Masters ven card con detalles
@@ -880,7 +774,9 @@ extension CentralScreenFormularios on _CentralScreenState {
                           // que son FN exclusivo.
                           {
                             final int svcId = nuevoServicioId;
-                            final String msg = 'Nuevo servicio disponible en el radar';
+                            final String msg = tipoServicio == 'RECOGIDA LOCAL'
+                                ? 'Recogida Local en ${origenController.text.trim()}'
+                                : 'Nuevo servicio disponible en el radar';
                             final List<String> masterSnap = List<String>.from(idsMasters);
                             // Excluir Masters y #1 del paradero (auto-asignado por cron)
                             final List<String> excluidos = [
@@ -1817,6 +1713,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                                             .select('id, nombre, usuario, rango_movil')
                                             .eq('rol', 'movil')
                                             .eq('activo', true)
+                                            .eq('en_linea', true)
                                             .not('suspendido', 'is', true)
                                             .eq('tiene_fn', true)
                                             .order('usuario');
@@ -1884,7 +1781,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                                     color: Colors.orange[800]!, width: 1.5),
                               ),
                               child: Text(
-                                '👤  DIRECTO',
+                                '👤  ASIGNAR MÓVIL',
                                 textAlign: TextAlign.center,
                                 style: TextStyle(
                                   fontSize: 12,
@@ -1996,7 +1893,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                                   final sel = movilesDirectaCache
                                       .firstWhere(
                                           (m) => m['id'].toString() == v,
-                                          orElse: () => {});
+                                          orElse: () => <String, dynamic>{});
                                   setDialogState(() {
                                     movilDirectoId = v;
                                     final usr = sel['usuario']?.toString() ?? '';
@@ -2086,6 +1983,18 @@ extension CentralScreenFormularios on _CentralScreenState {
                                     'lng': s['lng'],
                                   })
                               .toList();
+
+                          // Si la primera recogida tiene coords, usarlas como
+                          // referencia de proximidad (Fase 2/3) — el móvil va
+                          // primero a la recogida, no a la sede.
+                          final primeraRecLat = recogidasList.isNotEmpty
+                              ? (recogidasList.first['lat'] as num?)?.toDouble()
+                              : null;
+                          final primeraRecLng = recogidasList.isNotEmpty
+                              ? (recogidasList.first['lng'] as num?)?.toDouble()
+                              : null;
+                          final refLat = primeraRecLat ?? sLat;
+                          final refLng = primeraRecLng ?? sLng;
 
                           if (modoAsignacion == 'directa') {
                             // ══════════════════════════════════════════════════
@@ -2203,9 +2112,14 @@ extension CentralScreenFormularios on _CentralScreenState {
                             }
                           } else if (modoAsignacion == 'paradero') {
                             // ══════════════════════════════════════════════════
-                            // ASIGNACIÓN A PARADERO — la central elige el paradero.
-                            // Se busca el #1 de la fila y se asigna directamente.
-                            // El card llega como asignación manual (no radar).
+                            // CASCADA PARADERO FN — 4 FASES
+                            // Igual que Radar, pero Fase 2 auto-asigna al #1
+                            // del paradero elegido (no al más cercano por GPS).
+                            //
+                            // FASE 1 (T=0,   inmediato) → SOLO Masters
+                            // FASE 2 (T+30s, pg_cron)  → #1 del paradero
+                            // FASE 3 (T+60s, programado) → no-masters 2km
+                            // FASE 4 (T+90s, programado) → resto global
                             // ══════════════════════════════════════════════════
                             if (paraderoFN == null) {
                               ScaffoldMessenger.of(context).showSnackBar(
@@ -2217,8 +2131,37 @@ extension CentralScreenFormularios on _CentralScreenState {
                               return;
                             }
 
-                            // 1. Buscar el #1 del paradero (menor ingreso_fila, en línea, activo)
-                            final filaParadero = await Supabase.instance.client
+                            final ahora = DateTime.now().toUtc().toIso8601String();
+
+                            // 1. Cargar todos los móviles FN online
+                            final movilesDataP = await Supabase.instance.client
+                                .from('usuarios')
+                                .select('id, rango_movil, latitud, longitud, tipo_plan_movil, saldo_wallet')
+                                .eq('rol', 'movil')
+                                .eq('en_linea', true)
+                                .eq('activo', true)
+                                .eq('tiene_fn', true)
+                                .not('suspendido', 'is', true);
+
+                            final movilesAllP = (movilesDataP as List).where((m) {
+                              final plan = m['tipo_plan_movil']?.toString() ?? '';
+                              if (plan == 'prediario') {
+                                return ((m['saldo_wallet'] as num?)?.toDouble() ?? 0.0) > 0;
+                              }
+                              return true;
+                            }).toList();
+
+                            final mastersP = movilesAllP
+                                .where((m) => m['rango_movil']?.toString().toUpperCase() == 'MASTER')
+                                .toList();
+                            final noMastersP = movilesAllP
+                                .where((m) => m['rango_movil']?.toString().toUpperCase() != 'MASTER')
+                                .toList();
+                            final masterIdsP = mastersP.map<String>((m) => m['id'].toString()).toList();
+                            final noMasterIdsP = noMastersP.map<String>((m) => m['id'].toString()).toList();
+
+                            // 2. Buscar el #1 del paradero
+                            final filaParaderoP = await Supabase.instance.client
                                 .from('usuarios')
                                 .select('id, usuario, ingreso_fila')
                                 .eq('rol', 'movil')
@@ -2228,23 +2171,22 @@ extension CentralScreenFormularios on _CentralScreenState {
                                 .eq('paradero_actual', paraderoFN!)
                                 .not('suspendido', 'is', true)
                                 .order('ingreso_fila', ascending: true)
-                                .limit(5);
+                                .limit(1);
 
                             String? paraderoMovilId;
                             String? paraderoMovilNombre;
-                            for (final m in (filaParadero as List)) {
-                              paraderoMovilId = m['id'].toString();
-                              final usr = m['usuario']?.toString() ?? '';
-                              final num = RegExp(r'\d+').firstMatch(usr)?.group(0);
-                              paraderoMovilNombre = num != null ? 'Móvil $num' : usr;
-                              break; // solo el primero
+                            if ((filaParaderoP as List).isNotEmpty) {
+                              final primero = filaParaderoP.first;
+                              paraderoMovilId = primero['id'].toString();
+                              final usr = primero['usuario']?.toString() ?? '';
+                              final numStr = RegExp(r'\d+').firstMatch(usr)?.group(0);
+                              paraderoMovilNombre = numStr != null ? 'Móvil $numStr' : usr;
                             }
 
                             if (paraderoMovilId == null) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
-                                  content: Text(
-                                      'No hay móviles FN en el paradero $paraderoFN'),
+                                  content: Text('No hay móviles FN en el paradero $paraderoFN'),
                                   backgroundColor: Colors.red[700],
                                 ),
                               );
@@ -2252,53 +2194,129 @@ extension CentralScreenFormularios on _CentralScreenState {
                               return;
                             }
 
-                            final ahora = DateTime.now().toUtc().toIso8601String();
+                            // 3. Fase 3 — no-masters dentro de 2km (excl. #1 paradero)
+                            final fase3IdsP = noMastersP.where((m) {
+                              final id = m['id'].toString();
+                              if (id == paraderoMovilId) return false;
+                              if (refLat == null || refLng == null) return false;
+                              final uLat = (m['latitud'] as num?)?.toDouble();
+                              final uLng = (m['longitud'] as num?)?.toDouble();
+                              if (uLat == null || uLng == null) return false;
+                              return const Distance().as(
+                                    LengthUnit.Meter,
+                                    LatLng(uLat, uLng),
+                                    LatLng(refLat, refLng),
+                                  ) <= 2000;
+                            }).map<String>((m) => m['id'].toString()).toList();
 
-                            await Supabase.instance.client
+                            // 4. Fase 4 — resto global (excl. #1 paradero y fase 3)
+                            final fase4IdsP = noMasterIdsP
+                                .where((id) => id != paraderoMovilId && !fase3IdsP.contains(id))
+                                .toList();
+
+                            // ── FASE 1 (T=0): heads-up exclusivo a MASTERS ──
+                            if (masterIdsP.isNotEmpty) {
+                              await MotorNotificaciones.dispararRafa(
+                                idsDestinos: masterIdsP,
+                                titulo: '👑 TURNO FN — MASTER',
+                                mensaje: 'Servicio Farmanorte · $zonaLabel',
+                                urgente: true,
+                                sonido: 'master',
+                                canalAndroidId: MotorNotificaciones.canalMasterId,
+                              );
+                            }
+
+                            // ── Insertar servicio en BD ──────────────────────
+                            // Estado 'pendiente' — el pg_cron auto-asigna al #1
+                            // del paradero a T+30s via fn_fase2_movil_id.
+                            final insertedSvcP = await Supabase.instance.client
                                 .from('servicios')
                                 .insert({
-                              'origen': nombreSede,
-                              'destino': destinoCtrl.text.trim().toUpperCase(),
-                              'tarifa': tarifa,
-                              'estado': 'en_ruta_origen',
-                              'creador': 'Central FN',
-                              'tipo_servicio': 'FARMANORTE',
-                              'tipo_fn': true,
-                              'zona_fn': zona,
-                              'fn_sede_id': sede['id'],
-                              'recogidas': recogidasList,
-                              'metodo_pago': vaConDatafono ? 'Datafono' : 'Efectivo',
-                              'archivado': false,
-                              'movil_id': int.tryParse(paraderoMovilId),
-                              'accepted_at': ahora,
-                              'fn_asignacion_tipo': 'paradero',
-                              'paradero_origen': paraderoFN,
-                              'fn_asignado_por': 'Central',
-                              if (sLat != null) 'origen_lat': sLat,
-                              if (sLng != null) 'origen_lng': sLng,
-                              if (sede['telefono_whatsapp'] != null &&
-                                  (sede['telefono_whatsapp'] as String).isNotEmpty)
-                                'fn_whatsapp': sede['telefono_whatsapp'] as String,
-                              if (instruccionesCtrl.text.trim().isNotEmpty)
-                                'instrucciones_especiales': instruccionesCtrl.text.trim(),
-                            });
+                                  'origen': nombreSede,
+                                  'destino': destinoCtrl.text.trim().toUpperCase(),
+                                  'tarifa': tarifa,
+                                  'estado': tarifa > 0 ? 'pendiente' : 'cotizacion',
+                                  'creador': 'Central FN',
+                                  'tipo_servicio': 'FARMANORTE',
+                                  'tipo_fn': true,
+                                  'zona_fn': zona,
+                                  'fn_sede_id': sede['id'],
+                                  'recogidas': recogidasList,
+                                  'metodo_pago': vaConDatafono ? 'Datafono' : 'Efectivo',
+                                  'archivado': false,
+                                  'fn_radar_t0': ahora,
+                                  'fn_asignacion_tipo': 'paradero',
+                                  'fn_fase2_movil_id': paraderoMovilId,
+                                  'paradero_origen': paraderoFN,
+                                  if (masterIdsP.isNotEmpty)
+                                    'fn_notificados_fase1': masterIdsP,
+                                  if (refLat != null) 'origen_lat': refLat,
+                                  if (refLng != null) 'origen_lng': refLng,
+                                  if (sede['telefono_whatsapp'] != null &&
+                                      (sede['telefono_whatsapp'] as String).isNotEmpty)
+                                    'fn_whatsapp': sede['telefono_whatsapp'] as String,
+                                  if (instruccionesCtrl.text.trim().isNotEmpty)
+                                    'instrucciones_especiales': instruccionesCtrl.text.trim(),
+                                })
+                                .select('id')
+                                .single();
 
-                            // Notificación al #1 del paradero
-                            await MotorNotificaciones.dispararRafa(
-                              idsDestinos: [paraderoMovilId],
-                              titulo: '📍 TURNO FN — PARADERO $paraderoFN',
-                              mensaje:
-                                  'La central te asignó un turno Farmanorte · $zonaLabel',
-                              urgente: true,
-                              sonido: Sonidos.movilParadero,
-                            );
+                            final int nuevoIdP = (insertedSvcP['id'] as num).toInt();
+
+                            // ── FASE 3 (T+60s): zona 2km ─────────────────────
+                            String? notifFase3P;
+                            if (fase3IdsP.isNotEmpty) {
+                              notifFase3P = await MotorNotificaciones.programarMisilRetardado(
+                                externalIds: fase3IdsP,
+                                titulo: '🔵 TURNO FN CERCA',
+                                mensaje: 'Servicio Farmanorte disponible · $zonaLabel',
+                                segundosRetardo: 60,
+                                sonido: Sonidos.movilParadero,
+                              );
+                            }
+
+                            // ── FASE 4 (T+90s): global ───────────────────────
+                            String? notifFase4P;
+                            if (fase4IdsP.isNotEmpty) {
+                              notifFase4P = await MotorNotificaciones.programarMisilRetardado(
+                                externalIds: fase4IdsP,
+                                titulo: '🔵 TURNO FN SIN TOMAR',
+                                mensaje: 'Servicio Farmanorte · $zonaLabel',
+                                segundosRetardo: 90,
+                                sonido: Sonidos.movilParadero,
+                              );
+                            }
+
+                            // ── FASE 4b (T+90s): re-alerta Masters ───────────
+                            String? notifFase4bP;
+                            if (masterIdsP.isNotEmpty) {
+                              notifFase4bP = await MotorNotificaciones.programarMisilRetardado(
+                                externalIds: masterIdsP,
+                                titulo: '🚨 FN SIN CUBRIR',
+                                mensaje: 'Servicio Farmanorte sin tomar · $zonaLabel',
+                                segundosRetardo: 90,
+                                sonido: 'master',
+                                canalAndroidId: MotorNotificaciones.canalMasterId,
+                              );
+                            }
+
+                            // Guardar IDs para cancelar si alguien acepta
+                            if (notifFase3P != null || notifFase4P != null || notifFase4bP != null) {
+                              await Supabase.instance.client
+                                  .from('servicios')
+                                  .update({
+                                if (notifFase3P != null) 'fn_notif_fase3': notifFase3P,
+                                if (notifFase4P != null) 'fn_notif_fase4': notifFase4P,
+                                if (notifFase4bP != null) 'fn_notif_fase4b': notifFase4bP,
+                              }).eq('id', nuevoIdP);
+                            }
 
                             if (context.mounted) {
                               Navigator.pop(context);
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   content: Text(
-                                    'FN asignado al #1 de $paraderoFN ($paraderoMovilNombre)',
+                                    'FN Paradero · Masters avisados, $paraderoMovilNombre se auto-asigna en 30s',
                                   ),
                                   backgroundColor: Colors.teal[700],
                                 ),
@@ -2366,10 +2384,11 @@ extension CentralScreenFormularios on _CentralScreenState {
                                 .map<String>((m) => m['id'].toString())
                                 .toList();
 
-                            // 3. Calcular el móvil más cercano a la sede
+                            // 3. Calcular el móvil más cercano al punto de
+                            // referencia: primera recogida si la hay, sede si no.
                             String? fase2MovilId;
-                            if (sLat != null &&
-                                sLng != null &&
+                            if (refLat != null &&
+                                refLng != null &&
                                 noMasters.isNotEmpty) {
                               double minDist = double.infinity;
                               for (final m in noMasters) {
@@ -2381,7 +2400,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                                 final dist = const Distance().as(
                                   LengthUnit.Meter,
                                   LatLng(uLat, uLng),
-                                  LatLng(sLat, sLng),
+                                  LatLng(refLat, refLng),
                                 );
                                 if (dist < minDist) {
                                   minDist = dist;
@@ -2389,19 +2408,19 @@ extension CentralScreenFormularios on _CentralScreenState {
                                 }
                               }
                             } else if (noMasters.isNotEmpty) {
-                              // Sin coordenadas de sede → primer disponible
+                              // Sin coordenadas → primer disponible
                               fase2MovilId =
                                   noMasters.first['id'].toString();
                             }
 
-                            // Fase 3 (zona 2km desde la sede): no-masters
-                            // dentro del radio de 2km, excluyendo el de fase 2.
+                            // Fase 3 (zona 2km desde el punto de referencia):
+                            // no-masters dentro del radio, excluyendo el de fase 2.
                             final fase3Ids = noMasterIds.where((id) {
                               if (id == fase2MovilId) return false;
-                              if (sLat == null || sLng == null) return false;
+                              if (refLat == null || refLng == null) return false;
                               final mData = noMasters.firstWhere(
                                 (m) => m['id'].toString() == id,
-                                orElse: () => {},
+                                orElse: () => <String, dynamic>{},
                               );
                               if (mData.isEmpty) return false;
                               final uLat = (mData['latitud'] as num?)?.toDouble();
@@ -2410,7 +2429,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                               return const Distance().as(
                                     LengthUnit.Meter,
                                     LatLng(uLat, uLng),
-                                    LatLng(sLat, sLng),
+                                    LatLng(refLat, refLng),
                                   ) <= 2000;
                             }).toList();
 
@@ -2463,8 +2482,8 @@ extension CentralScreenFormularios on _CentralScreenState {
                                     'fn_fase2_movil_id': fase2MovilId,
                                   if (masterIds.isNotEmpty)
                                     'fn_notificados_fase1': masterIds,
-                                  if (sLat != null) 'origen_lat': sLat,
-                                  if (sLng != null) 'origen_lng': sLng,
+                                  if (refLat != null) 'origen_lat': refLat,
+                                  if (refLng != null) 'origen_lng': refLng,
                                   if (sede['telefono_whatsapp'] != null &&
                                       (sede['telefono_whatsapp'] as String)
                                           .isNotEmpty)
@@ -2517,9 +2536,23 @@ extension CentralScreenFormularios on _CentralScreenState {
                               );
                             }
 
+                            // ── FASE 4b (T+90s): re-alerta Masters ───────────
+                            String? notifFase4b;
+                            if (masterIds.isNotEmpty) {
+                              notifFase4b = await MotorNotificaciones
+                                  .programarMisilRetardado(
+                                externalIds: masterIds,
+                                titulo: '🚨 FN SIN CUBRIR',
+                                mensaje: 'Servicio Farmanorte sin tomar · $zonaLabel',
+                                segundosRetardo: 90,
+                                sonido: 'master',
+                                canalAndroidId: MotorNotificaciones.canalMasterId,
+                              );
+                            }
+
                             // Guardar IDs de misiles FN para cancelarlos
                             // si alguien acepta (NO son onesignal_30s/2m/5m)
-                            if (notifFase3 != null || notifFase4 != null) {
+                            if (notifFase3 != null || notifFase4 != null || notifFase4b != null) {
                               await Supabase.instance.client
                                   .from('servicios')
                                   .update({
@@ -2527,6 +2560,8 @@ extension CentralScreenFormularios on _CentralScreenState {
                                   'fn_notif_fase3': notifFase3,
                                 if (notifFase4 != null)
                                   'fn_notif_fase4': notifFase4,
+                                if (notifFase4b != null)
+                                  'fn_notif_fase4b': notifFase4b,
                               }).eq('id', nuevoId);
                             }
 
@@ -2570,7 +2605,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                       )
                     : Text(
                         modoAsignacion == 'directa'
-                            ? 'ASIGNAR DIRECTO'
+                            ? 'ASIGNAR MÓVIL'
                             : modoAsignacion == 'paradero'
                                 ? 'ASIGNAR A PARADERO'
                                 : 'ENVIAR AL RADAR',
@@ -2581,214 +2616,6 @@ extension CentralScreenFormularios on _CentralScreenState {
             ],
           );
         },
-      ),
-    );
-  }
-
-  void _mostrarMenuAsignacion(BuildContext contextoPrincipal, int servicioId) {
-    showDialog(
-      context: contextoPrincipal,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        title: const Text(
-          'ASIGNAR / REASIGNAR MÓVIL',
-          style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue),
-        ),
-        content: SizedBox(
-          width: 400,
-          height: 450,
-          child: FutureBuilder<List<dynamic>>(
-            // Cruce de tablas: Usuarios online + Servicios en curso
-            future: Future.wait([
-              Supabase.instance.client
-                  .from('usuarios')
-                  .select()
-                  .eq('rol', 'movil')
-                  .eq('en_linea', true),
-              Supabase.instance.client
-                  .from('servicios')
-                  .select('movil_id')
-                  .inFilter('estado', [
-                    'en_ruta_origen',
-                    'en_origen',
-                    'en_ruta_destino',
-                  ]),
-            ]),
-            builder: (ctx, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(
-                  child: CircularProgressIndicator(color: Colors.black),
-                );
-              }
-
-              final moviles =
-                  List<Map<String, dynamic>>.from(snapshot.data?[0] ?? []).map((
-                    m,
-                  ) {
-                    final map = Map<String, dynamic>.from(m);
-                    map['nombre'] = _formatearNombreCentral(map);
-                    return map;
-                  }).toList();
-              final activos = List<Map<String, dynamic>>.from(
-                snapshot.data?[1] ?? [],
-              );
-
-              if (moviles.isEmpty) {
-                return const Center(
-                  child: Text(
-                    'No hay móviles en línea.',
-                    style: TextStyle(
-                      color: Colors.grey,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                );
-              }
-
-              // Motor de Carga
-              for (var m in moviles) {
-                m['carga'] = activos
-                    .where((s) => s['movil_id'] == m['id'])
-                    .length;
-              }
-
-              // Orden ascendente por número de móvil (parte numérica de 'usuario')
-              int _numMovilForm(Map<String, dynamic> m) =>
-                  int.tryParse(RegExp(r'\d+').firstMatch(m['usuario']?.toString() ?? '')?.group(0) ?? '') ?? 9999;
-              moviles.sort((a, b) => _numMovilForm(a).compareTo(_numMovilForm(b)));
-
-              return ListView.builder(
-                itemCount: moviles.length,
-                itemBuilder: (ctx, index) {
-                  final movil = moviles[index];
-                  final int carga = movil['carga'];
-
-                  Color colorCarga = const Color(0xff3AF500);
-                  String txtCarga = 'LIBRE';
-                  if (carga == 1) {
-                    colorCarga = Colors.blue;
-                    txtCarga = '1 VIAJE';
-                  } else if (carga >= 2) {
-                    colorCarga = Colors.red;
-                    txtCarga = '$carga VIAJES';
-                  }
-
-                  return Card(
-                    elevation: 1,
-                    shape: RoundedRectangleBorder(
-                      side: BorderSide(
-                        color: carga >= 2
-                            ? Colors.red[200]!
-                            : Colors.transparent,
-                      ),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: ListTile(
-                      leading: CircleAvatar(
-                        radius: 14,
-                        backgroundColor: colorCarga,
-                        child: Text(
-                          _extraerNumeroAvatar(movil),
-                          style: const TextStyle(
-                            color: Colors.black,
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      title: Text(
-                        _formatearNombreCentral(movil),
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      subtitle: Text(
-                        'Rango: ${movil['rango_movil'] ?? 'NOVATO'}',
-                        style: const TextStyle(fontSize: 11),
-                      ),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: colorCarga.withValues(alpha: 0.2),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              txtCarga,
-                              style: TextStyle(
-                                color: colorCarga == const Color(0xff3AF500)
-                                    ? Colors.green[900]
-                                    : colorCarga,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 10,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          const Icon(Icons.send, color: Colors.blue, size: 18),
-                        ],
-                      ),
-                      onTap: () async {
-                        // 1. Asignamos el servicio
-                        await Supabase.instance.client
-                            .from('servicios')
-                            .update({
-                              'estado': 'en_ruta_origen',
-                              'movil_id': movil['id'],
-                              'accepted_at': DateTime.now()
-                                  .toUtc()
-                                  .toIso8601String(),
-                              'picked_up_at': null,
-                              'extension_minutes': 0,
-                              'observacion':
-                                  'Asignado a ${_formatearNombreCentral(movil)} por Central',
-                            })
-                            .eq('id', servicioId);
-
-                        // 2. QUEMAMOS EL TICKET VIP (Cobro del favor)
-                        if (movil['ticket_prioridad'] == true) {
-                          await Supabase.instance.client
-                              .from('usuarios')
-                              .update({
-                                'ticket_prioridad': false,
-                                // Reset ingreso_fila: con el ticket se había puesto
-                                // '2000-01-01' para ir de #1 — al quemarlo, el movil
-                                // vuelve al final de la fila (timestamp actual).
-                                'ingreso_fila': DateTime.now().toUtc().toIso8601String(),
-                              })
-                              .eq('id', movil['id']);
-                        }
-
-                        // 3. Disparamos la notificación
-                        await MotorNotificaciones.dispararMisil(
-                          idDestino: movil['id'].toString(),
-                          titulo: '🚨 NUEVO SERVICIO ASIGNADO',
-                          mensaje:
-                              'La Central te ha asignado un servicio manual. Revisa tu radar.',
-                          sonido: Sonidos.alerta,
-                        );
-
-                        if (ctx.mounted) {
-                          Navigator.pop(ctx);
-                          Navigator.pop(contextoPrincipal);
-                        }
-                      },
-                    ),
-                  );
-                },
-              );
-            },
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('CANCELAR', style: TextStyle(color: Colors.red)),
-          ),
-        ],
       ),
     );
   }

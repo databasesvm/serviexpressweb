@@ -209,7 +209,7 @@ class _FnFacturacionScreenState extends State<FnFacturacionScreen> {
     if (sedeId == null) return 'Sin sede';
     final sede = _sedes.firstWhere(
       (s) => s['id'].toString() == sedeId.toString(),
-      orElse: () => {},
+      orElse: () => <String, dynamic>{},
     );
     if (sede.isEmpty) return 'Sede $sedeId';
     final num = sede['numero']?.toString() ?? '';

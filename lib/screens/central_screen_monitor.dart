@@ -829,7 +829,7 @@ extension CentralScreenMonitor on _CentralScreenState {
                     vertical: 0,
                   ),
                 ),
-                onPressed: () => _mostrarMenuAsignacion(context, id),
+                onPressed: () { Navigator.pop(context); _asignarMotoManual(context, servicio); },
                 child: const Text(
                   'REASIGNAR',
                   style: TextStyle(
@@ -849,9 +849,30 @@ extension CentralScreenMonitor on _CentralScreenState {
                     ),
                   ),
                   onPressed: () async {
+                    // SE: cancelar cascada
+                    for (final campo in ['onesignal_30s', 'onesignal_2m', 'onesignal_5m']) {
+                      final nId = servicio[campo]?.toString();
+                      if (nId != null && nId.isNotEmpty && nId != 'null')
+                        MotorNotificaciones.cancelarMisil(nId).catchError((_) {});
+                    }
+                    // FN: cancelar cascada
+                    for (final campo in ['fn_notif_fase2', 'fn_notif_fase3', 'fn_notif_fase4', 'fn_notif_fase4b']) {
+                      final nId = servicio[campo]?.toString();
+                      if (nId != null && nId.isNotEmpty && nId != 'null')
+                        MotorNotificaciones.cancelarMisil(nId).catchError((_) {});
+                    }
                     await Supabase.instance.client
                         .from('servicios')
-                        .update({'estado': 'cancelado'})
+                        .update({
+                          'estado': 'cancelado',
+                          'onesignal_30s': null,
+                          'onesignal_2m': null,
+                          'onesignal_5m': null,
+                          'fn_notif_fase2': null,
+                          'fn_notif_fase3': null,
+                          'fn_notif_fase4': null,
+                          'fn_notif_fase4b': null,
+                        })
                         .eq('id', id);
                     if (context.mounted) Navigator.pop(context);
                   },
@@ -884,11 +905,31 @@ extension CentralScreenMonitor on _CentralScreenState {
                       nuevaObs =
                           '[MARCA DE FALLA] ${obsAnterior.isEmpty ? 'Cerrado forzoso por Central' : obsAnterior}';
                     }
+                    // Cancelar cascada SE + FN pendiente
+                    for (final campo in ['onesignal_30s', 'onesignal_2m', 'onesignal_5m']) {
+                      final nId = servicio[campo]?.toString();
+                      if (nId != null && nId.isNotEmpty && nId != 'null')
+                        MotorNotificaciones.cancelarMisil(nId).catchError((_) {});
+                    }
+                    for (final campo in ['fn_notif_fase2', 'fn_notif_fase3', 'fn_notif_fase4', 'fn_notif_fase4b']) {
+                      final nId = servicio[campo]?.toString();
+                      if (nId != null && nId.isNotEmpty && nId != 'null')
+                        MotorNotificaciones.cancelarMisil(nId).catchError((_) {});
+                    }
                     await Supabase.instance.client
                         .from('servicios')
                         .update({
                           'estado': 'finalizado',
                           'observacion': nuevaObs.isEmpty ? null : nuevaObs,
+                          'onesignal_30s': null,
+                          'onesignal_2m': null,
+                          'onesignal_5m': null,
+                          'fn_notif_fase2': null,
+                          'fn_notif_fase3': null,
+                          'fn_notif_fase4': null,
+                          'fn_notif_fase4b': null,
+                          'paradero_auto_movil_id': null,
+                          'fn_fase2_movil_id': null,
                         })
                         .eq('id', id);
                     if (context.mounted) Navigator.pop(context);
@@ -1424,6 +1465,13 @@ extension CentralScreenMonitor on _CentralScreenState {
                           onTap: () async {
                             Navigator.pop(ctx);
                             final nombreMoto = _formatearNombreCentral(moto);
+                            // Cancelar cascada SE + FN antes de asignar
+                            for (final campo in ['onesignal_30s', 'onesignal_2m', 'onesignal_5m',
+                                                 'fn_notif_fase2', 'fn_notif_fase3', 'fn_notif_fase4', 'fn_notif_fase4b']) {
+                              final nId = servicio[campo]?.toString();
+                              if (nId != null && nId.isNotEmpty && nId != 'null')
+                                MotorNotificaciones.cancelarMisil(nId).catchError((_) {});
+                            }
                             await Supabase.instance.client
                                 .from('servicios')
                                 .update({
@@ -1433,6 +1481,13 @@ extension CentralScreenMonitor on _CentralScreenState {
                                   'picked_up_at': null,
                                   'extension_minutes': 0,
                                   'observacion': 'Asignado a $nombreMoto por Central',
+                                  'onesignal_30s': null,
+                                  'onesignal_2m': null,
+                                  'onesignal_5m': null,
+                                  'fn_notif_fase2': null,
+                                  'fn_notif_fase3': null,
+                                  'fn_notif_fase4': null,
+                                  'fn_notif_fase4b': null,
                                 })
                                 .eq('id', servicio['id']);
                             if (moto['ticket_prioridad'] == true) {
@@ -1490,12 +1545,19 @@ extension CentralScreenMonitor on _CentralScreenState {
       final esFn = servicio['fn_origen'] != null ||
           servicio['tipo_fn'] == true;
 
-      // Si es FN, cancelar misiles pendientes de la cascada de notificaciones
+      // SE: cancelar misiles de cascada
+      for (final campo in ['onesignal_30s', 'onesignal_2m', 'onesignal_5m']) {
+        final nId = servicio[campo]?.toString();
+        if (nId != null && nId.isNotEmpty && nId != 'null')
+          MotorNotificaciones.cancelarMisil(nId).catchError((_) {});
+      }
+      // FN: cancelar misiles de cascada
       if (esFn) {
-        final fase2 = servicio['fn_notif_fase2']?.toString();
-        final fase3 = servicio['fn_notif_fase3']?.toString();
-        if (fase2 != null) MotorNotificaciones.cancelarMisil(fase2).catchError((_) {});
-        if (fase3 != null) MotorNotificaciones.cancelarMisil(fase3).catchError((_) {});
+        for (final campo in ['fn_notif_fase2', 'fn_notif_fase3', 'fn_notif_fase4', 'fn_notif_fase4b']) {
+          final nId = servicio[campo]?.toString();
+          if (nId != null && nId.isNotEmpty && nId != 'null')
+            MotorNotificaciones.cancelarMisil(nId).catchError((_) {});
+        }
       }
 
       await Supabase.instance.client.from('servicios').update({
@@ -1503,9 +1565,13 @@ extension CentralScreenMonitor on _CentralScreenState {
         'observacion': servicio['observacion'] != null
             ? '${servicio["observacion"]} | Cancelado por central'
             : 'Cancelado por central',
-        // Limpiar campos de notificación FN para detener la cascada
+        'onesignal_30s': null,
+        'onesignal_2m': null,
+        'onesignal_5m': null,
         if (esFn) 'fn_notif_fase2': null,
         if (esFn) 'fn_notif_fase3': null,
+        if (esFn) 'fn_notif_fase4': null,
+        if (esFn) 'fn_notif_fase4b': null,
         if (esFn) 'fn_notificados_fase1': <String>[],
       }).eq('id', servicio['id']);
       _seleccionadoId.value = null;
@@ -1536,9 +1602,31 @@ extension CentralScreenMonitor on _CentralScreenState {
       ),
     );
     if (confirm == true) {
+      // Cancelar cascada SE + FN pendiente
+      for (final campo in ['onesignal_30s', 'onesignal_2m', 'onesignal_5m']) {
+        final nId = servicio[campo]?.toString();
+        if (nId != null && nId.isNotEmpty && nId != 'null')
+          MotorNotificaciones.cancelarMisil(nId).catchError((_) {});
+      }
+      for (final campo in ['fn_notif_fase2', 'fn_notif_fase3', 'fn_notif_fase4', 'fn_notif_fase4b']) {
+        final nId = servicio[campo]?.toString();
+        if (nId != null && nId.isNotEmpty && nId != 'null')
+          MotorNotificaciones.cancelarMisil(nId).catchError((_) {});
+      }
       await Supabase.instance.client
           .from('servicios')
-          .update({'estado': 'finalizado'})
+          .update({
+            'estado': 'finalizado',
+            'onesignal_30s': null,
+            'onesignal_2m': null,
+            'onesignal_5m': null,
+            'fn_notif_fase2': null,
+            'fn_notif_fase3': null,
+            'fn_notif_fase4': null,
+            'fn_notif_fase4b': null,
+            'paradero_auto_movil_id': null,
+            'fn_fase2_movil_id': null,
+          })
           .eq('id', servicio['id']);
       _seleccionadoId.value = null;
     }
@@ -1569,9 +1657,31 @@ extension CentralScreenMonitor on _CentralScreenState {
       ),
     );
     if (confirm == true) {
+      // Cancelar cascada SE + FN pendiente
+      for (final campo in ['onesignal_30s', 'onesignal_2m', 'onesignal_5m']) {
+        final nId = servicio[campo]?.toString();
+        if (nId != null && nId.isNotEmpty && nId != 'null')
+          MotorNotificaciones.cancelarMisil(nId).catchError((_) {});
+      }
+      for (final campo in ['fn_notif_fase2', 'fn_notif_fase3', 'fn_notif_fase4', 'fn_notif_fase4b']) {
+        final nId = servicio[campo]?.toString();
+        if (nId != null && nId.isNotEmpty && nId != 'null')
+          MotorNotificaciones.cancelarMisil(nId).catchError((_) {});
+      }
       await Supabase.instance.client
           .from('servicios')
-          .update({'estado': 'finalizado_con_problema'})
+          .update({
+            'estado': 'finalizado_con_problema',
+            'onesignal_30s': null,
+            'onesignal_2m': null,
+            'onesignal_5m': null,
+            'fn_notif_fase2': null,
+            'fn_notif_fase3': null,
+            'fn_notif_fase4': null,
+            'fn_notif_fase4b': null,
+            'paradero_auto_movil_id': null,
+            'fn_fase2_movil_id': null,
+          })
           .eq('id', servicio['id']);
       _seleccionadoId.value = null;
     }
@@ -1874,7 +1984,7 @@ extension CentralScreenMonitor on _CentralScreenState {
     if (motoMasActivaId != null) {
       final m = _movilesCache.firstWhere(
           (m) => m['id'].toString() == motoMasActivaId,
-          orElse: () => {});
+          orElse: () => <String, dynamic>{});
       if (m.isNotEmpty) {
         motoLabel =
             '${_formatearNombreCentral(m)} · ${conteoMovil[motoMasActivaId]}';

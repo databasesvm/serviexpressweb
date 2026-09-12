@@ -82,7 +82,7 @@ class _HistorialServiciosScreenState extends State<HistorialServiciosScreen> {
 
   String _nombreMovil(dynamic movilId) {
     if (movilId == null) return '—';
-    final m = _movilesCache.firstWhere((m) => m['id'] == movilId, orElse: () => {});
+    final m = _movilesCache.firstWhere((m) => m['id'] == movilId, orElse: () => <String, dynamic>{});
     if (m.isEmpty) return '#$movilId';
     final usr = m['usuario']?.toString() ?? '';
     final num = usr.replaceAll(RegExp(r'[^0-9]'), '');

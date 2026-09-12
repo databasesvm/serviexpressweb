@@ -327,6 +327,267 @@ mixin _DispatchMixin on State<LocalScreen> {
     );
   }
 
+  // ── SOLICITUD DIRECTA AL RADAR (Temporal) ────────────────────────────────────
+  // Crea un servicio RECOGIDA LOCAL sin destino, datos del cliente ni precio y
+  // dispara la cascada SE completa (4 fases). Se elimina cuando el sistema
+  // tenga el flujo adaptado definitivamente.
+  Future<void> _solicitarMovilDirecto(BuildContext ctx) async {
+    final confirmar = await showDialog<bool>(
+      context: ctx,
+      barrierDismissible: true,
+      builder: (d) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: const Row(children: [
+          Icon(Icons.motorcycle, color: Colors.black, size: 22),
+          SizedBox(width: 8),
+          Text('SOLICITAR MÓVIL', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+        ]),
+        content: Text(
+          '¿Enviar solicitud al radar para ${widget.usuario['nombre']}?\n\nSin dirección ni precio — recogida directa en el local.',
+          style: const TextStyle(fontSize: 13),
+        ),
+        actionsAlignment: MainAxisAlignment.spaceBetween,
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(d, false),
+            child: const Text('CANCELAR', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.black),
+            onPressed: () => Navigator.pop(d, true),
+            child: const Text('SOLICITAR',
+                style: TextStyle(color: Color(0xff3AF500), fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+    if (confirmar != true || !mounted) return;
+
+    try {
+      final double? oLat = (widget.usuario['lat_fija'] as num?)?.toDouble();
+      final double? oLng = (widget.usuario['lng_fija'] as num?)?.toDouble();
+      final String localNombre = widget.usuario['nombre']?.toString() ?? 'Local';
+
+      // 1. Insertar servicio RECOGIDA LOCAL (sin tarifa, sin destino)
+      final insertedSvc = await Supabase.instance.client
+          .from('servicios')
+          .insert({
+            'local_id': widget.usuario['id'],
+            'tipo_servicio': 'RECOGIDA LOCAL',
+            'origen': localNombre,
+            'estado': 'pendiente',
+            'tarifa': 0,
+            'creador': localNombre,
+            'observacion': '[ RECOGIDA LOCAL ] - Solicitud directa desde el local',
+            if (oLat != null) 'origen_lat': oLat,
+            if (oLng != null) 'origen_lng': oLng,
+          })
+          .select('id')
+          .single();
+      final int svcId = (insertedSvc['id'] as num).toInt();
+
+      // 2. Buscar #1 libre del paradero objetivo (misma lógica de _solicitarMovilAprobado)
+      String? paraderoAutoMovilId;
+
+      final serviciosPendientes = await Supabase.instance.client
+          .from('servicios')
+          .select('exclusivo_id')
+          .eq('estado', 'pendiente')
+          .not('exclusivo_id', 'is', null);
+      final List<String> ocupados = [];
+      for (var s in serviciosPendientes) {
+        ocupados.addAll(s['exclusivo_id'].toString().split(',').map((e) => e.trim()));
+      }
+
+      final movilesLibres = await Supabase.instance.client
+          .from('usuarios')
+          .select('id, paradero_actual, ingreso_fila')
+          .eq('rol', 'movil')
+          .eq('en_linea', true)
+          .eq('tiene_se', true)
+          .not('paradero_actual', 'is', null);
+
+      final Map<String, List<Map<String, dynamic>>> gruposParaderos = {};
+      for (var m in movilesLibres) {
+        final String pName = m['paradero_actual'].toString().trim().toLowerCase();
+        gruposParaderos.putIfAbsent(pName, () => []).add(m);
+      }
+      gruposParaderos.forEach((_, lista) {
+        lista.sort((a, b) => DateTime.parse(
+          a['ingreso_fila'] ?? DateTime.now().toIso8601String(),
+        ).compareTo(DateTime.parse(
+          b['ingreso_fila'] ?? DateTime.now().toIso8601String(),
+        )));
+      });
+
+      // Paradero objetivo: exclusivo del local → más cercano si no tiene
+      final String paraderosRaw = widget.usuario['paradero_exclusivo']?.toString() ?? '';
+      final List<String> paraderosDelLocal = paraderosRaw
+          .split(',')
+          .map((e) => e.trim().toLowerCase())
+          .where((e) => e.isNotEmpty)
+          .toList();
+
+      String? paraderoObjetivo;
+      if (paraderosDelLocal.isNotEmpty) {
+        paraderoObjetivo = paraderosDelLocal.first;
+      } else if (oLat != null && oLng != null) {
+        final paraderosList = await Supabase.instance.client
+            .from('paraderos')
+            .select('nombre, latitud, longitud');
+        double menorDist = double.infinity;
+        for (var p in paraderosList) {
+          final pLat = (p['latitud'] as num?)?.toDouble();
+          final pLng = (p['longitud'] as num?)?.toDouble();
+          if (pLat == null || pLng == null) continue;
+          final dist = const Distance().as(
+            LengthUnit.Meter, LatLng(oLat, oLng), LatLng(pLat, pLng),
+          );
+          if (dist < menorDist) {
+            menorDist = dist;
+            paraderoObjetivo = p['nombre'].toString().trim().toLowerCase();
+          }
+        }
+      }
+
+      if (paraderoObjetivo != null && gruposParaderos.containsKey(paraderoObjetivo)) {
+        for (var candidato in gruposParaderos[paraderoObjetivo]!) {
+          final candId = candidato['id'].toString();
+          if (!ocupados.contains(candId)) {
+            paraderoAutoMovilId = candId;
+            break;
+          }
+        }
+      }
+
+      // Fallback: móvil SE más cercano al local
+      if (paraderoAutoMovilId == null && oLat != null && oLng != null) {
+        final todosMov = await Supabase.instance.client
+            .from('usuarios')
+            .select('id, latitud, longitud')
+            .eq('rol', 'movil')
+            .eq('en_linea', true)
+            .eq('tiene_se', true)
+            .not('latitud', 'is', null)
+            .not('longitud', 'is', null);
+        double menorDistMov = double.infinity;
+        for (var m in todosMov) {
+          final mId = m['id'].toString();
+          if (ocupados.contains(mId)) continue;
+          final mLat = (m['latitud'] as num?)?.toDouble();
+          final mLng = (m['longitud'] as num?)?.toDouble();
+          if (mLat == null || mLng == null) continue;
+          final dist = const Distance().as(
+            LengthUnit.Meter, LatLng(oLat, oLng), LatLng(mLat, mLng),
+          );
+          if (dist < menorDistMov) {
+            menorDistMov = dist;
+            paraderoAutoMovilId = mId;
+          }
+        }
+      }
+
+      // 3. Guardar paradero_auto_movil_id (pg_cron lo auto-asigna a T+30s)
+      if (paraderoAutoMovilId != null) {
+        await Supabase.instance.client.from('servicios').update({
+          'paradero_auto_movil_id': paraderoAutoMovilId,
+        }).eq('id', svcId);
+      }
+
+      final String msg = 'Recogida Local en $localNombre — revisa el radar';
+
+      // Fase 1 (T=0): Masters
+      final mastersData = await Supabase.instance.client
+          .from('usuarios')
+          .select('id')
+          .or('rol.eq.master,rango_movil.eq.MASTER')
+          .neq('suspendido', true);
+      final List<String> masterIds = mastersData.map((u) => u['id'].toString()).toList();
+      if (masterIds.isNotEmpty) {
+        await _dispararMisilInmediato(
+          externalIds: masterIds,
+          titulo: '🏪 RECOGIDA LOCAL',
+          mensaje: msg,
+        );
+      }
+
+      // Fase 2: pg_cron auto-asigna al #1 del paradero a T+30s
+
+      // Fases 3 y 4: misiles retardados a no-Masters
+      final Set<String> excluidos = {
+        ...masterIds,
+        if (paraderoAutoMovilId != null) paraderoAutoMovilId,
+      };
+      final movilesNoMaster = await Supabase.instance.client
+          .from('usuarios')
+          .select('id, latitud, longitud')
+          .eq('rol', 'movil')
+          .eq('en_linea', true)
+          .eq('tiene_se', true)
+          .neq('suspendido', true)
+          .not('rango_movil', 'in', '("MASTER")');
+
+      // Fase 3 (T+60s): 2km alrededor del local
+      final List<String> ids2km = movilesNoMaster.where((u) {
+        final id = u['id'].toString();
+        if (excluidos.contains(id)) return false;
+        if (oLat == null || oLng == null) return true;
+        final uLat = (u['latitud'] as num?)?.toDouble();
+        final uLng = (u['longitud'] as num?)?.toDouble();
+        if (uLat == null || uLng == null) return false;
+        return const Distance().as(
+              LengthUnit.Meter, LatLng(uLat, uLng), LatLng(oLat, oLng),
+            ) <= 2000;
+      }).map((u) => u['id'].toString()).toList();
+
+      // Fase 4 (T+90s): todos los conectados
+      final List<String> idsTodos = movilesNoMaster
+          .map((u) => u['id'].toString())
+          .where((id) => !excluidos.contains(id))
+          .toList();
+
+      String? id60s;
+      String? id90s;
+      if (ids2km.isNotEmpty) {
+        id60s = await _programarMisilRetardado(
+          externalIds: ids2km,
+          titulo: '📡 RECOGIDA CERCA (2km)',
+          mensaje: msg,
+          segundosRetardo: 60,
+        );
+      }
+      if (idsTodos.isNotEmpty) {
+        id90s = await _programarMisilRetardado(
+          externalIds: idsTodos,
+          titulo: '🚨 RECOGIDA SIN TOMAR',
+          mensaje: msg,
+          segundosRetardo: 90,
+        );
+      }
+      if (id60s != null || id90s != null) {
+        await Supabase.instance.client.from('servicios').update({
+          if (id60s != null) 'onesignal_2m': id60s,
+          if (id90s != null) 'onesignal_5m': id90s,
+        }).eq('id', svcId);
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('✅ Solicitud enviada al radar. Masters avisados.'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 3),
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Error al solicitar móvil: $e'),
+          backgroundColor: Colors.red,
+        ));
+      }
+    }
+  }
+
   // --- MÓDULO: COMPLETAR DATOS AL APROBAR COTIZACIÓN (MULTI-PARADERO + TEMPORIZADOR) ---
   void _completarDatosYAprobar(
     BuildContext contextoPrincipal,
@@ -683,10 +944,10 @@ mixin _DispatchMixin on State<LocalScreen> {
       int nuevoServicioId = servicio['id'];
       String nuevoEstado = retardoProgramado > 0 ? 'programado' : 'pendiente';
 
-      String? exclusivoIdCampo;
-      List<String> pilotosSeleccionadosIds = [];
+      String? paraderoAutoMovilId;
 
       if (!esPuntoAPunto) {
+        // --- Buscar #1 libre del paradero objetivo (espeja Ruta A de Central) ---
         final serviciosPendientes = await Supabase.instance.client
             .from('servicios')
             .select('exclusivo_id')
@@ -712,25 +973,15 @@ mixin _DispatchMixin on State<LocalScreen> {
           String pName = m['paradero_actual'].toString().trim().toLowerCase();
           gruposParaderos.putIfAbsent(pName, () => []).add(m);
         }
-
-        Map<String, String> numeroUnosPorParadero = {};
-        gruposParaderos.forEach((pName, listaFila) {
-          listaFila.sort(
-            (a, b) => DateTime.parse(
-              a['ingreso_fila'] ?? DateTime.now().toIso8601String(),
-            ).compareTo(
-              DateTime.parse(b['ingreso_fila'] ?? DateTime.now().toIso8601String()),
-            ),
-          );
-          for (var candidato in listaFila) {
-            String candId = candidato['id'].toString();
-            if (!ocupados.contains(candId)) {
-              numeroUnosPorParadero[pName] = candId;
-              break;
-            }
-          }
+        gruposParaderos.forEach((_, lista) {
+          lista.sort((a, b) => DateTime.parse(
+            a['ingreso_fila'] ?? DateTime.now().toIso8601String(),
+          ).compareTo(DateTime.parse(
+            b['ingreso_fila'] ?? DateTime.now().toIso8601String(),
+          )));
         });
 
+        // Determinar paradero objetivo
         String paraderosLocalRaw =
             widget.usuario['paradero_exclusivo']?.toString() ?? '';
         List<String> paraderosDelLocal = paraderosLocalRaw
@@ -739,28 +990,90 @@ mixin _DispatchMixin on State<LocalScreen> {
             .where((e) => e.isNotEmpty)
             .toList();
 
-        if (paraderosDelLocal.isEmpty) {
-          numeroUnosPorParadero.forEach((pName, driverId) {
-            pilotosSeleccionadosIds.add(driverId);
-          });
+        String? paraderoObjetivo;
+
+        if (paraderosDelLocal.isNotEmpty) {
+          // Local tiene paradero exclusivo → usar el primero
+          paraderoObjetivo = paraderosDelLocal.first;
         } else {
-          for (var pLocal in paraderosDelLocal) {
-            if (numeroUnosPorParadero.containsKey(pLocal)) {
-              pilotosSeleccionadosIds.add(numeroUnosPorParadero[pLocal]!);
+          // Sin paradero exclusivo → paradero más cercano al origen del servicio
+          final double? origLat = (servicio['origen_lat'] as num?)?.toDouble();
+          final double? origLng = (servicio['origen_lng'] as num?)?.toDouble();
+          if (origLat != null && origLng != null) {
+            final paraderosList = await Supabase.instance.client
+                .from('paraderos')
+                .select('nombre, latitud, longitud');
+            double menorDist = double.infinity;
+            for (var p in paraderosList) {
+              final pLat = (p['latitud'] as num?)?.toDouble();
+              final pLng = (p['longitud'] as num?)?.toDouble();
+              if (pLat == null || pLng == null) continue;
+              final dist = const Distance().as(
+                LengthUnit.Meter,
+                LatLng(origLat, origLng),
+                LatLng(pLat, pLng),
+              );
+              if (dist < menorDist) {
+                menorDist = dist;
+                paraderoObjetivo = p['nombre'].toString().trim().toLowerCase();
+              }
             }
           }
         }
 
-        if (pilotosSeleccionadosIds.isNotEmpty) {
-          exclusivoIdCampo = pilotosSeleccionadosIds.join(',');
+        // Encontrar #1 libre del paradero objetivo
+        if (paraderoObjetivo != null &&
+            gruposParaderos.containsKey(paraderoObjetivo)) {
+          for (var candidato in gruposParaderos[paraderoObjetivo]!) {
+            final candId = candidato['id'].toString();
+            if (!ocupados.contains(candId)) {
+              paraderoAutoMovilId = candId;
+              break;
+            }
+          }
         }
+        // Fallback (solo si no tiene paradero exclusivo): si el paradero más cercano
+        // estaba vacío, buscar el móvil SE más cercano al origen del servicio
+        if (paraderoAutoMovilId == null && paraderosDelLocal.isEmpty) {
+          final double? fbLat = (servicio['origen_lat'] as num?)?.toDouble();
+          final double? fbLng = (servicio['origen_lng'] as num?)?.toDouble();
+          if (fbLat != null && fbLng != null) {
+            final todosMov = await Supabase.instance.client
+                .from('usuarios')
+                .select('id, latitud, longitud')
+                .eq('rol', 'movil')
+                .eq('en_linea', true)
+                .eq('tiene_se', true)
+                .not('latitud', 'is', null)
+                .not('longitud', 'is', null);
+            double menorDistMov = double.infinity;
+            for (var m in todosMov) {
+              final mId = m['id'].toString();
+              if (ocupados.contains(mId)) continue;
+              final mLat = (m['latitud'] as num?)?.toDouble();
+              final mLng = (m['longitud'] as num?)?.toDouble();
+              if (mLat == null || mLng == null) continue;
+              final dist = const Distance().as(
+                LengthUnit.Meter,
+                LatLng(fbLat, fbLng),
+                LatLng(mLat, mLng),
+              );
+              if (dist < menorDistMov) {
+                menorDistMov = dist;
+                paraderoAutoMovilId = mId;
+              }
+            }
+          }
+        }
+        // Si aún sin móvil → Fase 3/4 disparan solos
       }
 
       await Supabase.instance.client
           .from('servicios')
           .update({
             'estado': nuevoEstado,
-            'exclusivo_id': exclusivoIdCampo,
+            if (paraderoAutoMovilId != null)
+              'paradero_auto_movil_id': paraderoAutoMovilId,
           })
           .eq('id', nuevoServicioId);
 
@@ -781,43 +1094,14 @@ mixin _DispatchMixin on State<LocalScreen> {
           mensaje: mensajeAlarma,
         );
       }
-
-      if (pilotosSeleccionadosIds.isNotEmpty) {
-        List<String> targetPilotos =
-            pilotosSeleccionadosIds.where((id) => !masterIds.contains(id)).toList();
-        if (targetPilotos.isNotEmpty) {
-          // Paradero: misil retardado con ID guardado — cancela si alguien acepta antes
-          String? id30s;
-          if (retardoProgramado > 0) {
-            id30s = await _programarMisilRetardado(
-              externalIds: targetPilotos,
-              titulo: 'TU TURNO DE PARADERO',
-              mensaje: mensajeAlarma,
-              minutosRetardo: retardoProgramado,
-            );
-          } else {
-            id30s = await _programarMisilRetardado(
-              externalIds: targetPilotos,
-              titulo: 'TU TURNO DE PARADERO',
-              mensaje: mensajeAlarma,
-              segundosRetardo: 30,
-            );
-          }
-          if (id30s != null) {
-            await Supabase.instance.client
-                .from('servicios')
-                .update({'onesignal_30s': id30s})
-                .eq('id', nuevoServicioId);
-          }
-        }
-      }
+      // Fase 2: fn-auto-asignar-fase2 maneja push + auto-asignación al #1 del paradero a T+30s
 
       // T=+60s (zonal 1km) y T=+90s (todos) — nuevas olas del embudo de 2 min
       if (!esPuntoAPunto) {
         final int _svcId3 = nuevoServicioId;
         final String _msg3 = mensajeAlarma;
         final List<String> _mSnap3 = List<String>.from(masterIds);
-        final List<String> _pSnap3 = List<String>.from(pilotosSeleccionadosIds);
+        final List<String> _pSnap3 = paraderoAutoMovilId != null ? [paraderoAutoMovilId] : [];
 
         if (retardoProgramado > 0) {
           // Misiles programados para servicios con retardo

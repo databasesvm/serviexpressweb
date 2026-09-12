@@ -1,6 +1,7 @@
 // ignore_for_file: use_build_context_synchronously
 import 'dart:async';
 import 'dart:math' as math;
+import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:serviexpress_app/utils/web_utils.dart';
 import 'package:flutter/material.dart';
@@ -160,13 +161,19 @@ class _SedeFnScreenState extends State<SedeFnScreen>
         .eq('fn_sede_solicitante_id', sedeId)
         .order('id', ascending: false);
 
+    const estadosActivos = [
+      'cotizacion', 'cotizada', 'pendiente',
+      'en_ruta_origen', 'en_origen', 'en_ruta_destino', 'fn_renegociando',
+    ];
+
     _subServicios = crudo.listen(
       (data) {
         final limite = DateTime.now().subtract(const Duration(days: 30));
         final filtrado = data.where((s) {
           final c = s['created_at']?.toString();
           if (c == null) return true;
-          return (DateTime.tryParse(c) ?? limite).isAfter(limite);
+          final enFecha = (DateTime.tryParse(c) ?? limite).isAfter(limite);
+          return enFecha && estadosActivos.contains(s['estado']);
         }).toList();
         _cacheServicios = filtrado;
         if (!_ctrlServicios.isClosed) _ctrlServicios.add(filtrado);
@@ -957,7 +964,7 @@ class _FormularioTabState extends State<_FormularioTab> {
         if (sLat == null || sLng == null) return false;
         final mData = noMasters.firstWhere(
           (m) => m['id'].toString() == id,
-          orElse: () => {},
+          orElse: () => <String, dynamic>{},
         );
         if (mData.isEmpty) return false;
         final uLat = (mData['latitud'] as num?)?.toDouble();
@@ -1027,8 +1034,10 @@ class _FormularioTabState extends State<_FormularioTab> {
         );
       }
       // Masters re-alertados con master.mp3 (push separado para sonido correcto)
+      // Se guarda en fn_notif_fase4b para poder cancelarlo al aceptar.
+      String? id90sMasters;
       if (masterIds.isNotEmpty) {
-        await MotorNotificaciones.programarMisilRetardado(
+        id90sMasters = await MotorNotificaciones.programarMisilRetardado(
           externalIds: masterIds,
           titulo: '🚨 FN SIN CUBRIR — $consec',
           mensaje: msg,
@@ -1043,6 +1052,7 @@ class _FormularioTabState extends State<_FormularioTab> {
       final notifIds = <String, dynamic>{};
       if (id60s != null) notifIds['fn_notif_fase3'] = id60s;
       if (id90s != null) notifIds['fn_notif_fase4'] = id90s;
+      if (id90sMasters != null) notifIds['fn_notif_fase4b'] = id90sMasters;
       if (fase3Ids.isNotEmpty) notifIds['fn_notificados_fase3'] = fase3Ids;
       // FASE 4 incluye todos (fase3 + fase4 + masters) — guardamos la lista completa
       if (fase4Todos.isNotEmpty) notifIds['fn_notificados_fase4'] = fase4Todos;
@@ -1192,6 +1202,13 @@ class _FormularioTabState extends State<_FormularioTab> {
             },
             if (_movilPreselId != null && !usaPrecioSugerido)
               'fn_movil_preseleccionado_id': int.tryParse(_movilPreselId!),
+            // Anclar fn_radar_t0 desde el INSERT para evitar la ventana donde
+            // el realtime emite el servicio sin anchor y todos los móviles
+            // entran en Fase 4 momentáneamente.
+            if (usaPrecioSugerido && _movilPreselId == null) ...{
+              'fn_radar_t0': DateTime.now().toUtc().toIso8601String(),
+              'fn_asignacion_tipo': 'radar',
+            },
             if (_instruccionesCtrl.text.trim().isNotEmpty)
               'instrucciones_especiales': _instruccionesCtrl.text.trim(),
             // Coordenadas de la primera sede de recogida como origen (solo si es sede oficial)
@@ -2371,7 +2388,7 @@ class _ActivosTabState extends State<_ActivosTab> {
         if (sLat == null || sLng == null) return false;
         final mData = noMasters.firstWhere(
           (m) => m['id'].toString() == id,
-          orElse: () => {},
+          orElse: () => <String, dynamic>{},
         );
         if (mData.isEmpty) return false;
         final uLat = (mData['latitud'] as num?)?.toDouble();
@@ -3041,13 +3058,13 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.18),
+                    color: color.withValues(alpha: 0.55),
                     borderRadius: BorderRadius.circular(5),
                     border: Border.all(color: color, width: 0.7),
                   ),
                   child: Text(label,
-                      style: TextStyle(
-                          color: color,
+                      style: const TextStyle(
+                          color: Colors.white,
                           fontSize: 10,
                           fontWeight: FontWeight.bold)),
                 ),
@@ -3201,27 +3218,35 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
               ),
 
               // ── Métodos de pago del móvil ─────────────────────────────
-              Builder(builder: (_) {
+              Builder(builder: (ctx) {
                 final metodos = <Widget>[];
+                final textosCopia = <String>[];
+
                 void _addPago(String? valor, String label, Color color) {
                   if (valor == null || valor.trim().isEmpty) return;
+                  textosCopia.add('$label: $valor');
                   metodos.add(GestureDetector(
                     onLongPress: () {
-                      // Copiar al portapapeles
+                      Clipboard.setData(ClipboardData(text: valor.trim()));
+                      ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+                        content: Text('$label copiado'),
+                        duration: const Duration(seconds: 1),
+                        backgroundColor: color,
+                      ));
                     },
                     child: Container(
                       margin: const EdgeInsets.only(right: 6, top: 4),
                       padding: const EdgeInsets.symmetric(
                           horizontal: 7, vertical: 3),
                       decoration: BoxDecoration(
-                        color: color.withValues(alpha: 0.15),
+                        color: color.withValues(alpha: 0.55),
                         borderRadius: BorderRadius.circular(5),
-                        border: Border.all(color: color.withValues(alpha: 0.5)),
+                        border: Border.all(color: color.withValues(alpha: 0.8)),
                       ),
                       child: Text(
                         '$label: $valor',
-                        style: TextStyle(
-                            color: color,
+                        style: const TextStyle(
+                            color: Colors.white,
                             fontSize: 10,
                             fontWeight: FontWeight.bold),
                       ),
@@ -3231,12 +3256,42 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
 
                 _addPago(_pagoNequi, 'Nequi', Colors.purple);
                 _addPago(_pagoDaviplata, 'Daviplata', const Color(0xFFFF5722));
-                _addPago(_pagoBancolombia, 'Bancolombia', Colors.amber);
+                _addPago(_pagoBancolombia, 'Bancolombia', Colors.amber[700]!);
                 _addPago(_pagoLlave, 'Llave', Colors.teal);
                 if (metodos.isEmpty) return const SizedBox.shrink();
+
+                // Botón copiar todo
+                metodos.add(GestureDetector(
+                  onTap: () {
+                    Clipboard.setData(
+                        ClipboardData(text: textosCopia.join(' | ')));
+                    ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                      content: Text('Métodos de pago copiados'),
+                      duration: Duration(seconds: 1),
+                      backgroundColor: Colors.green,
+                    ));
+                  },
+                  child: Container(
+                    margin: const EdgeInsets.only(right: 0, top: 4),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 7, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(5),
+                      border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.3)),
+                    ),
+                    child: const Icon(Icons.copy_rounded,
+                        size: 12, color: Colors.white70),
+                  ),
+                ));
+
                 return Padding(
                   padding: const EdgeInsets.only(top: 4),
-                  child: Wrap(children: metodos),
+                  child: Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: metodos,
+                  ),
                 );
               }),
 
@@ -3502,15 +3557,13 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
   Widget _chip(String label, Color color) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
         decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.25),
+          color: color.withValues(alpha: 0.55),
           borderRadius: BorderRadius.circular(4),
-          border: Border.all(color: color.withValues(alpha: 0.5)),
+          border: Border.all(color: color.withValues(alpha: 0.8)),
         ),
         child: Text(label,
-            style: TextStyle(
-                color: color == Colors.blueGrey
-                    ? Colors.blueGrey[200]
-                    : Colors.white,
+            style: const TextStyle(
+                color: Colors.white,
                 fontSize: 10,
                 fontWeight: FontWeight.bold)),
       );
@@ -3916,19 +3969,19 @@ class _HistorialTabState extends State<_HistorialTab> {
                                               horizontal: 6, vertical: 2),
                                           decoration: BoxDecoration(
                                             color:
-                                                color.withValues(alpha: 0.15),
+                                                color.withValues(alpha: 0.55),
                                             borderRadius:
                                                 BorderRadius.circular(4),
                                             border: Border.all(
                                                 color: color.withValues(
-                                                    alpha: 0.5),
+                                                    alpha: 0.8),
                                                 width: 0.8),
                                           ),
                                           child: Text(labelEstado,
-                                              style: TextStyle(
+                                              style: const TextStyle(
                                                   fontSize: 9,
                                                   fontWeight: FontWeight.bold,
-                                                  color: color)),
+                                                  color: Colors.white)),
                                         ),
                                         const SizedBox(width: 8),
                                         Text(

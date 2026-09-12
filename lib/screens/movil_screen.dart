@@ -1112,6 +1112,8 @@ class _MovilScreenState extends State<MovilScreen>
               icoTipo = Icons.shopping_basket;    clrTipo = Colors.teal[400]!;   lblTipo = 'ENCARGO';
             } else if (tipoSvc == 'PAQUETERÍA') {
               icoTipo = Icons.inventory_2_rounded; clrTipo = Colors.brown[300]!; lblTipo = 'PAQUETE';
+            } else if (tipoSvc == 'RECOGIDA LOCAL') {
+              icoTipo = Icons.store; clrTipo = Colors.green[400]!; lblTipo = 'RECOG. LOCAL';
             }
             return Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -3463,17 +3465,18 @@ class _MovilScreenState extends State<MovilScreen>
           );
           if (ruta != null) tiempoCalculado = ruta['tiempo_minutos'] as int;
         } else {
-          final destCoords = await MotorRutas.obtenerCoordenadas(
-            servicio['destino'],
-          );
-          if (destCoords != null) {
-            final ruta = await MotorRutas.calcularRuta(
-              latOrigen: pos.latitude,
-              lngOrigen: pos.longitude,
-              latDestino: destCoords['lat']!,
-              lngDestino: destCoords['lng']!,
-            );
-            if (ruta != null) tiempoCalculado = ruta['tiempo_minutos'] as int;
+          final destStr = servicio['destino']?.toString();
+          if (destStr != null && destStr.isNotEmpty) {
+            final destCoords = await MotorRutas.obtenerCoordenadas(destStr);
+            if (destCoords != null) {
+              final ruta = await MotorRutas.calcularRuta(
+                latOrigen: pos.latitude,
+                lngOrigen: pos.longitude,
+                latDestino: destCoords['lat']!,
+                lngDestino: destCoords['lng']!,
+              );
+              if (ruta != null) tiempoCalculado = ruta['tiempo_minutos'] as int;
+            }
           }
         }
         tiempoCalculado += 5;
@@ -7283,23 +7286,64 @@ class _MovilScreenState extends State<MovilScreen>
     final recogidasRaw = servicio['recogidas'];
     final List<dynamic> recogidasList =
         recogidasRaw is List ? recogidasRaw : [];
+    // Recogidas: mostrar solo código "FN82", nunca el nombre completo
     final String recogidasStr = recogidasList.isEmpty
         ? 'Sin recogidas'
-        : recogidasList.map((r) {
-            final rMap = r as Map<String, dynamic>;
-            final tipo = rMap['tipo'] as String? ?? '';
-            final numero = rMap['numero'];
-            if (tipo == 'FN' && numero != null) return 'FN$numero';
-            return numero != null ? '$tipo$numero' : tipo;
-          }).join(', ');
+        : recogidasList
+            .map((r) {
+              final rMap = r as Map<String, dynamic>;
+              final tipo = rMap['tipo']?.toString() ?? '';
+              final numero = rMap['numero'];
+              if (tipo == 'FN' && numero != null) return 'FN$numero';
+              // Para sedes sin tipo FN usar nombre corto si existe
+              final nombre = rMap['nombre']?.toString() ?? '';
+              return nombre.isNotEmpty ? nombre : (numero != null ? '$tipo$numero' : tipo);
+            })
+            .where((s) => s.isNotEmpty)
+            .join(', ');
     final String destino = servicio['destino']?.toString() ?? '—';
     final String movilCodigo = widget.usuario['usuario']?.toString() ??
         widget.usuario['nombre']?.toString() ?? '';
-    final String origenStr = servicio['origen']?.toString() ?? '';
-    final mSede = RegExp(r'FN #?(\d+)').firstMatch(origenStr);
-    final String sedeCodigo = mSede != null
-        ? 'FN${mSede.group(1)}'
-        : (servicio['zona_fn']?.toString() ?? origenStr);
+    // Sede solicitante: buscar primero en recogidas (es_sede_solicitante),
+    // luego en DB por fn_sede_solicitante_id / fn_sede_id, último regex sobre origen.
+    String sedeCodigo = '';
+    // 1) Recogidas con es_sede_solicitante
+    for (final r in recogidasList) {
+      final rMap = r as Map<String, dynamic>;
+      if (rMap['es_sede_solicitante'] == true) {
+        final tipo = rMap['tipo']?.toString() ?? '';
+        final numero = rMap['numero'];
+        if (tipo == 'FN' && numero != null) { sedeCodigo = 'FN$numero'; break; }
+        final nombre = rMap['nombre']?.toString() ?? '';
+        if (nombre.isNotEmpty) { sedeCodigo = nombre; break; }
+      }
+    }
+    // 2) DB lookup por fn_sede_solicitante_id o fn_sede_id
+    if (sedeCodigo.isEmpty) {
+      final sedeDbId = servicio['fn_sede_solicitante_id'] ?? servicio['fn_sede_id'];
+      if (sedeDbId != null) {
+        try {
+          final row = await Supabase.instance.client
+              .from('fn_sedes').select('tipo, numero, nombre')
+              .eq('id', sedeDbId).maybeSingle();
+          if (row != null) {
+            final tipo = row['tipo']?.toString() ?? '';
+            final numero = row['numero'];
+            sedeCodigo = (tipo == 'FN' && numero != null)
+                ? 'FN$numero'
+                : (row['nombre']?.toString() ?? '');
+          }
+        } catch (_) {}
+      }
+    }
+    // 3) Regex sobre origen como último recurso
+    if (sedeCodigo.isEmpty) {
+      final origenStr = servicio['origen']?.toString() ?? '';
+      final mSede = RegExp(r'FN\s*#?(\d+)').firstMatch(origenStr);
+      sedeCodigo = mSede != null
+          ? 'FN${mSede.group(1)}'
+          : (servicio['zona_fn']?.toString() ?? origenStr);
+    }
     final int tarifa = (servicio['tarifa'] as num?)?.toInt() ?? 0;
     final String consec =
         servicio['fn_consecutivo']?.toString() ?? '#${servicio['id']}';
@@ -7593,24 +7637,65 @@ class _MovilScreenState extends State<MovilScreen>
     final recogidasRaw = servicio['recogidas'];
     final List<dynamic> recogidasList =
         recogidasRaw is List ? recogidasRaw : [];
+    // Recogidas: mostrar solo código "FN82", nunca el nombre completo
     final String recogidasStr = recogidasList.isEmpty
         ? 'Sin recogidas'
-        : recogidasList.map((r) {
-            final rMap = r as Map<String, dynamic>;
-            final tipo = rMap['tipo'] as String? ?? '';
-            final numero = rMap['numero'];
-            if (tipo == 'FN' && numero != null) return 'FN$numero';
-            return numero != null ? '$tipo$numero' : tipo;
-          }).join(', ');
+        : recogidasList
+            .map((r) {
+              final rMap = r as Map<String, dynamic>;
+              final tipo = rMap['tipo']?.toString() ?? '';
+              final numero = rMap['numero'];
+              if (tipo == 'FN' && numero != null) return 'FN$numero';
+              final nombre = rMap['nombre']?.toString() ?? '';
+              return nombre.isNotEmpty ? nombre : (numero != null ? '$tipo$numero' : tipo);
+            })
+            .where((s) => s.isNotEmpty)
+            .join(', ');
 
     final String destino = servicio['destino']?.toString() ?? '—';
     final String movilCodigo = widget.usuario['usuario']?.toString() ??
         widget.usuario['nombre']?.toString() ?? '';
-    final String origenStr = servicio['origen']?.toString() ?? '';
-    final mSede = RegExp(r'FN #?(\d+)').firstMatch(origenStr);
-    final String sedeCodigo = mSede != null
-        ? 'FN${mSede.group(1)}'
-        : (servicio['zona_fn']?.toString() ?? origenStr);
+    // Sede solicitante: buscar primero en recogidas (es_sede_solicitante),
+    // luego en DB por fn_sede_solicitante_id / fn_sede_id, último regex sobre origen.
+    String sedeCodigo2 = '';
+    // 1) Recogidas con es_sede_solicitante
+    for (final r in recogidasList) {
+      final rMap = r as Map<String, dynamic>;
+      if (rMap['es_sede_solicitante'] == true) {
+        final tipo = rMap['tipo']?.toString() ?? '';
+        final numero = rMap['numero'];
+        if (tipo == 'FN' && numero != null) { sedeCodigo2 = 'FN$numero'; break; }
+        final nombre = rMap['nombre']?.toString() ?? '';
+        if (nombre.isNotEmpty) { sedeCodigo2 = nombre; break; }
+      }
+    }
+    // 2) DB lookup por fn_sede_solicitante_id o fn_sede_id
+    if (sedeCodigo2.isEmpty) {
+      final sedeDbId2 = servicio['fn_sede_solicitante_id'] ?? servicio['fn_sede_id'];
+      if (sedeDbId2 != null) {
+        try {
+          final row = await Supabase.instance.client
+              .from('fn_sedes').select('tipo, numero, nombre')
+              .eq('id', sedeDbId2).maybeSingle();
+          if (row != null) {
+            final tipo = row['tipo']?.toString() ?? '';
+            final numero = row['numero'];
+            sedeCodigo2 = (tipo == 'FN' && numero != null)
+                ? 'FN$numero'
+                : (row['nombre']?.toString() ?? '');
+          }
+        } catch (_) {}
+      }
+    }
+    // 3) Regex sobre origen como último recurso
+    if (sedeCodigo2.isEmpty) {
+      final origenStr2 = servicio['origen']?.toString() ?? '';
+      final mSede2 = RegExp(r'FN\s*#?(\d+)').firstMatch(origenStr2);
+      sedeCodigo2 = mSede2 != null
+          ? 'FN${mSede2.group(1)}'
+          : (servicio['zona_fn']?.toString() ?? origenStr2);
+    }
+    final String sedeCodigo = sedeCodigo2;
     final int tarifa = (servicio['tarifa'] as num?)?.toInt() ?? 0;
     final String consec =
         servicio['fn_consecutivo']?.toString() ?? '#${servicio['id']}';
@@ -9337,6 +9422,10 @@ class _MovilScreenState extends State<MovilScreen>
       tipoBadge = 'BEBIDAS';
       iconoBadge = Icons.nightlife;
       colorBadge = Colors.purple[600]!;
+    } else if (tipoSvc == 'RECOGIDA LOCAL' || observacion.contains('[ RECOGIDA LOCAL ]')) {
+      tipoBadge = 'RECOG. LOCAL';
+      iconoBadge = Icons.store;
+      colorBadge = Colors.green[700]!;
     }
 
     String textoDistancia = '';
@@ -9397,6 +9486,16 @@ class _MovilScreenState extends State<MovilScreen>
                       color: Colors.black87,
                     ),
                   ),
+                  if (tipoSvc == 'RECOGIDA LOCAL' &&
+                      (servicio['origen'] ?? '').toString().isNotEmpty)
+                    Text(
+                      servicio['origen'].toString().toUpperCase(),
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.green[800],
+                      ),
+                    ),
                   if (textoDistancia.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 4),
@@ -9770,6 +9869,10 @@ class _MovilScreenState extends State<MovilScreen>
                     if (servicio['fn_notif_fase4'] != null)
                       _abortarMisilOneSignal(
                           servicio['fn_notif_fase4'].toString());
+                    // Push de re-alerta Masters en Fase 4 (sede cascada)
+                    if (servicio['fn_notif_fase4b'] != null)
+                      _abortarMisilOneSignal(
+                          servicio['fn_notif_fase4b'].toString());
                   } else {
                     // Serviexpress normal: cancelar misiles estándar
                     if (servicio['onesignal_30s'] != null)
@@ -10369,6 +10472,10 @@ class _MovilScreenState extends State<MovilScreen>
         if (servicio['fn_notif_fase4'] != null)
           await MotorNotificaciones.cancelarMisil(
               servicio['fn_notif_fase4'].toString());
+        // Push re-alerta Masters Fase 4 (sede cascada)
+        if (servicio['fn_notif_fase4b'] != null)
+          await MotorNotificaciones.cancelarMisil(
+              servicio['fn_notif_fase4b'].toString());
       } else {
         // Serviexpress normal: cancelar misiles estándar
         if (servicio['onesignal_30s'] != null)
@@ -10491,8 +10598,27 @@ class _MovilScreenState extends State<MovilScreen>
           fase2IdFn = noMastersFn.first['id'].toString();
         }
 
+        // Fase 3 (T+61s): no-masters dentro de 2km de la sede (excl. fase2)
+        // Fase 4 (T+91s): resto global (excl. fase2 y fase3)
         final fase3IdsFn =
-            noMasterIdsFn.where((id) => id != fase2IdFn).toList();
+            noMastersFn.map<String>((m) => m['id'].toString()).where((id) {
+          if (id == fase2IdFn) return false;
+          if (origLatFn == null || origLngFn == null) return false;
+          final mData = noMastersFn.firstWhere(
+            (m) => m['id'].toString() == id,
+            orElse: () => <String, dynamic>{},
+          );
+          if (mData.isEmpty) return false;
+          final uLat = (mData['latitud'] as num?)?.toDouble();
+          final uLng = (mData['longitud'] as num?)?.toDouble();
+          if (uLat == null || uLng == null) return false;
+          return const Distance().as(LengthUnit.Meter,
+              LatLng(uLat, uLng), LatLng(origLatFn, origLngFn)) <= 2000;
+        }).toList();
+
+        final fase4IdsFn = noMasterIdsFn
+            .where((id) => id != fase2IdFn && !fase3IdsFn.contains(id))
+            .toList();
 
         // FASE 1 (T=0) — canal master (sonido menos invasivo para MASTER)
         if (masterIdsFn.isNotEmpty) {
@@ -10512,7 +10638,7 @@ class _MovilScreenState extends State<MovilScreen>
           if (masterIdsFn.isNotEmpty) 'fn_notificados_fase1': masterIdsFn,
         }).eq('id', servicioId);
 
-        // FASE 2 (T+31s)
+        // FASE 2 (T+31s): auto-asignación vía pg_cron al más cercano
         String? notifFase2Lib;
         if (fase2IdFn != null) {
           notifFase2Lib = await MotorNotificaciones.programarMisilRetardado(
@@ -10524,7 +10650,7 @@ class _MovilScreenState extends State<MovilScreen>
           );
         }
 
-        // FASE 3 (T+61s)
+        // FASE 3 (T+61s): no-masters dentro de 2km
         String? notifFase3Lib;
         if (fase3IdsFn.isNotEmpty) {
           notifFase3Lib = await MotorNotificaciones.programarMisilRetardado(
@@ -10536,10 +10662,23 @@ class _MovilScreenState extends State<MovilScreen>
           );
         }
 
-        if (notifFase2Lib != null || notifFase3Lib != null) {
+        // FASE 4 (T+91s): resto global (fuera de 2km)
+        String? notifFase4Lib;
+        if (fase4IdsFn.isNotEmpty) {
+          notifFase4Lib = await MotorNotificaciones.programarMisilRetardado(
+            externalIds: fase4IdsFn,
+            titulo: '🔵 TURNO FN LIBERADO',
+            mensaje: 'Servicio Farmanorte sin tomar · $zonaFn',
+            segundosRetardo: 91,
+            sonido: Sonidos.movilParadero,
+          );
+        }
+
+        if (notifFase2Lib != null || notifFase3Lib != null || notifFase4Lib != null) {
           await Supabase.instance.client.from('servicios').update({
             if (notifFase2Lib != null) 'fn_notif_fase2': notifFase2Lib,
             if (notifFase3Lib != null) 'fn_notif_fase3': notifFase3Lib,
+            if (notifFase4Lib != null) 'fn_notif_fase4': notifFase4Lib,
           }).eq('id', servicioId);
         }
       } else {
@@ -12246,11 +12385,15 @@ class _MovilScreenState extends State<MovilScreen>
                                   s['fn_radar_t0']?.toString() ??
                                   s['created_at']?.toString() ??
                                   '';
+                              // Fallback 0 (no 9999): si no hay anchor de tiempo
+                              // tratamos el servicio como recién creado → Fase 1
+                              // (solo Masters). Evita el flash de Fase 4 cuando
+                              // fn_radar_t0 aún no propagó al realtime.
                               final int segFn = t0Raw.isNotEmpty
                                   ? ahoraUtc
                                       .difference(DateTime.parse(t0Raw).toUtc())
                                       .inSeconds
-                                  : 9999;
+                                  : 0;
 
                               if (segFn < 30) {
                                 // FASE 1 (0-30s): exclusivo de MASTER
