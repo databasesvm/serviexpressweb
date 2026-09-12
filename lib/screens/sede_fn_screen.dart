@@ -504,11 +504,12 @@ class _FormularioTabState extends State<_FormularioTab> {
 
   /// Precio final = precio base (convenio o particular) + recargo sedes extra + datáfono + lluvia
   /// Retorna null si ningún tipo está activo O si no hay precio base O sedes extra sin coordenadas
+  /// MAPEO REAL: columna `precio` = CONVENIO (ya configurado) | columna `precio_convenio` = PARTICULAR (opcional)
   double? get _tarifaEfectiva {
     if (!_esConvenio && !_esParticular) return null; // sin tipo activo
     final base = _esConvenio
-        ? (_precioConvenio ?? _precioSugerido)  // convenio primero; fallback a particular si no hay convenio
-        : _precioSugerido;                       // particular
+        ? _precioSugerido                          // Convenio → columna `precio` (configurado)
+        : (_precioConvenio ?? _precioSugerido);    // Particular → columna `precio_convenio`; fallback a precio
     if (base == null) return null;
     if (_haySedesExtraSinCoordenadas) return null;
     return base +
@@ -585,13 +586,13 @@ class _FormularioTabState extends State<_FormularioTab> {
     }
 
     // El texto cambió completamente — limpiar selección y buscar de nuevo
+    // _esConvenio / _esParticular NO se resetean: son la elección del usuario
     setState(() {
       _destinoBase = null;
       _sectorBase = null;
       _redDireccionSelId = null;
       _precioSugerido = null;
       _precioConvenio = null;
-      _esConvenio = false;
       _sugerencias = v.trim().isEmpty ? [] : _filtrarDirecciones(v);
     });
   }
@@ -1608,100 +1609,34 @@ class _FormularioTabState extends State<_FormularioTab> {
               const SizedBox(height: 16),
 
               // ── Destino ─────────────────────────────────────────────────────
-              Builder(builder: (ctx) {
-                final hora = DateTime.now().hour;
-                final convenioHorario = hora >= 7 && hora <= 22;
-                return Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    _seccionLabel('🏁 Destino de entrega'),
-                    const Spacer(),
-                    // Toggle Convenio (compacto)
-                    Tooltip(
-                      message: convenioHorario ? '' : 'Fuera de horario de convenio',
-                      child: GestureDetector(
-                        onTap: convenioHorario
-                            ? () => setState(() {
-                                  _esConvenio = !_esConvenio;
-                                  if (_esConvenio) _esParticular = false;
-                                })
-                            : null,
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: _esConvenio
-                                ? Colors.amber[900]!.withValues(alpha: 0.30)
-                                : convenioHorario ? Colors.white10 : Colors.white.withValues(alpha: 0.03),
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(
-                              color: _esConvenio
-                                  ? Colors.amberAccent
-                                  : convenioHorario ? Colors.white30 : Colors.white12,
-                            ),
-                          ),
-                          child: Row(mainAxisSize: MainAxisSize.min, children: [
-                            Icon(
-                              _esConvenio ? Icons.handshake : Icons.handshake_outlined,
-                              color: _esConvenio ? Colors.amberAccent : convenioHorario ? Colors.white54 : Colors.white24,
-                              size: 13,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              'Convenio',
-                              style: TextStyle(
-                                color: _esConvenio ? Colors.amberAccent : convenioHorario ? Colors.white54 : Colors.white24,
-                                fontSize: 11,
-                                fontWeight: _esConvenio ? FontWeight.bold : FontWeight.normal,
-                              ),
-                            ),
-                            if (!convenioHorario)
-                              const Padding(
-                                padding: EdgeInsets.only(left: 3),
-                                child: Icon(Icons.access_time, color: Colors.white24, size: 11),
-                              ),
-                          ]),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    // Toggle Particular (compacto)
-                    GestureDetector(
-                      onTap: () => setState(() {
-                        _esParticular = !_esParticular;
-                        if (_esParticular) _esConvenio = false;
-                      }),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: _esParticular ? const Color(0xFF1E3A5F) : Colors.white10,
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(
-                            color: _esParticular ? Colors.blueAccent : Colors.white30,
-                          ),
-                        ),
-                        child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          Icon(
-                            _esParticular ? Icons.person : Icons.person_outline,
-                            color: _esParticular ? Colors.blueAccent : Colors.white54,
-                            size: 13,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            'Particular',
-                            style: TextStyle(
-                              color: _esParticular ? Colors.blueAccent : Colors.white54,
-                              fontSize: 11,
-                              fontWeight: _esParticular ? FontWeight.bold : FontWeight.normal,
-                            ),
-                          ),
-                        ]),
-                      ),
-                    ),
-                  ],
+              _seccionLabel('🏁 Destino de entrega'),
+              const SizedBox(height: 8),
+              // Toggle Convenio — mismo estilo que datáfono
+              Builder(builder: (_) {
+                final convenioHorario = DateTime.now().hour >= 7 && DateTime.now().hour <= 22;
+                return Tooltip(
+                  message: convenioHorario ? '' : 'Fuera de horario de convenio (7:00–23:00)',
+                  child: _switchTile(
+                    '🤝 Convenio${convenioHorario ? '' : '  🕐 fuera de horario'}',
+                    _esConvenio,
+                    convenioHorario
+                        ? (v) => setState(() {
+                              _esConvenio = v;
+                              if (v) _esParticular = false;
+                            })
+                        : null,
+                  ),
                 );
               }),
+              // Toggle Particular — mismo estilo
+              _switchTile(
+                '👤 Particular',
+                _esParticular,
+                (v) => setState(() {
+                  _esParticular = v;
+                  if (v) _esConvenio = false;
+                }),
+              ),
               const SizedBox(height: 8),
               TextFormField(
                 controller: _destinoCtrl,
@@ -1734,21 +1669,20 @@ class _FormularioTabState extends State<_FormularioTab> {
                   child: Column(
                     children: _sugerencias.map((dir) {
                       final esSector = dir['tipo'] == 'sector';
-                      // Precio según toggle activo
-                      final precioParticular = esSector
-                          ? (dir['precio'] as num).toDouble()
-                          : _precioDeDir(dir);
-                      final precioConvDir = esSector
+                      // MAPEO REAL: columna `precio` = CONVENIO | columna `precio_convenio` = PARTICULAR
+                      final precioConvenioReal = esSector
+                          ? (dir['precio'] as num? ?? 0).toDouble()
+                          : _precioDeDir(dir);           // precio column = convenio
+                      final precioParticularReal = esSector
                           ? (dir['precio_convenio'] as num? ?? 0).toDouble()
-                          : (_precioConvenioDeDir(dir) ?? 0.0);
-                      final precio = (_esConvenio && precioConvDir > 0)
-                          ? precioConvDir
-                          : precioParticular;
-                      final tienePrecio = esSector
-                          ? (_esConvenio
-                              ? (dir['tiene_convenio'] as bool? ?? precioConvDir > 0)
-                              : (dir['tiene_precio'] as bool? ?? precioParticular > 0))
-                          : precio > 0;
+                          : (_precioConvenioDeDir(dir) ?? 0.0); // precio_convenio = particular
+                      // Precio que se muestra según el toggle activo
+                      final precio = _esConvenio
+                          ? precioConvenioReal
+                          : precioParticularReal;
+                      final tienePrecio = _esConvenio
+                          ? precioConvenioReal > 0
+                          : precioParticularReal > 0;
 
                       // Subtítulo con contexto geográfico (#98)
                       String subtitulo;
@@ -1773,24 +1707,10 @@ class _FormularioTabState extends State<_FormularioTab> {
                             _redDireccionSelId = esSector
                                 ? -(dir['id'] as int)
                                 : dir['id'] as int;
-                            // Sin precio → null para que la central cotice (#95)
-                            _precioSugerido = tienePrecio ? precio : null;
-                            // Precio convenio para el item seleccionado (#110)
-                            if (esSector) {
-                              final sId = dir['id'] as int?;
-                              final pcSector = sId != null
-                                  ? _tarifasSedeConvenio[sId]
-                                  : null;
-                              final parentId =
-                                  sId != null ? _parentMap[sId] : null;
-                              final pcParent = parentId != null
-                                  ? _tarifasSedeConvenio[parentId]
-                                  : null;
-                              _precioConvenio =
-                                  (pcSector ?? pcParent)?.toDouble();
-                            } else {
-                              _precioConvenio = _precioConvenioDeDir(dir);
-                            }
+                            // MAPEO REAL: _precioSugerido = precio (Convenio) | _precioConvenio = precio_convenio (Particular)
+                            // Siempre asignar ambos valores de las columnas reales, sin importar el toggle activo
+                            _precioSugerido = precioConvenioReal > 0 ? precioConvenioReal : null;
+                            _precioConvenio = precioParticularReal > 0 ? precioParticularReal : null;
                             if (!esSector) {
                               _destinoBase =
                                   dir['direccion'].toString().toUpperCase();
@@ -2285,7 +2205,7 @@ class _FormularioTabState extends State<_FormularioTab> {
         isDense: true,
       );
 
-  Widget _switchTile(String label, bool value, ValueChanged<bool> onChanged) =>
+  Widget _switchTile(String label, bool value, ValueChanged<bool>? onChanged) =>
       Container(
         margin: const EdgeInsets.only(bottom: 6),
         decoration: BoxDecoration(

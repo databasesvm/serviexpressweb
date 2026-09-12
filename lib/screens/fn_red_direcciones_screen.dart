@@ -402,15 +402,15 @@ class _TabSectoresState extends State<_TabSectores>
                   ),
                 ),
                 const SizedBox(height: 12),
-                // 3a. Precio convenio (principal)
+                // 3a. Convenio (principal) → columna `precio`
                 TextField(
-                  controller: precioConvenioCtrl,
+                  controller: precioCtrl,
                   style: const TextStyle(color: Colors.white),
                   keyboardType: TextInputType.number,
                   decoration: const InputDecoration(
-                    labelText: 'Tarifa convenio (\$)',
+                    labelText: 'Convenio (principal) (\$)',
                     labelStyle: TextStyle(color: Colors.amber),
-                    hintText: 'Precio principal del sector',
+                    hintText: 'Precio configurado del sector',
                     hintStyle: TextStyle(color: Colors.white24),
                     border: OutlineInputBorder(),
                     isDense: true,
@@ -419,15 +419,15 @@ class _TabSectoresState extends State<_TabSectores>
                   ),
                 ),
                 const SizedBox(height: 10),
-                // 3b. Precio particular (opcional)
+                // 3b. Particular (opcional) → columna `precio_convenio`
                 TextField(
-                  controller: precioCtrl,
+                  controller: precioConvenioCtrl,
                   style: const TextStyle(color: Colors.white),
                   keyboardType: TextInputType.number,
                   decoration: const InputDecoration(
-                    labelText: 'Tarifa particular (\$) — opcional',
+                    labelText: 'Particular (opcional) (\$)',
                     labelStyle: TextStyle(color: Colors.white54),
-                    hintText: 'Solo si difiere del convenio',
+                    hintText: 'Solo si aplica tarifa particular',
                     hintStyle: TextStyle(color: Colors.white24),
                     border: OutlineInputBorder(),
                     isDense: true,
@@ -496,16 +496,15 @@ class _TabSectoresState extends State<_TabSectores>
                     }).eq('id', sector['id']);
                     newSectorId = sector['id'] as int;
                   }
-                  // Tarifa convenio = principal (obligatoria); particular = opcional
-                  final convenioTexto = precioConvenioCtrl.text.trim();
-                  final precioConvenio = int.tryParse(convenioTexto);
-                  final precioParticular = int.tryParse(precioCtrl.text.trim());
-                  if (precioConvenio != null && precioConvenio > 0) {
-                    // Si no se ingresó particular, se usa el convenio como fallback
+                  // MAPEO: precio (Convenio/principal) ← precioCtrl | precio_convenio (Particular/opcional) ← precioConvenioCtrl
+                  final convenioTexto = precioCtrl.text.trim();
+                  final convenioVal = int.tryParse(convenioTexto);
+                  final particularVal = int.tryParse(precioConvenioCtrl.text.trim());
+                  if (convenioVal != null && convenioVal > 0) {
                     await _guardarTarifa(
                       newSectorId,
-                      precioParticular ?? precioConvenio,
-                      precioConvenio: precioConvenio,
+                      convenioVal,              // → `precio` column (Convenio)
+                      precioConvenio: particularVal, // → `precio_convenio` column (Particular, null si vacío)
                     );
                   } else if (convenioTexto.isEmpty && sector != null) {
                     // Usuario borró la tarifa convenio → eliminar tarifa existente
@@ -562,8 +561,8 @@ class _TabSectoresState extends State<_TabSectores>
               style: const TextStyle(color: Colors.white),
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(
-                labelText: 'Precio particular (\$)',
-                labelStyle: TextStyle(color: Colors.white54),
+                labelText: 'Convenio (principal) (\$)',
+                labelStyle: TextStyle(color: Colors.amber),
                 border: OutlineInputBorder(),
                 isDense: true,
                 prefixText: '\$ ',
@@ -576,7 +575,7 @@ class _TabSectoresState extends State<_TabSectores>
               style: const TextStyle(color: Colors.white),
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(
-                labelText: 'Precio convenio (\$) — opcional',
+                labelText: 'Particular (opcional) (\$)',
                 labelStyle: TextStyle(color: Colors.white54),
                 border: OutlineInputBorder(),
                 isDense: true,
@@ -1579,14 +1578,14 @@ class _TabDireccionesState extends State<_TabDirecciones>
                     ),
                   ),
                   const SizedBox(height: 10),
-                  // 5a. Precio particular para esta sede
+                  // 5a. Convenio (principal) para esta sede → columna `precio`
                   TextField(
                     controller: precioCtrl,
                     style: const TextStyle(color: Colors.white),
                     keyboardType: TextInputType.number,
                     decoration: const InputDecoration(
-                      labelText: 'Precio particular (\$)',
-                      labelStyle: TextStyle(color: Colors.white54),
+                      labelText: 'Convenio (principal) (\$)',
+                      labelStyle: TextStyle(color: Colors.amber),
                       hintText: 'Sin precio → no aparece en autocomplete',
                       hintStyle: TextStyle(color: Colors.white24, fontSize: 11),
                       border: OutlineInputBorder(),
@@ -1596,13 +1595,13 @@ class _TabDireccionesState extends State<_TabDirecciones>
                     ),
                   ),
                   const SizedBox(height: 10),
-                  // 5b. Precio convenio
+                  // 5b. Particular (opcional) → columna `precio_convenio`
                   TextField(
                     controller: precioConvenioCtrl,
                     style: const TextStyle(color: Colors.white),
                     keyboardType: TextInputType.number,
                     decoration: const InputDecoration(
-                      labelText: 'Precio convenio (\$) — opcional',
+                      labelText: 'Particular (opcional) (\$)',
                       labelStyle: TextStyle(color: Colors.white54),
                       hintText: 'Solo si aplica precio especial',
                       hintStyle: TextStyle(color: Colors.white24, fontSize: 11),
