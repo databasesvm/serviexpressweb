@@ -147,7 +147,7 @@ Deno.serve(async () => {
   {
     const { data: serviciosFN } = await supabase
       .from('servicios')
-      .select('id, fn_fase2_movil_id, fn_notif_fase3, fn_notif_fase4')
+      .select('id, fn_fase2_movil_id, fn_notif_fase3, fn_notif_fase4, fn_notif_fase4b')
       .eq('fn_asignacion_tipo', 'radar')
       .eq('estado', 'pendiente')
       .eq('tipo_fn', true)
@@ -159,7 +159,8 @@ Deno.serve(async () => {
       await preasignarFn(
         srv.id,
         srv.fn_fase2_movil_id as string,
-        [srv.fn_notif_fase3, srv.fn_notif_fase4],
+        // fn_notif_fase4b = re-alerta Masters T+90s — también cancela para no spamear
+        [srv.fn_notif_fase3, srv.fn_notif_fase4, srv.fn_notif_fase4b],
       );
     }
   }

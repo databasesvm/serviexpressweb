@@ -3,8 +3,14 @@
 // MOTOR DE AUDIO IN-APP
 // ======================
 // Maneja la reproducción de sonidos cuando la app está en PRIMER PLANO.
-// Para segundo plano (pantalla apagada / app minimizada), los sonidos
+// Para segundo plano en móvil (pantalla apagada / app minimizada), los sonidos
 // viajan por OneSignal como parámetro de notificación push.
+//
+// EN WEB (Flutter web — navegador de escritorio o teléfono):
+//   • Los sonidos se reproducen via HTML Audio API (audioplayers lo maneja).
+//   • Las notificaciones emergentes (toast Windows/Android) van por la
+//     Web Notifications API → WebAlertaManager (web_notif.dart).
+//   • Se pide permiso de notificaciones al crear el singleton (una sola vez).
 //
 // DOS PLAYERS — sin conflictos de prioridad:
 //
@@ -34,6 +40,7 @@
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
+import 'web_notif.dart';
 
 // =========================================================================
 // CATÁLOGO DE SONIDOS — Referencia única para toda la app
@@ -81,13 +88,32 @@ class Sonidos {
 
 class SonidoManager {
   // =========================================================================
+  // TEXTOS PARA NOTIFICACIONES WEB — titulo y cuerpo del toast del SO
+  // Solo aplica en reproducir() cuando kIsWeb == true.
+  // reproducirSuave() no genera toast (son sonidos de UI en segundo plano).
+  // =========================================================================
+  static const Map<String, List<String>> _alertasWeb = {
+    Sonidos.centralCotizacion: ['📋 Nueva cotización', 'Cotización pendiente de asignar'],
+    Sonidos.centralRadar:      ['🚨 Servicio en radar', 'Nuevo servicio disponible'],
+    Sonidos.centralDemora:     ['⏰ Demora', 'Un móvil reporta demora'],
+    Sonidos.centralProblema:   ['⚠ Problema', 'Un móvil reportó un problema'],
+    Sonidos.centralCaducado:   ['⏱ Caducado', 'Un servicio ha caducado'],
+    Sonidos.centralCancelado:  ['❌ Cancelado', 'Un servicio fue cancelado'],
+    Sonidos.fnCotizacion:      ['💊 Cotización FN', 'Nueva solicitud de Farmanorte'],
+    Sonidos.localRespuesta:    ['✅ Respuesta Central', 'La central respondió tu solicitud'],
+    Sonidos.localEstado:       ['📦 Estado actualizado', 'El estado de tu pedido cambió'],
+    Sonidos.panico:            ['🚨 PÁNICO', '¡Alerta de emergencia activada!'],
+    Sonidos.alerta:            ['🔔 Alerta', 'Nuevo evento en ServiMoto'],
+  };
+
+  // =========================================================================
   // SINGLETON — Una sola instancia en toda la app
   // =========================================================================
   static final SonidoManager _instancia = SonidoManager._interno();
   factory SonidoManager() => _instancia;
 
   SonidoManager._interno() {
-    // setAudioContext solo aplica en Android/iOS — en web la API de audio
+    // AudioContext solo aplica en Android/iOS — en web la API de audio
     // es completamente diferente y este bloque causaría un crash en runtime.
     if (!kIsWeb) {
       AudioPlayer.global.setAudioContext(
@@ -104,6 +130,10 @@ class SonidoManager {
           ),
         ),
       );
+    } else {
+      // En web: pedir permiso de notificaciones al navegador (una sola vez).
+      // El navegador recuerda la respuesta entre sesiones.
+      WebAlertaManager.pedirPermiso();
     }
     _playerPrincipal.setReleaseMode(ReleaseMode.stop);
     _playerSecundario.setReleaseMode(ReleaseMode.stop);
@@ -112,25 +142,35 @@ class SonidoManager {
 
   final AudioPlayer _playerPrincipal = AudioPlayer();
   final AudioPlayer _playerSecundario = AudioPlayer();
-  final AudioPlayer _playerPanico =
-      AudioPlayer(); // Dedicado: loop hasta cerrar
+  final AudioPlayer _playerPanico = AudioPlayer(); // Dedicado: loop hasta cerrar
 
   // =========================================================================
   // REPRODUCCIÓN PRINCIPAL — Interrumpe lo que esté sonando
   // Para: alertas, notificaciones importantes, cotizaciones, pánico
+  // En web: además lanza notificación emergente del SO (toast Windows/Android).
   // =========================================================================
   Future<void> reproducir(String nombreArchivo) async {
-    if (kIsWeb) return; // Web no usa AssetSource de sounds/
     try {
       await _playerPrincipal.stop();
       await _playerPrincipal.play(AssetSource('sounds/$nombreArchivo.mp3'));
     } catch (e) {
       debugPrint('SonidoManager › reproducir "$nombreArchivo" → $e');
     }
+    // Toast del navegador (solo en web)
+    if (kIsWeb) {
+      final alerta = _alertasWeb[nombreArchivo];
+      if (alerta != null) {
+        WebAlertaManager.mostrar(titulo: alerta[0], cuerpo: alerta[1]);
+      }
+    }
   }
 
+  // =========================================================================
+  // REPRODUCCIÓN SUAVE — No interrumpe el player principal
+  // Para: confirmaciones, chat, botones UI
+  // En web: reproduce sonido pero NO muestra toast (son eventos de fondo).
+  // =========================================================================
   Future<void> reproducirSuave(String nombreArchivo) async {
-    if (kIsWeb) return;
     try {
       await _playerSecundario.stop();
       await _playerSecundario.play(AssetSource('sounds/$nombreArchivo.mp3'));
@@ -139,18 +179,25 @@ class SonidoManager {
     }
   }
 
+  // =========================================================================
+  // PÁNICO — Loop hasta detenerPanico()
+  // =========================================================================
   Future<void> reproducirPanico() async {
-    if (kIsWeb) return;
     try {
       await _playerPanico.stop();
       await _playerPanico.play(AssetSource('sounds/${Sonidos.panico}.mp3'));
     } catch (e) {
       debugPrint('SonidoManager › reproducirPanico → $e');
     }
+    if (kIsWeb) {
+      WebAlertaManager.mostrar(
+        titulo: '🚨 PÁNICO',
+        cuerpo: '¡Alerta de emergencia activada!',
+      );
+    }
   }
 
   Future<void> detenerPanico() async {
-    if (kIsWeb) return;
     try {
       await _playerPanico.stop();
     } catch (_) {}

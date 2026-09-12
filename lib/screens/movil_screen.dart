@@ -18,7 +18,9 @@ import 'package:serviexpress_app/screens/chat_screen.dart';
 import 'package:flutter/foundation.dart';
 // geolocator_apple removido — no compila en web; usamos LocationSettings genérico para iOS
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:latlong2/latlong.dart' hide Path; // <--- MOTOR DE DISTANCIAS (hide Path evita conflicto con ui.Path)
+import 'package:latlong2/latlong.dart'
+    hide
+        Path; // <--- MOTOR DE DISTANCIAS (hide Path evita conflicto con ui.Path)
 import 'package:image_picker/image_picker.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
@@ -38,8 +40,7 @@ class MovilScreen extends StatefulWidget {
   State<MovilScreen> createState() => _MovilScreenState();
 }
 
-class _MovilScreenState extends State<MovilScreen>
-    with WidgetsBindingObserver {
+class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
   late bool _estaEnLinea;
   // Recuerda el último estado de suspensión conocido para detectar el
   // momento EXACTO en que Central lo reactiva — sin esto, el chequeo
@@ -47,25 +48,34 @@ class _MovilScreenState extends State<MovilScreen>
   // _iniciarRelojSupervisionMultitarea).
   late bool _estabaSuspendido;
   bool _procesando = false;
-  bool _dialogoTransferenciaActivo = false; // evita mostrar el diálogo dos veces
-  bool _notifReconexionActiva = false; // true = foreground muestra "📶 Verificando señal..."
+  bool _dialogoTransferenciaActivo =
+      false; // evita mostrar el diálogo dos veces
+  bool _notifReconexionActiva =
+      false; // true = foreground muestra "📶 Verificando señal..."
 
   Timer? _supervisionTimer;
   StreamSubscription<Position>? _gpsTimer;
-  Timer? _heartbeatTimer; // Opción A: ping cada 60s → cron Supabase limpia zombis
-  Timer? _ubicacionHeartbeatTimer; // Fallback: envía ubicación cada 20s aunque GPS stream esté silencioso
-  bool _enviandoUbicacion = false; // Mutex: evita writes de ubicación simultáneos
-  Position? _pendingPosition;      // Última posición recibida mientras había write en curso
-  DateTime? _ultimoEnvioUbicacion; // Para el heartbeat: evita doble-write si GPS ya emitió
-  DateTime? _ultimaEmisionGps;     // Última vez que el stream GPS emitió — watchdog lo reinicia si lleva >90s mudo
-  bool _reiniciandoGps = false;    // Evita reinicios simultáneos del stream
+  Timer?
+      _heartbeatTimer; // Opción A: ping cada 60s → cron Supabase limpia zombis
+  Timer?
+      _ubicacionHeartbeatTimer; // Fallback: envía ubicación cada 20s aunque GPS stream esté silencioso
+  bool _enviandoUbicacion =
+      false; // Mutex: evita writes de ubicación simultáneos
+  Position?
+      _pendingPosition; // Última posición recibida mientras había write en curso
+  DateTime?
+      _ultimoEnvioUbicacion; // Para el heartbeat: evita doble-write si GPS ya emitió
+  DateTime?
+      _ultimaEmisionGps; // Última vez que el stream GPS emitió — watchdog lo reinicia si lleva >90s mudo
+  bool _reiniciandoGps = false; // Evita reinicios simultáneos del stream
 
   List<Map<String, dynamic>> _serviciosActivosData = [];
   final Set<int> _serviciosOcultosLocales = {};
 
   // --- VARIABLES DE ESTADO TÁCTICAS ---
   final Set<int> _serviciosExpandidos = {}; // cuáles están abiertos ahora
-  final Set<int> _serviciosVistos = {};     // todos los que ya aparecieron (evita re-expandir los colapsados por el usuario)
+  final Set<int> _serviciosVistos =
+      {}; // todos los que ya aparecieron (evita re-expandir los colapsados por el usuario)
   // REDISEÑO PANEL: 0 = Radar (operativo), 1 = Perfil (cuenta, datos,
   // historial). Antes todo vivía amontonado en un solo Scaffold con 4
   // íconos en el AppBar — ahora Perfil tiene su propia pestaña.
@@ -143,7 +153,7 @@ class _MovilScreenState extends State<MovilScreen>
   int _serviciosHoy = 0;
   int _serviciosTotal = 0;
   double _producidoHoy = 0;
-  double _producidoTotal = 0;   // acumulado histórico (Serviexpress + FN)
+  double _producidoTotal = 0; // acumulado histórico (Serviexpress + FN)
   // PRODUCCIÓN FN — historial exclusivo de servicios Farmanorte
   int _serviciosFnHoy = 0;
   int _serviciosFnTotal = 0;
@@ -151,9 +161,9 @@ class _MovilScreenState extends State<MovilScreen>
   double _producidoFnTotal = 0;
 
   // SESIONES — horas activas acumuladas hoy
-  int? _sesionActivaId;             // ID de la sesión abierta (null si offline)
-  DateTime? _sesionInicioAt;        // hora local de conexión (para calcular en vivo)
-  int _minutosActivosHoy = 0;      // suma de sesiones cerradas del día
+  int? _sesionActivaId; // ID de la sesión abierta (null si offline)
+  DateTime? _sesionInicioAt; // hora local de conexión (para calcular en vivo)
+  int _minutosActivosHoy = 0; // suma de sesiones cerradas del día
 
   // Minutos totales de hoy = cerradas + sesión en curso (si aplica)
   int get _minutosActivosHoyTotal {
@@ -180,13 +190,32 @@ class _MovilScreenState extends State<MovilScreen>
       StreamController<List<Map<String, dynamic>>>.broadcast();
   final StreamController<List<Map<String, dynamic>>> _ctrlServicios =
       StreamController<List<Map<String, dynamic>>>.broadcast();
-  Stream<List<Map<String, dynamic>>> get _streamUsuarios =>
-      _ctrlUsuarios.stream;
   Stream<List<Map<String, dynamic>>> get _streamServicios =>
       _ctrlServicios.stream;
+
+  // --- CHAT CENTRAL — conteo unificado de mensajes pendientes ──────────────
+  // Combina chat_central (usuarios) + chat_central_movil (servicios).
+  // El FAB pulsante lee este ValueNotifier para mostrar badge y latido.
+  int _svcChatCount = 0;
+  final ValueNotifier<int> _chatCentralTotal = ValueNotifier(0);
+
+  // --- MI PERFIL EN VIVO (solo mi propia fila — no carga a los demás) ---
+  // Emite únicamente cuando MI row cambia → el main builder no siente
+  // los GPS updates de los otros móviles.
+  final StreamController<Map<String, dynamic>?> _ctrlMiPerfil =
+      StreamController<Map<String, dynamic>?>.broadcast();
+  Stream<Map<String, dynamic>?> get _streamMiPerfil => _ctrlMiPerfil.stream;
+  Map<String, dynamic>? _cacheMiPerfil;
+  StreamSubscription<List<Map<String, dynamic>>>? _subMiPerfil;
+
+  // --- FILA DEL PARADERO — ValueNotifier para no reconstruir el main builder ---
+  // Solo cambia cuando alguien entra o sale de la fila (paradero_actual / en_linea).
+  // GPS updates de otros móviles NO lo actualizan (deduplicación por IDs).
+  final ValueNotifier<List<Map<String, dynamic>>> _filaNotifier =
+      ValueNotifier([]);
+
   // Cache del último dato — se usa como initialData para que al volver
   // de la pestaña de Perfil el radar no muestre spinner sino el dato previo.
-  List<Map<String, dynamic>>? _cacheUsuarios;
   List<Map<String, dynamic>>? _cacheServicios;
   // #91: true cuando el stream falló pero tenemos caché — muestra overlay suave
   bool _conexionPerdida = false;
@@ -206,11 +235,12 @@ class _MovilScreenState extends State<MovilScreen>
   // en dispose() crea un objeto nuevo y el canal original queda activo.
   RealtimeChannel? _canalRadarBg;
   RealtimeChannel? _canalPanico;
+  // Fila del paradero — canal liviano sin GPS de otros móviles
+  RealtimeChannel? _canalFila;
   // ---- DOMICILIOS ----
   RealtimeChannel? _canalPedidosMovil;
   Map<String, dynamic>? _pedidoDomicilioActivo;
   bool _alertaPedidoMostrada = false;
-
 
   // VIGILANTE DE CONEXIÓN — ver _iniciarVigilanteDeConexion() más abajo.
   // Reconstruye los streams de Realtime periódicamente. Una conexión
@@ -305,12 +335,14 @@ class _MovilScreenState extends State<MovilScreen>
           }
         }
       };
-      OneSignal.Notifications.addForegroundWillDisplayListener(_onForegroundNotif!);
+      OneSignal.Notifications.addForegroundWillDisplayListener(
+          _onForegroundNotif!);
       // --------------------------------------------------
     });
 
     _estaEnLinea = widget.usuario['en_linea'] ?? false;
-    _futureEstadisticasSemana = _cargarEstadisticasSemana(); // cargado una vez al iniciar
+    _futureEstadisticasSemana =
+        _cargarEstadisticasSemana(); // cargado una vez al iniciar
     _perfilTelefonoCtrl = TextEditingController(
       text: widget.usuario['telefono']?.toString() ?? '',
     );
@@ -335,7 +367,8 @@ class _MovilScreenState extends State<MovilScreen>
     // la conexión en el primer segundo (causa de ANR / pantalla congelada).
     Future.delayed(const Duration(milliseconds: 600), _cargarProduccion);
     Future.delayed(const Duration(milliseconds: 800), _cargarMinutosActivosHoy);
-    Future.delayed(const Duration(milliseconds: 1000), _verificarPanicoUsadoHoy);
+    Future.delayed(
+        const Duration(milliseconds: 1000), _verificarPanicoUsadoHoy);
 
     // ---- DOMICILIOS: suscripción a pedidos sin asignar ----
     _suscribirAlertasDomicilio();
@@ -434,7 +467,6 @@ class _MovilScreenState extends State<MovilScreen>
     setState(() => _tabActual = index);
   }
 
-
   // =========================================================================
   // DOMICILIOS — Suscripción, alerta y tarjeta de pedido activo
   // =========================================================================
@@ -474,7 +506,8 @@ class _MovilScreenState extends State<MovilScreen>
               if (pedido == null) return;
               if (!mounted) return;
               final esTerminal = ['entregado', 'cancelado'].contains(estado);
-              setState(() => _pedidoDomicilioActivo = esTerminal ? null : pedido);
+              setState(
+                  () => _pedidoDomicilioActivo = esTerminal ? null : pedido);
             }
 
             // Pedido ya asignado a otro — cerrar alerta si estaba abierta
@@ -584,7 +617,8 @@ class _MovilScreenState extends State<MovilScreen>
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(local['nombre']?.toString() ?? '',
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 13)),
                     ),
                   ],
                 ),
@@ -598,12 +632,13 @@ class _MovilScreenState extends State<MovilScreen>
               const Divider(height: 16),
               Row(
                 children: [
-                  const Icon(Icons.location_on_outlined, size: 14, color: Colors.grey),
+                  const Icon(Icons.location_on_outlined,
+                      size: 14, color: Colors.grey),
                   const SizedBox(width: 6),
                   Expanded(
-                    child: Text(
-                        pedido['direccion_entrega']?.toString() ?? '',
-                        style: TextStyle(fontSize: 12, color: Colors.grey[700])),
+                    child: Text(pedido['direccion_entrega']?.toString() ?? '',
+                        style:
+                            TextStyle(fontSize: 12, color: Colors.grey[700])),
                   ),
                 ],
               ),
@@ -612,7 +647,9 @@ class _MovilScreenState extends State<MovilScreen>
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    pedido['metodo_pago'] == 'efectivo' ? '💵 Efectivo' : '📲 Transferencia',
+                    pedido['metodo_pago'] == 'efectivo'
+                        ? '💵 Efectivo'
+                        : '📲 Transferencia',
                     style: TextStyle(fontSize: 12, color: Colors.grey[700]),
                   ),
                   Text(fmt(total),
@@ -627,7 +664,8 @@ class _MovilScreenState extends State<MovilScreen>
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
             child: const Text('RECHAZAR',
-                style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                style:
+                    TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
@@ -694,17 +732,28 @@ class _MovilScreenState extends State<MovilScreen>
     try {
       await Supabase.instance.client
           .from('pedidos')
-          .update({'estado': siguiente})
-          .eq('id', p['id']);
+          .update({'estado': siguiente}).eq('id', p['id']);
       if (siguiente == 'entregado') {
+        // +0.1 a puntuación por domicilio entregado exitosamente
+        try {
+          final md = await Supabase.instance.client
+              .from('usuarios')
+              .select('puntuacion')
+              .eq('id', widget.usuario['id'])
+              .single();
+          final double curr = (md['puntuacion'] as num?)?.toDouble() ?? 5.0;
+          await Supabase.instance.client.from('usuarios').update({
+            'puntuacion': double.parse((curr + 0.1).toStringAsFixed(2))
+          }).eq('id', widget.usuario['id']);
+        } catch (_) {}
         setState(() => _pedidoDomicilioActivo = null);
       } else {
         await _cargarPedidoActivoPropio();
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Error: $e'), backgroundColor: Colors.red));
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
       }
     }
   }
@@ -735,7 +784,8 @@ class _MovilScreenState extends State<MovilScreen>
         builder: (ctx2, setDlg) {
           final esFM = motivoSeleccionado?.$2 ?? false;
           return AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
             title: const Text('¿Por qué liberas el domicilio?',
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             content: SizedBox(
@@ -750,7 +800,8 @@ class _MovilScreenState extends State<MovilScreen>
                       decoration: BoxDecoration(
                         color: esFM ? Colors.green[50] : Colors.red[50],
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: esFM ? Colors.green : Colors.red),
+                        border:
+                            Border.all(color: esFM ? Colors.green : Colors.red),
                       ),
                       child: Text(
                         esFM
@@ -765,20 +816,26 @@ class _MovilScreenState extends State<MovilScreen>
                     const SizedBox(height: 4),
                     const Padding(
                       padding: EdgeInsets.only(left: 4, bottom: 6),
-                      child: Text('Los motivos en verde (fuerza mayor) no penalizan.',
-                          style: TextStyle(fontSize: 10, color: Colors.black38)),
+                      child: Text(
+                          'Los motivos en verde (fuerza mayor) no penalizan.',
+                          style:
+                              TextStyle(fontSize: 10, color: Colors.black38)),
                     ),
                     ...motivos.map((m) => RadioListTile<(String, bool)>(
                           title: Text(m.$1,
                               style: TextStyle(
                                   fontSize: 13,
-                                  color: m.$2 ? Colors.green[700] : Colors.black87,
-                                  fontWeight: m.$2 ? FontWeight.bold : FontWeight.normal)),
+                                  color:
+                                      m.$2 ? Colors.green[700] : Colors.black87,
+                                  fontWeight: m.$2
+                                      ? FontWeight.bold
+                                      : FontWeight.normal)),
                           value: m,
                           groupValue: motivoSeleccionado,
                           dense: true,
                           activeColor: m.$2 ? Colors.green : Colors.red,
-                          onChanged: (v) => setDlg(() => motivoSeleccionado = v),
+                          onChanged: (v) =>
+                              setDlg(() => motivoSeleccionado = v),
                         )),
                     if (motivoSeleccionado?.$1 == 'Otro motivo') ...[
                       const SizedBox(height: 8),
@@ -788,7 +845,8 @@ class _MovilScreenState extends State<MovilScreen>
                         decoration: InputDecoration(
                           hintText: 'Describe el motivo...',
                           isDense: true,
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8)),
                         ),
                       ),
                     ],
@@ -799,18 +857,21 @@ class _MovilScreenState extends State<MovilScreen>
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Volver', style: TextStyle(color: Colors.grey)),
+                child:
+                    const Text('Volver', style: TextStyle(color: Colors.grey)),
               ),
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: esFM ? Colors.green : Colors.red,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
                 ),
                 onPressed: motivoSeleccionado == null
                     ? null
                     : () => Navigator.pop(ctx, true),
                 child: Text('Liberar domicilio',
-                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                    style: TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.bold)),
               ),
             ],
           );
@@ -821,7 +882,8 @@ class _MovilScreenState extends State<MovilScreen>
     if (confirmado != true || motivoSeleccionado == null) return;
 
     final esFuerzaMayor = motivoSeleccionado!.$2;
-    final motivo = motivoSeleccionado!.$1 == 'Otro motivo' && otroCtrl.text.trim().isNotEmpty
+    final motivo = motivoSeleccionado!.$1 == 'Otro motivo' &&
+            otroCtrl.text.trim().isNotEmpty
         ? otroCtrl.text.trim()
         : motivoSeleccionado!.$1;
 
@@ -845,11 +907,18 @@ class _MovilScreenState extends State<MovilScreen>
 
       // 3. Penalizar puntaje solo si NO es fuerza mayor
       if (movilId != null && !esFuerzaMayor) {
-        final movilData = await db.from('usuarios').select('puntuacion').eq('id', movilId).maybeSingle();
+        final movilData = await db
+            .from('usuarios')
+            .select('puntuacion')
+            .eq('id', movilId)
+            .maybeSingle();
         if (movilData != null) {
-          final puntActual = (movilData['puntuacion'] as num?)?.toDouble() ?? 5.0;
+          final puntActual =
+              (movilData['puntuacion'] as num?)?.toDouble() ?? 5.0;
           final nuevoPunt = (puntActual - 1.0).clamp(1.0, 5.0);
-          await db.from('usuarios').update({'puntuacion': double.parse(nuevoPunt.toStringAsFixed(2))}).eq('id', movilId);
+          await db.from('usuarios').update({
+            'puntuacion': double.parse(nuevoPunt.toStringAsFixed(2))
+          }).eq('id', movilId);
         }
       }
 
@@ -859,12 +928,17 @@ class _MovilScreenState extends State<MovilScreen>
       // 5. Notificar al local
       final localId = p['local_id'];
       if (localId != null) {
-        final localData = await db.from('usuarios').select('nombre').eq('id', localId).maybeSingle();
+        final localData = await db
+            .from('usuarios')
+            .select('nombre')
+            .eq('id', localId)
+            .maybeSingle();
         final localNombre = localData?['nombre'] ?? 'el local';
         MotorNotificaciones.dispararMisil(
           idDestino: localId.toString(),
           titulo: '⚠️ Domicilio cancelado — $localNombre',
-          mensaje: 'El móvil canceló tu pedido. Motivo: $motivo. Buscamos otro.',
+          mensaje:
+              'El móvil canceló tu pedido. Motivo: $motivo. Buscamos otro.',
           urgente: true,
           sonido: 'alerta',
         );
@@ -872,7 +946,8 @@ class _MovilScreenState extends State<MovilScreen>
 
       // 6. REINICIAR CASCADA — igual que un servicio nuevo
       final local = p['local_nombre']?.toString() ?? 'local';
-      final msgAlerta = '🔄 Domicilio liberado — busca nuevo móvil para: $local';
+      final msgAlerta =
+          '🔄 Domicilio liberado — busca nuevo móvil para: $local';
 
       // T=0: Central (alerta) + Masters rango MASTER (sonido master)
       final mastersData = await db
@@ -883,10 +958,15 @@ class _MovilScreenState extends State<MovilScreen>
           .neq('suspendido', true);
       final centralIds = mastersData
           .where((u) => u['rol'] == 'central' || u['rol'] == 'master')
-          .map<String>((u) => u['id'].toString()).toList();
+          .map<String>((u) => u['id'].toString())
+          .toList();
       final masterMobileIds = mastersData
-          .where((u) => u['rango_movil'] == 'MASTER' && u['rol'] != 'central' && u['rol'] != 'master')
-          .map<String>((u) => u['id'].toString()).toList();
+          .where((u) =>
+              u['rango_movil'] == 'MASTER' &&
+              u['rol'] != 'central' &&
+              u['rol'] != 'master')
+          .map<String>((u) => u['id'].toString())
+          .toList();
       if (centralIds.isNotEmpty) {
         await MotorNotificaciones.dispararRafa(
           idsDestinos: centralIds,
@@ -916,7 +996,8 @@ class _MovilScreenState extends State<MovilScreen>
           .not('paradero_actual', 'is', null);
       final paraderoIds = enParaderoData
           .map((u) => u['id'].toString())
-          .where((id) => id != movilId?.toString() && !masterMobileIds.contains(id))
+          .where((id) =>
+              id != movilId?.toString() && !masterMobileIds.contains(id))
           .toList();
       if (paraderoIds.isNotEmpty) {
         await MotorNotificaciones.programarMisilRetardado(
@@ -929,8 +1010,16 @@ class _MovilScreenState extends State<MovilScreen>
 
       // T=60s: todos los disponibles — misil server-side
       {
-        final todosD = await db.from('usuarios').select('id').eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true);
-        final idsTodosD = todosD.map((u) => u['id'].toString()).where((id) => !masterMobileIds.contains(id)).toList();
+        final todosD = await db
+            .from('usuarios')
+            .select('id')
+            .eq('rol', 'movil')
+            .eq('en_linea', true)
+            .neq('suspendido', true);
+        final idsTodosD = todosD
+            .map((u) => u['id'].toString())
+            .where((id) => !masterMobileIds.contains(id))
+            .toList();
         if (idsTodosD.isNotEmpty) {
           final id60sD = await MotorNotificaciones.programarMisilRetardado(
             externalIds: idsTodosD,
@@ -939,7 +1028,9 @@ class _MovilScreenState extends State<MovilScreen>
             segundosRetardo: 60,
           );
           if (id60sD != null) {
-            await db.from('pedidos').update({'onesignal_2m': id60sD}).eq('id', pedidoId);
+            await db
+                .from('pedidos')
+                .update({'onesignal_2m': id60sD}).eq('id', pedidoId);
           }
         }
       }
@@ -1002,7 +1093,8 @@ class _MovilScreenState extends State<MovilScreen>
             // Botón manual por si la auto-reconexión no alcanza
             TextButton.icon(
               icon: const Icon(Icons.refresh_rounded, size: 16),
-              label: const Text('Reintentar ya', style: TextStyle(fontSize: 12)),
+              label:
+                  const Text('Reintentar ya', style: TextStyle(fontSize: 12)),
               onPressed: () {
                 if (mounted) {
                   _reconectandoStream = false;
@@ -1079,14 +1171,19 @@ class _MovilScreenState extends State<MovilScreen>
 
     String labelBoton() {
       switch (estado) {
-        case 'confirmado': return '🛍️ Ya recogí el pedido → EN CAMINO';
-        case 'listo_para_recoger': return '🛍️ Ya recogí el pedido → EN CAMINO';
-        case 'en_camino': return '✅ Entregado al cliente';
-        default: return '';
+        case 'confirmado':
+          return '🛍️ Ya recogí el pedido → EN CAMINO';
+        case 'listo_para_recoger':
+          return '🛍️ Ya recogí el pedido → EN CAMINO';
+        case 'en_camino':
+          return '✅ Entregado al cliente';
+        default:
+          return '';
       }
     }
 
-    final mostrarBoton = ['confirmado', 'listo_para_recoger', 'en_camino'].contains(estado);
+    final mostrarBoton =
+        ['confirmado', 'listo_para_recoger', 'en_camino'].contains(estado);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -1105,21 +1202,32 @@ class _MovilScreenState extends State<MovilScreen>
             Color clrTipo = const Color(0xff3AF500);
             String lblTipo = 'DOMICILIO';
             if (tipoSvc == 'COMIDA') {
-              icoTipo = Icons.dining;             clrTipo = Colors.red[400]!;    lblTipo = 'COMIDA';
+              icoTipo = Icons.dining;
+              clrTipo = Colors.red[400]!;
+              lblTipo = 'COMIDA';
             } else if (tipoSvc == 'BEBIDAS') {
-              icoTipo = Icons.nightlife;          clrTipo = Colors.purple[300]!; lblTipo = 'BEBIDAS';
+              icoTipo = Icons.nightlife;
+              clrTipo = Colors.purple[300]!;
+              lblTipo = 'BEBIDAS';
             } else if (tipoSvc == 'COMPRAS') {
-              icoTipo = Icons.shopping_basket;    clrTipo = Colors.teal[400]!;   lblTipo = 'ENCARGO';
+              icoTipo = Icons.shopping_basket;
+              clrTipo = Colors.teal[400]!;
+              lblTipo = 'ENCARGO';
             } else if (tipoSvc == 'PAQUETERÍA') {
-              icoTipo = Icons.inventory_2_rounded; clrTipo = Colors.brown[300]!; lblTipo = 'PAQUETE';
+              icoTipo = Icons.inventory_2_rounded;
+              clrTipo = Colors.brown[300]!;
+              lblTipo = 'PAQUETE';
             } else if (tipoSvc == 'RECOGIDA LOCAL') {
-              icoTipo = Icons.store; clrTipo = Colors.green[400]!; lblTipo = 'RECOG. LOCAL';
+              icoTipo = Icons.store;
+              clrTipo = Colors.green[400]!;
+              lblTipo = 'RECOG. LOCAL';
             }
             return Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
                 color: Colors.deepPurple,
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(12)),
               ),
               child: Row(
                 children: [
@@ -1133,7 +1241,8 @@ class _MovilScreenState extends State<MovilScreen>
                           letterSpacing: 0.5)),
                   const Spacer(),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                     decoration: BoxDecoration(
                       color: clrTipo.withValues(alpha: 0.2),
                       borderRadius: BorderRadius.circular(12),
@@ -1169,12 +1278,13 @@ class _MovilScreenState extends State<MovilScreen>
                 const SizedBox(height: 6),
                 Row(
                   children: [
-                    const Icon(Icons.location_on_outlined, size: 13, color: Colors.grey),
+                    const Icon(Icons.location_on_outlined,
+                        size: 13, color: Colors.grey),
                     const SizedBox(width: 4),
                     Expanded(
-                      child: Text(
-                          p['direccion_entrega']?.toString() ?? '',
-                          style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                      child: Text(p['direccion_entrega']?.toString() ?? '',
+                          style:
+                              TextStyle(fontSize: 12, color: Colors.grey[700]),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis),
                     ),
@@ -1206,11 +1316,14 @@ class _MovilScreenState extends State<MovilScreen>
                       style: OutlinedButton.styleFrom(
                         foregroundColor: Colors.red,
                         side: const BorderSide(color: Colors.red),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8)),
                         padding: const EdgeInsets.symmetric(vertical: 8),
                       ),
                       icon: const Icon(Icons.lock_open_outlined, size: 16),
-                      label: const Text('Liberar domicilio', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                      label: const Text('Liberar domicilio',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 12)),
                       onPressed: _cancelarDomicilio,
                     ),
                   ),
@@ -1228,12 +1341,14 @@ class _MovilScreenState extends State<MovilScreen>
     WidgetsBinding.instance.removeObserver(this);
     _canalRadarBg?.unsubscribe();
     _canalPanico?.unsubscribe();
+    _canalFila?.unsubscribe();
     _canalUpdateServicios?.unsubscribe();
     _canalPedidosMovil?.unsubscribe();
 
     // Remover el silenciador de primer plano para no acumular listeners
     if (_onForegroundNotif != null) {
-      OneSignal.Notifications.removeForegroundWillDisplayListener(_onForegroundNotif!);
+      OneSignal.Notifications.removeForegroundWillDisplayListener(
+          _onForegroundNotif!);
     }
 
     _supervisionTimer?.cancel();
@@ -1241,6 +1356,10 @@ class _MovilScreenState extends State<MovilScreen>
     _gpsTimer?.cancel();
     _heartbeatTimer?.cancel(); // ← Opción A
     _ubicacionHeartbeatTimer?.cancel(); // Fallback GPS
+    _subMiPerfil?.cancel();
+    _ctrlMiPerfil.close();
+    _filaNotifier.dispose();
+    _chatCentralTotal.dispose();
     _subUsuarios?.cancel();
     _subServicios?.cancel();
     _radarTick.dispose();
@@ -1284,6 +1403,141 @@ class _MovilScreenState extends State<MovilScreen>
   // Con 50 móviles trabajando a la vez, esto se traduce en ~1-2
   // peticiones por segundo en promedio para toda la flota — nada
   // para Postgres con el índice idx_servicios_estado ya puesto.
+  // =========================================================================
+  // FILA DEL PARADERO — fetch REST mínimo, sin GPS ni datos innecesarios
+  // Se llama al inicio y cuando _canalFila detecta un cambio de en_linea.
+  // Solo descarga los campos que el móvil realmente necesita de otros.
+  // =========================================================================
+  // =========================================================================
+  // CHAT PENDIENTE — abre el chat correcto al tocar el FAB
+  // Prioridad: 1) cliente/local escribió al móvil (chat_movil)
+  //            2) central escribió al móvil por servicio (chat_central_movil)
+  //            3) chat general de soporte (chat_central en usuarios)
+  // =========================================================================
+  void _abrirChatCentral() {
+    // 1. ¿Hay mensaje de cliente/local en chat del servicio?
+    final svcClienteMsg = _serviciosActivosData
+        .where((s) => s['chat_movil'] == true)
+        .firstOrNull;
+    if (svcClienteMsg != null) {
+      Supabase.instance.client
+          .from('servicios')
+          .update({'chat_movil': false}).eq('id', svcClienteMsg['id']);
+      final clienteId = (svcClienteMsg['cliente_id'] as num?)?.toInt();
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ChatScreen(
+            salaId: 'servicio_${svcClienteMsg['id']}',
+            miId: widget.usuario['id'],
+            miNombre: movilLabelConNombre(widget.usuario),
+            titulo: 'Chat del Servicio',
+            servicioId: svcClienteMsg['id'],
+            alarmaLocal: 'chat_movil',
+            alarmaDestino: 'chat_cliente',
+            destinatarioId: clienteId,
+            tipoFaq: TipoFaqChat.movil,
+          ),
+        ),
+      );
+      return;
+    }
+
+    // 2. ¿Hay mensaje de la central por servicio?
+    final svcCentralMsg = _serviciosActivosData
+        .where((s) => s['chat_central_movil'] == true)
+        .firstOrNull;
+    if (svcCentralMsg != null) {
+      Supabase.instance.client
+          .from('servicios')
+          .update({'chat_central_movil': false}).eq('id', svcCentralMsg['id']);
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ChatScreen(
+            salaId: 'soporte_movil_${svcCentralMsg['id']}',
+            miId: widget.usuario['id'],
+            miNombre: movilLabelConNombre(widget.usuario),
+            titulo: 'Soporte Central',
+            servicioId: svcCentralMsg['id'],
+            alarmaLocal: 'chat_central_movil',
+            alarmaDestino: 'chat_movil_central',
+            tipoFaq: TipoFaqChat.movil,
+          ),
+        ),
+      );
+      return;
+    }
+
+    // 3. Chat general de soporte (sin servicio específico)
+    Supabase.instance.client
+        .from('usuarios')
+        .update({'chat_central': false}).eq('id', widget.usuario['id']);
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChatScreen(
+          salaId: 'soporte_${widget.usuario['id']}',
+          miId: widget.usuario['id'] as int,
+          miNombre: movilLabelConNombre(widget.usuario),
+          titulo: 'Central',
+          usuarioId: widget.usuario['id'] as int?,
+          alarmaLocal: 'chat_central',
+          alarmaDestino: 'alarma_soporte',
+          tipoFaq: TipoFaqChat.movil,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _recargarFila() async {
+    try {
+      final data = await Supabase.instance.client
+          .from('usuarios')
+          .select(
+              'id, nombre, en_linea, paradero_actual, ingreso_fila, '
+              'ticket_prioridad, rango_movil, numero_movil')
+          .eq('rol', 'movil')
+          .eq('en_linea', true);
+      _actualizarFilaNotifier(List<Map<String, dynamic>>.from(data));
+    } catch (_) {
+      // Sin red: mantener la fila anterior
+    }
+  }
+
+  // Deduplicación para no reconstruir si solo cambió GPS u otro campo
+  // que no afecta la composición ni el orden de la cola.
+  void _actualizarFilaNotifier(List<Map<String, dynamic>> todos) {
+    final nuevaFila = todos
+        .where((u) =>
+            u['en_linea'] == true &&
+            u['paradero_actual'] != null &&
+            u['ingreso_fila'] != null)
+        .toList()
+      ..sort((a, b) {
+        final tA = a['ticket_prioridad'] == true ? 1 : 0;
+        final tB = b['ticket_prioridad'] == true ? 1 : 0;
+        if (tA != tB) return tB.compareTo(tA);
+        final cmp = DateTime.parse(a['ingreso_fila'])
+            .compareTo(DateTime.parse(b['ingreso_fila']));
+        if (cmp != 0) return cmp;
+        return ((a['id'] as num?) ?? 0).compareTo((b['id'] as num?) ?? 0);
+      });
+
+    // Clave de deduplicación: "id:paradero" de cada usuario en fila.
+    // Si es igual a lo anterior, no actualizar el notifier — evita rebuilds
+    // por GPS updates que no cambian la composición ni el orden de la cola.
+    final nuevaClave = nuevaFila
+        .map((u) => '${u['id']}:${u['paradero_actual']}')
+        .join(',');
+    final viejaClave = _filaNotifier.value
+        .map((u) => '${u['id']}:${u['paradero_actual']}')
+        .join(',');
+    if (nuevaClave != viejaClave) {
+      _filaNotifier.value = nuevaFila;
+    }
+  }
+
   void _construirStreams() {
     // Cancelamos las suscripciones VIEJAS al canal crudo de Supabase
     // (si las había) — esto es lo que realmente "tira la conexión
@@ -1315,20 +1569,67 @@ class _MovilScreenState extends State<MovilScreen>
         })
         .catchError((_) {});
 
+    // Pre-carga mi propio perfil (instantánea REST)
     Supabase.instance.client
         .from('usuarios')
         .select()
-        .eq('rol', 'movil')
+        .eq('id', widget.usuario['id'])
+        .maybeSingle()
         .then((data) {
-          _cacheUsuarios = List<Map<String, dynamic>>.from(data);
-          if (!_ctrlUsuarios.isClosed) _ctrlUsuarios.add(_cacheUsuarios!);
-        })
-        .catchError((_) {});
+      if (data != null) {
+        _cacheMiPerfil = data;
+        if (!_ctrlMiPerfil.isClosed) _ctrlMiPerfil.add(data);
+      }
+    }).catchError((_) {});
 
-    final crudoUsuarios = Supabase.instance.client
+    // Stream de MI propio perfil — solo emite cuando YO cambio.
+    // Los GPS updates de los otros 11 móviles NO disparan este stream.
+    _subMiPerfil?.cancel();
+    final crudoMiPerfil = Supabase.instance.client
         .from('usuarios')
         .stream(primaryKey: ['id'])
-        .eq('rol', 'movil');
+        .eq('id', widget.usuario['id']);
+    _subMiPerfil = crudoMiPerfil.listen(
+      (data) {
+        if (data.isNotEmpty) {
+          _cacheMiPerfil = data.first;
+          if (!_ctrlMiPerfil.isClosed) _ctrlMiPerfil.add(data.first);
+          // Actualizar conteo de chats: chat_central (nivel usuario)
+          _chatCentralTotal.value =
+              _svcChatCount + (data.first['chat_central'] == true ? 1 : 0);
+        }
+      },
+      onError: (e) {
+        if (_cacheMiPerfil != null && !_ctrlMiPerfil.isClosed) {
+          _ctrlMiPerfil.add(_cacheMiPerfil);
+        }
+      },
+    );
+
+    // Carga inicial de la fila del paradero (solo los campos necesarios,
+    // sin lat/lng ni datos que los móviles no necesitan ver de otros).
+    _recargarFila();
+
+    // Canal liviano para detectar cambios en la fila: solo escucha
+    // updates de usuarios en línea. Cuando alguien entra/sale del
+    // paradero, el REST fetch de _recargarFila() actualiza _filaNotifier.
+    // Los GPS updates de otros móviles NO llegan aquí porque este canal
+    // no suscribe a todos los móviles, solo reacciona a cambios relevantes.
+    _canalFila?.unsubscribe();
+    _canalFila = Supabase.instance.client
+        .channel('fila_paradero_${widget.usuario['id']}')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'usuarios',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'en_linea',
+            value: true,
+          ),
+          callback: (_) => _recargarFila(),
+        )
+        .subscribe();
 
     final crudoServicios = Supabase.instance.client
         .from('servicios')
@@ -1352,38 +1653,30 @@ class _MovilScreenState extends State<MovilScreen>
         .order('id', ascending: false)
         .limit(50); // Reducido de 150: sin histórico, sin cancelados
 
-    // Reenviamos cada evento del canal crudo hacia el controller
-    // estable. Mientras no llegue el primer dato del canal nuevo, el
-    // controller simplemente no emite nada — y el StreamBuilder sigue
-    // mostrando el último dato bueno que ya tenía. Cero parpadeo.
-    _subUsuarios = crudoUsuarios.listen(
-      (data) {
-        _cacheUsuarios = data;
-        if (!_ctrlUsuarios.isClosed) _ctrlUsuarios.add(data);
-      },
-      onError: (e) {
-        // #91: si hay caché, mantenerlo visible; no propagar el error al StreamBuilder
-        if (_cacheUsuarios != null && !_ctrlUsuarios.isClosed) {
-          _ctrlUsuarios.add(_cacheUsuarios!);
-        } else if (!_ctrlUsuarios.isClosed) {
-          _ctrlUsuarios.addError(e);
-        }
-      },
-    );
+    // _subUsuarios eliminado: el móvil ya no suscribe al stream de todos
+    // los móviles. La fila del paradero se actualiza por _canalFila +
+    // _recargarFila() (REST fetch de solo los campos necesarios, sin GPS).
     _subServicios = crudoServicios.listen(
       (data) {
         _cacheServicios = data;
         _ultimaEmisionServicios = DateTime.now(); // Fix #2
-        if (_conexionPerdida && mounted) setState(() => _conexionPerdida = false);
+        if (_conexionPerdida && mounted)
+          setState(() => _conexionPerdida = false);
         if (!_ctrlServicios.isClosed) _ctrlServicios.add(data);
         _verificarTransferenciaEntrante(List<Map<String, dynamic>>.from(data));
+        // Actualizar conteo de chats pendientes: central por servicio + cliente/local
+        _svcChatCount = data.where((s) =>
+            s['chat_central_movil'] == true || s['chat_movil'] == true).length;
+        _chatCentralTotal.value = _svcChatCount +
+            ((_cacheMiPerfil ?? widget.usuario)['chat_central'] == true ? 1 : 0);
       },
       onError: (e) {
         // #91: si hay caché, mantenerlo visible; no propagar el error al StreamBuilder.
         // Activamos el overlay suave para que el usuario sepa que hay problema de señal.
         if (_cacheServicios != null && !_ctrlServicios.isClosed) {
           _ctrlServicios.add(_cacheServicios!);
-          if (!_conexionPerdida && mounted) setState(() => _conexionPerdida = true);
+          if (!_conexionPerdida && mounted)
+            setState(() => _conexionPerdida = true);
         } else if (!_ctrlServicios.isClosed) {
           _ctrlServicios.addError(e);
         }
@@ -1417,7 +1710,8 @@ class _MovilScreenState extends State<MovilScreen>
                 .limit(50)
                 .then((data) {
                   _cacheServicios = List<Map<String, dynamic>>.from(data);
-                  if (!_ctrlServicios.isClosed) _ctrlServicios.add(_cacheServicios!);
+                  if (!_ctrlServicios.isClosed)
+                    _ctrlServicios.add(_cacheServicios!);
                   _verificarTransferenciaEntrante(_cacheServicios!);
                 })
                 .catchError((_) {});
@@ -1500,7 +1794,8 @@ class _MovilScreenState extends State<MovilScreen>
               asegurarServicioActivo(widget.usuario['id'].toString())
                   .catchError((_) {});
               if (!_notifReconexionActiva) {
-                updateForegroundNotification('Conectado · recibiendo servicios');
+                updateForegroundNotification(
+                    'Conectado · recibiendo servicios');
               }
             }
           }
@@ -1524,9 +1819,11 @@ class _MovilScreenState extends State<MovilScreen>
             final tieneServicio = _serviciosActivosData.isNotEmpty;
             final tieneParadero = _miParaderoCache != null;
             if (tieneServicio) {
-              updateForegroundNotification('⚠️ SERVICIO ACTIVO — no cierres la app');
+              updateForegroundNotification(
+                  '⚠️ SERVICIO ACTIVO — no cierres la app');
             } else if (tieneParadero) {
-              updateForegroundNotification('📍 En fila ($_miParaderoCache) — no cierres la app');
+              updateForegroundNotification(
+                  '📍 En fila ($_miParaderoCache) — no cierres la app');
             }
           }
         }
@@ -1559,7 +1856,8 @@ class _MovilScreenState extends State<MovilScreen>
   Future<void> _verificarPanicoPendiente() async {
     try {
       final miId = widget.usuario['id'].toString();
-      final hace2min = DateTime.now().toUtc().subtract(const Duration(minutes: 2));
+      final hace2min =
+          DateTime.now().toUtc().subtract(const Duration(minutes: 2));
       final eventos = await Supabase.instance.client
           .from('eventos_panico')
           .select()
@@ -1578,7 +1876,8 @@ class _MovilScreenState extends State<MovilScreen>
         final expiraStr = ev['ubicacion_expira_at']?.toString();
         if (expiraStr != null) {
           final expira = DateTime.tryParse(expiraStr)?.toUtc();
-          if (expira != null && DateTime.now().toUtc().isAfter(expira)) continue;
+          if (expira != null && DateTime.now().toUtc().isAfter(expira))
+            continue;
         }
 
         // Solo mostramos el más reciente
@@ -1586,8 +1885,10 @@ class _MovilScreenState extends State<MovilScreen>
         if ((ev['rol_disparador']?.toString() ?? '') == 'movil' &&
             ev['ultima_lat'] != null &&
             ev['ubicacion_expira_at'] != null) {
-          final expira = DateTime.tryParse(ev['ubicacion_expira_at'].toString())?.toUtc();
-          tieneUbicacion = expira != null && DateTime.now().toUtc().isBefore(expira);
+          final expira =
+              DateTime.tryParse(ev['ubicacion_expira_at'].toString())?.toUtc();
+          tieneUbicacion =
+              expira != null && DateTime.now().toUtc().isBefore(expira);
         }
         if (mounted) {
           _mostrarPanicoOverlay(
@@ -1751,7 +2052,8 @@ class _MovilScreenState extends State<MovilScreen>
       final confirmar = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           title: const Text('¿Detener tu alerta?'),
           content: const Text(
             'Dejas de compartir tu ubicación en vivo. Solo hazlo si ya '
@@ -1764,11 +2066,13 @@ class _MovilScreenState extends State<MovilScreen>
               child: const Text('Seguir compartiendo'),
             ),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.green[700]),
+              style:
+                  ElevatedButton.styleFrom(backgroundColor: Colors.green[700]),
               onPressed: () => Navigator.pop(ctx, true),
               child: Text(
                 'YA ESTOY BIEN',
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                style:
+                    TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
               ),
             ),
           ],
@@ -1779,14 +2083,11 @@ class _MovilScreenState extends State<MovilScreen>
 
     final idEvento = _eventoPanicoActivoId!;
     try {
-      await Supabase.instance.client
-          .from('eventos_panico')
-          .update({
-            // Expira YA — el campo que el GPS timer y el resto del
-            // sistema ya respetan para saber cuándo dejar de compartir.
-            'ubicacion_expira_at': DateTime.now().toUtc().toIso8601String(),
-          })
-          .eq('id', idEvento);
+      await Supabase.instance.client.from('eventos_panico').update({
+        // Expira YA — el campo que el GPS timer y el resto del
+        // sistema ya respetan para saber cuándo dejar de compartir.
+        'ubicacion_expira_at': DateTime.now().toUtc().toIso8601String(),
+      }).eq('id', idEvento);
 
       if (mounted) {
         setState(() {
@@ -1815,18 +2116,21 @@ class _MovilScreenState extends State<MovilScreen>
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        title: const Text('Cerrar sesión', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text('Cerrar sesión',
+            style: TextStyle(fontWeight: FontWeight.bold)),
         content: const Text('¿Seguro que quieres cerrar sesión?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar', style: TextStyle(color: Colors.black54)),
+            child:
+                const Text('Cancelar', style: TextStyle(color: Colors.black54)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.black),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('CERRAR SESIÓN',
-                style: TextStyle(color: Color(0xff3AF500), fontWeight: FontWeight.bold)),
+                style: TextStyle(
+                    color: Color(0xff3AF500), fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -1837,14 +2141,11 @@ class _MovilScreenState extends State<MovilScreen>
     try {
       // 1. Reportar baja en la base de datos (Apagar el radar)
       if (_estaEnLinea) {
-        await Supabase.instance.client
-            .from('usuarios')
-            .update({
-              'en_linea': false,
-              'paradero_actual': null,
-              'ingreso_fila': null,
-            })
-            .eq('id', widget.usuario['id']);
+        await Supabase.instance.client.from('usuarios').update({
+          'en_linea': false,
+          'paradero_actual': null,
+          'ingreso_fila': null,
+        }).eq('id', widget.usuario['id']);
         _cerrarSesion(); // cierra sesión de tiempo activo al cerrar sesión de app
       }
       _gpsTimer?.cancel();
@@ -1894,7 +2195,8 @@ class _MovilScreenState extends State<MovilScreen>
   }
 
   String _formatearMoneda(dynamic monto, {bool mostrarCero = false}) {
-    if (monto == null || monto == 0 || monto == 0.0) return mostrarCero ? '\$0' : 'SIN TARIFA';
+    if (monto == null || monto == 0 || monto == 0.0)
+      return mostrarCero ? '\$0' : 'SIN TARIFA';
     String texto = (monto as num).toInt().toString();
     String resultado = '';
     int contador = 0;
@@ -1918,14 +2220,11 @@ class _MovilScreenState extends State<MovilScreen>
     if (permission == LocationPermission.denied ||
         permission == LocationPermission.deniedForever) {
       if (_estaEnLinea) {
-        await Supabase.instance.client
-            .from('usuarios')
-            .update({
-              'en_linea': false,
-              'paradero_actual': null,
-              'ingreso_fila': null,
-            })
-            .eq('id', widget.usuario['id']);
+        await Supabase.instance.client.from('usuarios').update({
+          'en_linea': false,
+          'paradero_actual': null,
+          'ingreso_fila': null,
+        }).eq('id', widget.usuario['id']);
         if (mounted) {
           setState(() {
             _estaEnLinea = false;
@@ -1935,8 +2234,7 @@ class _MovilScreenState extends State<MovilScreen>
     } else {
       // El GPS arranca si está en línea, O si hay un pánico activo dentro
       // de su ventana de 24h (la ubicación de emergencia no espera turno).
-      final compartiendoPanico =
-          _eventoPanicoActivoId != null &&
+      final compartiendoPanico = _eventoPanicoActivoId != null &&
           _panicoUbicacionExpiraAt != null &&
           DateTime.now().toUtc().isBefore(_panicoUbicacionExpiraAt!);
 
@@ -2032,136 +2330,133 @@ class _MovilScreenState extends State<MovilScreen>
       );
     }
 
-    _gpsTimer = Geolocator.getPositionStream(locationSettings: locationSettings)
-        .listen((Position? pos) async {
-          // Watchdog: registramos cada vez que el stream emite — si deja de
-          // emitir, _iniciarHeartbeatUbicacion lo detecta y reinicia el stream.
-          _ultimaEmisionGps = DateTime.now();
+    _gpsTimer =
+        Geolocator.getPositionStream(locationSettings: locationSettings).listen(
+      (Position? pos) async {
+        // Watchdog: registramos cada vez que el stream emite — si deja de
+        // emitir, _iniciarHeartbeatUbicacion lo detecta y reinicia el stream.
+        _ultimaEmisionGps = DateTime.now();
 
-          if (pos != null && _estaEnLinea) {
-            _ultimaPosicionConocida = pos; // <-- RADAR ACTUALIZADO
-            _pendingPosition = pos;        // siempre guardamos la más reciente
-            // Si ya hay un write en curso, el bucle de abajo lo usará
-            if (_enviandoUbicacion) return;
-            _enviandoUbicacion = true;
-            try {
-              // Drena _pendingPosition: escribe hasta que no quede posición nueva
-              while (_pendingPosition != null) {
-                final toWrite = _pendingPosition!;
-                _pendingPosition = null;
-                await Supabase.instance.client
-                    .from('usuarios')
-                    .update({'latitud': toWrite.latitude, 'longitud': toWrite.longitude})
-                    .eq('id', widget.usuario['id']);
-                _ultimoEnvioUbicacion = DateTime.now();
-              }
-            } catch (e) {
-            } finally {
-              _enviandoUbicacion = false;
+        if (pos != null && _estaEnLinea) {
+          _ultimaPosicionConocida = pos; // <-- RADAR ACTUALIZADO
+          _pendingPosition = pos; // siempre guardamos la más reciente
+          // Si ya hay un write en curso, el bucle de abajo lo usará
+          if (_enviandoUbicacion) return;
+          _enviandoUbicacion = true;
+          try {
+            // Drena _pendingPosition: escribe hasta que no quede posición nueva
+            while (_pendingPosition != null) {
+              final toWrite = _pendingPosition!;
+              _pendingPosition = null;
+              await Supabase.instance.client.from('usuarios').update({
+                'latitud': toWrite.latitude,
+                'longitud': toWrite.longitude
+              }).eq('id', widget.usuario['id']);
+              _ultimoEnvioUbicacion = DateTime.now();
             }
-
-            // --- EXPULSIÓN AUTOMÁTICA POR GEOCERCA ---
-            // Si estoy registrado en un paradero y me alejo de su zona,
-            // salgo solo de la fila — sin tocar ningún botón. Evita que
-            // alguien se quede "fantasma" ocupando un puesto en la fila
-            // mientras ya está lejos atendiendo otra cosa.
-            if (_miParaderoCache != null &&
-                _kZonasParadero.containsKey(_miParaderoCache)) {
-              final zona = _kZonasParadero[_miParaderoCache]!;
-              final distancia = Geolocator.distanceBetween(
-                pos.latitude,
-                pos.longitude,
-                zona[0],
-                zona[1],
-              );
-              // Margen de 50m extra sobre el radio de entrada — evita
-              // que el GPS oscilando justo en el borde expulse y
-              // re-registre en bucle.
-              if (distancia > zona[2] + 50) {
-                final paraderoQueDejo = _miParaderoCache!;
-                _miParaderoCache = null;
-                try {
-                  await Supabase.instance.client
-                      .from('usuarios')
-                      .update({'paradero_actual': null, 'ingreso_fila': null})
-                      .eq('id', widget.usuario['id']);
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          '📍 Saliste del área de $paraderoQueDejo — te '
-                          'sacamos de la fila automáticamente.',
-                        ),
-                        backgroundColor: Colors.orange,
-                        duration: const Duration(seconds: 4),
-                      ),
-                    );
-                  }
-                } catch (_) {
-                  // Si falla el guardado, restauramos la caché para
-                  // reintentar en el próximo tick de GPS.
-                  _miParaderoCache = paraderoQueDejo;
-                }
-              }
-            }
-          } else if (pos != null) {
-            // Aunque esté offline, igual guardamos la última posición
-            // conocida — la necesitamos para el compartido de pánico.
-            _ultimaPosicionConocida = pos;
+          } catch (e) {
+          } finally {
+            _enviandoUbicacion = false;
           }
 
-          // --- COMPARTIDO DE PÁNICO 24H ---
-          // Si hay un evento de pánico activo y la ventana de 24h no ha
-          // expirado, también actualizamos su ubicación en tiempo real.
-          // Esto corre SIEMPRE, sin importar si el móvil está en línea —
-          // en una emergencia real, la ubicación debe seguir reportándose.
-          if (pos != null &&
-              _eventoPanicoActivoId != null &&
-              _panicoUbicacionExpiraAt != null) {
-            if (DateTime.now().toUtc().isBefore(_panicoUbicacionExpiraAt!)) {
+          // --- EXPULSIÓN AUTOMÁTICA POR GEOCERCA ---
+          // Si estoy registrado en un paradero y me alejo de su zona,
+          // salgo solo de la fila — sin tocar ningún botón. Evita que
+          // alguien se quede "fantasma" ocupando un puesto en la fila
+          // mientras ya está lejos atendiendo otra cosa.
+          if (_miParaderoCache != null &&
+              _kZonasParadero.containsKey(_miParaderoCache)) {
+            final zona = _kZonasParadero[_miParaderoCache]!;
+            final distancia = Geolocator.distanceBetween(
+              pos.latitude,
+              pos.longitude,
+              zona[0],
+              zona[1],
+            );
+            // Margen de 50m extra sobre el radio de entrada — evita
+            // que el GPS oscilando justo en el borde expulse y
+            // re-registre en bucle.
+            if (distancia > zona[2] + 50) {
+              final paraderoQueDejo = _miParaderoCache!;
+              _miParaderoCache = null;
               try {
                 await Supabase.instance.client
-                    .from('eventos_panico')
-                    .update({
-                      'ultima_lat': pos.latitude,
-                      'ultima_lng': pos.longitude,
-                      'ubicacion_actualizada_at': DateTime.now()
-                          .toUtc()
-                          .toIso8601String(),
-                    })
-                    .eq('id', _eventoPanicoActivoId!);
-              } catch (_) {}
-            } else {
-              // La ventana de 24h expiró — dejamos de compartir
-              _eventoPanicoActivoId = null;
-              _panicoUbicacionExpiraAt = null;
+                    .from('usuarios')
+                    .update({'paradero_actual': null, 'ingreso_fila': null}).eq(
+                        'id', widget.usuario['id']);
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        '📍 Saliste del área de $paraderoQueDejo — te '
+                        'sacamos de la fila automáticamente.',
+                      ),
+                      backgroundColor: Colors.orange,
+                      duration: const Duration(seconds: 4),
+                    ),
+                  );
+                }
+              } catch (_) {
+                // Si falla el guardado, restauramos la caché para
+                // reintentar en el próximo tick de GPS.
+                _miParaderoCache = paraderoQueDejo;
+              }
             }
           }
-        },
-        // Auto-reinicio si Android mata el proveedor de ubicación.
-        // En dispositivos Xiaomi/Samsung con batería restringida, el stream
-        // puede morir silenciosamente (sin error visible). Estos handlers
-        // capturan los casos en que SÍ notifica el cierre.
-        onError: (e) {
-          if (mounted && _estaEnLinea && !_reiniciandoGps) {
-            _reiniciandoGps = true;
-            Future.delayed(const Duration(seconds: 3), () {
-              _reiniciandoGps = false;
-              if (mounted && _estaEnLinea) _iniciarRastreoGps();
-            });
+        } else if (pos != null) {
+          // Aunque esté offline, igual guardamos la última posición
+          // conocida — la necesitamos para el compartido de pánico.
+          _ultimaPosicionConocida = pos;
+        }
+
+        // --- COMPARTIDO DE PÁNICO 24H ---
+        // Si hay un evento de pánico activo y la ventana de 24h no ha
+        // expirado, también actualizamos su ubicación en tiempo real.
+        // Esto corre SIEMPRE, sin importar si el móvil está en línea —
+        // en una emergencia real, la ubicación debe seguir reportándose.
+        if (pos != null &&
+            _eventoPanicoActivoId != null &&
+            _panicoUbicacionExpiraAt != null) {
+          if (DateTime.now().toUtc().isBefore(_panicoUbicacionExpiraAt!)) {
+            try {
+              await Supabase.instance.client.from('eventos_panico').update({
+                'ultima_lat': pos.latitude,
+                'ultima_lng': pos.longitude,
+                'ubicacion_actualizada_at':
+                    DateTime.now().toUtc().toIso8601String(),
+              }).eq('id', _eventoPanicoActivoId!);
+            } catch (_) {}
+          } else {
+            // La ventana de 24h expiró — dejamos de compartir
+            _eventoPanicoActivoId = null;
+            _panicoUbicacionExpiraAt = null;
           }
-        },
-        onDone: () {
-          if (mounted && _estaEnLinea && !_reiniciandoGps) {
-            _reiniciandoGps = true;
-            Future.delayed(const Duration(seconds: 3), () {
-              _reiniciandoGps = false;
-              if (mounted && _estaEnLinea) _iniciarRastreoGps();
-            });
-          }
-        },
-        cancelOnError: false,
-        );
+        }
+      },
+      // Auto-reinicio si Android mata el proveedor de ubicación.
+      // En dispositivos Xiaomi/Samsung con batería restringida, el stream
+      // puede morir silenciosamente (sin error visible). Estos handlers
+      // capturan los casos en que SÍ notifica el cierre.
+      onError: (e) {
+        if (mounted && _estaEnLinea && !_reiniciandoGps) {
+          _reiniciandoGps = true;
+          Future.delayed(const Duration(seconds: 3), () {
+            _reiniciandoGps = false;
+            if (mounted && _estaEnLinea) _iniciarRastreoGps();
+          });
+        }
+      },
+      onDone: () {
+        if (mounted && _estaEnLinea && !_reiniciandoGps) {
+          _reiniciandoGps = true;
+          Future.delayed(const Duration(seconds: 3), () {
+            _reiniciandoGps = false;
+            if (mounted && _estaEnLinea) _iniciarRastreoGps();
+          });
+        }
+      },
+      cancelOnError: false,
+    );
   }
 
   Future<void> _intentarRegistroParadero() async {
@@ -2298,16 +2593,13 @@ class _MovilScreenState extends State<MovilScreen>
             .single();
         final bool tieneTicket = perfilActual['ticket_prioridad'] == true;
 
-        await Supabase.instance.client
-            .from('usuarios')
-            .update({
-              'paradero_actual': nuevoParadero,
-              // Con ticket: fecha antigua → queda #1 en el ordenamiento por tiempo
-              'ingreso_fila': tieneTicket
-                  ? '2000-01-01T00:00:00Z'
-                  : DateTime.now().toUtc().toIso8601String(),
-            })
-            .eq('id', widget.usuario['id']);
+        await Supabase.instance.client.from('usuarios').update({
+          'paradero_actual': nuevoParadero,
+          // Con ticket: fecha antigua → queda #1 en el ordenamiento por tiempo
+          'ingreso_fila': tieneTicket
+              ? '2000-01-01T00:00:00Z'
+              : DateTime.now().toUtc().toIso8601String(),
+        }).eq('id', widget.usuario['id']);
         _miParaderoCache = nuevoParadero; // sincroniza la caché de geocerca
 
         // AUTO-CIERRE DE PÁNICO: registrarse en un paradero para seguir
@@ -2361,8 +2653,8 @@ class _MovilScreenState extends State<MovilScreen>
     try {
       await Supabase.instance.client
           .from('usuarios')
-          .update({'paradero_actual': null, 'ingreso_fila': null})
-          .eq('id', widget.usuario['id']);
+          .update({'paradero_actual': null, 'ingreso_fila': null}).eq(
+              'id', widget.usuario['id']);
       _miParaderoCache = null; // sincroniza la caché de geocerca
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2407,7 +2699,8 @@ class _MovilScreenState extends State<MovilScreen>
       double? lng = haciaOrigen
           ? (servicio['origen_lng'] as num?)?.toDouble()
           : (servicio['destino_lng'] as num?)?.toDouble();
-      String textoDireccion = haciaOrigen ? servicio['origen'] : servicio['destino'];
+      String textoDireccion =
+          haciaOrigen ? servicio['origen'] : servicio['destino'];
 
       Uri url;
 
@@ -2426,9 +2719,7 @@ class _MovilScreenState extends State<MovilScreen>
         // Por eso aparecía "Null" incluso cuando debería haber
         // funcionado. Ahora usa coords consistentemente.
         final coords = await MotorRutas.obtenerCoordenadas(textoDireccion);
-        if (coords != null &&
-            coords['lat'] != null &&
-            coords['lng'] != null) {
+        if (coords != null && coords['lat'] != null && coords['lng'] != null) {
           url = Uri.parse(
             'https://www.google.com/maps/dir/?api=1&destination=${coords['lat']},${coords['lng']}&travelmode=driving',
           );
@@ -2479,8 +2770,10 @@ class _MovilScreenState extends State<MovilScreen>
 
           if (est == 'en_ruta_destino' && servicio['picked_up_at'] != null) {
             const int metaDestino = 30;
-            final pickedUpUtc = DateTime.parse(servicio['picked_up_at']).toUtc();
-            final elapsed = DateTime.now().toUtc().difference(pickedUpUtc).inMinutes;
+            final pickedUpUtc =
+                DateTime.parse(servicio['picked_up_at']).toUtc();
+            final elapsed =
+                DateTime.now().toUtc().difference(pickedUpUtc).inMinutes;
             final extension = servicio['extension_minutes'] as int? ?? 0;
             final efectivos = elapsed - extension;
 
@@ -2491,15 +2784,18 @@ class _MovilScreenState extends State<MovilScreen>
               _alertasPrecaucion[id] = true;
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  content: Text('⚠️ Tiempo de entrega casi expirado — Orden #${servicio['numero_movil'] ?? id}.'),
+                  content: Text(
+                      '⚠️ Tiempo de entrega casi expirado — Orden #${servicio['numero_movil'] ?? id}.'),
                   backgroundColor: Colors.orange[800],
                 ));
               }
             }
-          } else if (est == 'en_ruta_origen' && servicio['accepted_at'] != null) {
+          } else if (est == 'en_ruta_origen' &&
+              servicio['accepted_at'] != null) {
             const int metaOrigen = 20;
             final acceptedUtc = DateTime.parse(servicio['accepted_at']).toUtc();
-            final elapsed = DateTime.now().toUtc().difference(acceptedUtc).inMinutes;
+            final elapsed =
+                DateTime.now().toUtc().difference(acceptedUtc).inMinutes;
 
             // Aviso 2 min antes del límite
             if (elapsed >= metaOrigen - 2 &&
@@ -2508,7 +2804,8 @@ class _MovilScreenState extends State<MovilScreen>
               _alertasPrecaucion[id] = true;
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  content: Text('⚠️ Casi en retraso — aún no llegaste a la sede. Orden #${servicio['numero_movil'] ?? id}.'),
+                  content: Text(
+                      '⚠️ Casi en retraso — aún no llegaste a la sede. Orden #${servicio['numero_movil'] ?? id}.'),
                   backgroundColor: Colors.orange[800],
                 ));
               }
@@ -2680,8 +2977,8 @@ class _MovilScreenState extends State<MovilScreen>
         _ultimaPosicionConocida = pos;
         await Supabase.instance.client
             .from('usuarios')
-            .update({'latitud': pos.latitude, 'longitud': pos.longitude})
-            .eq('id', widget.usuario['id']);
+            .update({'latitud': pos.latitude, 'longitud': pos.longitude}).eq(
+                'id', widget.usuario['id']);
         _ultimoEnvioUbicacion = DateTime.now();
       } catch (_) {
         // Si falla (sin red), el próximo tick lo reintenta
@@ -2716,7 +3013,10 @@ class _MovilScreenState extends State<MovilScreen>
       final zona = _kZonasParadero[_miParaderoCache];
       if (zona == null) return;
       final dist = Geolocator.distanceBetween(
-        pos.latitude, pos.longitude, zona[0], zona[1],
+        pos.latitude,
+        pos.longitude,
+        zona[0],
+        zona[1],
       );
       if (dist > zona[2] + 50) {
         final paraderoQueDejo = _miParaderoCache!;
@@ -2724,12 +3024,13 @@ class _MovilScreenState extends State<MovilScreen>
         try {
           await Supabase.instance.client
               .from('usuarios')
-              .update({'paradero_actual': null, 'ingreso_fila': null})
-              .eq('id', widget.usuario['id']);
+              .update({'paradero_actual': null, 'ingreso_fila': null}).eq(
+                  'id', widget.usuario['id']);
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text('📍 Saliste del área de $paraderoQueDejo — te sacamos de la fila.'),
+                content: Text(
+                    '📍 Saliste del área de $paraderoQueDejo — te sacamos de la fila.'),
                 backgroundColor: Colors.orange,
                 duration: const Duration(seconds: 4),
               ),
@@ -2744,8 +3045,8 @@ class _MovilScreenState extends State<MovilScreen>
         try {
           await Supabase.instance.client
               .from('usuarios')
-              .update({'latitud': pos.latitude, 'longitud': pos.longitude})
-              .eq('id', widget.usuario['id']);
+              .update({'latitud': pos.latitude, 'longitud': pos.longitude}).eq(
+                  'id', widget.usuario['id']);
         } catch (_) {}
       }
     } catch (_) {}
@@ -2761,25 +3062,36 @@ class _MovilScreenState extends State<MovilScreen>
     Map<String, dynamic> movilReportado,
     String paradero,
   ) async {
-    final reportadoNombre = (movilReportado['usuario'] ?? movilReportado['nombre'] ?? '').toString().toUpperCase();
+    final reportadoNombre =
+        (movilReportado['usuario'] ?? movilReportado['nombre'] ?? '')
+            .toString()
+            .toUpperCase();
 
     final bool? confirmar = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         backgroundColor: const Color(0xFF1A1A1A),
-        title: const Text('🚩 Reportar ausente', style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)),
+        title: const Text('🚩 Reportar ausente',
+            style:
+                TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)),
         content: Text(
           '¿Reportar que $reportadoNombre no está físicamente en el paradero $paradero?\n\n'
           'El sistema verificará su ubicación actual y actuará en consecuencia.',
-          style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
+          style:
+              const TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('CANCELAR', style: TextStyle(color: Colors.grey))),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child:
+                  const Text('CANCELAR', style: TextStyle(color: Colors.grey))),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.black),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orange, foregroundColor: Colors.black),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('REPORTAR', style: TextStyle(fontWeight: FontWeight.bold)),
+            child: const Text('REPORTAR',
+                style: TextStyle(fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -2799,7 +3111,9 @@ class _MovilScreenState extends State<MovilScreen>
       // Si ya salió del paradero por otra vía, no hacer nada
       if (datosReportado == null || datosReportado['paradero_actual'] == null) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$reportadoNombre ya salió de la fila.'), backgroundColor: Colors.grey),
+          SnackBar(
+              content: Text('$reportadoNombre ya salió de la fila.'),
+              backgroundColor: Colors.grey),
         );
         return;
       }
@@ -2811,20 +3125,22 @@ class _MovilScreenState extends State<MovilScreen>
       bool estaFuera = false;
       if (zona != null && lat != null && lng != null) {
         final dist = Geolocator.distanceBetween(lat, lng, zona[0], zona[1]);
-        estaFuera = dist > zona[2] + 50; // mismo margen que la geocerca automática
+        estaFuera =
+            dist > zona[2] + 50; // mismo margen que la geocerca automática
       }
 
       if (estaFuera) {
         // Sacar automáticamente — no molestar a la central
         await Supabase.instance.client
             .from('usuarios')
-            .update({'paradero_actual': null, 'ingreso_fila': null})
-            .eq('id', movilReportado['id']);
+            .update({'paradero_actual': null, 'ingreso_fila': null}).eq(
+                'id', movilReportado['id']);
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('📍 $reportadoNombre no estaba en $paradero — fue sacado de la fila automáticamente.'),
+              content: Text(
+                  '📍 $reportadoNombre no estaba en $paradero — fue sacado de la fila automáticamente.'),
               backgroundColor: Colors.green[700],
               duration: const Duration(seconds: 4),
             ),
@@ -2832,7 +3148,10 @@ class _MovilScreenState extends State<MovilScreen>
         }
       } else {
         // Está dentro del rango (o sin coordenadas) — avisar a central
-        final reportanteNombre = (widget.usuario['usuario'] ?? widget.usuario['nombre'] ?? '').toString().toUpperCase();
+        final reportanteNombre =
+            (widget.usuario['usuario'] ?? widget.usuario['nombre'] ?? '')
+                .toString()
+                .toUpperCase();
 
         final receptores = await Supabase.instance.client
             .from('usuarios')
@@ -2846,7 +3165,8 @@ class _MovilScreenState extends State<MovilScreen>
           await MotorNotificaciones.dispararRafa(
             idsDestinos: ids,
             titulo: '🚩 Reporte de ausencia en $paradero',
-            mensaje: '$reportanteNombre reporta que $reportadoNombre podría no estar en $paradero. La ubicación registrada lo sitúa dentro del rango.',
+            mensaje:
+                '$reportanteNombre reporta que $reportadoNombre podría no estar en $paradero. La ubicación registrada lo sitúa dentro del rango.',
             urgente: true,
           );
         }
@@ -2854,7 +3174,8 @@ class _MovilScreenState extends State<MovilScreen>
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('⚠️ $reportadoNombre aparece dentro del rango. Se avisó a la central para que verifique.'),
+              content: Text(
+                  '⚠️ $reportadoNombre aparece dentro del rango. Se avisó a la central para que verifique.'),
               backgroundColor: Colors.orange,
               duration: const Duration(seconds: 4),
             ),
@@ -2864,7 +3185,9 @@ class _MovilScreenState extends State<MovilScreen>
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al procesar reporte: $e'), backgroundColor: Colors.red),
+          SnackBar(
+              content: Text('Error al procesar reporte: $e'),
+              backgroundColor: Colors.red),
         );
       }
     }
@@ -2876,7 +3199,8 @@ class _MovilScreenState extends State<MovilScreen>
   Future<void> _abrirSesion() async {
     try {
       final ahora = DateTime.now().toUtc();
-      final fecha = '${ahora.year}-${ahora.month.toString().padLeft(2,'0')}-${ahora.day.toString().padLeft(2,'0')}';
+      final fecha =
+          '${ahora.year}-${ahora.month.toString().padLeft(2, '0')}-${ahora.day.toString().padLeft(2, '0')}';
       final res = await Supabase.instance.client
           .from('sesiones_movil')
           .insert({
@@ -2899,7 +3223,11 @@ class _MovilScreenState extends State<MovilScreen>
   Future<void> _cerrarSesion() async {
     final id = _sesionActivaId;
     if (id == null) return;
-    if (mounted) setState(() { _sesionActivaId = null; _sesionInicioAt = null; });
+    if (mounted)
+      setState(() {
+        _sesionActivaId = null;
+        _sesionInicioAt = null;
+      });
     try {
       final ahora = DateTime.now().toUtc();
       // Recuperamos la hora de conexión para calcular la duración
@@ -2913,13 +3241,10 @@ class _MovilScreenState extends State<MovilScreen>
         final inicio = DateTime.parse(row['conectado_at'].toString()).toUtc();
         duracion = ahora.difference(inicio).inMinutes;
       }
-      await Supabase.instance.client
-          .from('sesiones_movil')
-          .update({
-            'desconectado_at': ahora.toIso8601String(),
-            'duracion_minutos': duracion,
-          })
-          .eq('id', id);
+      await Supabase.instance.client.from('sesiones_movil').update({
+        'desconectado_at': ahora.toIso8601String(),
+        'duracion_minutos': duracion,
+      }).eq('id', id);
     } catch (_) {}
   }
 
@@ -2927,7 +3252,8 @@ class _MovilScreenState extends State<MovilScreen>
   Future<void> _cargarMinutosActivosHoy() async {
     try {
       final hoy = DateTime.now();
-      final fechaHoy = '${hoy.year}-${hoy.month.toString().padLeft(2,'0')}-${hoy.day.toString().padLeft(2,'0')}';
+      final fechaHoy =
+          '${hoy.year}-${hoy.month.toString().padLeft(2, '0')}-${hoy.day.toString().padLeft(2, '0')}';
       final rows = await Supabase.instance.client
           .from('sesiones_movil')
           .select('duracion_minutos')
@@ -2959,8 +3285,8 @@ class _MovilScreenState extends State<MovilScreen>
     try {
       await Supabase.instance.client
           .from('usuarios')
-          .update({'ultimo_ping': DateTime.now().toUtc().toIso8601String()})
-          .eq('id', widget.usuario['id']);
+          .update({'ultimo_ping': DateTime.now().toUtc().toIso8601String()}).eq(
+              'id', widget.usuario['id']);
     } catch (_) {} // silencioso — el cron tiene margen de 2 min
   }
 
@@ -2974,23 +3300,30 @@ class _MovilScreenState extends State<MovilScreen>
           barrierDismissible: false,
           builder: (ctx) => AlertDialog(
             backgroundColor: const Color(0xFF1A1A1A),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
             title: const Text('🚫 No puedes desconectarte',
-                style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 16)),
+                style: TextStyle(
+                    color: Colors.red,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16)),
             content: const Text(
               'Tienes un servicio en curso.\n\n'
               'Finaliza o libera el servicio antes de cerrar tu turno.',
-              style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
+              style:
+                  TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
             ),
             actions: [
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xff3AF500),
                   foregroundColor: Colors.black,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
                 ),
                 onPressed: () => Navigator.pop(ctx),
-                child: const Text('ENTENDIDO', style: TextStyle(fontWeight: FontWeight.bold)),
+                child: const Text('ENTENDIDO',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
               ),
             ],
           ),
@@ -3006,27 +3339,35 @@ class _MovilScreenState extends State<MovilScreen>
           barrierDismissible: false,
           builder: (ctx) => AlertDialog(
             backgroundColor: const Color(0xFF1A1A1A),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
             title: Text('📍 Estás en $paraderoActual',
-                style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 16)),
+                style: const TextStyle(
+                    color: Colors.orange,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16)),
             content: const Text(
               'Si te desconectas saldrás automáticamente de la fila.\n\n'
               '¿Confirmas que quieres desconectarte?',
-              style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
+              style:
+                  TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
             ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('CANCELAR', style: TextStyle(color: Colors.white38)),
+                child: const Text('CANCELAR',
+                    style: TextStyle(color: Colors.white38)),
               ),
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.red[700],
                   foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
                 ),
                 onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('SÍ, SALIR DE LA FILA', style: TextStyle(fontWeight: FontWeight.bold)),
+                child: const Text('SÍ, SALIR DE LA FILA',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
               ),
             ],
           ),
@@ -3068,18 +3409,24 @@ class _MovilScreenState extends State<MovilScreen>
             context: context,
             barrierDismissible: false,
             builder: (ctx) => AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14)),
               backgroundColor: const Color(0xFF1A1A1A),
-              title: const Text('📍 GPS desactivado', style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)),
+              title: const Text('📍 GPS desactivado',
+                  style: TextStyle(
+                      color: Colors.orange, fontWeight: FontWeight.bold)),
               content: const Text(
                 'Para conectarte necesitas tener el GPS del teléfono activado.\n\n'
                 'Ve a Ajustes → Ubicación y actívalo, luego vuelve a intentarlo.',
-                style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.5),
+                style:
+                    TextStyle(color: Colors.white70, fontSize: 14, height: 1.5),
               ),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(ctx),
-                  child: const Text('ENTENDIDO', style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)),
+                  child: const Text('ENTENDIDO',
+                      style: TextStyle(
+                          color: Colors.orange, fontWeight: FontWeight.bold)),
                 ),
               ],
             ),
@@ -3098,28 +3445,36 @@ class _MovilScreenState extends State<MovilScreen>
             context: context,
             barrierDismissible: false,
             builder: (ctx) => AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14)),
               backgroundColor: const Color(0xFF1A1A1A),
-              title: const Text('📍 Permiso de ubicación requerido', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+              title: const Text('📍 Permiso de ubicación requerido',
+                  style: TextStyle(
+                      color: Colors.red, fontWeight: FontWeight.bold)),
               content: const Text(
                 'ServiExpress necesita acceso a tu ubicación para:\n\n'
                 '• Mostrarte en el mapa en tiempo real\n'
                 '• Registrarte y sacarte del paradero automáticamente\n\n'
-                'Ve a Ajustes → Aplicaciones → ServiExpress → Permisos → Ubicación y selecciona "Siempre" o "Solo al usar la app".',
-                style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
+                'Ve a Ajustes → Aplicaciones → ServiExpress → Permisos → Ubicación y selecciona "Permitir Siempre".',
+                style:
+                    TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
               ),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(ctx),
-                  child: const Text('CERRAR', style: TextStyle(color: Colors.grey)),
+                  child: const Text('CERRAR',
+                      style: TextStyle(color: Colors.grey)),
                 ),
                 ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xff3AF500), foregroundColor: Colors.black),
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xff3AF500),
+                      foregroundColor: Colors.black),
                   onPressed: () async {
                     Navigator.pop(ctx);
                     await Geolocator.openAppSettings();
                   },
-                  child: const Text('IR A AJUSTES', style: TextStyle(fontWeight: FontWeight.bold)),
+                  child: const Text('IR A AJUSTES',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
                 ),
               ],
             ),
@@ -3143,7 +3498,8 @@ class _MovilScreenState extends State<MovilScreen>
                 .select('saldo_wallet')
                 .eq('id', widget.usuario['id'])
                 .single();
-            final saldo = (walletData['saldo_wallet'] as num?)?.toDouble() ?? 0.0;
+            final saldo =
+                (walletData['saldo_wallet'] as num?)?.toDouble() ?? 0.0;
             final bloqueado = tipoPlan == 'prediario' ? saldo <= 0 : saldo < 0;
             if (bloqueado && mounted) {
               setState(() => _procesando = false);
@@ -3151,22 +3507,29 @@ class _MovilScreenState extends State<MovilScreen>
               showDialog(
                 context: context,
                 builder: (ctx) => AlertDialog(
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14)),
                   backgroundColor: const Color(0xFF1A1A1A),
                   title: const Text('💳 Wallet insuficiente',
-                      style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 16)),
+                      style: TextStyle(
+                          color: Colors.orange,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16)),
                   content: Text(
                     tipoPlan == 'prediario'
                         ? 'Tu saldo actual es \$${saldo.toStringAsFixed(0)}. Recarga tu wallet antes de conectarte.'
                         : 'Tienes una deuda de \$$deuda del día anterior. Comunícate con central para ponerte al día.',
-                    style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
+                    style: const TextStyle(
+                        color: Colors.white70, fontSize: 13, height: 1.5),
                   ),
                   actions: [
                     ElevatedButton(
                       style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xff3AF500), foregroundColor: Colors.black),
+                          backgroundColor: const Color(0xff3AF500),
+                          foregroundColor: Colors.black),
                       onPressed: () => Navigator.pop(ctx),
-                      child: const Text('ENTENDIDO', style: TextStyle(fontWeight: FontWeight.bold)),
+                      child: const Text('ENTENDIDO',
+                          style: TextStyle(fontWeight: FontWeight.bold)),
                     ),
                   ],
                 ),
@@ -3178,14 +3541,11 @@ class _MovilScreenState extends State<MovilScreen>
       }
       // ─────────────────────────────────────────────────────────────────────
 
-      await Supabase.instance.client
-          .from('usuarios')
-          .update({
-            'en_linea': nuevoEstado,
-            'paradero_actual': null,
-            'ingreso_fila': null,
-          })
-          .eq('id', widget.usuario['id']);
+      await Supabase.instance.client.from('usuarios').update({
+        'en_linea': nuevoEstado,
+        'paradero_actual': null,
+        'ingreso_fila': null,
+      }).eq('id', widget.usuario['id']);
       _miParaderoCache = null; // sincroniza la caché de geocerca
 
       // PARADERO FLASH: al conectarse, refrescamos la lista de usuarios y servicios
@@ -3198,9 +3558,8 @@ class _MovilScreenState extends State<MovilScreen>
             .select()
             .eq('rol', 'movil')
             .then((data) {
-              if (!_ctrlUsuarios.isClosed) _ctrlUsuarios.add(data);
-            })
-            .catchError((_) {});
+          if (!_ctrlUsuarios.isClosed) _ctrlUsuarios.add(data);
+        }).catchError((_) {});
         Supabase.instance.client
             .from('servicios')
             .select()
@@ -3215,7 +3574,8 @@ class _MovilScreenState extends State<MovilScreen>
             .limit(50)
             .then((data) {
               _cacheServicios = List<Map<String, dynamic>>.from(data);
-              if (!_ctrlServicios.isClosed) _ctrlServicios.add(_cacheServicios!);
+              if (!_ctrlServicios.isClosed)
+                _ctrlServicios.add(_cacheServicios!);
             })
             .catchError((_) {});
       }
@@ -3241,12 +3601,12 @@ class _MovilScreenState extends State<MovilScreen>
         } else {
           _detenerHeartbeat(); // ← Opción A
           _detenerHeartbeatUbicacion(); // Fallback GPS
-          _notifReconexionActiva = false; // reset — la notif foreground desaparece al parar el servicio
+          _notifReconexionActiva =
+              false; // reset — la notif foreground desaparece al parar el servicio
           // PÁNICO 24H: si hay una alerta activa dentro de su ventana de
           // 24h, el GPS sigue corriendo aunque el móvil se marque offline.
           // La ubicación de emergencia no se detiene por un toggle de turno.
-          final compartiendoPanico =
-              _eventoPanicoActivoId != null &&
+          final compartiendoPanico = _eventoPanicoActivoId != null &&
               _panicoUbicacionExpiraAt != null &&
               DateTime.now().toUtc().isBefore(_panicoUbicacionExpiraAt!);
 
@@ -3310,24 +3670,23 @@ class _MovilScreenState extends State<MovilScreen>
               DropdownButton<String>(
                 value: motivo,
                 isExpanded: true,
-                items:
-                    [
-                          'Pedido retrasado en cocina / preparación',
-                          'Tráfico pesado / Lluvia',
-                          'Retraso por requisa / retén',
-                          'Dirección compleja',
-                          'Incidente menor',
-                        ]
-                        .map(
-                          (String v) => DropdownMenuItem(
-                            value: v,
-                            child: Text(
-                              v,
-                              style: const TextStyle(fontSize: 13),
-                            ),
-                          ),
-                        )
-                        .toList(),
+                items: [
+                  'Pedido retrasado en cocina / preparación',
+                  'Tráfico pesado / Lluvia',
+                  'Retraso por requisa / retén',
+                  'Dirección compleja',
+                  'Incidente menor',
+                ]
+                    .map(
+                      (String v) => DropdownMenuItem(
+                        value: v,
+                        child: Text(
+                          v,
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                      ),
+                    )
+                    .toList(),
                 onChanged: (val) {
                   if (val != null) setDialogState(() => motivo = val);
                 },
@@ -3353,13 +3712,10 @@ class _MovilScreenState extends State<MovilScreen>
                 final arg = detalle.text.trim().isEmpty
                     ? motivo
                     : '$motivo: ${detalle.text.trim()}';
-                await Supabase.instance.client
-                    .from('servicios')
-                    .update({
-                      'extension_minutes': minutosActuales + 15,
-                      'observacion': 'PRÓRROGA | $arg',
-                    })
-                    .eq('id', servicioId);
+                await Supabase.instance.client.from('servicios').update({
+                  'extension_minutes': minutosActuales + 15,
+                  'observacion': 'PRÓRROGA | $arg',
+                }).eq('id', servicioId);
                 if (context.mounted) Navigator.pop(context);
               },
               child: Text(
@@ -3419,14 +3775,11 @@ class _MovilScreenState extends State<MovilScreen>
 
               // La calificación se recalcula automáticamente al calificar en local_screen
               // (suma += 1.0 para servicios demorados). No se manipula directamente aquí.
-              await Supabase.instance.client
-                  .from('servicios')
-                  .update({
-                    'estado': 'finalizado_por_demora',
-                    'observacion':
-                        'FINALIZADO CON DEMORA | Excusa: ${detalle.text.trim()}',
-                  })
-                  .eq('id', servicioId);
+              await Supabase.instance.client.from('servicios').update({
+                'estado': 'finalizado_por_demora',
+                'observacion':
+                    'FINALIZADO CON DEMORA | Excusa: ${detalle.text.trim()}',
+              }).eq('id', servicioId);
 
               MotorNotificaciones.dispararACentral(
                 titulo: '⚠️ SERVICIO DEMORADO',
@@ -3456,7 +3809,8 @@ class _MovilScreenState extends State<MovilScreen>
       int tiempoCalculado = 15;
 
       if (pos != null) {
-        if (servicio['destino_lat'] != null && servicio['destino_lng'] != null) {
+        if (servicio['destino_lat'] != null &&
+            servicio['destino_lng'] != null) {
           final ruta = await MotorRutas.calcularRuta(
             latOrigen: pos.latitude,
             lngOrigen: pos.longitude,
@@ -3483,14 +3837,11 @@ class _MovilScreenState extends State<MovilScreen>
       }
 
       _sonidos.reproducirSuave(Sonidos.movilConfirmar); // Iniciando ruta
-      await Supabase.instance.client
-          .from('servicios')
-          .update({
-            'estado': 'en_ruta_destino',
-            'picked_up_at': DateTime.now().toUtc().toIso8601String(),
-            'tiempo_estimado_minutos': tiempoCalculado,
-          })
-          .eq('id', servicio['id']);
+      await Supabase.instance.client.from('servicios').update({
+        'estado': 'en_ruta_destino',
+        'picked_up_at': DateTime.now().toUtc().toIso8601String(),
+        'tiempo_estimado_minutos': tiempoCalculado,
+      }).eq('id', servicio['id']);
 
       if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
@@ -3535,11 +3886,13 @@ class _MovilScreenState extends State<MovilScreen>
         showDialog(
           context: context,
           builder: (ctx) => AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             title: const Row(children: [
               Icon(Icons.timer_outlined, color: Colors.orange),
               SizedBox(width: 8),
-              Text('Aún no puedes finalizar', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+              Text('Aún no puedes finalizar',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
             ]),
             content: const Text(
               'Estás dentro del límite de tiempo de entrega.\n\n'
@@ -3550,7 +3903,9 @@ class _MovilScreenState extends State<MovilScreen>
               ElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: Colors.black),
                 onPressed: () => Navigator.pop(ctx),
-                child: const Text('ENTENDIDO', style: TextStyle(color: Color(0xff3AF500), fontWeight: FontWeight.bold)),
+                child: const Text('ENTENDIDO',
+                    style: TextStyle(
+                        color: Color(0xff3AF500), fontWeight: FontWeight.bold)),
               ),
             ],
           ),
@@ -3566,12 +3921,9 @@ class _MovilScreenState extends State<MovilScreen>
     try {
       // Sonido disparado en onCompletado del BotonPresionSostenida
 
-      await Supabase.instance.client
-          .from('servicios')
-          .update({
-            'estado': tieneProblema ? 'finalizado_con_problema' : 'finalizado',
-          })
-          .eq('id', servicioId);
+      await Supabase.instance.client.from('servicios').update({
+        'estado': tieneProblema ? 'finalizado_con_problema' : 'finalizado',
+      }).eq('id', servicioId);
 
       // Aprendizaje silencioso del directorio — solo en cierres
       // limpios. Un "finalizado_con_problema" no representa una
@@ -3584,8 +3936,10 @@ class _MovilScreenState extends State<MovilScreen>
         );
       }
 
-      // ── FN completado: +0.1 a puntuación ─────────────────────────────
-      if (!tieneProblema && servicio['tipo_fn'] == true) {
+      // ── Servicio completado: +0.1 a puntuación (SE y FN) ────────────
+      // Aplica a cualquier servicio finalizado sin problema, sin importar
+      // si fue creado por central, local, sede, cliente o invitado.
+      if (!tieneProblema) {
         try {
           final md = await Supabase.instance.client
               .from('usuarios')
@@ -3593,10 +3947,9 @@ class _MovilScreenState extends State<MovilScreen>
               .eq('id', widget.usuario['id'])
               .single();
           final double curr = (md['puntuacion'] as num?)?.toDouble() ?? 5.0;
-          await Supabase.instance.client
-              .from('usuarios')
-              .update({'puntuacion': double.parse((curr + 0.1).toStringAsFixed(2))})
-              .eq('id', widget.usuario['id']);
+          await Supabase.instance.client.from('usuarios').update({
+            'puntuacion': double.parse((curr + 0.1).toStringAsFixed(2))
+          }).eq('id', widget.usuario['id']);
         } catch (_) {}
       }
 
@@ -3614,8 +3967,7 @@ class _MovilScreenState extends State<MovilScreen>
       if (!tieneProblema && servicio['es_punto_a_punto'] == true) {
         await Supabase.instance.client
             .from('usuarios')
-            .update({'ticket_prioridad': true})
-            .eq('id', widget.usuario['id']);
+            .update({'ticket_prioridad': true}).eq('id', widget.usuario['id']);
         if (mounted)
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -3642,25 +3994,31 @@ class _MovilScreenState extends State<MovilScreen>
               .limit(1);
           if (siguientes.isNotEmpty && mounted) {
             final sig = siguientes.first;
-            final sigOrden = (sig['multi_ruta_orden'] as int?) ?? (ordenActual + 1);
+            final sigOrden =
+                (sig['multi_ruta_orden'] as int?) ?? (ordenActual + 1);
             showDialog(
               context: context,
               barrierDismissible: false,
               builder: (dialogCtx) => AlertDialog(
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
                 title: Row(children: [
                   Icon(Icons.route_rounded, color: Colors.indigo[700]),
                   const SizedBox(width: 8),
-                  const Text('Siguiente parada', style: TextStyle(fontSize: 16)),
+                  const Text('Siguiente parada',
+                      style: TextStyle(fontSize: 16)),
                 ]),
-                content: Column(mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Parada #$sigOrden de tu ruta multi-pedido:',
-                      style: const TextStyle(fontSize: 12, color: Colors.black54)),
-                  const SizedBox(height: 6),
-                  Text('${sig["origen"] ?? "?"} ➔ ${sig["destino"] ?? "?"}',
-                      style: const TextStyle(fontWeight: FontWeight.bold)),
-                ]),
+                content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Parada #$sigOrden de tu ruta multi-pedido:',
+                          style: const TextStyle(
+                              fontSize: 12, color: Colors.black54)),
+                      const SizedBox(height: 6),
+                      Text('${sig["origen"] ?? "?"} ➔ ${sig["destino"] ?? "?"}',
+                          style: const TextStyle(fontWeight: FontWeight.bold)),
+                    ]),
                 actions: [
                   TextButton(
                     onPressed: () => Navigator.pop(dialogCtx),
@@ -3697,24 +4055,23 @@ class _MovilScreenState extends State<MovilScreen>
               DropdownButton<String>(
                 value: opcion,
                 isExpanded: true,
-                items:
-                    [
-                          'Pinchado / Avería Mecánica',
-                          'Accidente / Tránsito',
-                          'Cliente no responde',
-                          'Dirección Errada',
-                          'Otro',
-                        ]
-                        .map(
-                          (String v) => DropdownMenuItem(
-                            value: v,
-                            child: Text(
-                              v,
-                              style: const TextStyle(fontSize: 14),
-                            ),
-                          ),
-                        )
-                        .toList(),
+                items: [
+                  'Pinchado / Avería Mecánica',
+                  'Accidente / Tránsito',
+                  'Cliente no responde',
+                  'Dirección Errada',
+                  'Otro',
+                ]
+                    .map(
+                      (String v) => DropdownMenuItem(
+                        value: v,
+                        child: Text(
+                          v,
+                          style: const TextStyle(fontSize: 14),
+                        ),
+                      ),
+                    )
+                    .toList(),
                 onChanged: (val) {
                   if (val != null) setDialogState(() => opcion = val);
                 },
@@ -3740,8 +4097,8 @@ class _MovilScreenState extends State<MovilScreen>
                     : '$opcion: ${detalle.text.trim()}';
                 await Supabase.instance.client
                     .from('servicios')
-                    .update({'estado': 'problema', 'observacion': text})
-                    .eq('id', servicioId);
+                    .update({'estado': 'problema', 'observacion': text}).eq(
+                        'id', servicioId);
                 if (context.mounted) Navigator.pop(context);
               },
               child: Text(
@@ -3782,15 +4139,12 @@ class _MovilScreenState extends State<MovilScreen>
   // (próximamente), y las acciones de cuenta que antes vivían
   // amontonadas en el AppBar (Ranking, Cerrar sesión).
   Widget _construirPerfilTab() {
-    return StreamBuilder<List<Map<String, dynamic>>>(
-      stream: _streamUsuarios,
+    return StreamBuilder<Map<String, dynamic>?>(
+      // OPT: solo mi propia fila — no se reconstruye por GPS de otros.
+      stream: _streamMiPerfil,
       builder: (context, snap) {
-        final miPerfil = snap.hasData
-            ? snap.data!.firstWhere(
-                (u) => u['id'] == widget.usuario['id'],
-                orElse: () => widget.usuario,
-              )
-            : widget.usuario;
+        final miPerfil =
+            snap.data ?? _cacheMiPerfil ?? widget.usuario;
 
         final String rango =
             miPerfil['rango_movil']?.toString().toUpperCase() ?? 'NOVATO';
@@ -3856,15 +4210,14 @@ class _MovilScreenState extends State<MovilScreen>
                             backgroundColor: colorRango,
                             backgroundImage:
                                 (miPerfil['foto_perfil_url'] != null &&
-                                    miPerfil['foto_perfil_url']
-                                        .toString()
-                                        .isNotEmpty)
-                                ? NetworkImage(
-                                    miPerfil['foto_perfil_url'].toString(),
-                                  )
-                                : null,
-                            child:
-                                (miPerfil['foto_perfil_url'] == null ||
+                                        miPerfil['foto_perfil_url']
+                                            .toString()
+                                            .isNotEmpty)
+                                    ? NetworkImage(
+                                        miPerfil['foto_perfil_url'].toString(),
+                                      )
+                                    : null,
+                            child: (miPerfil['foto_perfil_url'] == null ||
                                     miPerfil['foto_perfil_url']
                                         .toString()
                                         .isEmpty)
@@ -3974,16 +4327,20 @@ class _MovilScreenState extends State<MovilScreen>
                         if (miPerfil['tiene_fn'] == true) ...[
                           const SizedBox(width: 8),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 6),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF002DA2).withValues(alpha: 0.20),
+                              color: const Color(0xFF002DA2)
+                                  .withValues(alpha: 0.20),
                               borderRadius: BorderRadius.circular(20),
-                              border: Border.all(color: const Color(0xFF3949AB), width: 1.5),
+                              border: Border.all(
+                                  color: const Color(0xFF3949AB), width: 1.5),
                             ),
                             child: const Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(Icons.local_pharmacy, size: 10, color: Color(0xFF7986CB)),
+                                Icon(Icons.local_pharmacy,
+                                    size: 10, color: Color(0xFF7986CB)),
                                 SizedBox(width: 4),
                                 Text(
                                   'FN',
@@ -4026,6 +4383,7 @@ class _MovilScreenState extends State<MovilScreen>
                     }
                     return buf.toString();
                   }
+
                   return Container(
                     margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                     decoration: BoxDecoration(
@@ -4107,11 +4465,15 @@ class _MovilScreenState extends State<MovilScreen>
               // ── WALLET (solo prediario / postdia) ─────────────────────────
               Builder(builder: (_) {
                 final tipoPlan = miPerfil['tipo_plan_movil']?.toString() ?? '';
-                if (tipoPlan != 'prediario' && tipoPlan != 'postdia') return const SizedBox.shrink();
-                final saldo = (miPerfil['saldo_wallet'] as num?)?.toDouble() ?? 0.0;
+                if (tipoPlan != 'prediario' && tipoPlan != 'postdia')
+                  return const SizedBox.shrink();
+                final saldo =
+                    (miPerfil['saldo_wallet'] as num?)?.toDouble() ?? 0.0;
                 final positivo = tipoPlan == 'postdia' ? saldo >= 0 : saldo > 0;
-                final colorSaldo = positivo ? const Color(0xFF22C55E) : Colors.redAccent;
-                final planLabel = tipoPlan == 'prediario' ? 'PREDIARIO' : 'POSTDIA';
+                final colorSaldo =
+                    positivo ? const Color(0xFF22C55E) : Colors.redAccent;
+                final planLabel =
+                    tipoPlan == 'prediario' ? 'PREDIARIO' : 'POSTDIA';
                 return FutureBuilder<List<dynamic>>(
                   future: Supabase.instance.client
                       .from('solicitudes_recarga_wallet')
@@ -4121,11 +4483,13 @@ class _MovilScreenState extends State<MovilScreen>
                       .order('created_at', ascending: false)
                       .limit(1),
                   builder: (_, snapRec) {
-                    final pendiente = snapRec.hasData && snapRec.data!.isNotEmpty
-                        ? snapRec.data!.first as Map<String, dynamic>
-                        : null;
+                    final pendiente =
+                        snapRec.hasData && snapRec.data!.isNotEmpty
+                            ? snapRec.data!.first as Map<String, dynamic>
+                            : null;
                     final montoPend = pendiente != null
-                        ? (pendiente['monto_solicitado'] as num?)?.toDouble() ?? 0.0
+                        ? (pendiente['monto_solicitado'] as num?)?.toDouble() ??
+                            0.0
                         : 0.0;
 
                     return Container(
@@ -4134,100 +4498,148 @@ class _MovilScreenState extends State<MovilScreen>
                         color: Colors.black,
                         borderRadius: BorderRadius.circular(14),
                         border: Border.all(
-                          color: positivo ? const Color(0xFF22C55E).withValues(alpha: 0.4) : Colors.redAccent.withValues(alpha: 0.5),
+                          color: positivo
+                              ? const Color(0xFF22C55E).withValues(alpha: 0.4)
+                              : Colors.redAccent.withValues(alpha: 0.5),
                         ),
                       ),
                       child: Padding(
                         padding: const EdgeInsets.all(16),
-                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Row(children: [
-                            const Icon(Icons.account_balance_wallet_rounded, color: Colors.white54, size: 16),
-                            const SizedBox(width: 8),
-                            Text('MI WALLET · $planLabel',
-                                style: const TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
-                            const Spacer(),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: positivo ? const Color(0xFF22C55E).withValues(alpha: 0.15) : Colors.red.withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(20),
+                        child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(children: [
+                                const Icon(Icons.account_balance_wallet_rounded,
+                                    color: Colors.white54, size: 16),
+                                const SizedBox(width: 8),
+                                Text('MI WALLET · $planLabel',
+                                    style: const TextStyle(
+                                        color: Colors.white54,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                        letterSpacing: 1)),
+                                const Spacer(),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: positivo
+                                        ? const Color(0xFF22C55E)
+                                            .withValues(alpha: 0.15)
+                                        : Colors.red.withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: Text(positivo ? 'AL DÍA' : 'DEUDA',
+                                      style: TextStyle(
+                                          color: colorSaldo,
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.bold,
+                                          letterSpacing: 0.8)),
+                                ),
+                              ]),
+                              const SizedBox(height: 12),
+                              Text(
+                                '\$${saldo.toStringAsFixed(0).replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]}.')}',
+                                style: TextStyle(
+                                    color: colorSaldo,
+                                    fontSize: 28,
+                                    fontWeight: FontWeight.bold),
                               ),
-                              child: Text(positivo ? 'AL DÍA' : 'DEUDA',
-                                  style: TextStyle(color: colorSaldo, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.8)),
-                            ),
-                          ]),
-                          const SizedBox(height: 12),
-                          Text(
-                            '\$${saldo.toStringAsFixed(0).replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]}.')}',
-                            style: TextStyle(color: colorSaldo, fontSize: 28, fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            tipoPlan == 'prediario'
-                                ? 'Saldo disponible para trabajar hoy'
-                                : saldo < 0
-                                    ? 'Deuda pendiente — comunícate con central'
-                                    : 'Sin deuda — puedes conectarte hoy',
-                            style: const TextStyle(color: Colors.white38, fontSize: 11),
-                          ),
-                          // Banner de recarga en verificación
-                          if (pendiente != null) ...[
-                            const SizedBox(height: 10),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                              decoration: BoxDecoration(
-                                color: Colors.amber[900]!.withValues(alpha: 0.2),
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: Colors.amber[700]!.withValues(alpha: 0.5)),
+                              const SizedBox(height: 4),
+                              Text(
+                                tipoPlan == 'prediario'
+                                    ? 'Saldo disponible para trabajar hoy'
+                                    : saldo < 0
+                                        ? 'Deuda pendiente — comunícate con central'
+                                        : 'Sin deuda — puedes conectarte hoy',
+                                style: const TextStyle(
+                                    color: Colors.white38, fontSize: 11),
                               ),
-                              child: Row(children: [
-                                const SizedBox(
-                                  width: 14, height: 14,
-                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.amber),
+                              // Banner de recarga en verificación
+                              if (pendiente != null) ...[
+                                const SizedBox(height: 10),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: Colors.amber[900]!
+                                        .withValues(alpha: 0.2),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                        color: Colors.amber[700]!
+                                            .withValues(alpha: 0.5)),
+                                  ),
+                                  child: Row(children: [
+                                    const SizedBox(
+                                      width: 14,
+                                      height: 14,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2, color: Colors.amber),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                        child: Text(
+                                      'Recarga de \$${montoPend.toStringAsFixed(0)} en verificación...',
+                                      style: const TextStyle(
+                                          color: Colors.amber,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600),
+                                    )),
+                                  ]),
+                                ),
+                              ],
+                              const SizedBox(height: 14),
+                              Row(children: [
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    icon: const Icon(Icons.history_rounded,
+                                        size: 13),
+                                    label: const Text('Historial',
+                                        style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.bold)),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: Colors.white70,
+                                      side: const BorderSide(
+                                          color: Colors.white24),
+                                      padding: const EdgeInsets.symmetric(
+                                          vertical: 8),
+                                      shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(8)),
+                                    ),
+                                    onPressed: () =>
+                                        _mostrarHistorialWallet(miPerfil['id']),
+                                  ),
                                 ),
                                 const SizedBox(width: 10),
-                                Expanded(child: Text(
-                                  'Recarga de \$${montoPend.toStringAsFixed(0)} en verificación...',
-                                  style: const TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.w600),
-                                )),
+                                Expanded(
+                                  child: ElevatedButton.icon(
+                                    icon: const Icon(Icons.add_card_rounded,
+                                        size: 13),
+                                    label: const Text('Recargar',
+                                        style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.bold)),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: pendiente != null
+                                          ? Colors.grey[700]
+                                          : const Color(0xFF818CF8),
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(
+                                          vertical: 8),
+                                      shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(8)),
+                                    ),
+                                    onPressed: pendiente != null
+                                        ? null
+                                        : () => _solicitarRecargaWallet(
+                                            miPerfil['id'], tipoPlan),
+                                  ),
+                                ),
                               ]),
-                            ),
-                          ],
-                          const SizedBox(height: 14),
-                          Row(children: [
-                            Expanded(
-                              child: OutlinedButton.icon(
-                                icon: const Icon(Icons.history_rounded, size: 13),
-                                label: const Text('Historial', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: Colors.white70,
-                                  side: const BorderSide(color: Colors.white24),
-                                  padding: const EdgeInsets.symmetric(vertical: 8),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                ),
-                                onPressed: () => _mostrarHistorialWallet(miPerfil['id']),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: ElevatedButton.icon(
-                                icon: const Icon(Icons.add_card_rounded, size: 13),
-                                label: const Text('Recargar', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: pendiente != null
-                                      ? Colors.grey[700]
-                                      : const Color(0xFF818CF8),
-                                  foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(vertical: 8),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                ),
-                                onPressed: pendiente != null
-                                    ? null
-                                    : () => _solicitarRecargaWallet(miPerfil['id'], tipoPlan),
-                              ),
-                            ),
-                          ]),
-                        ]),
+                            ]),
                       ),
                     );
                   },
@@ -4239,9 +4651,9 @@ class _MovilScreenState extends State<MovilScreen>
               // Serviexpress (no-FN) y FN se muestran separados.
               Builder(builder: (_) {
                 // Cuentas no-FN = total - FN
-                final srvHoyNoFn  = _serviciosHoy  - _serviciosFnHoy;
+                final srvHoyNoFn = _serviciosHoy - _serviciosFnHoy;
                 final srvTotalNoFn = _serviciosTotal - _serviciosFnTotal;
-                final prodHoyNoFn  = _producidoHoy  - _producidoFnHoy;
+                final prodHoyNoFn = _producidoHoy - _producidoFnHoy;
                 final tieneFn = miPerfil['tiene_fn'] == true;
 
                 return Column(children: [
@@ -4258,10 +4670,15 @@ class _MovilScreenState extends State<MovilScreen>
                       Padding(
                         padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
                         child: Row(children: [
-                          Icon(Icons.motorcycle, size: 14, color: Colors.black54),
+                          Icon(Icons.motorcycle,
+                              size: 14, color: Colors.black54),
                           const SizedBox(width: 6),
                           const Text('SERVIEXPRESS',
-                              style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.black45, letterSpacing: 0.8)),
+                              style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black45,
+                                  letterSpacing: 0.8)),
                         ]),
                       ),
                       // Hoy
@@ -4270,13 +4687,21 @@ class _MovilScreenState extends State<MovilScreen>
                         child: Row(children: [
                           Icon(Icons.today, size: 16, color: Colors.grey[500]),
                           const SizedBox(width: 8),
-                          Text('Hoy', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                          Text('Hoy',
+                              style: TextStyle(
+                                  fontSize: 12, color: Colors.grey[600])),
                           const SizedBox(width: 8),
                           Text('$srvHoyNoFn',
-                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black87)),
+                              style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black87)),
                           const Spacer(),
                           Text(_formatearMoneda(prodHoyNoFn, mostrarCero: true),
-                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.green[700])),
+                              style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.green[700])),
                         ]),
                       ),
                       Divider(height: 1, color: Colors.grey[100]),
@@ -4284,16 +4709,25 @@ class _MovilScreenState extends State<MovilScreen>
                       Padding(
                         padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
                         child: Row(children: [
-                          Icon(Icons.check_circle_outline, size: 16, color: Colors.grey[500]),
+                          Icon(Icons.check_circle_outline,
+                              size: 16, color: Colors.grey[500]),
                           const SizedBox(width: 8),
-                          Text('Total', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                          Text('Total',
+                              style: TextStyle(
+                                  fontSize: 12, color: Colors.grey[600])),
                           const SizedBox(width: 8),
                           Text('$srvTotalNoFn',
-                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black87)),
+                              style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black87)),
                           const Spacer(),
                           Text(
-                            _formatearMoneda(_producidoTotal - _producidoFnTotal, mostrarCero: true),
-                            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                            _formatearMoneda(
+                                _producidoTotal - _producidoFnTotal,
+                                mostrarCero: true),
+                            style: TextStyle(
+                                fontSize: 12, color: Colors.grey[600]),
                           ),
                         ]),
                       ),
@@ -4302,9 +4736,12 @@ class _MovilScreenState extends State<MovilScreen>
                       Padding(
                         padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
                         child: Row(children: [
-                          Icon(Icons.access_time_outlined, size: 16, color: Colors.grey[500]),
+                          Icon(Icons.access_time_outlined,
+                              size: 16, color: Colors.grey[500]),
                           const SizedBox(width: 8),
-                          Text('Activo hoy', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                          Text('Activo hoy',
+                              style: TextStyle(
+                                  fontSize: 12, color: Colors.grey[600])),
                           const Spacer(),
                           Builder(builder: (_) {
                             final mins = _minutosActivosHoyTotal;
@@ -4319,14 +4756,19 @@ class _MovilScreenState extends State<MovilScreen>
                                 style: TextStyle(
                                   fontSize: 13,
                                   fontWeight: FontWeight.bold,
-                                  color: _estaEnLinea ? Colors.green[700] : Colors.black87,
+                                  color: _estaEnLinea
+                                      ? Colors.green[700]
+                                      : Colors.black87,
                                 ));
                           }),
                           if (_estaEnLinea) ...[
                             const SizedBox(width: 4),
                             Container(
-                              width: 6, height: 6,
-                              decoration: BoxDecoration(color: Colors.green[600], shape: BoxShape.circle),
+                              width: 6,
+                              height: 6,
+                              decoration: BoxDecoration(
+                                  color: Colors.green[600],
+                                  shape: BoxShape.circle),
                             ),
                           ],
                         ]),
@@ -4341,22 +4783,37 @@ class _MovilScreenState extends State<MovilScreen>
                       decoration: BoxDecoration(
                         color: const Color(0xFF002DA2).withValues(alpha: 0.04),
                         borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: const Color(0xFF3949AB).withValues(alpha: 0.5)),
+                        border: Border.all(
+                            color:
+                                const Color(0xFF3949AB).withValues(alpha: 0.5)),
                       ),
                       child: Column(children: [
                         // Cabecera
                         Padding(
                           padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
                           child: Row(children: [
-                            const Icon(Icons.local_pharmacy, size: 14, color: Color(0xFF3949AB)),
+                            const Icon(Icons.local_pharmacy,
+                                size: 14, color: Color(0xFF3949AB)),
                             const SizedBox(width: 6),
                             const Text('FARMANORTE',
-                                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF3949AB), letterSpacing: 0.8)),
+                                style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFF3949AB),
+                                    letterSpacing: 0.8)),
                             const Spacer(),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(color: const Color(0xFF002DA2), borderRadius: BorderRadius.circular(8)),
-                              child: const Text('FN', style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold, letterSpacing: 0.8)),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                  color: const Color(0xFF002DA2),
+                                  borderRadius: BorderRadius.circular(8)),
+                              child: const Text('FN',
+                                  style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 8,
+                                      fontWeight: FontWeight.bold,
+                                      letterSpacing: 0.8)),
                             ),
                           ]),
                         ),
@@ -4364,31 +4821,56 @@ class _MovilScreenState extends State<MovilScreen>
                         Padding(
                           padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
                           child: Row(children: [
-                            const Icon(Icons.today, size: 16, color: Color(0xFF5C6BC0)),
+                            const Icon(Icons.today,
+                                size: 16, color: Color(0xFF5C6BC0)),
                             const SizedBox(width: 8),
-                            const Text('Hoy', style: TextStyle(fontSize: 12, color: Color(0xFF5C6BC0))),
+                            const Text('Hoy',
+                                style: TextStyle(
+                                    fontSize: 12, color: Color(0xFF5C6BC0))),
                             const SizedBox(width: 8),
                             Text('$_serviciosFnHoy',
-                                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF002DA2))),
+                                style: const TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFF002DA2))),
                             const Spacer(),
-                            Text(_formatearMoneda(_producidoFnHoy, mostrarCero: true),
-                                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF1565C0))),
+                            Text(
+                                _formatearMoneda(_producidoFnHoy,
+                                    mostrarCero: true),
+                                style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFF1565C0))),
                           ]),
                         ),
-                        Divider(height: 1, color: const Color(0xFF3949AB).withValues(alpha: 0.15)),
+                        Divider(
+                            height: 1,
+                            color: const Color(0xFF3949AB)
+                                .withValues(alpha: 0.15)),
                         // Total FN
                         Padding(
                           padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
                           child: Row(children: [
-                            const Icon(Icons.check_circle_outline, size: 16, color: Color(0xFF5C6BC0)),
+                            const Icon(Icons.check_circle_outline,
+                                size: 16, color: Color(0xFF5C6BC0)),
                             const SizedBox(width: 8),
-                            const Text('Total FN', style: TextStyle(fontSize: 12, color: Color(0xFF5C6BC0))),
+                            const Text('Total FN',
+                                style: TextStyle(
+                                    fontSize: 12, color: Color(0xFF5C6BC0))),
                             const SizedBox(width: 8),
                             Text('$_serviciosFnTotal',
-                                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF002DA2))),
+                                style: const TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFF002DA2))),
                             const Spacer(),
-                            Text(_formatearMoneda(_producidoFnTotal, mostrarCero: true),
-                                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF1565C0))),
+                            Text(
+                                _formatearMoneda(_producidoFnTotal,
+                                    mostrarCero: true),
+                                style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFF1565C0))),
                           ]),
                         ),
                       ]),
@@ -4407,13 +4889,37 @@ class _MovilScreenState extends State<MovilScreen>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Container(
-                          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
-                          decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(6)),
+                          padding: const EdgeInsets.symmetric(
+                              vertical: 6, horizontal: 8),
+                          decoration: BoxDecoration(
+                              color: Colors.grey[100],
+                              borderRadius: BorderRadius.circular(6)),
                           child: const Row(
                             children: [
-                              Expanded(flex: 4, child: Text('Rango', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.black45, letterSpacing: 0.4))),
-                              Expanded(flex: 3, child: Text('Cal.', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.black45, letterSpacing: 0.4))),
-                              Expanded(flex: 3, child: Text('Cupo', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.black45, letterSpacing: 0.4))),
+                              Expanded(
+                                  flex: 4,
+                                  child: Text('Rango',
+                                      style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.black45,
+                                          letterSpacing: 0.4))),
+                              Expanded(
+                                  flex: 3,
+                                  child: Text('Cal.',
+                                      style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.black45,
+                                          letterSpacing: 0.4))),
+                              Expanded(
+                                  flex: 3,
+                                  child: Text('Cupo',
+                                      style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.black45,
+                                          letterSpacing: 0.4))),
                             ],
                           ),
                         ),
@@ -4421,13 +4927,43 @@ class _MovilScreenState extends State<MovilScreen>
                         ...() {
                           final esMasterLocal = rango == 'MASTER';
                           final rangosData = [
-                            {'nombre': 'NOVATO',  'cal': '3.0–3.5', 'cupo': '1 servicio',      'vip': false, 'color': Colors.grey[600]!},
-                            {'nombre': 'PRO',     'cal': '3.6–4.2', 'cupo': '1 servicio',      'vip': false, 'color': const Color(0xFF4CAF50)},
-                            {'nombre': 'ELITE',   'cal': '4.3–4.7', 'cupo': '2 servicio',      'vip': false, 'color': const Color(0xFF2196F3)},
-                            {'nombre': 'LEYENDA', 'cal': '4.8–5.0', 'cupo': '3 servicio',      'vip': true,  'color': const Color(0xFFFF9800)},
+                            {
+                              'nombre': 'NOVATO',
+                              'cal': '3.0–3.5',
+                              'cupo': '1 servicio',
+                              'vip': false,
+                              'color': Colors.grey[600]!
+                            },
+                            {
+                              'nombre': 'PRO',
+                              'cal': '3.6–4.2',
+                              'cupo': '1 servicio',
+                              'vip': false,
+                              'color': const Color(0xFF4CAF50)
+                            },
+                            {
+                              'nombre': 'ELITE',
+                              'cal': '4.3–4.7',
+                              'cupo': '2 servicio',
+                              'vip': false,
+                              'color': const Color(0xFF2196F3)
+                            },
+                            {
+                              'nombre': 'LEYENDA',
+                              'cal': '4.8–5.0',
+                              'cupo': '3 servicio',
+                              'vip': true,
+                              'color': const Color(0xFFFF9800)
+                            },
                             // MASTER: solo visible si el propio usuario es Master
                             if (esMasterLocal)
-                              {'nombre': 'MASTER', 'cal': '5.0+', 'cupo': 'Sin límite', 'vip': true, 'color': const Color(0xFFE040FB)},
+                              {
+                                'nombre': 'MASTER',
+                                'cal': '5.0+',
+                                'cupo': 'Sin límite',
+                                'vip': true,
+                                'color': const Color(0xFFE040FB)
+                              },
                           ];
                           return rangosData.map<Widget>((r) {
                             final esActual = rango == r['nombre'] as String;
@@ -4435,24 +4971,69 @@ class _MovilScreenState extends State<MovilScreen>
                             final bool esVip = r['vip'] as bool;
                             return Container(
                               margin: const EdgeInsets.only(bottom: 4),
-                              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: 8, horizontal: 8),
                               decoration: BoxDecoration(
-                                color: esActual ? c.withValues(alpha: 0.08) : null,
+                                color:
+                                    esActual ? c.withValues(alpha: 0.08) : null,
                                 borderRadius: BorderRadius.circular(8),
-                                border: esActual ? Border.all(color: c.withValues(alpha: 0.5), width: 1.5) : null,
+                                border: esActual
+                                    ? Border.all(
+                                        color: c.withValues(alpha: 0.5),
+                                        width: 1.5)
+                                    : null,
                               ),
                               child: Row(
                                 children: [
-                                  Expanded(flex: 4, child: Row(children: [
-                                    Container(width: 8, height: 8, decoration: BoxDecoration(color: c, shape: BoxShape.circle)),
-                                    const SizedBox(width: 5),
-                                    Flexible(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                      Text(r['nombre'] as String, style: TextStyle(fontSize: 11, fontWeight: esActual ? FontWeight.bold : FontWeight.normal, color: esActual ? c : Colors.black87)),
-                                      if (esVip) Text('👑 VIP', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: c)),
-                                    ])),
-                                  ])),
-                                  Expanded(flex: 3, child: Text(r['cal'] as String, style: TextStyle(fontSize: 11, color: esActual ? c : Colors.black54, fontWeight: esActual ? FontWeight.bold : FontWeight.normal))),
-                                  Expanded(flex: 3, child: Text(r['cupo'] as String, style: const TextStyle(fontSize: 11, color: Colors.black54))),
+                                  Expanded(
+                                      flex: 4,
+                                      child: Row(children: [
+                                        Container(
+                                            width: 8,
+                                            height: 8,
+                                            decoration: BoxDecoration(
+                                                color: c,
+                                                shape: BoxShape.circle)),
+                                        const SizedBox(width: 5),
+                                        Flexible(
+                                            child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                              Text(r['nombre'] as String,
+                                                  style: TextStyle(
+                                                      fontSize: 11,
+                                                      fontWeight: esActual
+                                                          ? FontWeight.bold
+                                                          : FontWeight.normal,
+                                                      color: esActual
+                                                          ? c
+                                                          : Colors.black87)),
+                                              if (esVip)
+                                                Text('👑 VIP',
+                                                    style: TextStyle(
+                                                        fontSize: 9,
+                                                        fontWeight:
+                                                            FontWeight.bold,
+                                                        color: c)),
+                                            ])),
+                                      ])),
+                                  Expanded(
+                                      flex: 3,
+                                      child: Text(r['cal'] as String,
+                                          style: TextStyle(
+                                              fontSize: 11,
+                                              color:
+                                                  esActual ? c : Colors.black54,
+                                              fontWeight: esActual
+                                                  ? FontWeight.bold
+                                                  : FontWeight.normal))),
+                                  Expanded(
+                                      flex: 3,
+                                      child: Text(r['cupo'] as String,
+                                          style: const TextStyle(
+                                              fontSize: 11,
+                                              color: Colors.black54))),
                                 ],
                               ),
                             );
@@ -4460,16 +5041,25 @@ class _MovilScreenState extends State<MovilScreen>
                         }(),
                         const SizedBox(height: 8),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 7),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFFF9800).withValues(alpha: 0.08),
+                            color:
+                                const Color(0xFFFF9800).withValues(alpha: 0.08),
                             borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: const Color(0xFFFF9800).withValues(alpha: 0.3)),
+                            border: Border.all(
+                                color: const Color(0xFFFF9800)
+                                    .withValues(alpha: 0.3)),
                           ),
                           child: const Row(children: [
                             Text('👑', style: TextStyle(fontSize: 13)),
                             SizedBox(width: 6),
-                            Expanded(child: Text('Leyenda recibe servicios VIP exclusivos con +\$3.000 de tarifa.', style: TextStyle(fontSize: 10, color: Color(0xFF8a5c00)))),
+                            Expanded(
+                                child: Text(
+                                    'Leyenda recibe servicios VIP exclusivos con +\$3.000 de tarifa.',
+                                    style: TextStyle(
+                                        fontSize: 10,
+                                        color: Color(0xFF8a5c00)))),
                           ]),
                         ),
                       ],
@@ -4481,107 +5071,126 @@ class _MovilScreenState extends State<MovilScreen>
               // 3. CONTACTO Y PAGO — desplegable
               Builder(
                 builder: (bCtx) => Container(
-                margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: Colors.grey[200]!),
-                ),
-                child: Theme(
-                  data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-                  child: ExpansionTile(
-                    leading: const Icon(Icons.contact_phone_outlined, size: 16, color: Colors.black54),
-                    title: const Text(
-                      'CONTACTO Y PAGO',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black54,
-                        letterSpacing: 0.8,
+                  margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: Colors.grey[200]!),
+                  ),
+                  child: Theme(
+                    data: Theme.of(context)
+                        .copyWith(dividerColor: Colors.transparent),
+                    child: ExpansionTile(
+                      leading: const Icon(Icons.contact_phone_outlined,
+                          size: 16, color: Colors.black54),
+                      title: const Text(
+                        'CONTACTO Y PAGO',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black54,
+                          letterSpacing: 0.8,
+                        ),
                       ),
-                    ),
-                    trailing: const Icon(Icons.expand_more, size: 18, color: Colors.black38),
-                    initiallyExpanded: false,
-                    childrenPadding: EdgeInsets.zero,
-                    onExpansionChanged: (expanded) {
-                      if (expanded) {
-                        Future.delayed(const Duration(milliseconds: 200), () {
-                          Scrollable.ensureVisible(bCtx, duration: Duration.zero, alignment: 0.5);
-                        });
-                      }
-                    },
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            TextField(
-                              controller: _perfilTelefonoCtrl,
-                              keyboardType: TextInputType.phone,
-                              decoration: const InputDecoration(
-                                labelText: 'Teléfono / WhatsApp',
-                                prefixIcon: Icon(Icons.phone_android, size: 20),
-                                border: OutlineInputBorder(),
-                                contentPadding: EdgeInsets.fromLTRB(12, 20, 12, 14),
-                              ),
-                            ),
-                            const SizedBox(height: 14),
-                            const Text(
-                              'CUENTAS DE PAGO (opcional)',
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.black45,
-                                letterSpacing: 0.6,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            _filaCuentaPago('Nequi', const Color(0xFFE5007D), Colors.white, _perfilNequiCtrl),
-                            const SizedBox(height: 8),
-                            _filaCuentaPago('Daviplata', const Color(0xFFEE2A24), Colors.white, _perfilDaviplataCtrl),
-                            const SizedBox(height: 8),
-                            _filaCuentaPago('Bancolombia', const Color(0xFFFFCC00), Colors.black, _perfilBancolombiaCtrl),
-                            const SizedBox(height: 8),
-                            _filaCuentaPago('Llave', const Color(0xFF00796B), Colors.white, _perfilLlaveCtrl),
-                            const SizedBox(height: 12),
-                            SizedBox(
-                              width: double.infinity,
-                              child: ElevatedButton.icon(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.black,
-                                  padding: const EdgeInsets.symmetric(vertical: 11),
+                      trailing: const Icon(Icons.expand_more,
+                          size: 18, color: Colors.black38),
+                      initiallyExpanded: false,
+                      childrenPadding: EdgeInsets.zero,
+                      onExpansionChanged: (expanded) {
+                        if (expanded) {
+                          Future.delayed(const Duration(milliseconds: 200), () {
+                            Scrollable.ensureVisible(bCtx,
+                                duration: Duration.zero, alignment: 0.5);
+                          });
+                        }
+                      },
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              TextField(
+                                controller: _perfilTelefonoCtrl,
+                                keyboardType: TextInputType.phone,
+                                decoration: const InputDecoration(
+                                  labelText: 'Teléfono / WhatsApp',
+                                  prefixIcon:
+                                      Icon(Icons.phone_android, size: 20),
+                                  border: OutlineInputBorder(),
+                                  contentPadding:
+                                      EdgeInsets.fromLTRB(12, 20, 12, 14),
                                 ),
-                                onPressed: _guardandoPerfil
-                                    ? null
-                                    : () => _guardarContactoPerfil(miPerfil['id']),
-                                icon: _guardandoPerfil
-                                    ? const SizedBox(
-                                        width: 14,
-                                        height: 14,
-                                        child: CircularProgressIndicator(
-                                          color: Color(0xff3AF500),
-                                          strokeWidth: 2,
-                                        ),
-                                      )
-                                    : const Icon(Icons.save, size: 16, color: Color(0xff3AF500)),
-                                label: const Text(
-                                  'GUARDAR CAMBIOS',
-                                  style: TextStyle(
-                                    color: Color(0xff3AF500),
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 12,
+                              ),
+                              const SizedBox(height: 14),
+                              const Text(
+                                'CUENTAS DE PAGO (opcional)',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black45,
+                                  letterSpacing: 0.6,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              _filaCuentaPago('Nequi', const Color(0xFFE5007D),
+                                  Colors.white, _perfilNequiCtrl),
+                              const SizedBox(height: 8),
+                              _filaCuentaPago(
+                                  'Daviplata',
+                                  const Color(0xFFEE2A24),
+                                  Colors.white,
+                                  _perfilDaviplataCtrl),
+                              const SizedBox(height: 8),
+                              _filaCuentaPago(
+                                  'Bancolombia',
+                                  const Color(0xFFFFCC00),
+                                  Colors.black,
+                                  _perfilBancolombiaCtrl),
+                              const SizedBox(height: 8),
+                              _filaCuentaPago('Llave', const Color(0xFF00796B),
+                                  Colors.white, _perfilLlaveCtrl),
+                              const SizedBox(height: 12),
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton.icon(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.black,
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 11),
+                                  ),
+                                  onPressed: _guardandoPerfil
+                                      ? null
+                                      : () => _guardarContactoPerfil(
+                                          miPerfil['id']),
+                                  icon: _guardandoPerfil
+                                      ? const SizedBox(
+                                          width: 14,
+                                          height: 14,
+                                          child: CircularProgressIndicator(
+                                            color: Color(0xff3AF500),
+                                            strokeWidth: 2,
+                                          ),
+                                        )
+                                      : const Icon(Icons.save,
+                                          size: 16, color: Color(0xff3AF500)),
+                                  label: const Text(
+                                    'GUARDAR CAMBIOS',
+                                    style: TextStyle(
+                                      color: Color(0xff3AF500),
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12,
+                                    ),
                                   ),
                                 ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
-              ),
               ),
 
               // 4. DATOS PERSONALES — desplegable
@@ -4626,31 +5235,43 @@ class _MovilScreenState extends State<MovilScreen>
                     border: Border.all(color: Colors.grey[200]!),
                   ),
                   child: Theme(
-                    data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                    data: Theme.of(context)
+                        .copyWith(dividerColor: Colors.transparent),
                     child: ExpansionTile(
-                      leading: const Icon(Icons.folder_outlined, size: 16, color: Colors.black54),
+                      leading: const Icon(Icons.folder_outlined,
+                          size: 16, color: Colors.black54),
                       title: const Text(
                         'DOCUMENTOS',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.black54, letterSpacing: 0.8),
+                        style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black54,
+                            letterSpacing: 0.8),
                       ),
-                      trailing: const Icon(Icons.expand_more, size: 18, color: Colors.black38),
+                      trailing: const Icon(Icons.expand_more,
+                          size: 18, color: Colors.black38),
                       initiallyExpanded: false,
                       childrenPadding: EdgeInsets.zero,
                       onExpansionChanged: (expanded) {
                         if (expanded) {
                           Future.delayed(const Duration(milliseconds: 200), () {
-                            Scrollable.ensureVisible(bCtx, duration: Duration.zero, alignment: 0.5);
+                            Scrollable.ensureVisible(bCtx,
+                                duration: Duration.zero, alignment: 0.5);
                           });
                         }
                       },
                       children: [
                         _filaDocumentoFuturo(Icons.badge, 'Cédula'),
-                        _filaDocumentoFuturo(Icons.motorcycle, 'Licencia de conducción'),
+                        _filaDocumentoFuturo(
+                            Icons.motorcycle, 'Licencia de conducción'),
                         _filaDocumentoFuturo(Icons.pin, 'Placa de la moto'),
                         _filaDocumentoFuturo(Icons.shield, 'SOAT'),
                         _filaDocumentoFuturo(Icons.gavel, 'Antecedentes'),
-                        _filaDocumentoFuturo(Icons.home_outlined, 'Comprobante de domicilio'),
-                        _filaDocumentoFuturo(Icons.people_outline, 'Referencias personales', esUltimo: true),
+                        _filaDocumentoFuturo(
+                            Icons.home_outlined, 'Comprobante de domicilio'),
+                        _filaDocumentoFuturo(
+                            Icons.people_outline, 'Referencias personales',
+                            esUltimo: true),
                       ],
                     ),
                   ),
@@ -4668,10 +5289,13 @@ class _MovilScreenState extends State<MovilScreen>
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFFE040FB).withValues(alpha: 0.4)),
+                      border: Border.all(
+                          color:
+                              const Color(0xFFE040FB).withValues(alpha: 0.4)),
                     ),
                     child: SwitchListTile(
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 4),
                       secondary: Icon(
                         miPerfil['silenciar_radar'] == true
                             ? Icons.notifications_off
@@ -4679,12 +5303,14 @@ class _MovilScreenState extends State<MovilScreen>
                         color: const Color(0xFFE040FB),
                       ),
                       title: const Text('Silenciar nuevos servicios',
-                          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                          style: TextStyle(
+                              fontWeight: FontWeight.w600, fontSize: 14)),
                       subtitle: Text(
                         miPerfil['silenciar_radar'] == true
                             ? 'No recibirás push de nuevos servicios'
                             : 'Recibes push de nuevos servicios (máx 10 activos)',
-                        style: const TextStyle(fontSize: 11, color: Colors.black45),
+                        style: const TextStyle(
+                            fontSize: 11, color: Colors.black45),
                       ),
                       value: miPerfil['silenciar_radar'] == true,
                       activeThumbColor: const Color(0xFFE040FB),
@@ -4692,8 +5318,8 @@ class _MovilScreenState extends State<MovilScreen>
                         try {
                           await Supabase.instance.client
                               .from('usuarios')
-                              .update({'silenciar_radar': val})
-                              .eq('id', widget.usuario['id']);
+                              .update({'silenciar_radar': val}).eq(
+                                  'id', widget.usuario['id']);
                         } catch (_) {}
                       },
                     ),
@@ -4708,7 +5334,8 @@ class _MovilScreenState extends State<MovilScreen>
                 child: FutureBuilder<List<Map<String, dynamic>>>(
                   future: Supabase.instance.client
                       .from('calificaciones')
-                      .select('estrellas, comentario, calificador_tipo, created_at')
+                      .select(
+                          'estrellas, comentario, calificador_tipo, created_at')
                       .eq('movil_id', widget.usuario['id'].toString())
                       .order('created_at', ascending: false),
                   builder: (context, snap) {
@@ -4924,7 +5551,6 @@ class _MovilScreenState extends State<MovilScreen>
     );
   }
 
-
   Future<void> _cargarProduccion() async {
     try {
       final hoy = DateTime.now();
@@ -4949,20 +5575,20 @@ class _MovilScreenState extends State<MovilScreen>
       if (!mounted) return;
 
       final totalList = totalData;
-      final hoyList   = hoyData;
+      final hoyList = hoyData;
 
       // Totales generales
-      int   srvTotal      = 0;
+      int srvTotal = 0;
       double producidoTotal = 0;
       // Hoy general
-      int   srvHoy        = 0;
-      double producidoHoy  = 0;
+      int srvHoy = 0;
+      double producidoHoy = 0;
       // FN totales
-      int    fnTotal       = 0;
-      double fnProdTotal   = 0;
+      int fnTotal = 0;
+      double fnProdTotal = 0;
       // FN hoy
-      int    fnHoy         = 0;
-      double fnProdHoy     = 0;
+      int fnHoy = 0;
+      double fnProdHoy = 0;
 
       for (final s in totalList) {
         srvTotal++;
@@ -4984,17 +5610,18 @@ class _MovilScreenState extends State<MovilScreen>
       }
 
       setState(() {
-        _serviciosTotal    = srvTotal;
-        _serviciosHoy      = srvHoy;
-        _producidoHoy      = producidoHoy;
-        _producidoTotal    = producidoTotal;
-        _serviciosFnTotal  = fnTotal;
-        _producidoFnTotal  = fnProdTotal;
-        _serviciosFnHoy    = fnHoy;
-        _producidoFnHoy    = fnProdHoy;
+        _serviciosTotal = srvTotal;
+        _serviciosHoy = srvHoy;
+        _producidoHoy = producidoHoy;
+        _producidoTotal = producidoTotal;
+        _serviciosFnTotal = fnTotal;
+        _producidoFnTotal = fnProdTotal;
+        _serviciosFnHoy = fnHoy;
+        _producidoFnHoy = fnProdHoy;
       });
     } catch (e) {
-      debugPrint('[PRODUCCION] Error al cargar producción del móvil ${widget.usuario['id']}: $e');
+      debugPrint(
+          '[PRODUCCION] Error al cargar producción del móvil ${widget.usuario['id']}: $e');
     }
   }
 
@@ -5008,11 +5635,14 @@ class _MovilScreenState extends State<MovilScreen>
     try {
       final data = await Supabase.instance.client
           .from('solicitudes_descanso')
-          .select('id, fecha_inicio, fecha_fin, dias_solicitados, razon, estado, aprobado_por, rechazado_motivo, created_at')
+          .select(
+              'id, fecha_inicio, fecha_fin, dias_solicitados, razon, estado, aprobado_por, rechazado_motivo, created_at')
           .eq('movil_id', widget.usuario['id'])
           .order('created_at', ascending: false)
           .limit(5);
-      if (mounted) setState(() => _solicitudesDescanso = List<Map<String, dynamic>>.from(data));
+      if (mounted)
+        setState(
+            () => _solicitudesDescanso = List<Map<String, dynamic>>.from(data));
     } catch (_) {
     } finally {
       if (mounted) setState(() => _cargandoSolicitudesDescanso = false);
@@ -5023,12 +5653,13 @@ class _MovilScreenState extends State<MovilScreen>
     try {
       await Supabase.instance.client
           .from('usuarios')
-          .update({'dia_descanso_semanal': dia})
-          .eq('id', widget.usuario['id']);
+          .update({'dia_descanso_semanal': dia}).eq('id', widget.usuario['id']);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(dia == null ? '✅ Día de descanso fijo eliminado' : '✅ Día de descanso fijo guardado'),
+            content: Text(dia == null
+                ? '✅ Día de descanso fijo eliminado'
+                : '✅ Día de descanso fijo guardado'),
             backgroundColor: Colors.green[700],
           ),
         );
@@ -5036,7 +5667,9 @@ class _MovilScreenState extends State<MovilScreen>
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Error al guardar. Intenta de nuevo.'), backgroundColor: Colors.red),
+          const SnackBar(
+              content: Text('Error al guardar. Intenta de nuevo.'),
+              backgroundColor: Colors.red),
         );
       }
     }
@@ -5044,12 +5677,11 @@ class _MovilScreenState extends State<MovilScreen>
 
   Future<void> _mostrarDialogoSolicitarDescanso(BuildContext ctx) async {
     final inicioCtrl = TextEditingController();
-    final finCtrl    = TextEditingController();
-    final razonCtrl  = TextEditingController();
+    final finCtrl = TextEditingController();
+    final razonCtrl = TextEditingController();
     DateTime? fechaInicio;
     DateTime? fechaFin;
     bool enviando = false;
-
 
     Future<void> pickDate(bool esInicio, StateSetter setSt) async {
       final now = DateTime.now();
@@ -5061,7 +5693,8 @@ class _MovilScreenState extends State<MovilScreen>
         helpText: esInicio ? 'FECHA DE INICIO' : 'FECHA FIN',
         builder: (c, child) => Theme(
           data: Theme.of(c).copyWith(
-            colorScheme: const ColorScheme.dark(primary: Color(0xff3AF500), onPrimary: Colors.black),
+            colorScheme: const ColorScheme.dark(
+                primary: Color(0xff3AF500), onPrimary: Colors.black),
           ),
           child: child!,
         ),
@@ -5070,14 +5703,16 @@ class _MovilScreenState extends State<MovilScreen>
       setSt(() {
         if (esInicio) {
           fechaInicio = picked;
-          inicioCtrl.text = '${picked.day.toString().padLeft(2,'0')}/${picked.month.toString().padLeft(2,'0')}/${picked.year}';
+          inicioCtrl.text =
+              '${picked.day.toString().padLeft(2, '0')}/${picked.month.toString().padLeft(2, '0')}/${picked.year}';
           if (fechaFin != null && fechaFin!.isBefore(picked)) {
             fechaFin = null;
             finCtrl.clear();
           }
         } else {
           fechaFin = picked;
-          finCtrl.text = '${picked.day.toString().padLeft(2,'0')}/${picked.month.toString().padLeft(2,'0')}/${picked.year}';
+          finCtrl.text =
+              '${picked.day.toString().padLeft(2, '0')}/${picked.month.toString().padLeft(2, '0')}/${picked.year}';
         }
       });
     }
@@ -5091,17 +5726,23 @@ class _MovilScreenState extends State<MovilScreen>
             : 0;
         return AlertDialog(
           backgroundColor: const Color(0xFF1A1A1A),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: const Row(children: [
             Icon(Icons.beach_access, color: Color(0xff3AF500), size: 18),
             SizedBox(width: 8),
-            Text('Solicitar días de descanso', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+            Text('Solicitar días de descanso',
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold)),
           ]),
           content: SingleChildScrollView(
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               const Text(
                 'La solicitud pasa por Central. Si no responden antes de la fecha de inicio, se aprueba automáticamente.',
-                style: TextStyle(color: Colors.white54, fontSize: 11, height: 1.4),
+                style:
+                    TextStyle(color: Colors.white54, fontSize: 11, height: 1.4),
               ),
               const SizedBox(height: 14),
               Row(children: [
@@ -5111,14 +5752,19 @@ class _MovilScreenState extends State<MovilScreen>
                     child: AbsorbPointer(
                       child: TextField(
                         controller: inicioCtrl,
-                        style: const TextStyle(color: Colors.white, fontSize: 13),
+                        style:
+                            const TextStyle(color: Colors.white, fontSize: 13),
                         decoration: InputDecoration(
                           labelText: 'Desde',
-                          labelStyle: const TextStyle(color: Colors.white38, fontSize: 11),
+                          labelStyle: const TextStyle(
+                              color: Colors.white38, fontSize: 11),
                           filled: true,
                           fillColor: Colors.white10,
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
-                          suffixIcon: const Icon(Icons.calendar_today, color: Colors.white38, size: 14),
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: BorderSide.none),
+                          suffixIcon: const Icon(Icons.calendar_today,
+                              color: Colors.white38, size: 14),
                         ),
                       ),
                     ),
@@ -5131,14 +5777,19 @@ class _MovilScreenState extends State<MovilScreen>
                     child: AbsorbPointer(
                       child: TextField(
                         controller: finCtrl,
-                        style: const TextStyle(color: Colors.white, fontSize: 13),
+                        style:
+                            const TextStyle(color: Colors.white, fontSize: 13),
                         decoration: InputDecoration(
                           labelText: 'Hasta',
-                          labelStyle: const TextStyle(color: Colors.white38, fontSize: 11),
+                          labelStyle: const TextStyle(
+                              color: Colors.white38, fontSize: 11),
                           filled: true,
                           fillColor: Colors.white10,
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
-                          suffixIcon: const Icon(Icons.calendar_today, color: Colors.white38, size: 14),
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: BorderSide.none),
+                          suffixIcon: const Icon(Icons.calendar_today,
+                              color: Colors.white38, size: 14),
                         ),
                       ),
                     ),
@@ -5147,7 +5798,11 @@ class _MovilScreenState extends State<MovilScreen>
               ]),
               if (dias > 0) ...[
                 const SizedBox(height: 8),
-                Text('$dias día(s) solicitado(s)', style: const TextStyle(color: Color(0xff3AF500), fontSize: 12, fontWeight: FontWeight.bold)),
+                Text('$dias día(s) solicitado(s)',
+                    style: const TextStyle(
+                        color: Color(0xff3AF500),
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold)),
               ],
               const SizedBox(height: 12),
               TextField(
@@ -5156,10 +5811,13 @@ class _MovilScreenState extends State<MovilScreen>
                 style: const TextStyle(color: Colors.white, fontSize: 13),
                 decoration: InputDecoration(
                   labelText: 'Motivo del descanso',
-                  labelStyle: const TextStyle(color: Colors.white38, fontSize: 11),
+                  labelStyle:
+                      const TextStyle(color: Colors.white38, fontSize: 11),
                   filled: true,
                   fillColor: Colors.white10,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide.none),
                 ),
               ),
             ]),
@@ -5167,58 +5825,90 @@ class _MovilScreenState extends State<MovilScreen>
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(dCtx),
-              child: const Text('CANCELAR', style: TextStyle(color: Colors.white38)),
+              child: const Text('CANCELAR',
+                  style: TextStyle(color: Colors.white38)),
             ),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xff3AF500), foregroundColor: Colors.black),
-              onPressed: enviando ? null : () async {
-                if (fechaInicio == null || fechaFin == null) {
-                  ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Selecciona las fechas'), backgroundColor: Colors.orange));
-                  return;
-                }
-                if (razonCtrl.text.trim().isEmpty) {
-                  ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Escribe el motivo'), backgroundColor: Colors.orange));
-                  return;
-                }
-                if (fechaFin!.isBefore(fechaInicio!)) {
-                  ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('La fecha fin debe ser posterior al inicio'), backgroundColor: Colors.orange));
-                  return;
-                }
-                setSt(() => enviando = true);
-                try {
-                  final diasTotales = fechaFin!.difference(fechaInicio!).inDays + 1;
-                  await Supabase.instance.client.from('solicitudes_descanso').insert({
-                    'movil_id':        widget.usuario['id'],
-                    'fecha_inicio':    fechaInicio!.toIso8601String().split('T').first,
-                    'fecha_fin':       fechaFin!.toIso8601String().split('T').first,
-                    'dias_solicitados': diasTotales,
-                    'razon':           razonCtrl.text.trim(),
-                    'estado':          'pendiente',
-                  });
-                  // Notificar a Central
-                  await Supabase.instance.client.from('notificaciones_push_pendientes').insert({
-                    'destinatario_rol': 'central',
-                    'titulo': '🏖️ Solicitud de descanso',
-                    'cuerpo': '${movilLabel(widget.usuario)} solicita $diasTotales día(s) de descanso. Revisa en Gestión.',
-                    'tipo': 'descanso_solicitud',
-                  });
-                  if (mounted) {
-                    Navigator.pop(dCtx);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('✅ Solicitud enviada. Central revisará tu pedido.'), backgroundColor: Colors.green),
-                    );
-                    _cargarSolicitudesDescanso();
-                  }
-                } catch (e) {
-                  setSt(() => enviando = false);
-                  ScaffoldMessenger.of(ctx).showSnackBar(
-                    const SnackBar(content: Text('Error al enviar. Intenta de nuevo.'), backgroundColor: Colors.red),
-                  );
-                }
-              },
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xff3AF500),
+                  foregroundColor: Colors.black),
+              onPressed: enviando
+                  ? null
+                  : () async {
+                      if (fechaInicio == null || fechaFin == null) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                            content: Text('Selecciona las fechas'),
+                            backgroundColor: Colors.orange));
+                        return;
+                      }
+                      if (razonCtrl.text.trim().isEmpty) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                            content: Text('Escribe el motivo'),
+                            backgroundColor: Colors.orange));
+                        return;
+                      }
+                      if (fechaFin!.isBefore(fechaInicio!)) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                            content: Text(
+                                'La fecha fin debe ser posterior al inicio'),
+                            backgroundColor: Colors.orange));
+                        return;
+                      }
+                      setSt(() => enviando = true);
+                      try {
+                        final diasTotales =
+                            fechaFin!.difference(fechaInicio!).inDays + 1;
+                        await Supabase.instance.client
+                            .from('solicitudes_descanso')
+                            .insert({
+                          'movil_id': widget.usuario['id'],
+                          'fecha_inicio':
+                              fechaInicio!.toIso8601String().split('T').first,
+                          'fecha_fin':
+                              fechaFin!.toIso8601String().split('T').first,
+                          'dias_solicitados': diasTotales,
+                          'razon': razonCtrl.text.trim(),
+                          'estado': 'pendiente',
+                        });
+                        // Notificar a Central
+                        await Supabase.instance.client
+                            .from('notificaciones_push_pendientes')
+                            .insert({
+                          'destinatario_rol': 'central',
+                          'titulo': '🏖️ Solicitud de descanso',
+                          'cuerpo':
+                              '${movilLabel(widget.usuario)} solicita $diasTotales día(s) de descanso. Revisa en Gestión.',
+                          'tipo': 'descanso_solicitud',
+                        });
+                        if (mounted) {
+                          Navigator.pop(dCtx);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                                content: Text(
+                                    '✅ Solicitud enviada. Central revisará tu pedido.'),
+                                backgroundColor: Colors.green),
+                          );
+                          _cargarSolicitudesDescanso();
+                        }
+                      } catch (e) {
+                        setSt(() => enviando = false);
+                        ScaffoldMessenger.of(ctx).showSnackBar(
+                          const SnackBar(
+                              content:
+                                  Text('Error al enviar. Intenta de nuevo.'),
+                              backgroundColor: Colors.red),
+                        );
+                      }
+                    },
               child: enviando
-                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
-                  : const Text('ENVIAR SOLICITUD', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.black))
+                  : const Text('ENVIAR SOLICITUD',
+                      style:
+                          TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
             ),
           ],
         );
@@ -5232,10 +5922,18 @@ class _MovilScreenState extends State<MovilScreen>
 
   // Sección de descanso dentro del tab de Perfil
   Widget _seccionDescansoMovil(Map<String, dynamic> miPerfil) {
-    final diasNombres = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-    final bloqueado   = miPerfil['bloqueado_inactividad'] == true;
+    final diasNombres = [
+      'Domingo',
+      'Lunes',
+      'Martes',
+      'Miércoles',
+      'Jueves',
+      'Viernes',
+      'Sábado'
+    ];
+    final bloqueado = miPerfil['bloqueado_inactividad'] == true;
     final diasInactivos = (miPerfil['dias_inactivos_acumulados'] as int?) ?? 0;
-    final diaFijo     = miPerfil['dia_descanso_semanal'] as int?;
+    final diaFijo = miPerfil['dia_descanso_semanal'] as int?;
     int? diaSeleccionado = diaFijo;
 
     return _seccionPerfilDesplegable(
@@ -5245,153 +5943,219 @@ class _MovilScreenState extends State<MovilScreen>
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
           child: StatefulBuilder(builder: (ctx, setSt) {
-            return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              // ── Estado de inactividad ──────────────────────────────────
-              if (bloqueado)
-                Container(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.red[50],
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.red[200]!),
-                  ),
-                  child: Row(children: [
-                    Icon(Icons.lock_outline, color: Colors.red[700], size: 18),
-                    const SizedBox(width: 8),
-                    Expanded(
+            return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ── Estado de inactividad ──────────────────────────────────
+                  if (bloqueado)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.red[50],
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.red[200]!),
+                      ),
+                      child: Row(children: [
+                        Icon(Icons.lock_outline,
+                            color: Colors.red[700], size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '🔒 Tu cuenta está bloqueada por $diasInactivos día(s) sin actividad. Contacta a Central para reactivarla.',
+                            style: TextStyle(
+                                color: Colors.red[800],
+                                fontSize: 12,
+                                height: 1.4),
+                          ),
+                        ),
+                      ]),
+                    )
+                  else if (diasInactivos > 0)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.orange[50],
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.orange[200]!),
+                      ),
                       child: Text(
-                        '🔒 Tu cuenta está bloqueada por $diasInactivos día(s) sin actividad. Contacta a Central para reactivarla.',
-                        style: TextStyle(color: Colors.red[800], fontSize: 12, height: 1.4),
+                        '⚠️ Llevas $diasInactivos día(s) sin completar servicios.',
+                        style:
+                            TextStyle(color: Colors.orange[800], fontSize: 12),
                       ),
                     ),
-                  ]),
-                )
-              else if (diasInactivos > 0)
-                Container(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: Colors.orange[50],
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.orange[200]!),
-                  ),
-                  child: Text(
-                    '⚠️ Llevas $diasInactivos día(s) sin completar servicios.',
-                    style: TextStyle(color: Colors.orange[800], fontSize: 12),
-                  ),
-                ),
 
-              // ── Día de descanso fijo semanal ──────────────────────────
-              const Text('Día de descanso fijo cada semana', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.black87)),
-              const SizedBox(height: 6),
-              const Text('Este día no se te cuenta como inactividad y Central lo verá en el panel.',
-                  style: TextStyle(fontSize: 11, color: Colors.black45, height: 1.4)),
-              const SizedBox(height: 10),
-              DropdownButtonFormField<int?>(
-                value: diaSeleccionado,
-                decoration: InputDecoration(
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  isDense: true,
-                ),
-                hint: const Text('Sin día fijo', style: TextStyle(fontSize: 13)),
-                items: [
-                  const DropdownMenuItem<int?>(value: null, child: Text('Sin día fijo', style: TextStyle(fontSize: 13))),
-                  ...List.generate(7, (i) => DropdownMenuItem<int?>(
-                    value: i,
-                    child: Text(diasNombres[i], style: const TextStyle(fontSize: 13)),
-                  )),
-                ],
-                onChanged: (val) => setSt(() => diaSeleccionado = val),
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.black,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  ),
-                  onPressed: () => _guardarDiaDescansoFijo(diaSeleccionado),
-                  child: const Text('GUARDAR DÍA FIJO', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                ),
-              ),
-
-              const Divider(height: 28),
-
-              // ── Solicitar días de descanso ────────────────────────────
-              const Text('Solicitar días de descanso', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.black87)),
-              const SizedBox(height: 6),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  icon: const Icon(Icons.send, size: 16),
-                  label: const Text('Nueva solicitud', style: TextStyle(fontSize: 13)),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.black87,
-                    side: const BorderSide(color: Colors.black26),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    padding: const EdgeInsets.symmetric(vertical: 11),
-                  ),
-                  onPressed: () {
-                    _cargarSolicitudesDescanso();
-                    _mostrarDialogoSolicitarDescanso(context);
-                  },
-                ),
-              ),
-
-              const SizedBox(height: 14),
-
-              // ── Historial de solicitudes ──────────────────────────────
-              Row(children: [
-                const Text('Mis solicitudes', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.black87)),
-                const SizedBox(width: 8),
-                GestureDetector(
-                  onTap: _cargarSolicitudesDescanso,
-                  child: const Icon(Icons.refresh, size: 14, color: Colors.black38),
-                ),
-              ]),
-              const SizedBox(height: 8),
-              if (_cargandoSolicitudesDescanso)
-                const Center(child: SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2)))
-              else if (_solicitudesDescanso.isEmpty)
-                const Text('Sin solicitudes recientes.', style: TextStyle(fontSize: 12, color: Colors.black38))
-              else
-                ..._solicitudesDescanso.map((s) {
-                  final estado = s['estado']?.toString() ?? '';
-                  final color = estado == 'aprobado'
-                      ? Colors.green[700]!
-                      : estado == 'rechazado'
-                          ? Colors.red[700]!
-                          : Colors.orange[700]!;
-                  final emoji = estado == 'aprobado' ? '✅' : estado == 'rechazado' ? '❌' : '⏳';
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: Colors.grey[50],
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: color.withValues(alpha: 0.3)),
+                  // ── Día de descanso fijo semanal ──────────────────────────
+                  const Text('Día de descanso fijo cada semana',
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.black87)),
+                  const SizedBox(height: 6),
+                  const Text(
+                      'Este día no se te cuenta como inactividad y Central lo verá en el panel.',
+                      style: TextStyle(
+                          fontSize: 11, color: Colors.black45, height: 1.4)),
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<int?>(
+                    value: diaSeleccionado,
+                    decoration: InputDecoration(
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                      isDense: true,
                     ),
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Row(children: [
-                        Text('$emoji ${estado.toUpperCase()}', style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.bold)),
-                        const Spacer(),
-                        Text('${s['dias_solicitados']} día(s)', style: const TextStyle(fontSize: 11, color: Colors.black54)),
-                      ]),
-                      const SizedBox(height: 4),
-                      Text('${s['fecha_inicio']} → ${s['fecha_fin']}', style: const TextStyle(fontSize: 11, color: Colors.black54)),
-                      if (s['razon'] != null)
-                        Text(s['razon'].toString(), style: const TextStyle(fontSize: 11, color: Colors.black45), maxLines: 2, overflow: TextOverflow.ellipsis),
-                      if (estado == 'rechazado' && s['rechazado_motivo'] != null)
-                        Text('Motivo: ${s['rechazado_motivo']}', style: TextStyle(fontSize: 11, color: Colors.red[600], fontStyle: FontStyle.italic)),
-                    ]),
-                  );
-                }),
-            ]);
+                    hint: const Text('Sin día fijo',
+                        style: TextStyle(fontSize: 13)),
+                    items: [
+                      const DropdownMenuItem<int?>(
+                          value: null,
+                          child: Text('Sin día fijo',
+                              style: TextStyle(fontSize: 13))),
+                      ...List.generate(
+                          7,
+                          (i) => DropdownMenuItem<int?>(
+                                value: i,
+                                child: Text(diasNombres[i],
+                                    style: const TextStyle(fontSize: 13)),
+                              )),
+                    ],
+                    onChanged: (val) => setSt(() => diaSeleccionado = val),
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.black,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8)),
+                      ),
+                      onPressed: () => _guardarDiaDescansoFijo(diaSeleccionado),
+                      child: const Text('GUARDAR DÍA FIJO',
+                          style: TextStyle(
+                              fontSize: 12, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+
+                  const Divider(height: 28),
+
+                  // ── Solicitar días de descanso ────────────────────────────
+                  const Text('Solicitar días de descanso',
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.black87)),
+                  const SizedBox(height: 6),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.send, size: 16),
+                      label: const Text('Nueva solicitud',
+                          style: TextStyle(fontSize: 13)),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.black87,
+                        side: const BorderSide(color: Colors.black26),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8)),
+                        padding: const EdgeInsets.symmetric(vertical: 11),
+                      ),
+                      onPressed: () {
+                        _cargarSolicitudesDescanso();
+                        _mostrarDialogoSolicitarDescanso(context);
+                      },
+                    ),
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  // ── Historial de solicitudes ──────────────────────────────
+                  Row(children: [
+                    const Text('Mis solicitudes',
+                        style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.black87)),
+                    const SizedBox(width: 8),
+                    GestureDetector(
+                      onTap: _cargarSolicitudesDescanso,
+                      child: const Icon(Icons.refresh,
+                          size: 14, color: Colors.black38),
+                    ),
+                  ]),
+                  const SizedBox(height: 8),
+                  if (_cargandoSolicitudesDescanso)
+                    const Center(
+                        child: SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2)))
+                  else if (_solicitudesDescanso.isEmpty)
+                    const Text('Sin solicitudes recientes.',
+                        style: TextStyle(fontSize: 12, color: Colors.black38))
+                  else
+                    ..._solicitudesDescanso.map((s) {
+                      final estado = s['estado']?.toString() ?? '';
+                      final color = estado == 'aprobado'
+                          ? Colors.green[700]!
+                          : estado == 'rechazado'
+                              ? Colors.red[700]!
+                              : Colors.orange[700]!;
+                      final emoji = estado == 'aprobado'
+                          ? '✅'
+                          : estado == 'rechazado'
+                              ? '❌'
+                              : '⏳';
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[50],
+                          borderRadius: BorderRadius.circular(8),
+                          border:
+                              Border.all(color: color.withValues(alpha: 0.3)),
+                        ),
+                        child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(children: [
+                                Text('$emoji ${estado.toUpperCase()}',
+                                    style: TextStyle(
+                                        color: color,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold)),
+                                const Spacer(),
+                                Text('${s['dias_solicitados']} día(s)',
+                                    style: const TextStyle(
+                                        fontSize: 11, color: Colors.black54)),
+                              ]),
+                              const SizedBox(height: 4),
+                              Text('${s['fecha_inicio']} → ${s['fecha_fin']}',
+                                  style: const TextStyle(
+                                      fontSize: 11, color: Colors.black54)),
+                              if (s['razon'] != null)
+                                Text(s['razon'].toString(),
+                                    style: const TextStyle(
+                                        fontSize: 11, color: Colors.black45),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis),
+                              if (estado == 'rechazado' &&
+                                  s['rechazado_motivo'] != null)
+                                Text('Motivo: ${s['rechazado_motivo']}',
+                                    style: TextStyle(
+                                        fontSize: 11,
+                                        color: Colors.red[600],
+                                        fontStyle: FontStyle.italic)),
+                            ]),
+                      );
+                    }),
+                ]);
           }),
         ),
       ],
@@ -5427,7 +6191,8 @@ class _MovilScreenState extends State<MovilScreen>
                 letterSpacing: 0.8,
               ),
             ),
-            trailing: const Icon(Icons.expand_more, size: 18, color: Colors.black38),
+            trailing:
+                const Icon(Icons.expand_more, size: 18, color: Colors.black38),
             initiallyExpanded: initiallyExpanded,
             childrenPadding: EdgeInsets.zero,
             onExpansionChanged: (expanded) {
@@ -5487,7 +6252,8 @@ class _MovilScreenState extends State<MovilScreen>
               hintText: 'Número de cuenta (opcional)',
               border: OutlineInputBorder(),
               isDense: true,
-              contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+              contentPadding:
+                  EdgeInsets.symmetric(horizontal: 10, vertical: 12),
             ),
           ),
         ),
@@ -5593,28 +6359,24 @@ class _MovilScreenState extends State<MovilScreen>
     );
   }
 
-
   Future<void> _guardarContactoPerfil(dynamic movilId) async {
     setState(() => _guardandoPerfil = true);
     try {
-      await Supabase.instance.client
-          .from('usuarios')
-          .update({
-            'telefono': _perfilTelefonoCtrl.text.trim(),
-            'pago_nequi': _perfilNequiCtrl.text.trim().isEmpty
-                ? null
-                : _perfilNequiCtrl.text.trim(),
-            'pago_daviplata': _perfilDaviplataCtrl.text.trim().isEmpty
-                ? null
-                : _perfilDaviplataCtrl.text.trim(),
-            'pago_bancolombia': _perfilBancolombiaCtrl.text.trim().isEmpty
-                ? null
-                : _perfilBancolombiaCtrl.text.trim(),
-            'pago_llave': _perfilLlaveCtrl.text.trim().isEmpty
-                ? null
-                : _perfilLlaveCtrl.text.trim(),
-          })
-          .eq('id', movilId);
+      await Supabase.instance.client.from('usuarios').update({
+        'telefono': _perfilTelefonoCtrl.text.trim(),
+        'pago_nequi': _perfilNequiCtrl.text.trim().isEmpty
+            ? null
+            : _perfilNequiCtrl.text.trim(),
+        'pago_daviplata': _perfilDaviplataCtrl.text.trim().isEmpty
+            ? null
+            : _perfilDaviplataCtrl.text.trim(),
+        'pago_bancolombia': _perfilBancolombiaCtrl.text.trim().isEmpty
+            ? null
+            : _perfilBancolombiaCtrl.text.trim(),
+        'pago_llave': _perfilLlaveCtrl.text.trim().isEmpty
+            ? null
+            : _perfilLlaveCtrl.text.trim(),
+      }).eq('id', movilId);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -5627,11 +6389,13 @@ class _MovilScreenState extends State<MovilScreen>
       String mensajeError = 'Error: $e';
       if (e.toString().contains('23505') ||
           e.toString().contains('usuarios_telefono_key')) {
-        mensajeError = 'Este número ya está registrado en otra cuenta del sistema.';
+        mensajeError =
+            'Este número ya está registrado en otra cuenta del sistema.';
       }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(mensajeError), backgroundColor: Colors.red[900]),
+          SnackBar(
+              content: Text(mensajeError), backgroundColor: Colors.red[900]),
         );
       }
     } finally {
@@ -5661,9 +6425,7 @@ class _MovilScreenState extends State<MovilScreen>
       final nombreArchivo =
           'movil_${movilId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
 
-      await Supabase.instance.client.storage
-          .from('perfiles')
-          .uploadBinary(
+      await Supabase.instance.client.storage.from('perfiles').uploadBinary(
             nombreArchivo,
             bytesEditados,
             fileOptions: const FileOptions(
@@ -5678,8 +6440,7 @@ class _MovilScreenState extends State<MovilScreen>
 
       await Supabase.instance.client
           .from('usuarios')
-          .update({'foto_perfil_url': urlPublica})
-          .eq('id', movilId);
+          .update({'foto_perfil_url': urlPublica}).eq('id', movilId);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -5692,7 +6453,9 @@ class _MovilScreenState extends State<MovilScreen>
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al subir la foto: $e'), backgroundColor: Colors.red),
+          SnackBar(
+              content: Text('Error al subir la foto: $e'),
+              backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -5748,7 +6511,8 @@ class _MovilScreenState extends State<MovilScreen>
                             transformationController: transformCtrl,
                             minScale: 1.0,
                             maxScale: 6.0,
-                            boundaryMargin: const EdgeInsets.all(double.infinity),
+                            boundaryMargin:
+                                const EdgeInsets.all(double.infinity),
                             child: Image.memory(
                               imageBytes,
                               width: 280,
@@ -5805,8 +6569,7 @@ class _MovilScreenState extends State<MovilScreen>
                             Navigator.of(ctx).pop(null);
                             return;
                           }
-                          Navigator.of(ctx)
-                              .pop(byteData.buffer.asUint8List());
+                          Navigator.of(ctx).pop(byteData.buffer.asUint8List());
                         } catch (_) {
                           Navigator.of(ctx).pop(null);
                         }
@@ -5835,7 +6598,8 @@ class _MovilScreenState extends State<MovilScreen>
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           title: const Text('Cambiar correo'),
           content: TextField(
             controller: correoCtrl,
@@ -5857,7 +6621,8 @@ class _MovilScreenState extends State<MovilScreen>
                   ? null
                   : () async {
                       final nuevoCorreo = correoCtrl.text.trim().toLowerCase();
-                      if (!RegExp(r'^[\w.+-]+@[\w-]+\.[\w.-]+$').hasMatch(nuevoCorreo)) {
+                      if (!RegExp(r'^[\w.+-]+@[\w-]+\.[\w.-]+$')
+                          .hasMatch(nuevoCorreo)) {
                         ScaffoldMessenger.of(ctx).showSnackBar(
                           const SnackBar(
                             content: Text('Escribe un correo válido.'),
@@ -5879,7 +6644,8 @@ class _MovilScreenState extends State<MovilScreen>
                           if (ctx.mounted) {
                             ScaffoldMessenger.of(ctx).showSnackBar(
                               const SnackBar(
-                                content: Text('Ese correo ya está en uso por otra cuenta.'),
+                                content: Text(
+                                    'Ese correo ya está en uso por otra cuenta.'),
                                 backgroundColor: Colors.orange,
                               ),
                             );
@@ -5888,8 +6654,7 @@ class _MovilScreenState extends State<MovilScreen>
                         }
                         await Supabase.instance.client
                             .from('usuarios')
-                            .update({'correo': nuevoCorreo})
-                            .eq('id', movilId);
+                            .update({'correo': nuevoCorreo}).eq('id', movilId);
                         if (ctx.mounted) {
                           Navigator.pop(ctx);
                           ScaffoldMessenger.of(context).showSnackBar(
@@ -5903,7 +6668,9 @@ class _MovilScreenState extends State<MovilScreen>
                         setDialogState(() => guardando = false);
                         if (ctx.mounted) {
                           ScaffoldMessenger.of(ctx).showSnackBar(
-                            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+                            SnackBar(
+                                content: Text('Error: $e'),
+                                backgroundColor: Colors.red),
                           );
                         }
                       }
@@ -5919,7 +6686,9 @@ class _MovilScreenState extends State<MovilScreen>
                     )
                   : const Text(
                       'GUARDAR',
-                      style: TextStyle(color: Color(0xff3AF500), fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                          color: Color(0xff3AF500),
+                          fontWeight: FontWeight.bold),
                     ),
             ),
           ],
@@ -5944,7 +6713,8 @@ class _MovilScreenState extends State<MovilScreen>
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           title: const Text('Cambiar contraseña'),
           content: SingleChildScrollView(
             child: Column(
@@ -5958,8 +6728,11 @@ class _MovilScreenState extends State<MovilScreen>
                     border: const OutlineInputBorder(),
                     isDense: true,
                     suffixIcon: IconButton(
-                      icon: Icon(verActual ? Icons.visibility_off : Icons.visibility, size: 18),
-                      onPressed: () => setDialogState(() => verActual = !verActual),
+                      icon: Icon(
+                          verActual ? Icons.visibility_off : Icons.visibility,
+                          size: 18),
+                      onPressed: () =>
+                          setDialogState(() => verActual = !verActual),
                     ),
                   ),
                 ),
@@ -5972,8 +6745,11 @@ class _MovilScreenState extends State<MovilScreen>
                     border: const OutlineInputBorder(),
                     isDense: true,
                     suffixIcon: IconButton(
-                      icon: Icon(verNueva ? Icons.visibility_off : Icons.visibility, size: 18),
-                      onPressed: () => setDialogState(() => verNueva = !verNueva),
+                      icon: Icon(
+                          verNueva ? Icons.visibility_off : Icons.visibility,
+                          size: 18),
+                      onPressed: () =>
+                          setDialogState(() => verNueva = !verNueva),
                     ),
                   ),
                 ),
@@ -6003,7 +6779,8 @@ class _MovilScreenState extends State<MovilScreen>
                       if (nuevaCtrl.text.length < 4) {
                         ScaffoldMessenger.of(ctx).showSnackBar(
                           const SnackBar(
-                            content: Text('La nueva contraseña debe tener mínimo 4 caracteres.'),
+                            content: Text(
+                                'La nueva contraseña debe tener mínimo 4 caracteres.'),
                             backgroundColor: Colors.red,
                           ),
                         );
@@ -6012,7 +6789,8 @@ class _MovilScreenState extends State<MovilScreen>
                       if (nuevaCtrl.text != confirmarCtrl.text) {
                         ScaffoldMessenger.of(ctx).showSnackBar(
                           const SnackBar(
-                            content: Text('Las contraseñas nuevas no coinciden.'),
+                            content:
+                                Text('Las contraseñas nuevas no coinciden.'),
                             backgroundColor: Colors.red,
                           ),
                         );
@@ -6025,7 +6803,8 @@ class _MovilScreenState extends State<MovilScreen>
                             .select('contrasena')
                             .eq('id', movilId)
                             .single();
-                        final hashActualGuardado = fila['contrasena']?.toString() ?? '';
+                        final hashActualGuardado =
+                            fila['contrasena']?.toString() ?? '';
                         final hashIngresado = hashContrasena(actualCtrl.text);
 
                         if (hashIngresado != hashActualGuardado) {
@@ -6033,7 +6812,8 @@ class _MovilScreenState extends State<MovilScreen>
                           if (ctx.mounted) {
                             ScaffoldMessenger.of(ctx).showSnackBar(
                               const SnackBar(
-                                content: Text('La contraseña actual no es correcta.'),
+                                content: Text(
+                                    'La contraseña actual no es correcta.'),
                                 backgroundColor: Colors.red,
                               ),
                             );
@@ -6041,10 +6821,9 @@ class _MovilScreenState extends State<MovilScreen>
                           return;
                         }
 
-                        await Supabase.instance.client
-                            .from('usuarios')
-                            .update({'contrasena': hashContrasena(nuevaCtrl.text)})
-                            .eq('id', movilId);
+                        await Supabase.instance.client.from('usuarios').update({
+                          'contrasena': hashContrasena(nuevaCtrl.text)
+                        }).eq('id', movilId);
 
                         if (ctx.mounted) {
                           Navigator.pop(ctx);
@@ -6059,7 +6838,9 @@ class _MovilScreenState extends State<MovilScreen>
                         setDialogState(() => guardando = false);
                         if (ctx.mounted) {
                           ScaffoldMessenger.of(ctx).showSnackBar(
-                            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+                            SnackBar(
+                                content: Text('Error: $e'),
+                                backgroundColor: Colors.red),
                           );
                         }
                       }
@@ -6075,7 +6856,9 @@ class _MovilScreenState extends State<MovilScreen>
                     )
                   : const Text(
                       'CAMBIAR',
-                      style: TextStyle(color: Color(0xff3AF500), fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                          color: Color(0xff3AF500),
+                          fontWeight: FontWeight.bold),
                     ),
             ),
           ],
@@ -6121,25 +6904,9 @@ class _MovilScreenState extends State<MovilScreen>
     );
   }
 
-
-  Widget _construirFilaVirtual(List<Map<String, dynamic>> usuariosTotales) {
-    final enFila = usuariosTotales
-        .where(
-          (u) =>
-              u['en_linea'] == true &&
-              u['paradero_actual'] != null &&
-              u['ingreso_fila'] != null,
-        )
-        .toList();
-    // Ticket de prioridad va primero, luego por ingreso_fila, luego por id (estable)
-    enFila.sort((a, b) {
-      final tA = a['ticket_prioridad'] == true ? 1 : 0;
-      final tB = b['ticket_prioridad'] == true ? 1 : 0;
-      if (tA != tB) return tB.compareTo(tA);
-      final cmp = DateTime.parse(a['ingreso_fila']).compareTo(DateTime.parse(b['ingreso_fila']));
-      if (cmp != 0) return cmp;
-      return ((a['id'] as num?) ?? 0).compareTo((b['id'] as num?) ?? 0);
-    });
+  // OPT: recibe la lista ya filtrada y ordenada desde _filaNotifier
+  // (solo usuarios en línea con paradero asignado — sin filtrar aquí).
+  Widget _construirFilaVirtual(List<Map<String, dynamic>> enFila) {
 
     if (enFila.isEmpty) return const SizedBox.shrink();
 
@@ -6151,9 +6918,8 @@ class _MovilScreenState extends State<MovilScreen>
     );
     if (miIndexGlobal != -1) {
       final miParadero = enFila[miIndexGlobal]['paradero_actual'];
-      final miFilaLocal = enFila
-          .where((u) => u['paradero_actual'] == miParadero)
-          .toList();
+      final miFilaLocal =
+          enFila.where((u) => u['paradero_actual'] == miParadero).toList();
       final miPos = miFilaLocal.indexWhere(
         (u) => u['id'].toString() == widget.usuario['id'].toString(),
       );
@@ -6188,7 +6954,8 @@ class _MovilScreenState extends State<MovilScreen>
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               child: Row(
                 children: [
-                  Icon(Icons.groups_outlined, size: 16, color: Colors.grey[600]),
+                  Icon(Icons.groups_outlined,
+                      size: 16, color: Colors.grey[600]),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -6218,156 +6985,218 @@ class _MovilScreenState extends State<MovilScreen>
             curve: Curves.easeInOut,
             child: _filaVirtualExpandida
                 ? Padding(
-              padding: const EdgeInsets.fromLTRB(0, 0, 0, 8),
-              child: Column(
-                children: agrupados.entries.map((entry) {
-                  String nombreParadero = entry.key;
-                  List<Map<String, dynamic>> lista = entry.value;
+                    padding: const EdgeInsets.fromLTRB(0, 0, 0, 8),
+                    child: Column(
+                      children: agrupados.entries.map((entry) {
+                        String nombreParadero = entry.key;
+                        List<Map<String, dynamic>> lista = entry.value;
 
-                  return Container(
-          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.blue[50],
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.blue[200]!),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const Icon(Icons.format_list_numbered, size: 16, color: Colors.blue),
-                  const SizedBox(width: 6),
-                  Text(
-                    'FILA EN VIVO: $nombreParadero',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.blue),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              ...lista.asMap().entries.map((e) {
-                int idx = e.key + 1;
-                var movil = e.value;
-                bool soyYo = movil['id'] == widget.usuario['id'];
-                final bool tieneTicket = movil['ticket_prioridad'] == true;
-                final bool tieneFN = movil['tiene_fn'] == true;
-                final String rango = movil['rango_movil']?.toString().toUpperCase() ?? 'NOVATO';
-                final dynamic calRaw = movil['puntuacion'];
-                final String calTexto = calRaw == null ? '-' : '★ ${(calRaw as num).toDouble().toStringAsFixed(1)}';
-                final int cap = _limitePorRango(rango);
-                final String texCap = cap >= 999 ? '∞' : '$cap';
-                return KeyedSubtree(
-                  key: ValueKey('fila_${movil['id']}'),
-                  child: Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(4),
-                            decoration: BoxDecoration(
-                              color: soyYo ? Colors.black : Colors.blue[100],
-                              shape: BoxShape.circle,
-                            ),
-                            child: Text(
-                              '$idx',
-                              style: TextStyle(
-                                color: soyYo ? const Color(0xff3AF500) : Colors.blue,
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
+                        return Container(
+                          margin: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 6),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.blue[50],
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.blue[200]!),
                           ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              '${(movil['usuario'] ?? movil['nombre'] ?? '').toString().toUpperCase()}',
-                              style: TextStyle(
-                                fontWeight: soyYo ? FontWeight.bold : FontWeight.normal,
-                                fontSize: 12,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  const Icon(Icons.format_list_numbered,
+                                      size: 16, color: Colors.blue),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'FILA EN VIVO: $nombreParadero',
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12,
+                                        color: Colors.blue),
+                                  ),
+                                ],
                               ),
-                            ),
-                          ),
-                          if (tieneFN)
-                            Container(
-                              margin: const EdgeInsets.only(left: 4),
-                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF002DA2),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: const Text(
-                                'FN',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 8,
-                                  fontWeight: FontWeight.bold,
-                                  letterSpacing: 0.8,
-                                ),
-                              ),
-                            ),
-                          if (tieneTicket)
-                            const Padding(
-                              padding: EdgeInsets.only(left: 2),
-                              child: Text('🎟️', style: TextStyle(fontSize: 13)),
-                            ),
-                          if (soyYo)
-                            const Padding(
-                              padding: EdgeInsets.only(left: 4),
-                              child: Text(
-                                'TÚ',
-                                style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 10),
-                              ),
-                            ),
-                          // Botón de reporte: solo si NO soy yo y estoy en el MISMO paradero
-                          if (!soyYo && _miParaderoCache == nombreParadero)
-                            GestureDetector(
-                              onTap: () => _reportarMovilAusente(movil, nombreParadero),
-                              child: const Padding(
-                                padding: EdgeInsets.only(left: 4),
-                                child: Text('🚩', style: TextStyle(fontSize: 13)),
-                              ),
-                            ),
-                        ],
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.only(left: 28, top: 1),
-                        child: Row(
-                          children: [
-                            Text(
-                              rango,
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: Colors.blue[700],
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const Text(' · ', style: TextStyle(fontSize: 10, color: Colors.black38)),
-                            Text(calTexto, style: const TextStyle(fontSize: 10, color: Colors.black45)),
-                            const Text(' · ', style: TextStyle(fontSize: 10, color: Colors.black38)),
-                            Text('$texCap pedido${texCap == '1' ? '' : 's'}', style: const TextStyle(fontSize: 10, color: Colors.black45)),
-                            if (tieneTicket) ...[
-                              const Text(' · ', style: TextStyle(fontSize: 10, color: Colors.black38)),
-                              const Text('Prioridad P2P', style: TextStyle(fontSize: 10, color: Colors.purple, fontWeight: FontWeight.bold)),
+                              const SizedBox(height: 8),
+                              ...lista.asMap().entries.map((e) {
+                                int idx = e.key + 1;
+                                var movil = e.value;
+                                bool soyYo =
+                                    movil['id'] == widget.usuario['id'];
+                                final bool tieneTicket =
+                                    movil['ticket_prioridad'] == true;
+                                final bool tieneFN = movil['tiene_fn'] == true;
+                                final String rango = movil['rango_movil']
+                                        ?.toString()
+                                        .toUpperCase() ??
+                                    'NOVATO';
+                                final dynamic calRaw = movil['puntuacion'];
+                                final String calTexto = calRaw == null
+                                    ? '-'
+                                    : '★ ${(calRaw as num).toDouble().toStringAsFixed(1)}';
+                                final int cap = _limitePorRango(rango);
+                                final String texCap = cap >= 999 ? '∞' : '$cap';
+                                return KeyedSubtree(
+                                  key: ValueKey('fila_${movil['id']}'),
+                                  child: Padding(
+                                    padding: const EdgeInsets.only(bottom: 6),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Container(
+                                              padding: const EdgeInsets.all(4),
+                                              decoration: BoxDecoration(
+                                                color: soyYo
+                                                    ? Colors.black
+                                                    : Colors.blue[100],
+                                                shape: BoxShape.circle,
+                                              ),
+                                              child: Text(
+                                                '$idx',
+                                                style: TextStyle(
+                                                  color: soyYo
+                                                      ? const Color(0xff3AF500)
+                                                      : Colors.blue,
+                                                  fontSize: 10,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Text(
+                                                '${(movil['usuario'] ?? movil['nombre'] ?? '').toString().toUpperCase()}',
+                                                style: TextStyle(
+                                                  fontWeight: soyYo
+                                                      ? FontWeight.bold
+                                                      : FontWeight.normal,
+                                                  fontSize: 12,
+                                                ),
+                                              ),
+                                            ),
+                                            if (tieneFN)
+                                              Container(
+                                                margin: const EdgeInsets.only(
+                                                    left: 4),
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                        horizontal: 5,
+                                                        vertical: 2),
+                                                decoration: BoxDecoration(
+                                                  color:
+                                                      const Color(0xFF002DA2),
+                                                  borderRadius:
+                                                      BorderRadius.circular(6),
+                                                ),
+                                                child: const Text(
+                                                  'FN',
+                                                  style: TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 8,
+                                                    fontWeight: FontWeight.bold,
+                                                    letterSpacing: 0.8,
+                                                  ),
+                                                ),
+                                              ),
+                                            if (tieneTicket)
+                                              const Padding(
+                                                padding:
+                                                    EdgeInsets.only(left: 2),
+                                                child: Text('🎟️',
+                                                    style: TextStyle(
+                                                        fontSize: 13)),
+                                              ),
+                                            if (soyYo)
+                                              const Padding(
+                                                padding:
+                                                    EdgeInsets.only(left: 4),
+                                                child: Text(
+                                                  'TÚ',
+                                                  style: TextStyle(
+                                                      color: Colors.green,
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                      fontSize: 10),
+                                                ),
+                                              ),
+                                            // Botón de reporte: solo si NO soy yo y estoy en el MISMO paradero
+                                            if (!soyYo &&
+                                                _miParaderoCache ==
+                                                    nombreParadero)
+                                              GestureDetector(
+                                                onTap: () =>
+                                                    _reportarMovilAusente(
+                                                        movil, nombreParadero),
+                                                child: const Padding(
+                                                  padding:
+                                                      EdgeInsets.only(left: 4),
+                                                  child: Text('🚩',
+                                                      style: TextStyle(
+                                                          fontSize: 13)),
+                                                ),
+                                              ),
+                                          ],
+                                        ),
+                                        Padding(
+                                          padding: const EdgeInsets.only(
+                                              left: 28, top: 1),
+                                          child: Row(
+                                            children: [
+                                              Text(
+                                                rango,
+                                                style: TextStyle(
+                                                  fontSize: 10,
+                                                  color: Colors.blue[700],
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                              const Text(' · ',
+                                                  style: TextStyle(
+                                                      fontSize: 10,
+                                                      color: Colors.black38)),
+                                              Text(calTexto,
+                                                  style: const TextStyle(
+                                                      fontSize: 10,
+                                                      color: Colors.black45)),
+                                              const Text(' · ',
+                                                  style: TextStyle(
+                                                      fontSize: 10,
+                                                      color: Colors.black38)),
+                                              Text(
+                                                  '$texCap pedido${texCap == '1' ? '' : 's'}',
+                                                  style: const TextStyle(
+                                                      fontSize: 10,
+                                                      color: Colors.black45)),
+                                              if (tieneTicket) ...[
+                                                const Text(' · ',
+                                                    style: TextStyle(
+                                                        fontSize: 10,
+                                                        color: Colors.black38)),
+                                                const Text('Prioridad P2P',
+                                                    style: TextStyle(
+                                                        fontSize: 10,
+                                                        color: Colors.purple,
+                                                        fontWeight:
+                                                            FontWeight.bold)),
+                                              ],
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              }),
                             ],
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  ),
-                );
-              }),
-            ],
-          ),
-        );
-      }).toList(),
-              ),
-                )
-              : const SizedBox.shrink(),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  )
+                : const SizedBox.shrink(),
           ),
         ],
       ),
@@ -6398,7 +7227,8 @@ class _MovilScreenState extends State<MovilScreen>
     Map<String, dynamic> servicio, {
     bool esMaster = false,
   }) {
-    final bool estaExpandida = _serviciosExpandidos.contains(servicio['id'] as int);
+    final bool estaExpandida =
+        _serviciosExpandidos.contains(servicio['id'] as int);
     final estado = servicio['estado'];
     final bool tieneProblema = estado == 'problema';
 
@@ -6406,116 +7236,128 @@ class _MovilScreenState extends State<MovilScreen>
       return AnimatedSwitcher(
         duration: Duration.zero,
         child: Card(
-        key: ValueKey('collapsed_${servicio['id']}_$estado'),
-        elevation: 2,
-        margin: const EdgeInsets.only(bottom: 10),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-          side: BorderSide(
-            color: tieneProblema ? Colors.red : Colors.grey[400]!,
-            width: 1.5,
-          ),
-        ),
-        child: InkWell(
-          onTap: () => setState(() {
-            _serviciosExpandidos.clear(); // acordeón: colapsa las demás
-            _serviciosExpandidos.add(servicio['id'] as int);
-          }),
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(
-              children: [
-                Icon(
-                  tieneProblema
-                      ? Icons.warning_amber_rounded
-                      : Icons.motorcycle,
-                  color: tieneProblema ? Colors.red : Colors.black87,
-                  size: 28,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Text(
-                            'ORDEN #${servicio['numero_movil'] ?? servicio['id']}',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 15,
-                              color: tieneProblema ? Colors.red : Colors.black,
-                            ),
-                          ),
-                          if (servicio['ruta_grupo_id'] != null) ...[
-                            const SizedBox(width: 6),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: Colors.blue[50],
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(color: Colors.blue[200]!),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.alt_route, size: 10, color: Colors.blue[700]),
-                                  const SizedBox(width: 2),
-                                  Text(
-                                    'Ruta combinada',
-                                    style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.blue[700]),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                          if (servicio['multi_ruta_id'] != null) ...[
-                            const SizedBox(width: 6),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: Colors.indigo[50],
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(color: Colors.indigo[200]!),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.route_rounded, size: 10, color: Colors.indigo[700]),
-                                  const SizedBox(width: 2),
-                                  Text(
-                                    'Parada #${servicio["multi_ruta_orden"] ?? "?"}',
-                                    style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.indigo[700]),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                      Text(
-                        estado == 'en_ruta_destino'
-                            ? (_esMototaxi(servicio['tipo_servicio'])
-                                ? 'Destino: ${servicio['destino']}'
-                                : 'Entrega: ${servicio['destino']}')
-                            : 'Recogida: ${servicio['origen']}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          color: Colors.black54,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const Icon(Icons.expand_more, color: Colors.black54),
-              ],
+          key: ValueKey('collapsed_${servicio['id']}_$estado'),
+          elevation: 2,
+          margin: const EdgeInsets.only(bottom: 10),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+            side: BorderSide(
+              color: tieneProblema ? Colors.red : Colors.grey[400]!,
+              width: 1.5,
             ),
           ),
-        ),
-      ),  // Card
-    );    // AnimatedSwitcher
+          child: InkWell(
+            onTap: () => setState(() {
+              _serviciosExpandidos.clear(); // acordeón: colapsa las demás
+              _serviciosExpandidos.add(servicio['id'] as int);
+            }),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  Icon(
+                    tieneProblema
+                        ? Icons.warning_amber_rounded
+                        : Icons.motorcycle,
+                    color: tieneProblema ? Colors.red : Colors.black87,
+                    size: 28,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Text(
+                              'ORDEN #${servicio['numero_movil'] ?? servicio['id']}',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
+                                color:
+                                    tieneProblema ? Colors.red : Colors.black,
+                              ),
+                            ),
+                            if (servicio['ruta_grupo_id'] != null) ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.blue[50],
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: Colors.blue[200]!),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.alt_route,
+                                        size: 10, color: Colors.blue[700]),
+                                    const SizedBox(width: 2),
+                                    Text(
+                                      'Ruta combinada',
+                                      style: TextStyle(
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.blue[700]),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                            if (servicio['multi_ruta_id'] != null) ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.indigo[50],
+                                  borderRadius: BorderRadius.circular(10),
+                                  border:
+                                      Border.all(color: Colors.indigo[200]!),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.route_rounded,
+                                        size: 10, color: Colors.indigo[700]),
+                                    const SizedBox(width: 2),
+                                    Text(
+                                      'Parada #${servicio["multi_ruta_orden"] ?? "?"}',
+                                      style: TextStyle(
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.indigo[700]),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        Text(
+                          estado == 'en_ruta_destino'
+                              ? (_esMototaxi(servicio['tipo_servicio'])
+                                  ? 'Destino: ${servicio['destino']}'
+                                  : 'Entrega: ${servicio['destino']}')
+                              : 'Recogida: ${servicio['origen']}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: Colors.black54,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.expand_more, color: Colors.black54),
+                ],
+              ),
+            ),
+          ),
+        ), // Card
+      ); // AnimatedSwitcher
     }
 
     // ── Tarjeta exclusiva para servicios FN ────────────────────────────────────
@@ -6542,7 +7384,8 @@ class _MovilScreenState extends State<MovilScreen>
       efectivos = elapsed;
       tiempoMeta = _limiteOrigenMin;
       mostrarReloj = true;
-    } else if (estado == 'en_ruta_destino' && servicio['picked_up_at'] != null) {
+    } else if (estado == 'en_ruta_destino' &&
+        servicio['picked_up_at'] != null) {
       final elapsed = DateTime.now()
           .toUtc()
           .difference(DateTime.parse(servicio['picked_up_at']).toUtc())
@@ -6557,10 +7400,9 @@ class _MovilScreenState extends State<MovilScreen>
     final String textoTarifa = _formatearMoneda(servicio['tarifa']);
     final esComidaOCompra =
         (servicio['observacion'] ?? '').contains('[ COMIDA ]') ||
-        (servicio['observacion'] ?? '').contains('[ COMPRAS ]');
+            (servicio['observacion'] ?? '').contains('[ COMPRAS ]');
 
-    bool mostrarBotonNavegar =
-        estado == 'en_ruta_destino' ||
+    bool mostrarBotonNavegar = estado == 'en_ruta_destino' ||
         (estado == 'en_ruta_origen' && !esComidaOCompra);
 
     Widget botonAccion;
@@ -6597,7 +7439,8 @@ class _MovilScreenState extends State<MovilScreen>
               )
             : Text(
                 '📍 LLEGUÉ AL ${_textoOrigenSegunTipo(servicio['tipo_servicio'])}',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                style:
+                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
               ),
       );
     } else if (estado == 'en_origen') {
@@ -6622,7 +7465,8 @@ class _MovilScreenState extends State<MovilScreen>
                 _esMototaxi(servicio['tipo_servicio'])
                     ? 'INICIAR VIAJE'
                     : 'INICIAR RUTA DE ENTREGA',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                style:
+                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
               ),
       );
     } else {
@@ -6683,8 +7527,8 @@ class _MovilScreenState extends State<MovilScreen>
                 ),
                 IconButton(
                   icon: const Icon(Icons.expand_less, color: Colors.black54),
-                  onPressed: () =>
-                      setState(() => _serviciosExpandidos.remove(servicio['id'] as int)),
+                  onPressed: () => setState(
+                      () => _serviciosExpandidos.remove(servicio['id'] as int)),
                 ),
               ],
             ),
@@ -6694,7 +7538,8 @@ class _MovilScreenState extends State<MovilScreen>
               const SizedBox(height: 8),
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
                   color: Colors.purple[50],
                   borderRadius: BorderRadius.circular(8),
@@ -6727,8 +7572,10 @@ class _MovilScreenState extends State<MovilScreen>
               ),
               child: mostrarReloj
                   ? Container(
-                      key: ValueKey('badge_reloj_$estado${estaDemorado ? '_d' : ''}'),
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      key: ValueKey(
+                          'badge_reloj_$estado${estaDemorado ? '_d' : ''}'),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
                         color: estaDemorado ? Colors.red[50] : Colors.blue[50],
                         borderRadius: BorderRadius.circular(20),
@@ -6742,14 +7589,16 @@ class _MovilScreenState extends State<MovilScreen>
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 14,
-                          color: estaDemorado ? Colors.red[800] : Colors.blue[800],
+                          color:
+                              estaDemorado ? Colors.red[800] : Colors.blue[800],
                         ),
                       ),
                     )
                   : estado == 'en_origen'
                       ? Container(
                           key: const ValueKey('badge_en_origen'),
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 6),
                           decoration: BoxDecoration(
                             color: Colors.orange[50],
                             borderRadius: BorderRadius.circular(20),
@@ -6787,16 +7636,22 @@ class _MovilScreenState extends State<MovilScreen>
               style: const TextStyle(fontSize: 16),
             ),
             // Destino: solo visible después de llegar al local/pasajero
-            if (['en_ruta_destino', 'problema', 'finalizado',
-                 'finalizado_con_problema'].contains(estado))
+            if ([
+              'en_ruta_destino',
+              'problema',
+              'finalizado',
+              'finalizado_con_problema'
+            ].contains(estado))
               Text(
                 '🏁 Destino: ${servicio['destino']}',
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                style:
+                    const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
               )
             else
               Container(
                 margin: const EdgeInsets.only(top: 4),
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
                   color: Colors.grey[200],
                   borderRadius: BorderRadius.circular(6),
@@ -6809,6 +7664,32 @@ class _MovilScreenState extends State<MovilScreen>
                     Text(
                       'Destino visible al llegar al local',
                       style: TextStyle(fontSize: 13, color: Colors.black45),
+                    ),
+                  ],
+                ),
+              ),
+            if ([
+              'en_ruta_destino',
+              'problema',
+              'finalizado',
+              'finalizado_con_problema'
+            ].contains(estado))
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('⚠ ',
+                        style:
+                            TextStyle(fontSize: 11, color: Colors.orange)),
+                    const Expanded(
+                      child: Text(
+                        'Las ubicaciones GPS no son exactas. Verifica bien el destino y pide la dirección exacta al cliente.',
+                        style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.orange,
+                            fontStyle: FontStyle.italic),
+                      ),
                     ),
                   ],
                 ),
@@ -6832,7 +7713,8 @@ class _MovilScreenState extends State<MovilScreen>
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
                           color: const Color(0xFF25D366),
                           borderRadius: BorderRadius.circular(6),
@@ -6871,7 +7753,8 @@ class _MovilScreenState extends State<MovilScreen>
             ),
             // Desglose del precio si viene con tarifa_detalle
             Builder(builder: (_) {
-              final detalle = servicio['tarifa_detalle'] as Map<String, dynamic>?;
+              final detalle =
+                  servicio['tarifa_detalle'] as Map<String, dynamic>?;
               if (detalle == null) return const SizedBox.shrink();
               final int recargo = (detalle['recargo'] as num?)?.toInt() ?? 0;
               final bool lluvia = detalle['lluvia'] == true;
@@ -6880,15 +7763,15 @@ class _MovilScreenState extends State<MovilScreen>
               final String fuente = detalle['fuente']?.toString() ?? '';
               final bool tieneDesglose =
                   recargo > 0 || lluvia || nocturno || sobrecarga;
-              if (!tieneDesglose && fuente.isEmpty) return const SizedBox.shrink();
+              if (!tieneDesglose && fuente.isEmpty)
+                return const SizedBox.shrink();
               return Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Wrap(
                   spacing: 4,
                   runSpacing: 4,
                   children: [
-                    if (lluvia)
-                      _chipDetalle('🌧 lluvia', Colors.blue[100]!),
+                    if (lluvia) _chipDetalle('🌧 lluvia', Colors.blue[100]!),
                     if (nocturno)
                       _chipDetalle('🌙 nocturno', Colors.indigo[100]!),
                     if (sobrecarga)
@@ -6923,13 +7806,14 @@ class _MovilScreenState extends State<MovilScreen>
                     onPressed: _procesando
                         ? null
                         : () => _abrirNavegadorSatelital(
-                            servicio,
-                            estado == 'en_ruta_origen',
-                          ),
+                              servicio,
+                              estado == 'en_ruta_origen',
+                            ),
                     icon: const Icon(Icons.explore, size: 18),
                     label: const Text(
                       'Navegar en Google Maps',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                      style:
+                          TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                     ),
                   ),
                 ),
@@ -6951,11 +7835,13 @@ class _MovilScreenState extends State<MovilScreen>
                       side: const BorderSide(color: Color(0xFFE040FB)),
                       padding: const EdgeInsets.symmetric(vertical: 12),
                     ),
-                    onPressed: _procesando ? null : () => _liberarServicio(servicio),
+                    onPressed:
+                        _procesando ? null : () => _liberarServicio(servicio),
                     icon: const Icon(Icons.replay, size: 18),
                     label: const Text(
                       'LIBERAR',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                      style:
+                          TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
                     ),
                   ),
                 ),
@@ -6973,11 +7859,13 @@ class _MovilScreenState extends State<MovilScreen>
                       side: const BorderSide(color: Color(0xFFFFB300)),
                       padding: const EdgeInsets.symmetric(vertical: 12),
                     ),
-                    onPressed: _procesando ? null : () => _reasignarServicio(servicio),
+                    onPressed:
+                        _procesando ? null : () => _reasignarServicio(servicio),
                     icon: const Icon(Icons.swap_horiz, size: 18),
                     label: const Text(
                       'REASIGNAR',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                      style:
+                          TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
                     ),
                   ),
                 ),
@@ -6995,11 +7883,14 @@ class _MovilScreenState extends State<MovilScreen>
                       side: const BorderSide(color: Colors.teal),
                       padding: const EdgeInsets.symmetric(vertical: 12),
                     ),
-                    onPressed: _procesando ? null : () => _transferirServicio(servicio),
+                    onPressed: _procesando
+                        ? null
+                        : () => _transferirServicio(servicio),
                     icon: const Icon(Icons.send, size: 18),
                     label: const Text(
                       'TRANSFERIR',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                      style:
+                          TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
                     ),
                   ),
                 ),
@@ -7021,9 +7912,8 @@ class _MovilScreenState extends State<MovilScreen>
 
                     // Asignación de nombres e íconos dinámicos
                     String textoChat = esClienteApp ? 'Cliente' : 'Local';
-                    IconData iconoChat = esClienteApp
-                        ? Icons.person
-                        : Icons.storefront;
+                    IconData iconoChat =
+                        esClienteApp ? Icons.person : Icons.storefront;
                     // -------------------------------------------------
 
                     // FUNCIÓN CONSTRUCTORA DE LA FILA (Para evitar saltos de interfaz)
@@ -7048,8 +7938,8 @@ class _MovilScreenState extends State<MovilScreen>
 
                                   String nombreNegocio =
                                       (servicio['creador'] == 'Central')
-                                      ? 'ServiExpress'
-                                      : servicio['creador'].toString();
+                                          ? 'ServiExpress'
+                                          : servicio['creador'].toString();
 
                                   // Mensaje inteligente: Diferencia si lo pidió el Local o el Cliente App
                                   String textoWa = esClienteApp
@@ -7086,14 +7976,15 @@ class _MovilScreenState extends State<MovilScreen>
                             Expanded(
                               child: Builder(
                                 builder: (context) {
-                                  bool tieneMsg = servicio['chat_movil'] == true;
+                                  bool tieneMsg =
+                                      servicio['chat_movil'] == true;
                                   if (tieneMsg) {
                                     WidgetsBinding.instance
                                         .addPostFrameCallback((_) {
-                                          _sonidos.reproducirSuave(
-                                            Sonidos.movilChatCliente,
-                                          );
-                                        });
+                                      _sonidos.reproducirSuave(
+                                        Sonidos.movilChatCliente,
+                                      );
+                                    });
                                   }
                                   return BotonTacticoAccion(
                                     icono: iconoChat,
@@ -7104,19 +7995,22 @@ class _MovilScreenState extends State<MovilScreen>
                                     onTap: () {
                                       Supabase.instance.client
                                           .from('servicios')
-                                          .update({'chat_movil': false})
-                                          .eq('id', servicio['id']);
+                                          .update({'chat_movil': false}).eq(
+                                              'id', servicio['id']);
                                       Navigator.push(
                                         context,
                                         MaterialPageRoute(
                                           builder: (context) => ChatScreen(
-                                            salaId: 'servicio_${servicio['id']}',
+                                            salaId:
+                                                'servicio_${servicio['id']}',
                                             miId: widget.usuario['id'],
-                                            miNombre: movilLabelConNombre(widget.usuario),
+                                            miNombre: movilLabelConNombre(
+                                                widget.usuario),
                                             titulo: 'Chat $textoChat',
                                             servicioId: servicio['id'],
                                             alarmaLocal: 'chat_movil',
                                             alarmaDestino: 'chat_cliente',
+                                            destinatarioId: (servicio['cliente_id'] as num?)?.toInt(),
                                             tipoFaq: TipoFaqChat.movil,
                                           ),
                                         ),
@@ -7129,53 +8023,8 @@ class _MovilScreenState extends State<MovilScreen>
                             const SizedBox(width: 8),
                           ],
 
-                          // CHAT CENTRAL (ROJO EMERGENCIA)
-                          Expanded(
-                            child: Builder(
-                              builder: (context) {
-                                bool tieneMsg =
-                                    servicio['chat_central_movil'] == true;
-                                // Suena al detectar alarma activa de Central
-                                if (tieneMsg) {
-                                  WidgetsBinding.instance.addPostFrameCallback((
-                                    _,
-                                  ) {
-                                    _sonidos.reproducir(
-                                      Sonidos.movilChatCentral,
-                                    );
-                                  });
-                                }
-                                return BotonTacticoAccion(
-                                  icono: Icons.support_agent,
-                                  texto: 'Central',
-                                  colorBase: Colors.red[800]!,
-                                  colorFondo: Colors.red[50]!,
-                                  tieneAlarma: tieneMsg,
-                                  onTap: () {
-                                    Supabase.instance.client
-                                        .from('servicios')
-                                        .update({'chat_central_movil': false})
-                                        .eq('id', servicio['id']);
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (context) => ChatScreen(
-                                          salaId: 'soporte_movil_${servicio['id']}',
-                                          miId: widget.usuario['id'],
-                                          miNombre: movilLabelConNombre(widget.usuario),
-                                          titulo: 'Soporte Central',
-                                          servicioId: servicio['id'],
-                                          alarmaLocal: 'chat_central_movil',
-                                          alarmaDestino: 'chat_movil_central',
-                                          tipoFaq: TipoFaqChat.movil,
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                );
-                              },
-                            ),
-                          ),
+                          // Chat con Central removido de la card:
+                          // el FAB pulsante maneja todos los mensajes de la central.
                         ],
                       );
                     }
@@ -7214,7 +8063,9 @@ class _MovilScreenState extends State<MovilScreen>
               duration: Duration.zero,
               transitionBuilder: (child, anim) => FadeTransition(
                 opacity: anim,
-                child: ScaleTransition(scale: Tween(begin: 0.92, end: 1.0).animate(anim), child: child),
+                child: ScaleTransition(
+                    scale: Tween(begin: 0.92, end: 1.0).animate(anim),
+                    child: child),
               ),
               child: SizedBox(
                 key: ValueKey('btn_$estado${estaDemorado ? '_d' : ''}'),
@@ -7244,7 +8095,10 @@ class _MovilScreenState extends State<MovilScreen>
                     icon: Icon(Icons.timer, color: Colors.blue[600], size: 16),
                     label: const Text(
                       'Justificar (+15 min)',
-                      style: TextStyle(color: Colors.blue, fontWeight: FontWeight.w600, fontSize: 12),
+                      style: TextStyle(
+                          color: Colors.blue,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12),
                     ),
                   ),
                 ),
@@ -7259,11 +8113,16 @@ class _MovilScreenState extends State<MovilScreen>
                       side: BorderSide(color: Colors.red[400]!, width: 1),
                       padding: const EdgeInsets.symmetric(vertical: 6),
                     ),
-                    onPressed: () => _mostrarMenuProblema(context, servicio['id']),
-                    icon: Icon(Icons.flag_outlined, color: Colors.red[500], size: 15),
+                    onPressed: () =>
+                        _mostrarMenuProblema(context, servicio['id']),
+                    icon: Icon(Icons.flag_outlined,
+                        color: Colors.red[500], size: 15),
                     label: Text(
                       'Reportar problema',
-                      style: TextStyle(color: Colors.red[500], fontWeight: FontWeight.w600, fontSize: 12),
+                      style: TextStyle(
+                          color: Colors.red[500],
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12),
                     ),
                   ),
                 ),
@@ -7297,13 +8156,16 @@ class _MovilScreenState extends State<MovilScreen>
               if (tipo == 'FN' && numero != null) return 'FN$numero';
               // Para sedes sin tipo FN usar nombre corto si existe
               final nombre = rMap['nombre']?.toString() ?? '';
-              return nombre.isNotEmpty ? nombre : (numero != null ? '$tipo$numero' : tipo);
+              return nombre.isNotEmpty
+                  ? nombre
+                  : (numero != null ? '$tipo$numero' : tipo);
             })
             .where((s) => s.isNotEmpty)
             .join(', ');
     final String destino = servicio['destino']?.toString() ?? '—';
     final String movilCodigo = widget.usuario['usuario']?.toString() ??
-        widget.usuario['nombre']?.toString() ?? '';
+        widget.usuario['nombre']?.toString() ??
+        '';
     // Sede solicitante: buscar primero en recogidas (es_sede_solicitante),
     // luego en DB por fn_sede_solicitante_id / fn_sede_id, último regex sobre origen.
     String sedeCodigo = '';
@@ -7313,19 +8175,28 @@ class _MovilScreenState extends State<MovilScreen>
       if (rMap['es_sede_solicitante'] == true) {
         final tipo = rMap['tipo']?.toString() ?? '';
         final numero = rMap['numero'];
-        if (tipo == 'FN' && numero != null) { sedeCodigo = 'FN$numero'; break; }
+        if (tipo == 'FN' && numero != null) {
+          sedeCodigo = 'FN$numero';
+          break;
+        }
         final nombre = rMap['nombre']?.toString() ?? '';
-        if (nombre.isNotEmpty) { sedeCodigo = nombre; break; }
+        if (nombre.isNotEmpty) {
+          sedeCodigo = nombre;
+          break;
+        }
       }
     }
     // 2) DB lookup por fn_sede_solicitante_id o fn_sede_id
     if (sedeCodigo.isEmpty) {
-      final sedeDbId = servicio['fn_sede_solicitante_id'] ?? servicio['fn_sede_id'];
+      final sedeDbId =
+          servicio['fn_sede_solicitante_id'] ?? servicio['fn_sede_id'];
       if (sedeDbId != null) {
         try {
           final row = await Supabase.instance.client
-              .from('fn_sedes').select('tipo, numero, nombre')
-              .eq('id', sedeDbId).maybeSingle();
+              .from('fn_sedes')
+              .select('tipo, numero, nombre')
+              .eq('id', sedeDbId)
+              .maybeSingle();
           if (row != null) {
             final tipo = row['tipo']?.toString() ?? '';
             final numero = row['numero'];
@@ -7363,8 +8234,7 @@ class _MovilScreenState extends State<MovilScreen>
           title: Row(
             children: [
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: Colors.indigo[900],
                   borderRadius: BorderRadius.circular(6),
@@ -7569,7 +8439,8 @@ class _MovilScreenState extends State<MovilScreen>
                         Expanded(
                           child: Text(
                             'Sin señal. Intenta de nuevo.',
-                            style: TextStyle(fontSize: 11, color: Colors.red[700]),
+                            style:
+                                TextStyle(fontSize: 11, color: Colors.red[700]),
                           ),
                         ),
                       ],
@@ -7581,6 +8452,13 @@ class _MovilScreenState extends State<MovilScreen>
             ),
           ),
           actions: [
+            TextButton(
+              onPressed: _enviando ? null : () => Navigator.pop(ctx),
+              child: const Text(
+                'Omitir',
+                style: TextStyle(color: Colors.grey),
+              ),
+            ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF00a650),
@@ -7589,7 +8467,10 @@ class _MovilScreenState extends State<MovilScreen>
               onPressed: (_enviando || facturaCtrl.text.trim().isEmpty)
                   ? null
                   : () async {
-                      setS(() { _enviando = true; _errorEnvio = null; });
+                      setS(() {
+                        _enviando = true;
+                        _errorEnvio = null;
+                      });
                       String? imgB64;
                       if (_fotoSede != null) {
                         final bytes = await _fotoSede!.readAsBytes();
@@ -7609,16 +8490,22 @@ class _MovilScreenState extends State<MovilScreen>
                         );
                         if (ctx.mounted) Navigator.pop(ctx);
                       } catch (_) {
-                        if (ctx.mounted) setS(() { _enviando = false; _errorEnvio = 'error'; });
+                        if (ctx.mounted)
+                          setS(() {
+                            _enviando = false;
+                            _errorEnvio = 'error';
+                          });
                       }
                     },
               child: _enviando
                   ? const SizedBox(
-                      width: 16, height: 16,
+                      width: 16,
+                      height: 16,
                       child: CircularProgressIndicator(
                           strokeWidth: 2, color: Colors.white))
                   : const Text('REPORTAR FACTURA',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                      style:
+                          TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
             ),
           ],
         ),
@@ -7647,14 +8534,17 @@ class _MovilScreenState extends State<MovilScreen>
               final numero = rMap['numero'];
               if (tipo == 'FN' && numero != null) return 'FN$numero';
               final nombre = rMap['nombre']?.toString() ?? '';
-              return nombre.isNotEmpty ? nombre : (numero != null ? '$tipo$numero' : tipo);
+              return nombre.isNotEmpty
+                  ? nombre
+                  : (numero != null ? '$tipo$numero' : tipo);
             })
             .where((s) => s.isNotEmpty)
             .join(', ');
 
     final String destino = servicio['destino']?.toString() ?? '—';
     final String movilCodigo = widget.usuario['usuario']?.toString() ??
-        widget.usuario['nombre']?.toString() ?? '';
+        widget.usuario['nombre']?.toString() ??
+        '';
     // Sede solicitante: buscar primero en recogidas (es_sede_solicitante),
     // luego en DB por fn_sede_solicitante_id / fn_sede_id, último regex sobre origen.
     String sedeCodigo2 = '';
@@ -7664,19 +8554,28 @@ class _MovilScreenState extends State<MovilScreen>
       if (rMap['es_sede_solicitante'] == true) {
         final tipo = rMap['tipo']?.toString() ?? '';
         final numero = rMap['numero'];
-        if (tipo == 'FN' && numero != null) { sedeCodigo2 = 'FN$numero'; break; }
+        if (tipo == 'FN' && numero != null) {
+          sedeCodigo2 = 'FN$numero';
+          break;
+        }
         final nombre = rMap['nombre']?.toString() ?? '';
-        if (nombre.isNotEmpty) { sedeCodigo2 = nombre; break; }
+        if (nombre.isNotEmpty) {
+          sedeCodigo2 = nombre;
+          break;
+        }
       }
     }
     // 2) DB lookup por fn_sede_solicitante_id o fn_sede_id
     if (sedeCodigo2.isEmpty) {
-      final sedeDbId2 = servicio['fn_sede_solicitante_id'] ?? servicio['fn_sede_id'];
+      final sedeDbId2 =
+          servicio['fn_sede_solicitante_id'] ?? servicio['fn_sede_id'];
       if (sedeDbId2 != null) {
         try {
           final row = await Supabase.instance.client
-              .from('fn_sedes').select('tipo, numero, nombre')
-              .eq('id', sedeDbId2).maybeSingle();
+              .from('fn_sedes')
+              .select('tipo, numero, nombre')
+              .eq('id', sedeDbId2)
+              .maybeSingle();
           if (row != null) {
             final tipo = row['tipo']?.toString() ?? '';
             final numero = row['numero'];
@@ -7783,8 +8682,7 @@ class _MovilScreenState extends State<MovilScreen>
                       _fnFacturaFila('Sede', sedeCodigo),
                       _fnFacturaFila('Recogidas', recogidasStr),
                       _fnFacturaFila('Destino', destino),
-                      _fnFacturaFila('Valor',
-                          '\$${_formatearMoneda(tarifa)}'),
+                      _fnFacturaFila('Valor', '\$${_formatearMoneda(tarifa)}'),
                       _fnFacturaFila('Nro. Factura', '— pendiente —',
                           pendiente: true),
                     ],
@@ -7949,9 +8847,8 @@ class _MovilScreenState extends State<MovilScreen>
                   children: [
                     // Omitir — cierra sin enviar
                     TextButton(
-                      onPressed: _enviandoForm
-                          ? null
-                          : () => Navigator.of(ctx).pop(),
+                      onPressed:
+                          _enviandoForm ? null : () => Navigator.of(ctx).pop(),
                       child: const Text(
                         'Omitir',
                         style: TextStyle(color: Colors.black38, fontSize: 14),
@@ -8039,8 +8936,7 @@ class _MovilScreenState extends State<MovilScreen>
   }
 
   /// Fila de la vista previa de factura
-  Widget _fnFacturaFila(String label, String valor,
-      {bool pendiente = false}) =>
+  Widget _fnFacturaFila(String label, String valor, {bool pendiente = false}) =>
       Padding(
         padding: const EdgeInsets.only(bottom: 8),
         child: Row(
@@ -8060,9 +8956,8 @@ class _MovilScreenState extends State<MovilScreen>
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
                       color: pendiente ? Colors.orange[700] : Colors.black87,
-                      fontStyle: pendiente
-                          ? FontStyle.italic
-                          : FontStyle.normal)),
+                      fontStyle:
+                          pendiente ? FontStyle.italic : FontStyle.normal)),
             ),
           ],
         ),
@@ -8109,8 +9004,8 @@ class _MovilScreenState extends State<MovilScreen>
         'factura': "'$factura", // comilla preserva ceros a la izq. en Sheets
         'valor': tarifa.toString(),
         'direccion': destino,
+        'imagen': imagenBase64 ?? '', // siempre presente para evitar undefined en GAS
       };
-      if (imagenBase64 != null) payloadMap['imagen'] = imagenBase64;
       final payload = jsonEncode(payloadMap);
 
       await http.post(
@@ -8122,8 +9017,7 @@ class _MovilScreenState extends State<MovilScreen>
       // Guardar número de factura en Supabase para que aparezca en el card
       await Supabase.instance.client
           .from('servicios')
-          .update({'fn_factura_numero': factura})
-          .eq('id', servicio['id']);
+          .update({'fn_factura_numero': factura}).eq('id', servicio['id']);
 
       overlayEntry.remove();
       if (mounted) {
@@ -8158,26 +9052,30 @@ class _MovilScreenState extends State<MovilScreen>
         ),
         child: Text(label,
             style: TextStyle(
-                color: color,
-                fontSize: 10,
-                fontWeight: FontWeight.bold)),
+                color: color, fontSize: 10, fontWeight: FontWeight.bold)),
       );
 
   // ── Etiqueta legible de zona FN ─────────────────────────────────────────────
   String _fnZonaLabel(String z) {
     switch (z) {
-      case 'CUCUTA': return 'Cúcuta';
-      case 'LOS_PATIOS': return 'Los Patios';
-      case 'V_ROSARIO': return 'Villa del Rosario';
-      default: return z;
+      case 'CUCUTA':
+        return 'Cúcuta';
+      case 'LOS_PATIOS':
+        return 'Los Patios';
+      case 'V_ROSARIO':
+        return 'Villa del Rosario';
+      default:
+        return z;
     }
   }
 
   // ── Abrir Google Maps hacia una coordenada ───────────────────────────────────
-  Future<void> _abrirMapsHaciaCoords(double lat, double lng, String label) async {
+  Future<void> _abrirMapsHaciaCoords(
+      double lat, double lng, String label) async {
     final uri = Uri.parse(
         'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving');
-    if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (await canLaunchUrl(uri))
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -8218,8 +9116,8 @@ class _MovilScreenState extends State<MovilScreen>
               child: Row(
                 children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 4),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
                       color: Colors.indigo[900],
                       borderRadius: BorderRadius.circular(6),
@@ -8241,9 +9139,8 @@ class _MovilScreenState extends State<MovilScreen>
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 15,
-                            color: tieneProblema
-                                ? Colors.red
-                                : Colors.indigo[900],
+                            color:
+                                tieneProblema ? Colors.red : Colors.indigo[900],
                           ),
                         ),
                         Text(
@@ -8291,7 +9188,8 @@ class _MovilScreenState extends State<MovilScreen>
       tiempoMeta = _limiteOrigenMinFn;
       // tiempoDisplay ya tiene el GPS-ETA desde tiempo_estimado_minutos
       mostrarReloj = true;
-    } else if (estado == 'en_ruta_destino' && servicio['picked_up_at'] != null) {
+    } else if (estado == 'en_ruta_destino' &&
+        servicio['picked_up_at'] != null) {
       efectivos = DateTime.now()
               .toUtc()
               .difference(DateTime.parse(servicio['picked_up_at']).toUtc())
@@ -8299,22 +9197,21 @@ class _MovilScreenState extends State<MovilScreen>
           (servicio['extension_minutes'] as int? ?? 0);
       if (efectivos < 0) efectivos = 0;
       tiempoMeta = _limiteDestinoMinFn;
-      tiempoDisplay = _limiteDestinoMinFn; // sin GPS pre-calc en ruta de entrega
+      tiempoDisplay =
+          _limiteDestinoMinFn; // sin GPS pre-calc en ruta de entrega
       mostrarReloj = true;
     }
 
     final bool estaDemorado = efectivos >= tiempoMeta;
     final String textoTarifa = _formatearMoneda(servicio['tarifa']);
     final recogidasRaw = servicio['recogidas'];
-    final List<dynamic> recogidas =
-        recogidasRaw is List ? recogidasRaw : [];
+    final List<dynamic> recogidas = recogidasRaw is List ? recogidasRaw : [];
 
     // ── Botón de acción principal ─────────────────────────────────────────────
     Widget botonAccion;
     if (tieneProblema) {
       botonAccion = ElevatedButton(
-        style:
-            ElevatedButton.styleFrom(backgroundColor: Colors.grey[400]),
+        style: ElevatedButton.styleFrom(backgroundColor: Colors.grey[400]),
         onPressed: null,
         child: const Text('⚠️ EN REVISIÓN POR CENTRAL',
             style: TextStyle(
@@ -8329,8 +9226,7 @@ class _MovilScreenState extends State<MovilScreen>
           foregroundColor: Colors.white,
           elevation: 4,
         ),
-        onPressed:
-            _procesando ? null : () => _marcarLlegadaOrigen(servicio),
+        onPressed: _procesando ? null : () => _marcarLlegadaOrigen(servicio),
         child: _procesando
             ? const SizedBox(
                 width: 24,
@@ -8338,8 +9234,7 @@ class _MovilScreenState extends State<MovilScreen>
                 child: CircularProgressIndicator(
                     color: Colors.white, strokeWidth: 3))
             : const Text('📍 LLEGUÉ A LA SEDE',
-                style: TextStyle(
-                    fontWeight: FontWeight.bold, fontSize: 16)),
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
       );
     } else if (estado == 'en_origen') {
       botonAccion = ElevatedButton(
@@ -8348,8 +9243,7 @@ class _MovilScreenState extends State<MovilScreen>
           foregroundColor: Colors.black,
           elevation: 4,
         ),
-        onPressed:
-            _procesando ? null : () => _iniciarRutaDestino(servicio),
+        onPressed: _procesando ? null : () => _iniciarRutaDestino(servicio),
         child: _procesando
             ? const SizedBox(
                 width: 24,
@@ -8357,16 +9251,13 @@ class _MovilScreenState extends State<MovilScreen>
                 child: CircularProgressIndicator(
                     color: Colors.black, strokeWidth: 3))
             : const Text('INICIAR RUTA DE ENTREGA',
-                style: TextStyle(
-                    fontWeight: FontWeight.bold, fontSize: 16)),
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
       );
     } else {
       botonAccion = estaDemorado
           ? ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red[900]),
-              onPressed: () =>
-                  _abrirMenuJustificacion(context, servicio['id']),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red[900]),
+              onPressed: () => _abrirMenuJustificacion(context, servicio['id']),
               child: const Text('⚠️ DEMORA - JUSTIFICAR',
                   style: TextStyle(
                       color: Colors.white,
@@ -8399,12 +9290,12 @@ class _MovilScreenState extends State<MovilScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-
             // ── Encabezado + timer inline ─────────────────────────────────
             Row(
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                   decoration: BoxDecoration(
                     color: Colors.indigo[900],
                     borderRadius: BorderRadius.circular(5),
@@ -8431,25 +9322,31 @@ class _MovilScreenState extends State<MovilScreen>
                 if (mostrarReloj)
                   Container(
                     margin: const EdgeInsets.only(right: 4),
-                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                     decoration: BoxDecoration(
                       color: estaDemorado ? Colors.red[100] : Colors.indigo[50],
                       borderRadius: BorderRadius.circular(6),
                       border: Border.all(
-                          color: estaDemorado ? Colors.red[400]! : Colors.indigo[200]!),
+                          color: estaDemorado
+                              ? Colors.red[400]!
+                              : Colors.indigo[200]!),
                     ),
                     child: Text(
                       '$efectivos/$tiempoDisplay min',
                       style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.bold,
-                          color: estaDemorado ? Colors.red[800] : Colors.indigo[800]),
+                          color: estaDemorado
+                              ? Colors.red[800]
+                              : Colors.indigo[800]),
                     ),
                   ),
                 GestureDetector(
                   onTap: () => setState(
                       () => _serviciosExpandidos.remove(servicio['id'] as int)),
-                  child: const Icon(Icons.expand_less, color: Colors.black38, size: 20),
+                  child: const Icon(Icons.expand_less,
+                      color: Colors.black38, size: 20),
                 ),
               ],
             ),
@@ -8467,20 +9364,28 @@ class _MovilScreenState extends State<MovilScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Zona (una línea pequeña)
-                  if (servicio['zona_fn'] != null)
+                  // Zona + sector (una línea pequeña)
+                  if (servicio['zona_fn'] != null || servicio['fn_sector_sede'] != null)
                     Text(
-                      _fnZonaLabel(servicio['zona_fn'] as String),
+                      () {
+                        final z = servicio['zona_fn'] != null
+                            ? _fnZonaLabel(servicio['zona_fn'] as String)
+                            : '';
+                        final s = servicio['fn_sector_sede'] as String? ?? '';
+                        return [if (z.isNotEmpty) z, if (s.isNotEmpty) s].join(' - ');
+                      }(),
                       style: TextStyle(
                           color: Colors.indigo[600],
                           fontWeight: FontWeight.w500,
                           fontSize: 11),
                     ),
-                  if (servicio['zona_fn'] != null) const SizedBox(height: 6),
+                  if (servicio['zona_fn'] != null || servicio['fn_sector_sede'] != null)
+                    const SizedBox(height: 6),
 
                   // ── SOLICITANTE ───────────────────────────────────────
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
                       color: Colors.indigo[100],
                       borderRadius: BorderRadius.circular(4),
@@ -8504,8 +9409,10 @@ class _MovilScreenState extends State<MovilScreen>
                       // Botón GPS
                       GestureDetector(
                         onTap: () async {
-                          final lat = (servicio['origen_lat'] as num?)?.toDouble();
-                          final lng = (servicio['origen_lng'] as num?)?.toDouble();
+                          final lat =
+                              (servicio['origen_lat'] as num?)?.toDouble();
+                          final lng =
+                              (servicio['origen_lng'] as num?)?.toDouble();
                           if (lat != null && lng != null) {
                             _abrirMapsHaciaCoords(
                                 lat, lng, servicio['origen'] ?? 'Sede');
@@ -8529,7 +9436,8 @@ class _MovilScreenState extends State<MovilScreen>
                           child: const Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.navigation, size: 16, color: Colors.white),
+                              Icon(Icons.navigation,
+                                  size: 16, color: Colors.white),
                               SizedBox(width: 4),
                               Text('GPS',
                                   style: TextStyle(
@@ -8584,12 +9492,16 @@ class _MovilScreenState extends State<MovilScreen>
                     // Separa: recogidas que son la sede solicitante vs extras
                     final otrasRecogidas = recogidas
                         .where((r) =>
-                            (r as Map<String, dynamic>)['es_sede_solicitante'] != true)
+                            (r as Map<String, dynamic>)[
+                                'es_sede_solicitante'] !=
+                            true)
                         .cast<Map<String, dynamic>>()
                         .toList();
                     final soloSolicitante = recogidas.isNotEmpty &&
                         recogidas.every((r) =>
-                            (r as Map<String, dynamic>)['es_sede_solicitante'] == true);
+                            (r as Map<String, dynamic>)[
+                                'es_sede_solicitante'] ==
+                            true);
 
                     // Sin recogidas extra + sede es el único punto → nota simple
                     if (soloSolicitante) {
@@ -8644,8 +9556,7 @@ class _MovilScreenState extends State<MovilScreen>
                           final lat = (rMap['lat'] as num?)?.toDouble();
                           final lng = (rMap['lng'] as num?)?.toDouble();
                           final esManual = rMap['es_manual'] == true;
-                          final direccion =
-                              rMap['direccion']?.toString() ?? '';
+                          final direccion = rMap['direccion']?.toString() ?? '';
                           final gpsLink = rMap['gps_link']?.toString() ?? '';
                           final label = esManual
                               ? (direccion.isNotEmpty
@@ -8653,7 +9564,9 @@ class _MovilScreenState extends State<MovilScreen>
                                   : nombre)
                               : (tipo == 'FN' && numero != null
                                   ? 'FN#$numero – $nombre'
-                                  : nombre.isNotEmpty ? nombre : tipo);
+                                  : nombre.isNotEmpty
+                                      ? nombre
+                                      : tipo);
                           return Padding(
                             padding: const EdgeInsets.only(top: 5),
                             child: Row(
@@ -8678,10 +9591,8 @@ class _MovilScreenState extends State<MovilScreen>
                                   onTap: () async {
                                     if (lat != null && lng != null) {
                                       _abrirMapsHaciaCoords(lat, lng, label);
-                                    } else if (esManual &&
-                                        gpsLink.isNotEmpty) {
-                                      await launchUrl(
-                                          Uri.parse(gpsLink),
+                                    } else if (esManual && gpsLink.isNotEmpty) {
+                                      await launchUrl(Uri.parse(gpsLink),
                                           mode: LaunchMode.externalApplication);
                                     } else {
                                       final q = Uri.encodeComponent(label);
@@ -8727,7 +9638,8 @@ class _MovilScreenState extends State<MovilScreen>
                   if (estado == 'pendiente' || estado == 'en_ruta_origen') ...[
                     Row(
                       children: [
-                        const Icon(Icons.lock_outline, size: 13, color: Colors.white38),
+                        const Icon(Icons.lock_outline,
+                            size: 13, color: Colors.white38),
                         const SizedBox(width: 5),
                         const Expanded(
                           child: Text(
@@ -8754,8 +9666,10 @@ class _MovilScreenState extends State<MovilScreen>
                             (servicio['destino_lng'] as num?) != null)
                           GestureDetector(
                             onTap: () {
-                              final lat = (servicio['destino_lat'] as num).toDouble();
-                              final lng = (servicio['destino_lng'] as num).toDouble();
+                              final lat =
+                                  (servicio['destino_lat'] as num).toDouble();
+                              final lng =
+                                  (servicio['destino_lng'] as num).toDouble();
                               _abrirMapsHaciaCoords(lat, lng, 'Destino');
                             },
                             child: Container(
@@ -8766,7 +9680,8 @@ class _MovilScreenState extends State<MovilScreen>
                                 color: Colors.teal[700]!.withValues(alpha: 0.2),
                                 borderRadius: BorderRadius.circular(5),
                                 border: Border.all(
-                                    color: Colors.tealAccent.withValues(alpha: 0.5)),
+                                    color: Colors.tealAccent
+                                        .withValues(alpha: 0.5)),
                               ),
                               child: const Row(
                                 mainAxisSize: MainAxisSize.min,
@@ -8783,6 +9698,53 @@ class _MovilScreenState extends State<MovilScreen>
                               ),
                             ),
                           ),
+                        if (estado == 'en_ruta_destino' && !tieneProblema)
+                          GestureDetector(
+                            onTap: _procesando
+                                ? null
+                                : () =>
+                                    _abrirNavegadorSatelital(servicio, false),
+                            child: Container(
+                              margin: const EdgeInsets.only(left: 6),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: Colors.indigo[600],
+                                borderRadius: BorderRadius.circular(5),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.explore,
+                                      size: 12, color: Colors.white),
+                                  SizedBox(width: 3),
+                                  Text('Navegar',
+                                      style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold)),
+                                ],
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('⚠ ',
+                            style:
+                                TextStyle(fontSize: 11, color: Colors.orange)),
+                        const Expanded(
+                          child: Text(
+                            'Las ubicaciones GPS no son exactas. Verifica bien el destino y pide la dirección exacta al cliente.',
+                            style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.orange,
+                                fontStyle: FontStyle.italic),
+                          ),
+                        ),
                       ],
                     ),
                   ],
@@ -8798,7 +9760,8 @@ class _MovilScreenState extends State<MovilScreen>
               children: [
                 if (servicio['metodo_pago'] == 'Datafono') ...[
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
                     decoration: BoxDecoration(
                       color: Colors.blue[700],
                       borderRadius: BorderRadius.circular(5),
@@ -8820,7 +9783,9 @@ class _MovilScreenState extends State<MovilScreen>
                   const SizedBox(width: 8),
                 ],
                 Text(
-                  textoTarifa == 'SIN TARIFA' ? 'SIN TARIFA' : 'Cobrar: $textoTarifa',
+                  textoTarifa == 'SIN TARIFA'
+                      ? 'SIN TARIFA'
+                      : 'Cobrar: $textoTarifa',
                   style: TextStyle(
                     color: textoTarifa == 'SIN TARIFA'
                         ? Colors.orange[800]
@@ -8834,7 +9799,9 @@ class _MovilScreenState extends State<MovilScreen>
 
             // Instrucciones especiales (compactas)
             if (servicio['instrucciones_especiales'] != null &&
-                (servicio['instrucciones_especiales'] as String).trim().isNotEmpty) ...[
+                (servicio['instrucciones_especiales'] as String)
+                    .trim()
+                    .isNotEmpty) ...[
               const SizedBox(height: 6),
               Container(
                 width: double.infinity,
@@ -8847,12 +9814,14 @@ class _MovilScreenState extends State<MovilScreen>
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.info_outline, color: Colors.amber[800], size: 15),
+                    Icon(Icons.info_outline,
+                        color: Colors.amber[800], size: 15),
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
                         servicio['instrucciones_especiales'].toString(),
-                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                        style: const TextStyle(
+                            fontSize: 12, fontWeight: FontWeight.w500),
                       ),
                     ),
                   ],
@@ -8861,22 +9830,27 @@ class _MovilScreenState extends State<MovilScreen>
             ],
 
             // ── Datos de factura FN (solo cuando es servicio desde sede) ──────
-            if (servicio['fn_origen']?.toString() == 'sede') ...[
+            if (servicio['tipo_fn'] == true) ...[
               const SizedBox(height: 8),
               Wrap(
                 spacing: 6,
                 runSpacing: 4,
                 children: [
                   if (servicio['fn_consecutivo'] != null)
-                    _chipFnMovil('📋 ${servicio['fn_consecutivo']}', Colors.indigo[700]!),
+                    _chipFnMovil('📋 ${servicio['fn_consecutivo']}',
+                        Colors.indigo[700]!),
                   if (servicio['fn_factura_numero'] != null)
-                    _chipFnMovil('Fac. ${servicio['fn_factura_numero']}', Colors.blueGrey[700]!),
+                    _chipFnMovil('Fac. ${servicio['fn_factura_numero']}',
+                        Colors.blueGrey[700]!),
                   if (servicio['fn_factura_valor'] != null)
-                    _chipFnMovil('\$${_formatearMoneda(servicio['fn_factura_valor'])}', Colors.blueGrey[700]!),
+                    _chipFnMovil(
+                        '\$${_formatearMoneda(servicio['fn_factura_valor'])}',
+                        Colors.blueGrey[700]!),
                   if (servicio['fn_pagar_producto'] == true)
                     _chipFnMovil('⚠ PAGAR PRODUCTO', Colors.red[700]!),
                   if (servicio['fn_factura_auto'] == true)
-                    _chipFnMovil('✓ Factura cargada automáticamente', Colors.green[700]!),
+                    _chipFnMovil('✓ Factura cargada automáticamente',
+                        Colors.green[700]!),
                 ],
               ),
             ],
@@ -8901,7 +9875,7 @@ class _MovilScreenState extends State<MovilScreen>
                             borderRadius: BorderRadius.circular(7)),
                       ),
                       onPressed: () =>
-                          servicio['fn_origen']?.toString() == 'sede'
+                          servicio['tipo_fn'] == true
                               ? _mostrarDialogoFacturaSede(servicio)
                               : _mostrarFormularioFactura(servicio),
                       icon: Icon(
@@ -8921,102 +9895,14 @@ class _MovilScreenState extends State<MovilScreen>
                   ),
                 ),
 
-                // Navegar destino (solo en_ruta_destino)
-                if (estado == 'en_ruta_destino' && !tieneProblema) ...[
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: SizedBox(
-                      height: 36,
-                      child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.indigo[600],
-                          foregroundColor: Colors.white,
-                          padding: EdgeInsets.zero,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(7)),
-                        ),
-                        onPressed: _procesando
-                            ? null
-                            : () => _abrirNavegadorSatelital(servicio, false),
-                        icon: const Icon(Icons.explore, size: 14),
-                        label: const Text('Destino',
-                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                      ),
-                    ),
-                  ),
-                ],
 
-                // Chat Central
-                if (!tieneProblema) ...[
-                  const SizedBox(width: 6),
-                  Builder(builder: (context) {
-                    final tieneMsg = servicio['chat_central_movil'] == true;
-                    if (tieneMsg) {
-                      WidgetsBinding.instance.addPostFrameCallback(
-                          (_) => _sonidos.reproducir(Sonidos.movilChatCentral));
-                    }
-                    return SizedBox(
-                      height: 36,
-                      width: 80,
-                      child: Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          SizedBox(
-                            width: 80,
-                            height: 36,
-                            child: ElevatedButton(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.red[800],
-                                foregroundColor: Colors.white,
-                                padding: EdgeInsets.zero,
-                                shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(7)),
-                              ),
-                              onPressed: () {
-                                Supabase.instance.client
-                                    .from('servicios')
-                                    .update({'chat_central_movil': false})
-                                    .eq('id', servicio['id']);
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => ChatScreen(
-                                      salaId: 'soporte_movil_${servicio['id']}',
-                                      miId: widget.usuario['id'],
-                                      miNombre: movilLabelConNombre(widget.usuario),
-                                      titulo: 'Soporte Central',
-                                      servicioId: servicio['id'],
-                                      alarmaLocal: 'chat_central_movil',
-                                      alarmaDestino: 'chat_movil_central',
-                                      tipoFaq: TipoFaqChat.movil,
-                                    ),
-                                  ),
-                                );
-                              },
-                              child: const Icon(Icons.support_agent, size: 18),
-                            ),
-                          ),
-                          if (tieneMsg)
-                            Positioned(
-                              top: -4,
-                              right: -4,
-                              child: Container(
-                                width: 12,
-                                height: 12,
-                                decoration: const BoxDecoration(
-                                  color: Colors.yellow,
-                                  shape: BoxShape.circle,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                    );
-                  }),
-                ],
+                // Chat con Central removido de la card FN:
+                // el FAB pulsante maneja todos los mensajes de la central.
 
                 // Liberar (solo Master en_ruta_origen)
-                if (esMaster && estado == 'en_ruta_origen' && !tieneProblema) ...[
+                if (esMaster &&
+                    estado == 'en_ruta_origen' &&
+                    !tieneProblema) ...[
                   const SizedBox(width: 6),
                   SizedBox(
                     height: 36,
@@ -9028,9 +9914,11 @@ class _MovilScreenState extends State<MovilScreen>
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(7)),
                       ),
-                      onPressed: _procesando ? null : () => _liberarServicio(servicio),
+                      onPressed:
+                          _procesando ? null : () => _liberarServicio(servicio),
                       child: const Text('LIBERAR',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 11)),
                     ),
                   ),
                 ],
@@ -9047,9 +9935,12 @@ class _MovilScreenState extends State<MovilScreen>
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(7)),
                       ),
-                      onPressed: _procesando ? null : () => _reasignarServicio(servicio),
+                      onPressed: _procesando
+                          ? null
+                          : () => _reasignarServicio(servicio),
                       child: const Text('REASIGNAR',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 11)),
                     ),
                   ),
                 ],
@@ -9066,9 +9957,12 @@ class _MovilScreenState extends State<MovilScreen>
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(7)),
                       ),
-                      onPressed: _procesando ? null : () => _transferirServicio(servicio),
+                      onPressed: _procesando
+                          ? null
+                          : () => _transferirServicio(servicio),
                       child: const Text('TRANSFERIR',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 11)),
                     ),
                   ),
                 ],
@@ -9105,8 +9999,10 @@ class _MovilScreenState extends State<MovilScreen>
                       padding: const EdgeInsets.symmetric(vertical: 4),
                       minimumSize: Size.zero,
                     ),
-                    onPressed: () => _mostrarMenuProblema(context, servicio['id']),
-                    icon: Icon(Icons.flag_outlined, color: Colors.red[400], size: 13),
+                    onPressed: () =>
+                        _mostrarMenuProblema(context, servicio['id']),
+                    icon: Icon(Icons.flag_outlined,
+                        color: Colors.red[400], size: 13),
                     label: Text('Reportar problema',
                         style: TextStyle(
                             color: Colors.red[400],
@@ -9129,7 +10025,12 @@ class _MovilScreenState extends State<MovilScreen>
     final bool esFn = servicio['tipo_fn'] == true;
     if (esFn) {
       final String zonaFn = servicio['zona_fn'] as String? ?? '';
-      final String zonaLabel = _fnZonaLabel(zonaFn);
+      final String sectorFn = servicio['fn_sector_sede'] as String? ?? '';
+      final String _zonaBase = _fnZonaLabel(zonaFn);
+      final String zonaLabel = [
+        if (_zonaBase.isNotEmpty) _zonaBase,
+        if (sectorFn.isNotEmpty) sectorFn,
+      ].join(' - ');
 
       // MASTER: tarjeta expandida con detalles completos
       if (esMaster) {
@@ -9138,8 +10039,10 @@ class _MovilScreenState extends State<MovilScreen>
         final String facturaN = servicio['fn_factura_numero']?.toString() ?? '';
         final dynamic facturaV = servicio['fn_factura_valor'];
         final bool pagarProducto = servicio['fn_pagar_producto'] == true;
-        final bool conDatafono = (servicio['metodo_pago']?.toString() ?? '') == 'Datafono';
-        final String instrucciones = servicio['instrucciones_especiales']?.toString() ?? '';
+        final bool conDatafono =
+            (servicio['metodo_pago']?.toString() ?? '') == 'Datafono';
+        final String instrucciones =
+            servicio['instrucciones_especiales']?.toString() ?? '';
         final dynamic recogidas = servicio['recogidas'];
         final List recogidasList = recogidas is List ? recogidas : [];
 
@@ -9164,7 +10067,8 @@ class _MovilScreenState extends State<MovilScreen>
                         color: Colors.indigo[900]!.withValues(alpha: 0.1),
                         shape: BoxShape.circle,
                       ),
-                      child: Icon(Icons.local_pharmacy, color: Colors.indigo[800], size: 22),
+                      child: Icon(Icons.local_pharmacy,
+                          color: Colors.indigo[800], size: 22),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
@@ -9173,24 +10077,45 @@ class _MovilScreenState extends State<MovilScreen>
                         children: [
                           Row(children: [
                             Text('TURNO FARMANORTE',
-                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.indigo[900])),
+                                style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 14,
+                                    color: Colors.indigo[900])),
                             const SizedBox(width: 6),
                             if (consecutivo.isNotEmpty)
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(color: Colors.indigo[800], borderRadius: BorderRadius.circular(6)),
-                                child: Text(consecutivo, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                    color: Colors.indigo[800],
+                                    borderRadius: BorderRadius.circular(6)),
+                                child: Text(consecutivo,
+                                    style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold)),
                               ),
                           ]),
                           if (zonaLabel.isNotEmpty)
-                            Text(zonaLabel, style: TextStyle(color: Colors.indigo[600], fontSize: 12, fontWeight: FontWeight.w600)),
+                            Text(zonaLabel,
+                                style: TextStyle(
+                                    color: Colors.indigo[600],
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600)),
                         ],
                       ),
                     ),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                      decoration: BoxDecoration(color: Colors.amber[700], borderRadius: BorderRadius.circular(6)),
-                      child: const Text('MASTER', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 3),
+                      decoration: BoxDecoration(
+                          color: Colors.amber[700],
+                          borderRadius: BorderRadius.circular(6)),
+                      child: const Text('MASTER',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 9,
+                              fontWeight: FontWeight.bold)),
                     ),
                   ],
                 ),
@@ -9202,18 +10127,26 @@ class _MovilScreenState extends State<MovilScreen>
                 Row(
                   children: [
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 5, vertical: 1),
                       decoration: BoxDecoration(
                         color: Colors.indigo[100],
                         borderRadius: BorderRadius.circular(3),
                       ),
                       child: Text('SOLICITANTE',
-                          style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.indigo[800], letterSpacing: 0.5)),
+                          style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.indigo[800],
+                              letterSpacing: 0.5)),
                     ),
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(servicio['origen']?.toString() ?? '—',
-                          style: TextStyle(color: Colors.indigo[900], fontSize: 12, fontWeight: FontWeight.bold)),
+                          style: TextStyle(
+                              color: Colors.indigo[900],
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold)),
                     ),
                   ],
                 ),
@@ -9226,17 +10159,22 @@ class _MovilScreenState extends State<MovilScreen>
                       .cast<Map<String, dynamic>>()
                       .toList();
                   final soloSolic = recogidasList.isNotEmpty &&
-                      recogidasList.every((r) => (r as Map)['es_sede_solicitante'] == true);
+                      recogidasList.every(
+                          (r) => (r as Map)['es_sede_solicitante'] == true);
 
                   if (soloSolic) {
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 6),
                       child: Row(
                         children: [
-                          Icon(Icons.subdirectory_arrow_right, size: 12, color: Colors.indigo[300]),
+                          Icon(Icons.subdirectory_arrow_right,
+                              size: 12, color: Colors.indigo[300]),
                           const SizedBox(width: 4),
                           Text('↳ Recoger en la sede solicitante',
-                              style: TextStyle(fontSize: 11, color: Colors.indigo[400], fontStyle: FontStyle.italic)),
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.indigo[400],
+                                  fontStyle: FontStyle.italic)),
                         ],
                       ),
                     );
@@ -9252,10 +10190,20 @@ class _MovilScreenState extends State<MovilScreen>
                         Row(
                           children: [
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                              decoration: BoxDecoration(color: Colors.green[100], borderRadius: BorderRadius.circular(3)),
-                              child: Text(otrasRec.length == 1 ? 'RECOGIDA' : 'RECOGIDAS (${otrasRec.length})',
-                                  style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.green[800], letterSpacing: 0.5)),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 5, vertical: 1),
+                              decoration: BoxDecoration(
+                                  color: Colors.green[100],
+                                  borderRadius: BorderRadius.circular(3)),
+                              child: Text(
+                                  otrasRec.length == 1
+                                      ? 'RECOGIDA'
+                                      : 'RECOGIDAS (${otrasRec.length})',
+                                  style: TextStyle(
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.green[800],
+                                      letterSpacing: 0.5)),
                             ),
                           ],
                         ),
@@ -9268,13 +10216,20 @@ class _MovilScreenState extends State<MovilScreen>
                           final dir = r['direccion']?.toString() ?? '';
                           final label = esManual
                               ? (dir.isNotEmpty ? '$nombre · $dir' : nombre)
-                              : (tipo == 'FN' && num.isNotEmpty ? 'FN$num — $nombre' : nombre);
+                              : (tipo == 'FN' && num.isNotEmpty
+                                  ? 'FN$num — $nombre'
+                                  : nombre);
                           return Row(
                             children: [
-                              Icon(Icons.storefront, size: 12, color: Colors.green[700]),
+                              Icon(Icons.storefront,
+                                  size: 12, color: Colors.green[700]),
                               const SizedBox(width: 5),
-                              Expanded(child: Text(label,
-                                  style: TextStyle(color: Colors.green[800], fontSize: 11, fontWeight: FontWeight.w600))),
+                              Expanded(
+                                  child: Text(label,
+                                      style: TextStyle(
+                                          color: Colors.green[800],
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600))),
                             ],
                           );
                         }),
@@ -9289,7 +10244,10 @@ class _MovilScreenState extends State<MovilScreen>
                     children: [
                       Icon(Icons.place, size: 13, color: Colors.red[400]),
                       const SizedBox(width: 6),
-                      Expanded(child: Text(destino, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
+                      Expanded(
+                          child: Text(destino,
+                              style: const TextStyle(
+                                  fontSize: 12, fontWeight: FontWeight.w600))),
                     ],
                   ),
 
@@ -9303,7 +10261,9 @@ class _MovilScreenState extends State<MovilScreen>
                     if (facturaN.isNotEmpty)
                       _chipFnMovil('Fac. $facturaN', Colors.blueGrey[700]!),
                     if (facturaV != null)
-                      _chipFnMovil('💰 \$${(facturaV as num).toStringAsFixed(0)}', Colors.green[700]!),
+                      _chipFnMovil(
+                          '💰 \$${(facturaV as num).toStringAsFixed(0)}',
+                          Colors.green[700]!),
                     if (pagarProducto)
                       _chipFnMovil('💳 Pagar producto', Colors.orange[700]!),
                     if (conDatafono)
@@ -9318,7 +10278,12 @@ class _MovilScreenState extends State<MovilScreen>
                     children: [
                       Icon(Icons.info, size: 13, color: Colors.grey[600]),
                       const SizedBox(width: 6),
-                      Expanded(child: Text(instrucciones, style: TextStyle(fontSize: 11, color: Colors.grey[700], fontStyle: FontStyle.italic))),
+                      Expanded(
+                          child: Text(instrucciones,
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey[700],
+                                  fontStyle: FontStyle.italic))),
                     ],
                   ),
                 ],
@@ -9330,11 +10295,18 @@ class _MovilScreenState extends State<MovilScreen>
                   child: ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.indigo[900],
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
                     ),
-                    onPressed: () => _aceptarServicioConCandado(context, servicio),
-                    icon: const Icon(Icons.check_circle, color: Colors.white, size: 16),
-                    label: const Text('ACEPTAR SERVICIO', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                    onPressed: () =>
+                        _aceptarServicioConCandado(context, servicio),
+                    icon: const Icon(Icons.check_circle,
+                        color: Colors.white, size: 16),
+                    label: const Text('ACEPTAR SERVICIO',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13)),
                   ),
                 ),
               ],
@@ -9361,7 +10333,8 @@ class _MovilScreenState extends State<MovilScreen>
                   color: Colors.indigo[900]!.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
-                child: Icon(Icons.local_pharmacy, color: Colors.indigo[800], size: 28),
+                child: Icon(Icons.local_pharmacy,
+                    color: Colors.indigo[800], size: 28),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -9370,11 +10343,17 @@ class _MovilScreenState extends State<MovilScreen>
                   children: [
                     const Text(
                       'TURNO FARMANORTE',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black87),
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: Colors.black87),
                     ),
                     if (zonaLabel.isNotEmpty)
                       Text(zonaLabel,
-                          style: TextStyle(color: Colors.indigo[700], fontWeight: FontWeight.w600, fontSize: 13)),
+                          style: TextStyle(
+                              color: Colors.indigo[700],
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13)),
                   ],
                 ),
               ),
@@ -9384,10 +10363,16 @@ class _MovilScreenState extends State<MovilScreen>
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.indigo[900],
                     padding: const EdgeInsets.symmetric(horizontal: 20),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8)),
                   ),
-                  onPressed: () => _aceptarServicioConCandado(context, servicio),
-                  child: const Text('ACEPTAR', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                  onPressed: () =>
+                      _aceptarServicioConCandado(context, servicio),
+                  child: const Text('ACEPTAR',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13)),
                 ),
               ),
             ],
@@ -9401,7 +10386,8 @@ class _MovilScreenState extends State<MovilScreen>
     // tipo_servicio es la fuente de verdad — observacion era el fallback
     // anterior pero se borra al reactivar desde Central, causando que todo
     // apareciera como PAQUETERÍA. tipo_servicio nunca se toca en reactivación.
-    final String tipoSvc = (servicio['tipo_servicio'] ?? '').toString().toUpperCase();
+    final String tipoSvc =
+        (servicio['tipo_servicio'] ?? '').toString().toUpperCase();
     String tipoBadge = 'PAQUETERÍA';
     IconData iconoBadge = Icons.inventory_2_rounded;
     Color colorBadge = Colors.brown[500]!;
@@ -9422,7 +10408,8 @@ class _MovilScreenState extends State<MovilScreen>
       tipoBadge = 'BEBIDAS';
       iconoBadge = Icons.nightlife;
       colorBadge = Colors.purple[600]!;
-    } else if (tipoSvc == 'RECOGIDA LOCAL' || observacion.contains('[ RECOGIDA LOCAL ]')) {
+    } else if (tipoSvc == 'RECOGIDA LOCAL' ||
+        observacion.contains('[ RECOGIDA LOCAL ]')) {
       tipoBadge = 'RECOG. LOCAL';
       iconoBadge = Icons.store;
       colorBadge = Colors.green[700]!;
@@ -9454,122 +10441,123 @@ class _MovilScreenState extends State<MovilScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: colorBadge.withValues(alpha: 0.1),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(iconoBadge, color: colorBadge, size: 28),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Text(
-                    'NUEVO SERVICIO',
-                    style: TextStyle(
-                      color: Colors.black54,
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1,
-                    ),
-                  ),
-                  Text(
-                    tipoBadge,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                      color: Colors.black87,
-                    ),
-                  ),
-                  if (tipoSvc == 'RECOGIDA LOCAL' &&
-                      (servicio['origen'] ?? '').toString().isNotEmpty)
-                    Text(
-                      servicio['origen'].toString().toUpperCase(),
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.green[800],
-                      ),
-                    ),
-                  if (textoDistancia.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.black87,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          textoDistancia,
-                          style: const TextStyle(
-                            color: Color(0xff3AF500),
-                            fontWeight: FontWeight.bold,
-                            fontSize: 10,
-                          ),
-                        ),
-                      ),
-                    ),
-                  if (servicio['etiqueta_tiempo'] != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.red[800],
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          servicio['etiqueta_tiempo'],
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 9,
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            Column(
-              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                SizedBox(
-                  height: 45,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.black,
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: colorBadge.withValues(alpha: 0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(iconoBadge, color: colorBadge, size: 28),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Text(
+                        'NUEVO SERVICIO',
+                        style: TextStyle(
+                          color: Colors.black54,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1,
+                        ),
                       ),
-                      elevation: 4,
-                    ),
-                    onPressed: () => _aceptarServicioConCandado(context, servicio),
-                    child: const Text(
-                      'ACEPTAR',
-                      style: TextStyle(
-                        color: Color(0xff3AF500),
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
+                      Text(
+                        tipoBadge,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: Colors.black87,
+                        ),
                       ),
-                    ),
+                      if (tipoSvc == 'RECOGIDA LOCAL' &&
+                          (servicio['origen'] ?? '').toString().isNotEmpty)
+                        Text(
+                          servicio['origen'].toString().toUpperCase(),
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.green[800],
+                          ),
+                        ),
+                      if (textoDistancia.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.black87,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              textoDistancia,
+                              style: const TextStyle(
+                                color: Color(0xff3AF500),
+                                fontWeight: FontWeight.bold,
+                                fontSize: 10,
+                              ),
+                            ),
+                          ),
+                        ),
+                      if (servicio['etiqueta_tiempo'] != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.red[800],
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              servicio['etiqueta_tiempo'],
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 9,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
-              ],
-            ),
+                Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    SizedBox(
+                      height: 45,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.black,
+                          padding: const EdgeInsets.symmetric(horizontal: 24),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          elevation: 4,
+                        ),
+                        onPressed: () =>
+                            _aceptarServicioConCandado(context, servicio),
+                        child: const Text(
+                          'ACEPTAR',
+                          style: TextStyle(
+                            color: Color(0xff3AF500),
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ],
             ),
 
@@ -9638,7 +10626,8 @@ class _MovilScreenState extends State<MovilScreen>
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
-                      servicio['tarifa'] != null && (servicio['tarifa'] as num) > 0
+                      servicio['tarifa'] != null &&
+                              (servicio['tarifa'] as num) > 0
                           ? _formatearMoneda(servicio['tarifa'])
                           : 'COTIZAR',
                       style: const TextStyle(
@@ -9762,10 +10751,15 @@ class _MovilScreenState extends State<MovilScreen>
     // ---------------------------------------------
 
     final String destinoActual = servicio['destino']?.toString().trim() ?? '';
+    final String tipoSvcAcep = servicio['tipo_servicio']?.toString().toUpperCase().trim() ?? '';
+    final bool esRecogidaLocalAcep = tipoSvcAcep == 'RECOGIDA LOCAL';
 
-    if (destinoActual.isEmpty ||
+    // Los servicios de RECOGIDA LOCAL no necesitan destino — el punto de entrega
+    // es el propio local, así que saltamos el diálogo de destino en blanco.
+    if (!esRecogidaLocalAcep &&
+        (destinoActual.isEmpty ||
         destinoActual.toLowerCase() == 'n/a' ||
-        destinoActual.length < 3) {
+        destinoActual.length < 3)) {
       final destinoCtrl = TextEditingController();
       showDialog(
         context: context,
@@ -9817,14 +10811,20 @@ class _MovilScreenState extends State<MovilScreen>
                     final String motivo = fila?['motivo']?.toString() ?? '';
                     String mensaje;
                     if (motivo == 'limite_alcanzado') {
-                      mensaje = '🚫 Alcanzaste tu límite de servicios simultáneos.';
+                      mensaje =
+                          '🚫 Alcanzaste tu límite de servicios simultáneos.';
                     } else {
                       final svcActual = await Supabase.instance.client
-                          .from('servicios').select('estado').eq('id', servicio['id']).maybeSingle();
+                          .from('servicios')
+                          .select('estado')
+                          .eq('id', servicio['id'])
+                          .maybeSingle();
                       final est = svcActual?['estado']?.toString() ?? '';
                       if (est == 'cancelado') {
                         mensaje = '❌ La Central canceló este servicio.';
-                      } else if (est == 'completado' || est == 'finalizado' || est == 'finalizado_con_problema') {
+                      } else if (est == 'completado' ||
+                          est == 'finalizado' ||
+                          est == 'finalizado_con_problema') {
                         mensaje = '✅ Este servicio ya fue completado.';
                       } else {
                         mensaje = '⚡ Ya fue asignado a otro móvil.';
@@ -9843,10 +10843,10 @@ class _MovilScreenState extends State<MovilScreen>
                   }
 
                   // Solo sale del paradero si ganó el servicio
-                  await Supabase.instance.client
-                      .from('usuarios')
-                      .update({'paradero_actual': null, 'ingreso_fila': null})
-                      .eq('id', widget.usuario['id']);
+                  await Supabase.instance.client.from('usuarios').update({
+                    'paradero_actual': null,
+                    'ingreso_fila': null
+                  }).eq('id', widget.usuario['id']);
                   _miParaderoCache = null; // sincroniza caché local con la BD
 
                   // AUTO-CIERRE DE PÁNICO: aceptar un servicio con
@@ -9928,11 +10928,16 @@ class _MovilScreenState extends State<MovilScreen>
           mensaje = '🚫 Alcanzaste tu límite de servicios simultáneos.';
         } else {
           final svcActual = await Supabase.instance.client
-              .from('servicios').select('estado').eq('id', servicio['id']).maybeSingle();
+              .from('servicios')
+              .select('estado')
+              .eq('id', servicio['id'])
+              .maybeSingle();
           final est = svcActual?['estado']?.toString() ?? '';
           if (est == 'cancelado') {
             mensaje = '❌ La Central canceló este servicio.';
-          } else if (est == 'completado' || est == 'finalizado' || est == 'finalizado_con_problema') {
+          } else if (est == 'completado' ||
+              est == 'finalizado' ||
+              est == 'finalizado_con_problema') {
             mensaje = '✅ Este servicio ya fue completado.';
           } else {
             mensaje = '⚡ Ya fue asignado a otro móvil.';
@@ -9953,8 +10958,8 @@ class _MovilScreenState extends State<MovilScreen>
       // Solo sale del paradero si ganó el servicio
       await Supabase.instance.client
           .from('usuarios')
-          .update({'paradero_actual': null, 'ingreso_fila': null})
-          .eq('id', widget.usuario['id']);
+          .update({'paradero_actual': null, 'ingreso_fila': null}).eq(
+              'id', widget.usuario['id']);
       _miParaderoCache = null; // sincroniza caché local con la BD
 
       // AUTO-CIERRE DE PÁNICO: aceptar un servicio con normalidad es
@@ -10005,15 +11010,13 @@ class _MovilScreenState extends State<MovilScreen>
           .from('servicios')
           .select('movil_id')
           .inFilter('estado', [
-            'en_ruta_origen',
-            'en_origen',
-            'en_ruta_destino',
-            'problema',
-          ])
-          .not('movil_id', 'is', null);
-      final idsOcupados = activosSvc
-          .map((s) => s['movil_id'].toString())
-          .toSet();
+        'en_ruta_origen',
+        'en_origen',
+        'en_ruta_destino',
+        'problema',
+      ]).not('movil_id', 'is', null);
+      final idsOcupados =
+          activosSvc.map((s) => s['movil_id'].toString()).toSet();
       idsOcupados.add(widget.usuario['id'].toString());
 
       // 2. Móviles disponibles
@@ -10046,7 +11049,8 @@ class _MovilScreenState extends State<MovilScreen>
       final seleccionado = await showDialog<Map<String, dynamic>>(
         context: context,
         builder: (ctx) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           title: const Text('¿A quién transferir?'),
           content: SizedBox(
             width: double.maxFinite,
@@ -10055,23 +11059,29 @@ class _MovilScreenState extends State<MovilScreen>
               itemCount: disponibles.length,
               itemBuilder: (_, i) {
                 final m = disponibles[i];
-                final rango = m['rango_movil']?.toString().toUpperCase() ?? 'NOVATO';
+                final rango =
+                    m['rango_movil']?.toString().toUpperCase() ?? 'NOVATO';
                 return ListTile(
                   dense: true,
                   leading: CircleAvatar(
                     radius: 16,
                     backgroundColor: Colors.black87,
                     child: Text(
-                      RegExp(r'\d+').firstMatch(m['usuario']?.toString() ?? '')?.group(0) ?? '?',
+                      RegExp(r'\d+')
+                              .firstMatch(m['usuario']?.toString() ?? '')
+                              ?.group(0) ??
+                          '?',
                       style: const TextStyle(
-                          color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold),
                     ),
                   ),
                   title: Text(
                       'Móvil ${RegExp(r'\d+').firstMatch(m['usuario']?.toString() ?? '')?.group(0) ?? '?'}',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                  subtitle: Text(rango,
-                      style: const TextStyle(fontSize: 11)),
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 13)),
+                  subtitle: Text(rango, style: const TextStyle(fontSize: 11)),
                   onTap: () => Navigator.pop(ctx, m),
                 );
               },
@@ -10092,7 +11102,8 @@ class _MovilScreenState extends State<MovilScreen>
       final confirmar = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           title: const Text('¿Solicitar transferencia?'),
           content: Text(
             'Se enviará una solicitud a Móvil ${RegExp(r'\d+').firstMatch(seleccionado['usuario']?.toString() ?? '')?.group(0) ?? '?'}.\n'
@@ -10108,7 +11119,8 @@ class _MovilScreenState extends State<MovilScreen>
               onPressed: () => Navigator.pop(ctx, true),
               child: const Text(
                 'ENVIAR',
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                style:
+                    TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
               ),
             ),
           ],
@@ -10127,7 +11139,8 @@ class _MovilScreenState extends State<MovilScreen>
       await MotorNotificaciones.dispararMisil(
         idDestino: nuevoId.toString(),
         titulo: '📨 SOLICITUD DE TRANSFERENCIA',
-        mensaje: 'Móvil ${RegExp(r'\d+').firstMatch(widget.usuario['usuario']?.toString() ?? '')?.group(0) ?? '?'} quiere transferirte un servicio',
+        mensaje:
+            'Móvil ${RegExp(r'\d+').firstMatch(widget.usuario['usuario']?.toString() ?? '')?.group(0) ?? '?'} quiere transferirte un servicio',
         urgente: true,
         sonido: Sonidos.movilParadero,
       );
@@ -10213,14 +11226,16 @@ class _MovilScreenState extends State<MovilScreen>
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
             child: const Text('RECHAZAR',
-                style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                style:
+                    TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text(
               'ACEPTAR',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              style:
+                  TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
             ),
           ),
         ],
@@ -10244,7 +11259,8 @@ class _MovilScreenState extends State<MovilScreen>
         await MotorNotificaciones.dispararMisil(
           idDestino: deMovilId.toString(),
           titulo: '✅ Transferencia aceptada',
-          mensaje: '${movilLabel(widget.usuario)} aceptó tu servicio #${servicio['id']}',
+          mensaje:
+              '${movilLabel(widget.usuario)} aceptó tu servicio #${servicio['id']}',
           urgente: false,
           sonido: 'alerta',
         );
@@ -10293,15 +11309,13 @@ class _MovilScreenState extends State<MovilScreen>
           .from('servicios')
           .select('movil_id')
           .inFilter('estado', [
-            'en_ruta_origen',
-            'en_origen',
-            'en_ruta_destino',
-            'problema',
-          ])
-          .not('movil_id', 'is', null);
-      final idsOcupados = activosSvc
-          .map((s) => s['movil_id'].toString())
-          .toSet();
+        'en_ruta_origen',
+        'en_origen',
+        'en_ruta_destino',
+        'problema',
+      ]).not('movil_id', 'is', null);
+      final idsOcupados =
+          activosSvc.map((s) => s['movil_id'].toString()).toSet();
       idsOcupados.add(widget.usuario['id'].toString()); // excluir a sí mismo
 
       // 2. Móviles disponibles
@@ -10334,7 +11348,8 @@ class _MovilScreenState extends State<MovilScreen>
       final seleccionado = await showDialog<Map<String, dynamic>>(
         context: context,
         builder: (ctx) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           title: const Text('¿A quién reasignas?'),
           content: SizedBox(
             width: double.maxFinite,
@@ -10343,18 +11358,27 @@ class _MovilScreenState extends State<MovilScreen>
               itemCount: disponibles.length,
               itemBuilder: (_, i) {
                 final m = disponibles[i];
-                final rango = m['rango_movil']?.toString().toUpperCase() ?? 'NOVATO';
+                final rango =
+                    m['rango_movil']?.toString().toUpperCase() ?? 'NOVATO';
                 return ListTile(
                   dense: true,
                   leading: CircleAvatar(
                     radius: 16,
                     backgroundColor: Colors.black87,
                     child: Text(
-                      RegExp(r'\d+').firstMatch(m['usuario']?.toString() ?? '')?.group(0) ?? '?',
-                      style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                      RegExp(r'\d+')
+                              .firstMatch(m['usuario']?.toString() ?? '')
+                              ?.group(0) ??
+                          '?',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold),
                     ),
                   ),
-                  title: Text(movilLabel(m), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  title: Text(movilLabel(m),
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 13)),
                   subtitle: Text(rango, style: const TextStyle(fontSize: 11)),
                   onTap: () => Navigator.pop(ctx, m),
                 );
@@ -10376,7 +11400,8 @@ class _MovilScreenState extends State<MovilScreen>
       final confirmar = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           title: const Text('¿Confirmar reasignación?'),
           content: Text(
             'El servicio pasará a ${seleccionado['nombre']}.\n'
@@ -10392,7 +11417,8 @@ class _MovilScreenState extends State<MovilScreen>
               onPressed: () => Navigator.pop(ctx, true),
               child: const Text(
                 'REASIGNAR',
-                style: TextStyle(color: Color(0xff3AF500), fontWeight: FontWeight.bold),
+                style: TextStyle(
+                    color: Color(0xff3AF500), fontWeight: FontWeight.bold),
               ),
             ),
           ],
@@ -10420,7 +11446,9 @@ class _MovilScreenState extends State<MovilScreen>
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al reasignar: $e'), backgroundColor: Colors.red),
+          SnackBar(
+              content: Text('Error al reasignar: $e'),
+              backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -10444,11 +11472,13 @@ class _MovilScreenState extends State<MovilScreen>
             child: const Text('Cancelar'),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFE040FB)),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFE040FB)),
             onPressed: () => Navigator.pop(ctx, true),
             child: Text(
               'LIBERAR',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              style:
+                  TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
             ),
           ),
         ],
@@ -10489,31 +11519,27 @@ class _MovilScreenState extends State<MovilScreen>
               servicio['onesignal_5m'].toString());
       }
 
-      final String ahoraLibera =
-          DateTime.now().toUtc().toIso8601String();
+      final String ahoraLibera = DateTime.now().toUtc().toIso8601String();
 
-      await Supabase.instance.client
-          .from('servicios')
-          .update({
-            'movil_id': null,
-            'estado': 'pendiente',
-            'liberacion_at': ahoraLibera,
-            'accepted_at': null,
-            // Serviexpress normal
-            'onesignal_30s': null,
-            'onesignal_2m': null,
-            'onesignal_5m': null,
-            // FN: reinicio completo de escalamiento
-            if (esFnLiberar) 'fn_radar_t0': ahoraLibera,
-            if (esFnLiberar) 'fn_fase2_movil_id': null,
-            if (esFnLiberar) 'fn_fase2_at': null,
-            if (esFnLiberar) 'fn_fase3_at': null,
-            if (esFnLiberar) 'fn_notif_fase2': null,
-            if (esFnLiberar) 'fn_notif_fase3': null,
-            if (esFnLiberar) 'fn_notif_fase4': null,
-            if (esFnLiberar) 'fn_notificados_fase1': <String>[],
-          })
-          .eq('id', servicio['id']);
+      await Supabase.instance.client.from('servicios').update({
+        'movil_id': null,
+        'estado': 'pendiente',
+        'liberacion_at': ahoraLibera,
+        'accepted_at': null,
+        // Serviexpress normal
+        'onesignal_30s': null,
+        'onesignal_2m': null,
+        'onesignal_5m': null,
+        // FN: reinicio completo de escalamiento
+        if (esFnLiberar) 'fn_radar_t0': ahoraLibera,
+        if (esFnLiberar) 'fn_fase2_movil_id': null,
+        if (esFnLiberar) 'fn_fase2_at': null,
+        if (esFnLiberar) 'fn_fase3_at': null,
+        if (esFnLiberar) 'fn_notif_fase2': null,
+        if (esFnLiberar) 'fn_notif_fase3': null,
+        if (esFnLiberar) 'fn_notif_fase4': null,
+        if (esFnLiberar) 'fn_notificados_fase1': <String>[],
+      }).eq('id', servicio['id']);
 
       // El registro al paradero es decisión del móvil — no se auto-registra al liberar.
 
@@ -10541,9 +11567,11 @@ class _MovilScreenState extends State<MovilScreen>
             .from('servicios')
             .select('movil_id')
             .inFilter('estado', [
-              'en_ruta_origen', 'en_origen', 'en_ruta_destino', 'problema'
-            ])
-            .not('movil_id', 'is', null);
+          'en_ruta_origen',
+          'en_origen',
+          'en_ruta_destino',
+          'problema'
+        ]).not('movil_id', 'is', null);
         final Map<String, int> cntFn = {};
         for (final sv in svcActivos) {
           final sid = sv['movil_id'].toString();
@@ -10551,13 +11579,19 @@ class _MovilScreenState extends State<MovilScreen>
         }
         int limRango(String? r) {
           switch (r?.toUpperCase().trim()) {
-            case 'PRO': return 1;
-            case 'ELITE': return 2;
-            case 'LEYENDA': return 3;
-            case 'MASTER': return 999;
-            default: return 1;
+            case 'PRO':
+              return 1;
+            case 'ELITE':
+              return 2;
+            case 'LEYENDA':
+              return 3;
+            case 'MASTER':
+              return 999;
+            default:
+              return 1;
           }
         }
+
         bool tieneCapFn(Map m) =>
             (cntFn[m['id'].toString()] ?? 0) <
             limRango(m['rango_movil']?.toString());
@@ -10579,10 +11613,8 @@ class _MovilScreenState extends State<MovilScreen>
             noMastersFn.map<String>((m) => m['id'].toString()).toList();
 
         // Más cercano para fase 2
-        final double? origLatFn =
-            (servicio['origen_lat'] as num?)?.toDouble();
-        final double? origLngFn =
-            (servicio['origen_lng'] as num?)?.toDouble();
+        final double? origLatFn = (servicio['origen_lat'] as num?)?.toDouble();
+        final double? origLngFn = (servicio['origen_lng'] as num?)?.toDouble();
         String? fase2IdFn;
         if (origLatFn != null && origLngFn != null && noMastersFn.isNotEmpty) {
           double minD = double.infinity;
@@ -10590,9 +11622,12 @@ class _MovilScreenState extends State<MovilScreen>
             final uLat = (m['latitud'] as num?)?.toDouble();
             final uLng = (m['longitud'] as num?)?.toDouble();
             if (uLat == null || uLng == null) continue;
-            final d = const Distance().as(LengthUnit.Meter,
-                LatLng(uLat, uLng), LatLng(origLatFn, origLngFn));
-            if (d < minD) { minD = d; fase2IdFn = m['id'].toString(); }
+            final d = const Distance().as(LengthUnit.Meter, LatLng(uLat, uLng),
+                LatLng(origLatFn, origLngFn));
+            if (d < minD) {
+              minD = d;
+              fase2IdFn = m['id'].toString();
+            }
           }
         } else if (noMastersFn.isNotEmpty) {
           fase2IdFn = noMastersFn.first['id'].toString();
@@ -10612,8 +11647,9 @@ class _MovilScreenState extends State<MovilScreen>
           final uLat = (mData['latitud'] as num?)?.toDouble();
           final uLng = (mData['longitud'] as num?)?.toDouble();
           if (uLat == null || uLng == null) return false;
-          return const Distance().as(LengthUnit.Meter,
-              LatLng(uLat, uLng), LatLng(origLatFn, origLngFn)) <= 2000;
+          return const Distance().as(LengthUnit.Meter, LatLng(uLat, uLng),
+                  LatLng(origLatFn, origLngFn)) <=
+              2000;
         }).toList();
 
         final fase4IdsFn = noMasterIdsFn
@@ -10674,7 +11710,9 @@ class _MovilScreenState extends State<MovilScreen>
           );
         }
 
-        if (notifFase2Lib != null || notifFase3Lib != null || notifFase4Lib != null) {
+        if (notifFase2Lib != null ||
+            notifFase3Lib != null ||
+            notifFase4Lib != null) {
           await Supabase.instance.client.from('servicios').update({
             if (notifFase2Lib != null) 'fn_notif_fase2': notifFase2Lib,
             if (notifFase3Lib != null) 'fn_notif_fase3': notifFase3Lib,
@@ -10697,10 +11735,15 @@ class _MovilScreenState extends State<MovilScreen>
             .neq('suspendido', true);
         final centralIds2 = mastersData
             .where((u) => u['rol'] == 'central' || u['rol'] == 'master')
-            .map<String>((u) => u['id'].toString()).toList();
+            .map<String>((u) => u['id'].toString())
+            .toList();
         final masterMobileIds2 = mastersData
-            .where((u) => u['rango_movil'] == 'MASTER' && u['rol'] != 'central' && u['rol'] != 'master')
-            .map<String>((u) => u['id'].toString()).toList();
+            .where((u) =>
+                u['rango_movil'] == 'MASTER' &&
+                u['rol'] != 'central' &&
+                u['rol'] != 'master')
+            .map<String>((u) => u['id'].toString())
+            .toList();
         if (centralIds2.isNotEmpty) {
           await MotorNotificaciones.dispararRafa(
             idsDestinos: centralIds2,
@@ -10739,15 +11782,12 @@ class _MovilScreenState extends State<MovilScreen>
           if (id30s != null) {
             await Supabase.instance.client
                 .from('servicios')
-                .update({'onesignal_30s': id30s})
-                .eq('id', servicioId);
+                .update({'onesignal_30s': id30s}).eq('id', servicioId);
           }
         }
 
-        final double? origLat =
-            (servicio['origen_lat'] as num?)?.toDouble();
-        final double? origLng =
-            (servicio['origen_lng'] as num?)?.toDouble();
+        final double? origLat = (servicio['origen_lat'] as num?)?.toDouble();
+        final double? origLng = (servicio['origen_lng'] as num?)?.toDouble();
         final movilesLib = await Supabase.instance.client
             .from('usuarios')
             .select('id, latitud, longitud')
@@ -10755,19 +11795,22 @@ class _MovilScreenState extends State<MovilScreen>
             .eq('en_linea', true)
             .eq('tiene_se', true)
             .neq('suspendido', true)
-            .not('rango_movil', 'in', '("MASTER")');
-        final idsZona60 = movilesLib.where((u) {
-          final id = u['id'].toString();
-          if (masterMobileIds2.contains(id) || paraderoIds.contains(id))
-            return false;
-          if (origLat == null || origLng == null) return true;
-          final uLat = (u['latitud'] as num?)?.toDouble();
-          final uLng = (u['longitud'] as num?)?.toDouble();
-          if (uLat == null || uLng == null) return false;
-          return const Distance().as(LengthUnit.Meter, LatLng(uLat, uLng),
-                  LatLng(origLat, origLng)) <=
-              1000;
-        }).map((u) => u['id'].toString()).toList();
+            .or('rango_movil.is.null,rango_movil.neq.MASTER');
+        final idsZona60 = movilesLib
+            .where((u) {
+              final id = u['id'].toString();
+              if (masterMobileIds2.contains(id) || paraderoIds.contains(id))
+                return false;
+              if (origLat == null || origLng == null) return true;
+              final uLat = (u['latitud'] as num?)?.toDouble();
+              final uLng = (u['longitud'] as num?)?.toDouble();
+              if (uLat == null || uLng == null) return false;
+              return const Distance().as(LengthUnit.Meter, LatLng(uLat, uLng),
+                      LatLng(origLat, origLng)) <=
+                  1000;
+            })
+            .map((u) => u['id'].toString())
+            .toList();
         final idsTodos90 = movilesLib
             .map((u) => u['id'].toString())
             .where((id) => !masterMobileIds2.contains(id))
@@ -10801,7 +11844,8 @@ class _MovilScreenState extends State<MovilScreen>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('🔄 Servicio liberado — vuelve a empezar para todos.'),
+            content:
+                Text('🔄 Servicio liberado — vuelve a empezar para todos.'),
             backgroundColor: Color(0xFFE040FB),
           ),
         );
@@ -10844,10 +11888,8 @@ class _MovilScreenState extends State<MovilScreen>
     if (textoDireccion == null || textoDireccion.trim().isEmpty) return;
     try {
       if (horaReferencia != null) {
-        final transcurridos = DateTime.now()
-            .toUtc()
-            .difference(horaReferencia)
-            .inSeconds;
+        final transcurridos =
+            DateTime.now().toUtc().difference(horaReferencia).inSeconds;
         if (transcurridos < segundosMinimos) return;
       }
 
@@ -10887,11 +11929,12 @@ class _MovilScreenState extends State<MovilScreen>
       _sonidos.reproducirSuave(Sonidos.movilConfirmar); // Llegué al local
 
       // Si es un servicio FN desde sede → activar factura automática
-      final esFnSede = servicio['fn_origen']?.toString() == 'sede';
+      final esFnSede = servicio['tipo_fn'] == true;
       final String ahoraIso = DateTime.now().toUtc().toIso8601String();
       final Map<String, dynamic> updateData = {
         'estado': 'en_origen',
-        'llegada_sede_at': ahoraIso, // timestamp para regla de 10 minutos mínimos
+        'llegada_sede_at':
+            ahoraIso, // timestamp para regla de 10 minutos mínimos
       };
       if (esFnSede) {
         updateData['fn_factura_auto'] = true;
@@ -10954,184 +11997,256 @@ class _MovilScreenState extends State<MovilScreen>
       builder: (_) => StatefulBuilder(
         builder: (ctx, setDs) => AlertDialog(
           backgroundColor: const Color(0xFF1A1A1A),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           title: Row(children: [
-            const Icon(Icons.add_card_rounded, color: Color(0xFF818CF8), size: 20),
+            const Icon(Icons.add_card_rounded,
+                color: Color(0xFF818CF8), size: 20),
             const SizedBox(width: 8),
             Text(tipoPlan == 'prediario' ? 'Recargar Saldo' : 'Pagar Deuda',
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15)),
           ]),
           content: SingleChildScrollView(
-            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-              // ── Datos de pago configurados por Central ─────────────────
-              FutureBuilder<Map<String, dynamic>?>(
-                future: Supabase.instance.client
-                    .from('config_sistema')
-                    .select('info_recarga_wallet')
-                    .eq('id', 1)
-                    .maybeSingle(),
-                builder: (_, snapCfg) {
-                  final info = snapCfg.data?['info_recarga_wallet']?.toString();
-                  if (info == null || info.isEmpty) return const SizedBox.shrink();
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 14),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF818CF8).withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: const Color(0xFF818CF8).withValues(alpha: 0.4)),
-                    ),
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      const Row(children: [
-                        Icon(Icons.account_balance_rounded, color: Color(0xFF818CF8), size: 14),
-                        SizedBox(width: 6),
-                        Text('TRANSFERIR A:', style: TextStyle(color: Color(0xFF818CF8), fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.8)),
-                      ]),
-                      const SizedBox(height: 6),
-                      SelectableText(info, style: const TextStyle(color: Colors.white, fontSize: 12, height: 1.5)),
-                    ]),
-                  );
-                },
-              ),
-              const Text(
-                'Ingresa el monto y adjunta el comprobante de transferencia. Tu saldo se actualizará automáticamente.',
-                style: TextStyle(color: Colors.white54, fontSize: 11, height: 1.4),
-              ),
-              const SizedBox(height: 14),
-              TextField(
-                controller: montoCtrl,
-                keyboardType: TextInputType.number,
-                style: const TextStyle(color: Colors.white, fontSize: 14),
-                decoration: InputDecoration(
-                  labelText: 'Monto a recargar (\$)',
-                  labelStyle: const TextStyle(color: Colors.white54, fontSize: 12),
-                  prefixText: '\$ ',
-                  prefixStyle: const TextStyle(color: Colors.white54),
-                  filled: true, fillColor: Colors.white.withValues(alpha: 0.06),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-                ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: notaCtrl,
-                style: const TextStyle(color: Colors.white, fontSize: 13),
-                decoration: InputDecoration(
-                  labelText: 'Nota (opcional)',
-                  labelStyle: const TextStyle(color: Colors.white54, fontSize: 12),
-                  filled: true, fillColor: Colors.white.withValues(alpha: 0.06),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-                ),
-              ),
-              const SizedBox(height: 12),
-              // Comprobante
-              InkWell(
-                onTap: () async {
-                  final picker = ImagePicker();
-                  final img = await picker.pickImage(source: ImageSource.gallery, imageQuality: 70);
-                  if (img == null) return;
-                  final bytes = await img.readAsBytes();
-                  setDs(() {
-                    _imgBytes = bytes;
-                  });
-                },
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.04),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.white24),
+            child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ── Datos de pago configurados por Central ─────────────────
+                  FutureBuilder<Map<String, dynamic>?>(
+                    future: Supabase.instance.client
+                        .from('config_sistema')
+                        .select('info_recarga_wallet')
+                        .eq('id', 1)
+                        .maybeSingle(),
+                    builder: (_, snapCfg) {
+                      final info =
+                          snapCfg.data?['info_recarga_wallet']?.toString();
+                      if (info == null || info.isEmpty)
+                        return const SizedBox.shrink();
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 14),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color:
+                              const Color(0xFF818CF8).withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                              color: const Color(0xFF818CF8)
+                                  .withValues(alpha: 0.4)),
+                        ),
+                        child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Row(children: [
+                                Icon(Icons.account_balance_rounded,
+                                    color: Color(0xFF818CF8), size: 14),
+                                SizedBox(width: 6),
+                                Text('TRANSFERIR A:',
+                                    style: TextStyle(
+                                        color: Color(0xFF818CF8),
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                        letterSpacing: 0.8)),
+                              ]),
+                              const SizedBox(height: 6),
+                              SelectableText(info,
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 12,
+                                      height: 1.5)),
+                            ]),
+                      );
+                    },
                   ),
-                  child: _imgBytes != null
-                      ? Column(children: [
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: Image.memory(_imgBytes!, height: 120, fit: BoxFit.cover),
-                          ),
-                          const SizedBox(height: 6),
-                          const Text('Toca para cambiar', style: TextStyle(color: Colors.white38, fontSize: 10)),
-                        ])
-                      : const Column(children: [
-                          Icon(Icons.upload_rounded, color: Colors.white38, size: 24),
-                          SizedBox(height: 4),
-                          Text('Adjuntar comprobante', style: TextStyle(color: Colors.white54, fontSize: 12)),
-                        ]),
-                ),
-              ),
-            ]),
+                  const Text(
+                    'Ingresa el monto y adjunta el comprobante de transferencia. Tu saldo se actualizará automáticamente.',
+                    style: TextStyle(
+                        color: Colors.white54, fontSize: 11, height: 1.4),
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: montoCtrl,
+                    keyboardType: TextInputType.number,
+                    style: const TextStyle(color: Colors.white, fontSize: 14),
+                    decoration: InputDecoration(
+                      labelText: 'Monto a recargar (\$)',
+                      labelStyle:
+                          const TextStyle(color: Colors.white54, fontSize: 12),
+                      prefixText: '\$ ',
+                      prefixStyle: const TextStyle(color: Colors.white54),
+                      filled: true,
+                      fillColor: Colors.white.withValues(alpha: 0.06),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 10),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: BorderSide.none),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: notaCtrl,
+                    style: const TextStyle(color: Colors.white, fontSize: 13),
+                    decoration: InputDecoration(
+                      labelText: 'Nota (opcional)',
+                      labelStyle:
+                          const TextStyle(color: Colors.white54, fontSize: 12),
+                      filled: true,
+                      fillColor: Colors.white.withValues(alpha: 0.06),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 10),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: BorderSide.none),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  // Comprobante
+                  InkWell(
+                    onTap: () async {
+                      final picker = ImagePicker();
+                      final img = await picker.pickImage(
+                          source: ImageSource.gallery, imageQuality: 70);
+                      if (img == null) return;
+                      final bytes = await img.readAsBytes();
+                      setDs(() {
+                        _imgBytes = bytes;
+                      });
+                    },
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.04),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.white24),
+                      ),
+                      child: _imgBytes != null
+                          ? Column(children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.memory(_imgBytes!,
+                                    height: 120, fit: BoxFit.cover),
+                              ),
+                              const SizedBox(height: 6),
+                              const Text('Toca para cambiar',
+                                  style: TextStyle(
+                                      color: Colors.white38, fontSize: 10)),
+                            ])
+                          : const Column(children: [
+                              Icon(Icons.upload_rounded,
+                                  color: Colors.white38, size: 24),
+                              SizedBox(height: 4),
+                              Text('Adjuntar comprobante',
+                                  style: TextStyle(
+                                      color: Colors.white54, fontSize: 12)),
+                            ]),
+                    ),
+                  ),
+                ]),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('CANCELAR', style: TextStyle(color: Colors.white38)),
+              child: const Text('CANCELAR',
+                  style: TextStyle(color: Colors.white38)),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF818CF8), foregroundColor: Colors.white),
-              onPressed: _subiendo ? null : () async {
-                final monto = double.tryParse(montoCtrl.text.replaceAll(',', '.').trim());
-                if (monto == null || monto <= 0) return;
-                setDs(() => _subiendo = true);
-                try {
-                  String? urlComprobante;
-                  if (_imgBytes != null) {
-                    final nombreArch = 'recarga_${movilId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
-                    await Supabase.instance.client.storage
-                        .from('documentos')
-                        .uploadBinary(nombreArch, _imgBytes!,
-                            fileOptions: const FileOptions(contentType: 'image/jpeg', upsert: true));
-                    urlComprobante = Supabase.instance.client.storage
-                        .from('documentos')
-                        .getPublicUrl(nombreArch);
-                  }
-                  await Supabase.instance.client.from('solicitudes_recarga_wallet').insert({
-                    'movil_id': movilId,
-                    'monto_solicitado': monto,
-                    'nota': notaCtrl.text.trim().isNotEmpty ? notaCtrl.text.trim() : null,
-                    'comprobante_url': urlComprobante,
-                    'estado': 'pendiente',
-                  });
-                  if (mounted) {
-                    Navigator.pop(ctx);
-                    showDialog(
-                      context: context,
-                      builder: (dCtx) => AlertDialog(
-                        backgroundColor: const Color(0xFF1A1A1A),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                        title: const Row(children: [
-                          Icon(Icons.hourglass_top_rounded, color: Colors.amber, size: 22),
-                          SizedBox(width: 10),
-                          Text('En verificación', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-                        ]),
-                        content: Text(
-                          'Tu recarga de \$${monto.toStringAsFixed(0)} está siendo revisada por el equipo.\n\nTu saldo se actualizará automáticamente en cuanto sea aprobada.',
-                          style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
-                        ),
-                        actions: [
-                          ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF818CF8), foregroundColor: Colors.white),
-                            onPressed: () => Navigator.pop(dCtx),
-                            child: const Text('ENTENDIDO', style: TextStyle(fontWeight: FontWeight.bold)),
-                          ),
-                        ],
-                      ),
-                    );
-                  }
-                } catch (e) {
-                  setDs(() => _subiendo = false);
-                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text('Error: $e'),
-                    backgroundColor: Colors.red,
-                    behavior: SnackBarBehavior.floating,
-                  ));
-                }
-              },
+                  backgroundColor: const Color(0xFF818CF8),
+                  foregroundColor: Colors.white),
+              onPressed: _subiendo
+                  ? null
+                  : () async {
+                      final monto = double.tryParse(
+                          montoCtrl.text.replaceAll(',', '.').trim());
+                      if (monto == null || monto <= 0) return;
+                      setDs(() => _subiendo = true);
+                      try {
+                        String? urlComprobante;
+                        if (_imgBytes != null) {
+                          final nombreArch =
+                              'recarga_${movilId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+                          await Supabase.instance.client.storage
+                              .from('documentos')
+                              .uploadBinary(nombreArch, _imgBytes!,
+                                  fileOptions: const FileOptions(
+                                      contentType: 'image/jpeg', upsert: true));
+                          urlComprobante = Supabase.instance.client.storage
+                              .from('documentos')
+                              .getPublicUrl(nombreArch);
+                        }
+                        await Supabase.instance.client
+                            .from('solicitudes_recarga_wallet')
+                            .insert({
+                          'movil_id': movilId,
+                          'monto_solicitado': monto,
+                          'nota': notaCtrl.text.trim().isNotEmpty
+                              ? notaCtrl.text.trim()
+                              : null,
+                          'comprobante_url': urlComprobante,
+                          'estado': 'pendiente',
+                        });
+                        if (mounted) {
+                          Navigator.pop(ctx);
+                          showDialog(
+                            context: context,
+                            builder: (dCtx) => AlertDialog(
+                              backgroundColor: const Color(0xFF1A1A1A),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14)),
+                              title: const Row(children: [
+                                Icon(Icons.hourglass_top_rounded,
+                                    color: Colors.amber, size: 22),
+                                SizedBox(width: 10),
+                                Text('En verificación',
+                                    style: TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 16)),
+                              ]),
+                              content: Text(
+                                'Tu recarga de \$${monto.toStringAsFixed(0)} está siendo revisada por el equipo.\n\nTu saldo se actualizará automáticamente en cuanto sea aprobada.',
+                                style: const TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 13,
+                                    height: 1.5),
+                              ),
+                              actions: [
+                                ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                      backgroundColor: const Color(0xFF818CF8),
+                                      foregroundColor: Colors.white),
+                                  onPressed: () => Navigator.pop(dCtx),
+                                  child: const Text('ENTENDIDO',
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.bold)),
+                                ),
+                              ],
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        setDs(() => _subiendo = false);
+                        if (mounted)
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                            content: Text('Error: $e'),
+                            backgroundColor: Colors.red,
+                            behavior: SnackBarBehavior.floating,
+                          ));
+                      }
+                    },
               child: _subiendo
-                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                  : const Text('ENVIAR', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white))
+                  : const Text('ENVIAR',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
             ),
           ],
         ),
@@ -11156,9 +12271,19 @@ class _MovilScreenState extends State<MovilScreen>
         expand: false,
         builder: (ctx2, scroll) => Column(children: [
           const SizedBox(height: 8),
-          Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
+          Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(2))),
           const SizedBox(height: 14),
-          const Text('HISTORIAL DE WALLET', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14, letterSpacing: 1)),
+          const Text('HISTORIAL DE WALLET',
+              style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                  letterSpacing: 1)),
           const SizedBox(height: 12),
           Expanded(
             child: FutureBuilder<List<dynamic>>(
@@ -11170,9 +12295,13 @@ class _MovilScreenState extends State<MovilScreen>
                   .limit(50),
               builder: (ctx3, snap) {
                 if (snap.connectionState == ConnectionState.waiting)
-                  return const Center(child: CircularProgressIndicator(color: Color(0xff3AF500)));
+                  return const Center(
+                      child:
+                          CircularProgressIndicator(color: Color(0xff3AF500)));
                 if (!snap.hasData || snap.data!.isEmpty)
-                  return const Center(child: Text('Sin movimientos registrados', style: TextStyle(color: Colors.white38)));
+                  return const Center(
+                      child: Text('Sin movimientos registrados',
+                          style: TextStyle(color: Colors.white38)));
                 final items = snap.data!;
                 return ListView.builder(
                   controller: scroll,
@@ -11185,34 +12314,56 @@ class _MovilScreenState extends State<MovilScreen>
                     final tipo = item['tipo']?.toString() ?? '';
                     final concepto = item['concepto']?.toString() ?? tipo;
                     final fecha = item['created_at'] != null
-                        ? DateTime.tryParse(item['created_at'].toString())?.toLocal()
+                        ? DateTime.tryParse(item['created_at'].toString())
+                            ?.toLocal()
                         : null;
                     final fechaStr = fecha != null
-                        ? '${fecha.day.toString().padLeft(2,'0')}/${fecha.month.toString().padLeft(2,'0')} ${fecha.hour.toString().padLeft(2,'0')}:${fecha.minute.toString().padLeft(2,'0')}'
+                        ? '${fecha.day.toString().padLeft(2, '0')}/${fecha.month.toString().padLeft(2, '0')} ${fecha.hour.toString().padLeft(2, '0')}:${fecha.minute.toString().padLeft(2, '0')}'
                         : '';
-                    final IconData icono = tipo == 'recarga' ? Icons.add_circle_outline
-                        : tipo == 'comision' ? Icons.remove_circle_outline
-                        : tipo == 'pago_postdia' ? Icons.check_circle_outline
-                        : Icons.tune_rounded;
+                    final IconData icono = tipo == 'recarga'
+                        ? Icons.add_circle_outline
+                        : tipo == 'comision'
+                            ? Icons.remove_circle_outline
+                            : tipo == 'pago_postdia'
+                                ? Icons.check_circle_outline
+                                : Icons.tune_rounded;
                     return Container(
                       margin: const EdgeInsets.only(bottom: 8),
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 10),
                       decoration: BoxDecoration(
                         color: Colors.white.withValues(alpha: 0.05),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Row(children: [
-                        Icon(icono, size: 18, color: positivo ? const Color(0xFF22C55E) : Colors.redAccent),
+                        Icon(icono,
+                            size: 18,
+                            color: positivo
+                                ? const Color(0xFF22C55E)
+                                : Colors.redAccent),
                         const SizedBox(width: 12),
-                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text(concepto, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500)),
-                          if (fechaStr.isNotEmpty)
-                            Text(fechaStr, style: const TextStyle(color: Colors.white38, fontSize: 10)),
-                        ])),
+                        Expanded(
+                            child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                              Text(concepto,
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500)),
+                              if (fechaStr.isNotEmpty)
+                                Text(fechaStr,
+                                    style: const TextStyle(
+                                        color: Colors.white38, fontSize: 10)),
+                            ])),
                         Text(
                           '${positivo ? '+' : ''}\$${monto.toStringAsFixed(0)}',
-                          style: TextStyle(color: positivo ? const Color(0xFF22C55E) : Colors.redAccent,
-                              fontWeight: FontWeight.bold, fontSize: 14),
+                          style: TextStyle(
+                              color: positivo
+                                  ? const Color(0xFF22C55E)
+                                  : Colors.redAccent,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14),
                         ),
                       ]),
                     );
@@ -11307,7 +12458,7 @@ class _MovilScreenState extends State<MovilScreen>
                           rangoSeleccionado == null
                               ? 'Filtrar por fecha'
                               : '${rangoSeleccionado!.start.day}/${rangoSeleccionado!.start.month} - '
-                                '${rangoSeleccionado!.end.day}/${rangoSeleccionado!.end.month}',
+                                  '${rangoSeleccionado!.end.day}/${rangoSeleccionado!.end.month}',
                           style: const TextStyle(fontSize: 12),
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -11339,11 +12490,11 @@ class _MovilScreenState extends State<MovilScreen>
                         .select()
                         .eq('movil_id', widget.usuario['id'])
                         .inFilter('estado', [
-                          'finalizado',
-                          'cancelado',
-                          'finalizado_por_demora',
-                          'finalizado_con_problema',
-                        ])
+                      'finalizado',
+                      'cancelado',
+                      'finalizado_por_demora',
+                      'finalizado_con_problema',
+                    ])
                         // "Borrados" por el moto no se muestran en su
                         // propia vista — pero el registro real sigue
                         // intacto para calificaciones y reportes.
@@ -11384,9 +12535,10 @@ class _MovilScreenState extends State<MovilScreen>
                       if (servicio['estado'] == 'finalizado' &&
                           servicio['created_at'] != null) {
                         if (rangoSeleccionado != null) {
-                          if (servicio['tarifa'] != null && servicio['tarifa'] is num) {
-                            producidoCalculado += (servicio['tarifa'] as num)
-                                .toDouble();
+                          if (servicio['tarifa'] != null &&
+                              servicio['tarifa'] is num) {
+                            producidoCalculado +=
+                                (servicio['tarifa'] as num).toDouble();
                           }
                         } else {
                           final fechaSvc = DateTime.parse(
@@ -11395,9 +12547,10 @@ class _MovilScreenState extends State<MovilScreen>
                           if (fechaSvc.year == hoy.year &&
                               fechaSvc.month == hoy.month &&
                               fechaSvc.day == hoy.day) {
-                            if (servicio['tarifa'] != null && servicio['tarifa'] is num) {
-                              producidoCalculado += (servicio['tarifa'] as num)
-                                  .toDouble();
+                            if (servicio['tarifa'] != null &&
+                                servicio['tarifa'] is num) {
+                              producidoCalculado +=
+                                  (servicio['tarifa'] as num).toDouble();
                             }
                           }
                         }
@@ -11423,7 +12576,8 @@ class _MovilScreenState extends State<MovilScreen>
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
                                 children: [
                                   Text(
                                     etiquetaProducido,
@@ -11433,7 +12587,8 @@ class _MovilScreenState extends State<MovilScreen>
                                     ),
                                   ),
                                   Text(
-                                    _formatearMoneda(producidoCalculado, mostrarCero: true),
+                                    _formatearMoneda(producidoCalculado,
+                                        mostrarCero: true),
                                     style: const TextStyle(
                                       fontWeight: FontWeight.bold,
                                       fontSize: 22,
@@ -11444,7 +12599,8 @@ class _MovilScreenState extends State<MovilScreen>
                               ),
                               const SizedBox(height: 8),
                               Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
                                 children: [
                                   const Text(
                                     'ACTIVO HOY:',
@@ -11476,7 +12632,8 @@ class _MovilScreenState extends State<MovilScreen>
                                         if (_estaEnLinea) ...[
                                           const SizedBox(width: 5),
                                           Container(
-                                            width: 7, height: 7,
+                                            width: 7,
+                                            height: 7,
                                             decoration: BoxDecoration(
                                               color: Colors.green[600],
                                               shape: BoxShape.circle,
@@ -11520,7 +12677,8 @@ class _MovilScreenState extends State<MovilScreen>
                                       label = 'RETRASADO';
                                     } else if (estado ==
                                             'finalizado_con_problema' ||
-                                        (servicio['observacion'] ?? '').contains(
+                                        (servicio['observacion'] ?? '')
+                                            .contains(
                                           '[MARCA DE FALLA]',
                                         )) {
                                       colorTag = Colors.red[700]!;
@@ -11548,7 +12706,8 @@ class _MovilScreenState extends State<MovilScreen>
                                               CrossAxisAlignment.end,
                                           children: [
                                             Text(
-                                              _formatearMoneda(servicio['tarifa']),
+                                              _formatearMoneda(
+                                                  servicio['tarifa']),
                                               style: const TextStyle(
                                                 fontWeight: FontWeight.bold,
                                                 fontSize: 13,
@@ -11622,7 +12781,8 @@ class _MovilScreenState extends State<MovilScreen>
             onPressed: () => Navigator.pop(ctx, true),
             child: Text(
               'BORRAR',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              style:
+                  TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
             ),
           ),
         ],
@@ -11697,14 +12857,11 @@ class _MovilScreenState extends State<MovilScreen>
 
     if (confirmar == true) {
       try {
-        await Supabase.instance.client
-            .from('usuarios')
-            .update({
-              'suspendido': true,
-              'en_linea': false,
-              'observacion': 'CUENTA ELIMINADA POR EL USUARIO',
-            })
-            .eq('id', widget.usuario['id']);
+        await Supabase.instance.client.from('usuarios').update({
+          'suspendido': true,
+          'en_linea': false,
+          'observacion': 'CUENTA ELIMINADA POR EL USUARIO',
+        }).eq('id', widget.usuario['id']);
 
         final prefs = await SharedPreferences.getInstance();
         await prefs.remove('saved_phone');
@@ -11741,9 +12898,13 @@ class _MovilScreenState extends State<MovilScreen>
         barrierDismissible: false,
         builder: (ctx) => AlertDialog(
           backgroundColor: const Color(0xFF1A1A1A),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           title: const Text('🚫 No puedes salir',
-              style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 16)),
+              style: TextStyle(
+                  color: Colors.red,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16)),
           content: const Text(
             'Tienes un servicio en curso.\n\n'
             'Finaliza o libera el servicio antes de cerrar la app.',
@@ -11754,10 +12915,12 @@ class _MovilScreenState extends State<MovilScreen>
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xff3AF500),
                 foregroundColor: Colors.black,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8)),
               ),
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('ENTENDIDO', style: TextStyle(fontWeight: FontWeight.bold)),
+              child: const Text('ENTENDIDO',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
             ),
           ],
         ),
@@ -11778,8 +12941,7 @@ class _MovilScreenState extends State<MovilScreen>
           'pero afecta el flujo del paradero. ¿Salir de todas formas?';
     } else {
       titulo = '⚠️ Estás conectado';
-      mensaje =
-          'Seguirás apareciendo como disponible en el radar y tu '
+      mensaje = 'Seguirás apareciendo como disponible en el radar y tu '
           'ubicación se congelará.\n\n'
           'El sistema te desconectará automáticamente en ~2 minutos.';
     }
@@ -11791,17 +12953,19 @@ class _MovilScreenState extends State<MovilScreen>
         backgroundColor: const Color(0xFF1A1A1A),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         title: Text(titulo,
-            style: const TextStyle(color: Colors.orange,
-                fontWeight: FontWeight.bold, fontSize: 16)),
+            style: const TextStyle(
+                color: Colors.orange,
+                fontWeight: FontWeight.bold,
+                fontSize: 16)),
         content: Text(mensaje,
-            style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.5)),
+            style: const TextStyle(
+                color: Colors.white70, fontSize: 13, height: 1.5)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
             child: const Text('QUEDARME',
                 style: TextStyle(
-                    color: Color(0xff3AF500),
-                    fontWeight: FontWeight.bold)),
+                    color: Color(0xff3AF500), fontWeight: FontWeight.bold)),
           ),
           TextButton(
             style: TextButton.styleFrom(foregroundColor: Colors.red[400]),
@@ -11826,1132 +12990,1616 @@ class _MovilScreenState extends State<MovilScreen>
         }
       },
       child: Scaffold(
-      backgroundColor: const Color(0xFF0D0D0D),
-      appBar: AppBar(
-        title: Text(
-          'PANEL | ${(widget.usuario['usuario'] ?? '').toString().toUpperCase()}',
-          style: TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        backgroundColor: Colors.black,
-        iconTheme: const IconThemeData(color: Colors.white),
-        actions: [
-          // AppBar simplificado: Perfil, Ranking y Cerrar sesión ahora
-          // viven en la pestaña de Perfil — el AppBar solo conserva lo
-          // que debe estar accesible SIEMPRE sin importar la pestaña:
-          // la alerta de pánico, por seguridad.
-
-          // ALERTA DE PÁNICO — solo visible en 2 casos:
-          // 1. Ya hay una activa → botón pulsante para DETENERLA.
-          // 2. Hay un servicio en curso Y no se ha usado hoy → botón para disparar.
-          // Fuera de servicio o ya usado: botón oculto (reduce abuso en fases de prueba).
-          if (_eventoPanicoActivoId != null &&
-              _panicoUbicacionExpiraAt != null &&
-              DateTime.now().toUtc().isBefore(_panicoUbicacionExpiraAt!))
-            PulsingPanicoButton(
-              color: Colors.red,
-              child: IconButton(
-                icon: const Icon(Icons.shield_rounded, color: Colors.red),
-                tooltip: 'Tu alerta sigue activa — toca para detenerla',
-                onPressed: () => _detenerMiAlertaPanico(),
-              ),
-            )
-          else if (_tieneServicioActivo && !_panicoUsadoHoy)
-            BotonPanicoTrigger(
-              esCompacto: true,
-              segundos: 2,
-              icono: Icons.shield_rounded,
-              colorAcento: Colors.red,
-              titulo: 'ALERTA DE PÁNICO',
-              descripcion:
-                  'Se notificará a Central y a todos los móviles en línea. Usa esto solo en una emergencia real.',
-              onActivado: _dispararPanico,
+        backgroundColor: const Color(0xFF0D0D0D),
+        appBar: AppBar(
+          title: Text(
+            'PANEL | ${(widget.usuario['usuario'] ?? '').toString().toUpperCase()}',
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
             ),
-          const SizedBox(width: 6),
-        ],
-      ),
-      // ---> INYECCIÓN: BOTÓN FLOTANTE (SOLO APARECE EN EMERGENCIA) <---
-      floatingActionButton: StreamBuilder<List<Map<String, dynamic>>>(
-        stream: _streamUsuarios,
-        builder: (context, snapUsuarios) {
-          bool alarmaSoporte = false;
-          if (snapUsuarios.hasData) {
-            final miPerfil = snapUsuarios.data!.firstWhere(
-              (u) => u['id'] == widget.usuario['id'],
-              orElse: () => widget.usuario,
-            );
-            alarmaSoporte = miPerfil['chat_central'] == true;
-          }
+          ),
+          backgroundColor: Colors.black,
+          iconTheme: const IconThemeData(color: Colors.white),
+          actions: [
+            // AppBar simplificado: Perfil, Ranking y Cerrar sesión ahora
+            // viven en la pestaña de Perfil — el AppBar solo conserva lo
+            // que debe estar accesible SIEMPRE sin importar la pestaña:
+            // la alerta de pánico, por seguridad.
 
-          WidgetsBinding.instance.addPostFrameCallback((_) async {
-            if (mounted) {
-              if (alarmaSoporte && !_sonidoSoporteReproducido) {
+            // ALERTA DE PÁNICO — solo visible en 2 casos:
+            // 1. Ya hay una activa → botón pulsante para DETENERLA.
+            // 2. Hay un servicio en curso Y no se ha usado hoy → botón para disparar.
+            // Fuera de servicio o ya usado: botón oculto (reduce abuso en fases de prueba).
+            if (_eventoPanicoActivoId != null &&
+                _panicoUbicacionExpiraAt != null &&
+                DateTime.now().toUtc().isBefore(_panicoUbicacionExpiraAt!))
+              PulsingPanicoButton(
+                color: Colors.red,
+                child: IconButton(
+                  icon: const Icon(Icons.shield_rounded, color: Colors.red),
+                  tooltip: 'Tu alerta sigue activa — toca para detenerla',
+                  onPressed: () => _detenerMiAlertaPanico(),
+                ),
+              )
+            else if (_tieneServicioActivo && !_panicoUsadoHoy)
+              BotonPanicoTrigger(
+                esCompacto: true,
+                segundos: 2,
+                icono: Icons.shield_rounded,
+                colorAcento: Colors.red,
+                titulo: 'ALERTA DE PÁNICO',
+                descripcion:
+                    'Se notificará a Central y a todos los móviles en línea. Usa esto solo en una emergencia real.',
+                onActivado: _dispararPanico,
+              ),
+            const SizedBox(width: 6),
+          ],
+        ),
+        // ── FAB CHAT CENTRAL — aparece cuando la central escribe ──────────────
+        // Combina mensajes de chat_central (usuario) y chat_central_movil
+        // (por servicio). PulsingPanicoButton da el glow + latido agresivo.
+        // Badge amarillo muestra cuántos mensajes hay pendientes.
+        floatingActionButton: ValueListenableBuilder<int>(
+          valueListenable: _chatCentralTotal,
+          builder: (context, totalMsgs, _) {
+            // Sonido — suena solo la primera vez que aparece la alarma
+            WidgetsBinding.instance.addPostFrameCallback((_) async {
+              if (!mounted) return;
+              if (totalMsgs > 0 && !_sonidoSoporteReproducido) {
                 _sonidoSoporteReproducido = true;
-                _sonidos.reproducir(
-                  Sonidos.movilChatCentral,
-                ); // Mensaje urgente de Central
-              } else if (!alarmaSoporte) {
+                _sonidos.reproducir(Sonidos.movilChatCentral);
+              } else if (totalMsgs == 0) {
                 _sonidoSoporteReproducido = false;
               }
-            }
-          });
+            });
 
-          // 1. SI NO HAY ALARMA, SE DESAPARECE POR COMPLETO (PANTALLA LIMPIA)
-          if (!alarmaSoporte) return const SizedBox.shrink();
+            if (totalMsgs == 0) return const SizedBox.shrink();
 
-          // 2. SI HAY ALARMA, SALE EL BOTÓN ROJO QUE ABRE EL CHAT CON CENTRAL
-          return FloatingActionButton.extended(
-            backgroundColor: Colors.red[700],
-            icon: Icon(Icons.support_agent, color: Colors.white),
-            label: Text('Central', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-            onPressed: () {
-              // Apaga la alarma antes de entrar al chat
-              Supabase.instance.client
-                  .from('usuarios')
-                  .update({'chat_central': false})
-                  .eq('id', widget.usuario['id']);
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => ChatScreen(
-                    salaId: 'soporte_${widget.usuario['id']}',
-                    miId: widget.usuario['id'] as int,
-                    miNombre: movilLabelConNombre(widget.usuario),
-                    titulo: 'Central',
-                    usuarioId: widget.usuario['id'] as int?,
-                    alarmaLocal: 'chat_central',    // limpia flag en usuarios al abrir
-                    alarmaDestino: 'alarma_soporte', // avisa a Central al escribir
-                    tipoFaq: TipoFaqChat.movil,
-                  ),
-                ),
-              );
-            },
-          );
-        },
-      ),
-      // -----------------------------------------------------------------
-      // IndexedStack mantiene ambas pestañas vivas en el árbol de widgets,
-      // así el radar sigue recibiendo datos del stream mientras el móvil
-      // está en Perfil — sin spinner al volver.
-      // OPTIMIZACIÓN: Column y banner FUERA del ValueListenableBuilder para que
-      // el banner no se reconstruya cada 5s. Solo el IndexedStack hace rebuild.
-      body: Stack(
-        children: [
-          Column(
-        children: [
-          // ── Banner de permisos — solo reacciona a setState, no al radarTick ──
-          if (_permisosCriticosFaltantes && !kIsWeb)
-            Material(
-              color: const Color(0xFFF59E0B),
-              child: InkWell(
-                onTap: () async {
-                  await Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const PermisosCriticosScreen(
-                        permisosOpcionales: kPermisosOpcionalesMovil,
-                      ),
-                      fullscreenDialog: true,
-                    ),
-                  );
-                  _chequearPermisosCriticos();
-                },
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                  child: Row(children: [
-                    const Icon(Icons.warning_amber_rounded, color: Colors.black, size: 18),
-                    const SizedBox(width: 8),
-                    const Expanded(
-                      child: Text(
-                        '⚠️ Faltan permisos críticos — toca para activarlos',
-                        style: TextStyle(color: Colors.black, fontSize: 12, fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                    const Icon(Icons.arrow_forward_ios, color: Colors.black, size: 12),
-                  ]),
-                ),
-              ),
-            ),
-          // ── Contenido principal ──────────────────────────────────────────
-          Expanded(
-            child: ValueListenableBuilder<int>(
-              valueListenable: _radarTick,
-              builder: (context, _, __) => IndexedStack(
-                index: _tabActual,
+            return PulsingPanicoButton(
+              color: Colors.red,
+              child: Stack(
+                clipBehavior: Clip.none,
                 children: [
-                  // Pestaña servicios — RepaintBoundary propio para que la GPU
-                  // no re-rasterice esta pestaña cuando cambia la de perfil.
-                  // TickerMode desactiva sus animaciones cuando está oculta.
-                  RepaintBoundary(
-                    child: TickerMode(
-                      enabled: _tabActual == 0,
-                      child: StreamBuilder<List<Map<String, dynamic>>>(
-        stream: _streamUsuarios,
-        initialData: _cacheUsuarios, // evita el spinner al volver de Perfil
-        builder: (context, snapUsuarios) {
-          if (snapUsuarios.hasError)
-            return _pantallaErrorStream('usuarios', snapUsuarios.error);
-          if (!snapUsuarios.hasData)
-            return const Center(
-              child: CircularProgressIndicator(color: Colors.black),
-            );
-
-          final usuariosTotales = snapUsuarios.data!;
-          final miPerfilEnVivo = usuariosTotales.firstWhere(
-            (u) => u['id'].toString() == widget.usuario['id'].toString(),
-            orElse: () => widget.usuario,
-          );
-
-          // La base de datos es la única fuente de verdad.
-          final String? paraderoActual =
-              miPerfilEnVivo['paradero_actual'] as String?;
-
-          final enFila = usuariosTotales
-              .where(
-                (u) =>
-                    u['en_linea'] == true &&
-                    u['paradero_actual'] != null &&
-                    u['ingreso_fila'] != null,
-              )
-              .toList();
-          enFila.sort((a, b) {
-            final tA = a['ticket_prioridad'] == true ? 1 : 0;
-            final tB = b['ticket_prioridad'] == true ? 1 : 0;
-            if (tA != tB) return tB.compareTo(tA);
-            final cmp = DateTime.parse(a['ingreso_fila']).compareTo(DateTime.parse(b['ingreso_fila']));
-            if (cmp != 0) return cmp;
-            return ((a['id'] as num?) ?? 0).compareTo((b['id'] as num?) ?? 0);
-          });
-
-          bool radarAbierto = false;
-          String mensajeBloqueo = '';
-          final bool esMaster =
-              miPerfilEnVivo['rango_movil']?.toString().toUpperCase() ==
-              'MASTER';
-
-          if (paraderoActual == null) {
-            if (esMaster) {
-              radarAbierto = true;
-            } else {
-              radarAbierto = false;
-              mensajeBloqueo = enFila.isEmpty
-                  ? 'Radar bloqueado.\nDirígete a un paradero y regístrate para recibir pedidos.'
-                  : 'Hay compañeros en fila.\nDirígete a un paradero y regístrate para entrar en turno.';
-            }
-          } else {
-            // BLINDAJE TÁCTICO: Solo comparamos tu turno contra los que están en tu MISMO paradero
-            final miFila = enFila
-                .where((u) => u['paradero_actual'] == paraderoActual)
-                .toList();
-            final miTurnoIndex = miFila.indexWhere(
-              (u) => u['id'].toString() == widget.usuario['id'].toString(),
-            );
-
-            if (miTurnoIndex == 0 || miFila.isEmpty) {
-              radarAbierto = true;
-            } else if (miTurnoIndex > 0) {
-              radarAbierto = false;
-              mensajeBloqueo =
-                  'Estás en la posición #${miTurnoIndex + 1} de la fila $paraderoActual.\nEspera tu turno para recibir servicios.';
-            } else {
-              radarAbierto = false;
-              mensajeBloqueo = 'Sincronizando tu turno con la Central...';
-            }
-          }
-
-          // ---> HEADER REDISEÑADO: card style consistente con Perfil <---
-          final Color _statusColor = _estaEnLinea
-              ? (paraderoActual != null ? Colors.blue : const Color(0xff3AF500))
-              : Colors.grey;
-          final String _statusLabel = !_estaEnLinea
-              ? 'Fuera de Servicio'
-              : paraderoActual != null
-                  ? 'En paradero'
-                  : 'Activo · Sin paradero';
-
-          return Column(
-            children: [
-              Container(
-                margin: const EdgeInsets.fromLTRB(12, 12, 12, 4),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: Colors.grey[200]!),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                  child: Row(
-                    children: [
-                      // Ícono de estado en círculo de color
-                      Container(
-                        width: 44,
-                        height: 44,
-                        decoration: BoxDecoration(
-                          color: _statusColor.withValues(alpha: 0.12),
-                          shape: BoxShape.circle,
-                        ),
-                        child: AnimatedSwitcher(
-                          duration: Duration.zero,
-                          child: Icon(
-                            key: ValueKey(_statusLabel),
-                            _estaEnLinea
-                                ? (paraderoActual != null
-                                    ? Icons.location_on
-                                    : Icons.gps_fixed)
-                                : Icons.gps_off,
-                            color: _statusColor,
-                            size: 22,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      // Estado + paradero
-                      Expanded(
-                        child: AnimatedSwitcher(
-                          duration: Duration.zero,
-                          transitionBuilder: (child, anim) => FadeTransition(
-                            opacity: anim,
-                            child: SlideTransition(
-                              position: Tween<Offset>(begin: const Offset(0, 0.3), end: Offset.zero)
-                                  .animate(CurvedAnimation(parent: anim, curve: Curves.easeOut)),
-                              child: child,
-                            ),
-                          ),
-                          child: Column(
-                            key: ValueKey('$_statusLabel::${paraderoActual ?? ''}'),
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                            Text(
-                              _statusLabel,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 13,
-                                color: Colors.black87,
-                              ),
-                            ),
-                            if (paraderoActual != null)
-                              Text(
-                                paraderoActual,
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.grey[600],
-                                  letterSpacing: 0.4,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      // Botón conectar/desconectar
-                      Container(
-                        decoration: BoxDecoration(
-                          color: _estaEnLinea ? Colors.red[800] : Colors.black,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.transparent,
-                            shadowColor: Colors.transparent,
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 18, vertical: 10),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                          ),
-                          onPressed: _procesando ? null : _cambiarEstado,
-                          child: AnimatedSwitcher(
-                            duration: Duration.zero,
-                            child: _procesando
-                                ? SizedBox(
-                                    key: ValueKey('loading'),
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                      color: Colors.white,
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                : Text(
-                                    key: ValueKey(_estaEnLinea),
-                                    _estaEnLinea ? 'DESCONECTAR' : 'CONECTARSE',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: _estaEnLinea
-                                          ? Colors.white
-                                          : const Color(0xff3AF500),
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-              Expanded(
-                child: AnimatedSwitcher(
-                  duration: Duration.zero,
-                  switchInCurve: Curves.easeOut,
-                  switchOutCurve: Curves.easeIn,
-                  transitionBuilder: (child, anim) => FadeTransition(
-                    opacity: anim,
-                    child: child,
-                  ),
-                  child: !_estaEnLinea
-                    ? const Center(
-                        key: ValueKey('offline_area'),
-                        child: Text(
-                          'ESTÁS FUERA DE LÍNEA\nConéctate para recibir servicios.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: Colors.grey,
-                            fontSize: 16,
+                  FloatingActionButton.extended(
+                    backgroundColor: Colors.red[800],
+                    icon: const Icon(Icons.support_agent,
+                        color: Colors.white, size: 22),
+                    label: const Text('Central',
+                        style: TextStyle(
+                            color: Colors.white,
                             fontWeight: FontWeight.bold,
+                            fontSize: 14)),
+                    onPressed: _abrirChatCentral,
+                  ),
+                  // Badge con conteo de mensajes
+                  Positioned(
+                    top: -6,
+                    right: -6,
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: BoxDecoration(
+                        color: Colors.yellow[600],
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.red[900]!, width: 1.5),
+                      ),
+                      constraints:
+                          const BoxConstraints(minWidth: 22, minHeight: 22),
+                      child: Text(
+                        '$totalMsgs',
+                        style: const TextStyle(
+                            color: Colors.black,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+        // -----------------------------------------------------------------
+        // IndexedStack mantiene ambas pestañas vivas en el árbol de widgets,
+        // así el radar sigue recibiendo datos del stream mientras el móvil
+        // está en Perfil — sin spinner al volver.
+        // OPTIMIZACIÓN: Column y banner FUERA del ValueListenableBuilder para que
+        // el banner no se reconstruya cada 5s. Solo el IndexedStack hace rebuild.
+        body: Stack(
+          children: [
+            Column(
+              children: [
+                // ── Banner de permisos — solo reacciona a setState, no al radarTick ──
+                if (_permisosCriticosFaltantes && !kIsWeb)
+                  Material(
+                    color: const Color(0xFFF59E0B),
+                    child: InkWell(
+                      onTap: () async {
+                        await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const PermisosCriticosScreen(
+                              permisosOpcionales: kPermisosOpcionalesMovil,
+                            ),
+                            fullscreenDialog: true,
                           ),
-                        ),
-                      )
-                    : StreamBuilder<List<Map<String, dynamic>>>(
-                        key: const ValueKey('online_area'),
-                        stream: _streamServicios,
-                        initialData: _cacheServicios, // evita spinner al conectarse
-                        builder: (context, snapshot) {
-                          if (snapshot.hasError)
-                            return _pantallaErrorStream('servicios', snapshot.error);
-                          if (!snapshot.hasData)
-                            return const Center(
-                              child: CircularProgressIndicator(
-                                color: Colors.black,
-                              ),
-                            );
-                          final todos = snapshot.data ?? [];
-
-                          _serviciosActivosData = todos
-                              .where(
-                                (s) =>
-                                    s['movil_id'] == widget.usuario['id'] &&
-                                    [
-                                      'en_ruta_origen',
-                                      'en_origen',
-                                      'en_ruta_destino',
-                                      'problema',
-                                    ].contains(s['estado']) &&
-                                    !_serviciosOcultosLocales.contains(s['id']),
-                              )
-                              .toList();
-
-                          // SAFETY NET: si el móvil reconecta con un servicio activo
-                          // pero paradero_actual quedó sucio de la sesión anterior,
-                          // lo expulsamos de la fila automáticamente.
-                          if (_miParaderoCache != null &&
-                              _serviciosActivosData.isNotEmpty) {
-                            final paraderoQueDejo = _miParaderoCache;
-                            _miParaderoCache = null; // evita re-disparar en siguientes builds
-                            WidgetsBinding.instance.addPostFrameCallback((_) async {
-                              if (!mounted) {
-                                _miParaderoCache = paraderoQueDejo;
-                                return;
-                              }
-                              try {
-                                await Supabase.instance.client
-                                    .from('usuarios')
-                                    .update({
-                                      'paradero_actual': null,
-                                      'ingreso_fila': null,
-                                    })
-                                    .eq('id', widget.usuario['id']);
-                                if (mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(
-                                        '📍 Tienes un servicio activo — te sacamos de la fila $paraderoQueDejo.',
-                                      ),
-                                      backgroundColor: Colors.orange[800],
-                                      duration: const Duration(seconds: 4),
-                                    ),
-                                  );
-                                }
-                              } catch (_) {
-                                _miParaderoCache = paraderoQueDejo; // reintento en próximo tick
-                              }
-                            });
-                          }
-
-                          // Actualizar _tieneServicioActivo en el próximo frame
-                          // para que el AppBar lo refleje sin llamar setState dentro de build().
-                          final hayServicio = _serviciosActivosData.isNotEmpty;
-                          if (hayServicio != _tieneServicioActivo) {
-                            WidgetsBinding.instance.addPostFrameCallback((_) {
-                              if (mounted) setState(() => _tieneServicioActivo = hayServicio);
-                            });
-                          }
-
-                          // Límite de servicios simultáneos según rango
-                          final int limiteRango = _limitePorRango(
-                            miPerfilEnVivo['rango_movil']?.toString(),
-                          );
-                          final bool tieneCapacidad =
-                              _serviciosActivosData.length < limiteRango;
-                          bool tienePermisoDeRadar =
-                              tieneCapacidad && radarAbierto;
-
-                          // --- EMBUDO TÁCTICO DE TIEMPOS Y PARADEROS (JERARQUÍA MASTER) ---
-                          final ahoraUtc = DateTime.now().toUtc();
-                          List<Map<String, dynamic>> pendientes = [];
-
-                          final bool esMaster =
-                              miPerfilEnVivo['rango_movil']
-                                  ?.toString()
-                                  .toUpperCase() ==
-                              'MASTER';
-                          final Distance medidorDistancia = const Distance();
-
-                          // Helper: tiempo canónico de un servicio (GREATEST fix)
-                          DateTime _canonTime(Map<String, dynamic> s) {
-                            final ca = s['created_at'] != null
-                                ? DateTime.parse(s['created_at']).toUtc()
-                                : ahoraUtc;
-                            final lib = s['liberacion_at'] != null
-                                ? DateTime.parse(s['liberacion_at']).toUtc()
-                                : null;
-                            return (lib != null && lib.isAfter(ca)) ? lib : ca;
-                          }
-
-                          for (var s in todos.where(
-                            (x) => x['estado'] == 'pendiente',
-                          )) {
-                            if (_serviciosOcultosLocales.contains(s['id'])) {
-                              continue;
-                            }
-
-                            // 1. Leemos el reloj inteligente (GREATEST fix)
-                            final targetUtc = _canonTime(s);
-                            final int segundos = ahoraUtc
-                                .difference(targetUtc)
-                                .inSeconds;
-
-                            // 2. FILTRO FANTASMA (Diferidos):
-                            if (segundos < 0 && !esMaster) continue;
-
-                            bool puedeVer = false;
-
-                            // ═══ REGLA FN (FARMANORTE) — escalamiento 3 fases ═══
-                            // Sistema PROPIO de FN — completamente separado del
-                            // embudo de paraderos/zonas de Serviexpress normal.
-                            //
-                            // El timing se mide desde fn_radar_t0 (momento exacto
-                            // en que el servicio entró al radar). Si fn_radar_t0
-                            // no está seteado (servicios legacy), cae a created_at.
-                            //
-                            //  FASE 1 (0–30s)   → SOLO Masters (card con detalles + aceptar)
-                            //  FASE 2 (30–60s)  → Auto-asignación via pg_cron al más cercano
-                            //                     (fn_fase2_movil_id). Masters ven como fallback.
-                            //  FASE 3 (60–90s)  → No-masters en radio 2km (card + aceptar)
-                            //  FASE 4 (90s+)    → Todos los FN habilitados (card + aceptar)
-                            //
-                            // Para servicios FN el límite de capacidad NO aplica:
-                            // los móviles pueden recibir y ver todos los servicios
-                            // FN independientemente de sus servicios activos.
-                            if (s['tipo_fn'] == true) {
-                              // ── ASIGNACIÓN DIRECTA (directo_presel) ─────────
-                              // Verificar PRIMERO si ya tiene movil_id asignado.
-                              // Si soy el asignado → mostrar sin importar rango ni fase.
-                              // Si es otro → invisible para mí (incluidos Masters).
-                              // Se evalúa antes de tienePermFN para que un Novato/Pro/Elite
-                              // directamente asignado siempre pueda ver y aceptar su servicio.
-                              final int? svcMovilId = s['movil_id'] as int?;
-                              if (svcMovilId != null) {
-                                if (svcMovilId == (widget.usuario['id'] as int)) {
-                                  pendientes.add(s); // soy el asignado directo
-                                }
-                                continue; // salta fases en todos los casos
-                              }
-
-                              // ── CASCADA ABIERTA ──────────────────────────────
-                              // Permiso base: ser MASTER o tener tiene_fn habilitado
-                              final bool tienePermFN = esMaster ||
-                                  miPerfilEnVivo['tiene_fn'] == true;
-
-                              // Sin permiso FN → invisible
-                              if (!tienePermFN) {
-                                continue; // salta embudo estándar
-                              }
-
-                              // Anchor de tiempo: fn_radar_t0 > created_at (fallback)
-                              final String t0Raw =
-                                  s['fn_radar_t0']?.toString() ??
-                                  s['created_at']?.toString() ??
-                                  '';
-                              // Fallback 0 (no 9999): si no hay anchor de tiempo
-                              // tratamos el servicio como recién creado → Fase 1
-                              // (solo Masters). Evita el flash de Fase 4 cuando
-                              // fn_radar_t0 aún no propagó al realtime.
-                              final int segFn = t0Raw.isNotEmpty
-                                  ? ahoraUtc
-                                      .difference(DateTime.parse(t0Raw).toUtc())
-                                      .inSeconds
-                                  : 0;
-
-                              if (segFn < 30) {
-                                // FASE 1 (0-30s): exclusivo de MASTER
-                                // Masters ven la card con detalles completos y
-                                // botón de aceptar. Nadie más puede ver el servicio.
-                                puedeVer = esMaster;
-                              } else if (segFn < 60) {
-                                // FASE 2 (30-60s): el más cercano es auto-asignado
-                                // por pg_cron (fn-auto-asignar-fase2). Los Masters
-                                // siguen viéndolo como fallback mientras llega el cron.
-                                // El fn_fase2_movil_id NO ve la card — ya está siendo
-                                // asignado automáticamente sin necesidad de aceptar.
-                                puedeVer = esMaster;
-                              } else if (segFn < 90) {
-                                // FASE 3 (60-90s): zona 2km alrededor de la sede.
-                                // Muestra card con botón ACEPTAR a los no-masters cercanos.
-                                if (esMaster) {
-                                  puedeVer = true;
-                                } else {
-                                  final svcLat = (s['origen_lat'] as num?)?.toDouble();
-                                  final svcLng = (s['origen_lng'] as num?)?.toDouble();
-                                  if (svcLat != null &&
-                                      svcLng != null &&
-                                      _ultimaPosicionConocida != null) {
-                                    final distFn = medidorDistancia.as(
-                                      LengthUnit.Meter,
-                                      LatLng(_ultimaPosicionConocida!.latitude,
-                                             _ultimaPosicionConocida!.longitude),
-                                      LatLng(svcLat, svcLng),
-                                    );
-                                    puedeVer = distFn <= 2000;
-                                  } else {
-                                    puedeVer = false;
-                                  }
-                                }
-                              } else {
-                                // FASE 4 (90s+): SIN CUBRIR — todos ven la card y
-                                // pueden aceptar. Masters ven detalles completos
-                                // (igual que FASE 1). No-Masters ven card estándar.
-                                // El push ya llegó a todos — la card debe estar visible
-                                // para que no haya confusión "recibí push pero no veo nada".
-                                puedeVer = true;
-                              }
-
-                              if (puedeVer) pendientes.add(s);
-                              continue; // salta embudo estándar
-                            }
-
-                            // 3. CÁLCULO DE DISTANCIA OPERATIVA DESDE EL LOCAL
-                            double distMetros = 999999;
-                            if (_ultimaPosicionConocida != null &&
-                                s['origen_lat'] != null &&
-                                s['origen_lng'] != null) {
-                              distMetros = medidorDistancia.as(
-                                LengthUnit.Meter,
-                                LatLng(
-                                  _ultimaPosicionConocida!.latitude,
-                                  _ultimaPosicionConocida!.longitude,
-                                ),
-                                LatLng(
-                                  (s['origen_lat'] as num).toDouble(),
-                                  (s['origen_lng'] as num).toDouble(),
-                                ),
-                              );
-                            }
-
-                            // 4. REGLA SUPREMA: MASTERS VEN todo (T=0)
-                            if (esMaster) {
-                              puedeVer = true;
-                            }
-                            // 5. EMBUDO DE TIEMPO — 4 FASES DE 30s (total 2 min)
-                            else {
-                              if (segundos < 30) {
-                                // FASE 1 (0–29s): exclusivo del Master.
-                                // Nadie más lo ve. Masters tienen 30s para aceptar.
-                                puedeVer = false;
-                              } else if (segundos < 60) {
-                                // FASE 2 (30–59s): pg_cron auto-asigna al #1 del
-                                // paradero (paradero_auto_movil_id). Los no-masters
-                                // no deben ver la card — el #1 será asignado sin
-                                // necesidad de aceptar. Masters siguen como fallback.
-                                puedeVer = false;
-                              } else if (segundos < 90) {
-                                // FASE 3 (60–89s): Zona 2km desde el origen.
-                                // No-masters con capacidad dentro del radio ven la card.
-                                if (tieneCapacidad && distMetros <= 2000) {
-                                  puedeVer = true;
-                                }
-                              } else {
-                                // FASE 4 (90s+): Todos los disponibles con capacidad.
-                                if (tieneCapacidad) {
-                                  puedeVer = true;
-                                }
-                              }
-                            }
-
-                            if (puedeVer) {
-                              pendientes.add(s);
-                            }
-                          }
-                          // --- ORDENAMIENTO FIFO ABSOLUTO ---
-                          // El primero que pidió (o el que más tiempo lleva esperando) sale de primero.
-                          if (pendientes.isNotEmpty) {
-                            // _canonTime ya está definido arriba — reutilizamos
-                            pendientes.sort(
-                              (a, b) => _canonTime(a).compareTo(_canonTime(b)));
-                          }
-                          // --------------------------------------------------------
-
-                          // --- AUTO-EXPANSIÓN ACORDEÓN ---
-                          // Cuando llega un servicio nuevo (no visto aún),
-                          // colapsa todos los demás y expande solo el nuevo.
-                          // Los colapsados manualmente por el usuario no
-                          // se re-expanden (están en _serviciosVistos pero
-                          // no en _serviciosExpandidos).
-                          final nuevosIds = _serviciosActivosData
-                              .map((s) => s['id'] as int)
-                              .where((id) => !_serviciosVistos.contains(id))
-                              .toList();
-                          if (nuevosIds.isNotEmpty) {
-                            _serviciosExpandidos.clear();
-                            _serviciosExpandidos.add(nuevosIds.last);
-                            _serviciosVistos.addAll(nuevosIds);
-                          }
-                          // Limpiar IDs de servicios que ya no existen.
-                          _serviciosExpandidos.removeWhere(
-                            (id) => !_serviciosActivosData.any((s) => s['id'] == id),
-                          );
-                          _serviciosVistos.removeWhere(
-                            (id) => !_serviciosActivosData.any((s) => s['id'] == id),
-                          );
-
-                          /// --- ALARMA DE NUEVO PEDIDO ---
-                          WidgetsBinding.instance.addPostFrameCallback((
-                            _,
-                          ) async {
-                            if (mounted) {
-                              // INYECCIÓN TÁCTICA: Permite sonar si tienes permiso O SI un misil rompió el candado (pendientes.isNotEmpty)
-                              if ((tienePermisoDeRadar ||
-                                      pendientes.isNotEmpty) &&
-                                  pendientes.length >
-                                      _cantidadPendientesAnterior) {
-                                if (!_reproduciendoAudio) {
-                                  _reproduciendoAudio = true;
-
-                                  // 1. Disparo Auditivo — suprimido si venimos
-                                  // de background (el push ya sonó via OS).
-                                  if (!_vieneDeBackground) {
-                                    _sonidos.reproducir(Sonidos.alerta);
-                                  }
-                                  _vieneDeBackground = false;
-
-                                  // 2. Disparo Visual (Notificación emergente tipo WhatsApp en el TECHO)
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Row(
-                                        children: [
-                                          Icon(
-                                            Icons.radar,
-                                            color: Colors.white,
-                                            size: 28,
-                                          ),
-                                          SizedBox(width: 12),
-                                          Expanded(
-                                            child: Column(
-                                              mainAxisSize: MainAxisSize.min,
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Text(
-                                                  '🚨 ¡NUEVO SERVICIO EN RADAR!',
-                                                  style: TextStyle(
-                                                    fontWeight: FontWeight.bold,
-                                                    fontSize: 14,
-                                                    color: Colors.white,
-                                                  ),
-                                                ),
-                                                Text(
-                                                  'Revisa el radar para ver el servicio.',
-                                                  style: TextStyle(
-                                                    fontSize: 12,
-                                                    color: Colors.white70,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      backgroundColor: Colors.green,
-                                      duration: const Duration(seconds: 4),
-                                      behavior: SnackBarBehavior.floating,
-                                      // ---> MAGIA MATEMÁTICA: Lo empuja hasta el techo de la pantalla <---
-                                      margin: EdgeInsets.only(
-                                        bottom:
-                                            MediaQuery.of(context).size.height -
-                                            150,
-                                        left: 12,
-                                        right: 12,
-                                      ),
-                                      dismissDirection: DismissDirection.up,
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                      elevation: 10,
-                                    ),
+                        );
+                        _chequearPermisosCriticos();
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 8),
+                        child: Row(children: [
+                          const Icon(Icons.warning_amber_rounded,
+                              color: Colors.black, size: 18),
+                          const SizedBox(width: 8),
+                          const Expanded(
+                            child: Text(
+                              '⚠️ Faltan permisos críticos — toca para activarlos',
+                              style: TextStyle(
+                                  color: Colors.black,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                          const Icon(Icons.arrow_forward_ios,
+                              color: Colors.black, size: 12),
+                        ]),
+                      ),
+                    ),
+                  ),
+                // ── Contenido principal ──────────────────────────────────────────
+                Expanded(
+                  child: ValueListenableBuilder<int>(
+                    valueListenable: _radarTick,
+                    builder: (context, _, __) => IndexedStack(
+                      index: _tabActual,
+                      children: [
+                        // Pestaña servicios — RepaintBoundary propio para que la GPU
+                        // no re-rasterice esta pestaña cuando cambia la de perfil.
+                        // TickerMode desactiva sus animaciones cuando está oculta.
+                        RepaintBoundary(
+                          child: TickerMode(
+                            enabled: _tabActual == 0,
+                            child: StreamBuilder<Map<String, dynamic>?>(
+                              // OPT: solo escucha MI propia fila — los GPS
+                              // updates de los otros móviles no disparan
+                              // este builder ni reconstruyen la pantalla.
+                              stream: _streamMiPerfil,
+                              initialData: _cacheMiPerfil,
+                              builder: (context, snapMiPerfil) {
+                                if (!snapMiPerfil.hasData &&
+                                    _cacheMiPerfil == null)
+                                  return const Center(
+                                    child: CircularProgressIndicator(
+                                        color: Colors.black),
                                   );
 
-                                  // Seguro táctico para que el audio no se superponga si caen 3 pedidos de golpe
-                                  Future.delayed(
-                                    const Duration(seconds: 2),
-                                    () {
-                                      if (mounted) _reproduciendoAudio = false;
-                                    },
-                                  );
-                                }
-                              }
-                              // Actualizamos la memoria del radar
-                              _cantidadPendientesAnterior = pendientes.length;
-                              // Limpiar el flag solo si la app está en primer
-                              // plano. En background el isolate Dart sigue vivo
-                              // y el StreamBuilder sigue disparando — si
-                              // reseteamos aquí, el flag llega vacío cuando el
-                              // moto abre la app y el OS ya había sonado.
-                              if (WidgetsBinding.instance.lifecycleState ==
-                                  AppLifecycleState.resumed) {
-                                _vieneDeBackground = false;
-                              }
-                            }
-                          });
+                                final miPerfilEnVivo = snapMiPerfil.data ??
+                                    _cacheMiPerfil ??
+                                    widget.usuario;
 
-                          // ---> INYECCIÓN: CÁLCULO DE CAJA EN VIVO <---
-                          double producidoHoy = 0.0;
-                          final hoyLocal = DateTime.now().toLocal();
-                          for (var s in todos) {
-                            if (s['estado'] == 'finalizado' &&
-                                s['movil_id'] == widget.usuario['id'] &&
-                                s['created_at'] != null) {
-                              final fechaSvc = DateTime.parse(
-                                s['created_at'],
-                              ).toLocal();
-                              if (fechaSvc.year == hoyLocal.year &&
-                                  fechaSvc.month == hoyLocal.month &&
-                                  fechaSvc.day == hoyLocal.day) {
-                                producidoHoy +=
-                                    (s['tarifa'] as num?)?.toDouble() ?? 0.0;
-                              }
-                            }
-                          }
-                          // --------------------------------------------
+                                // La base de datos es la única fuente de verdad.
+                                final String? paraderoActual =
+                                    miPerfilEnVivo['paradero_actual']
+                                        as String?;
 
-                          return ListView(
-                            padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
-                            children: [
-                              if (_estaEnLinea)
-                                Container(
-                                  margin: const EdgeInsets.only(bottom: 10),
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 14, vertical: 10),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white,
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(color: Colors.grey[200]!),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Icon(Icons.bar_chart,
-                                          size: 14, color: Colors.black45),
-                                      const SizedBox(width: 6),
-                                      const Text(
-                                        'PRODUCIDO HOY',
-                                        style: TextStyle(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.black45,
-                                          letterSpacing: 0.8,
-                                        ),
+                                // ---> HEADER REDISEÑADO: card style consistente con Perfil <---
+                                final Color _statusColor = _estaEnLinea
+                                    ? (paraderoActual != null
+                                        ? Colors.blue
+                                        : const Color(0xff3AF500))
+                                    : Colors.grey;
+                                final String _statusLabel = !_estaEnLinea
+                                    ? 'Fuera de Servicio'
+                                    : paraderoActual != null
+                                        ? 'En paradero'
+                                        : 'Activo · Sin paradero';
+
+                                // OPT: enFila y radarAbierto viven en
+                                // ValueListenableBuilder — solo reconstruye
+                                // cuando cambia la COMPOSICIÓN de la cola
+                                // (alguien entra/sale), no por GPS updates.
+                                return ValueListenableBuilder<
+                                    List<Map<String, dynamic>>>(
+                                  valueListenable: _filaNotifier,
+                                  builder: (context, enFila, _) {
+                                    bool radarAbierto = false;
+                                    String mensajeBloqueo = '';
+                                    final bool esMaster =
+                                        miPerfilEnVivo['rango_movil']
+                                                ?.toString()
+                                                .toUpperCase() ==
+                                            'MASTER';
+
+                                    if (paraderoActual == null) {
+                                      if (esMaster) {
+                                        radarAbierto = true;
+                                      } else {
+                                        radarAbierto = false;
+                                        mensajeBloqueo = enFila.isEmpty
+                                            ? 'Radar bloqueado para Servicios de ServiExpress.\nDirígete a un paradero y regístrate para recibir Turnos.'
+                                            : 'Hay compañeros en fila.\nDirígete a un paradero y regístrate para entrar en turno.';
+                                      }
+                                    } else {
+                                      // BLINDAJE TÁCTICO: Solo comparamos tu turno contra los que están en tu MISMO paradero
+                                      final miFila = enFila
+                                          .where((u) =>
+                                              u['paradero_actual'] ==
+                                              paraderoActual)
+                                          .toList();
+                                      final miTurnoIndex = miFila.indexWhere(
+                                        (u) =>
+                                            u['id'].toString() ==
+                                            widget.usuario['id'].toString(),
+                                      );
+
+                                      if (miTurnoIndex == 0 ||
+                                          miFila.isEmpty) {
+                                        radarAbierto = true;
+                                      } else if (miTurnoIndex > 0) {
+                                        radarAbierto = false;
+                                        mensajeBloqueo =
+                                            'Estás en la posición #${miTurnoIndex + 1} de la fila $paraderoActual.\nEspera tu turno para recibir servicios.';
+                                      } else {
+                                        radarAbierto = false;
+                                        mensajeBloqueo =
+                                            'Sincronizando tu turno con la Central...';
+                                      }
+                                    }
+
+                                return Column(
+                                  children: [
+                                    Container(
+                                      margin: const EdgeInsets.fromLTRB(
+                                          12, 12, 12, 4),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        borderRadius: BorderRadius.circular(14),
+                                        border: Border.all(
+                                            color: Colors.grey[200]!),
                                       ),
-                                      const Spacer(),
-                                      Text(
-                                        _formatearMoneda(producidoHoy,
-                                            mostrarCero: true),
-                                        style: TextStyle(
-                                          fontSize: 15,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.green[700],
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              // -------------------------------------------
-                              if (_serviciosActivosData.isEmpty) ...[
-                                Container(
-                                  width: double.infinity,
-                                  padding: const EdgeInsets.all(14),
-                                  margin: const EdgeInsets.only(bottom: 8),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white,
-                                    borderRadius: BorderRadius.circular(10),
-                                    border: Border.all(color: Colors.grey[300]!),
-                                  ),
-                                  child: Column(
-                                    children: [
-                                      if (paraderoActual == null) ...[
-                                        Text(
-                                          'No estás en la fila de ningún paradero',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.w600,
-                                            fontSize: 13,
-                                            color: Colors.grey[800],
-                                          ),
-                                        ),
-                                        const SizedBox(height: 10),
-                                        SizedBox(
-                                          width: double.infinity,
-                                          child: ElevatedButton.icon(
-                                            style: ElevatedButton.styleFrom(
-                                              backgroundColor: Colors.black,
-                                              padding: const EdgeInsets.symmetric(vertical: 12),
-                                            ),
-                                            onPressed: _procesando
-                                                ? null
-                                                : _intentarRegistroParadero,
-                                            icon: const Icon(
-                                              Icons.location_on,
-                                              color: Color(0xff3AF500),
-                                              size: 18,
-                                            ),
-                                            label: _procesando
-                                                ? SizedBox(
-                                                    width: 16,
-                                                    height: 16,
-                                                    child:
-                                                        CircularProgressIndicator(
-                                                          color: Colors.white,
-                                                          strokeWidth: 2,
-                                                        ),
-                                                  )
-                                                : const Text(
-                                                    'REGISTRARME EN PARADERO',
-                                                    style: TextStyle(
-                                                      color: Color(0xff3AF500),
-                                                      fontWeight: FontWeight.bold,
-                                                      fontSize: 13,
-                                                    ),
-                                                  ),
-                                          ),
-                                        ),
-                                      ] else ...[
-                                        Row(
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 14, vertical: 12),
+                                        child: Row(
                                           children: [
+                                            // Ícono de estado en círculo de color
                                             Container(
-                                              width: 8,
-                                              height: 8,
-                                              decoration: const BoxDecoration(
-                                                color: Color(0xff3AF500),
+                                              width: 44,
+                                              height: 44,
+                                              decoration: BoxDecoration(
+                                                color: _statusColor.withValues(
+                                                    alpha: 0.12),
                                                 shape: BoxShape.circle,
                                               ),
+                                              child: AnimatedSwitcher(
+                                                duration: Duration.zero,
+                                                child: Icon(
+                                                  key: ValueKey(_statusLabel),
+                                                  _estaEnLinea
+                                                      ? (paraderoActual != null
+                                                          ? Icons.location_on
+                                                          : Icons.gps_fixed)
+                                                      : Icons.gps_off,
+                                                  color: _statusColor,
+                                                  size: 22,
+                                                ),
+                                              ),
                                             ),
-                                            const SizedBox(width: 8),
-                                            Text(
-                                              'En fila: $paraderoActual',
-                                              style: TextStyle(
-                                                fontWeight: FontWeight.w600,
-                                                fontSize: 13,
-                                                color: Colors.grey[800],
+                                            const SizedBox(width: 12),
+                                            // Estado + paradero
+                                            Expanded(
+                                              child: AnimatedSwitcher(
+                                                duration: Duration.zero,
+                                                transitionBuilder:
+                                                    (child, anim) =>
+                                                        FadeTransition(
+                                                  opacity: anim,
+                                                  child: SlideTransition(
+                                                    position: Tween<Offset>(
+                                                            begin: const Offset(
+                                                                0, 0.3),
+                                                            end: Offset.zero)
+                                                        .animate(
+                                                            CurvedAnimation(
+                                                                parent: anim,
+                                                                curve: Curves
+                                                                    .easeOut)),
+                                                    child: child,
+                                                  ),
+                                                ),
+                                                child: Column(
+                                                  key: ValueKey(
+                                                      '$_statusLabel::${paraderoActual ?? ''}'),
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
+                                                    Text(
+                                                      _statusLabel,
+                                                      style: const TextStyle(
+                                                        fontWeight:
+                                                            FontWeight.bold,
+                                                        fontSize: 13,
+                                                        color: Colors.black87,
+                                                      ),
+                                                    ),
+                                                    if (paraderoActual != null)
+                                                      Text(
+                                                        paraderoActual,
+                                                        style: TextStyle(
+                                                          fontSize: 11,
+                                                          color:
+                                                              Colors.grey[600],
+                                                          letterSpacing: 0.4,
+                                                        ),
+                                                      ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                            // Botón conectar/desconectar
+                                            Container(
+                                              decoration: BoxDecoration(
+                                                color: _estaEnLinea
+                                                    ? Colors.red[800]
+                                                    : Colors.black,
+                                                borderRadius:
+                                                    BorderRadius.circular(8),
+                                              ),
+                                              child: ElevatedButton(
+                                                style: ElevatedButton.styleFrom(
+                                                  backgroundColor:
+                                                      Colors.transparent,
+                                                  shadowColor:
+                                                      Colors.transparent,
+                                                  padding: const EdgeInsets
+                                                      .symmetric(
+                                                      horizontal: 18,
+                                                      vertical: 10),
+                                                  shape: RoundedRectangleBorder(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            8),
+                                                  ),
+                                                ),
+                                                onPressed: _procesando
+                                                    ? null
+                                                    : _cambiarEstado,
+                                                child: AnimatedSwitcher(
+                                                  duration: Duration.zero,
+                                                  child: _procesando
+                                                      ? SizedBox(
+                                                          key: ValueKey(
+                                                              'loading'),
+                                                          width: 18,
+                                                          height: 18,
+                                                          child:
+                                                              CircularProgressIndicator(
+                                                            color: Colors.white,
+                                                            strokeWidth: 2,
+                                                          ),
+                                                        )
+                                                      : Text(
+                                                          key: ValueKey(
+                                                              _estaEnLinea),
+                                                          _estaEnLinea
+                                                              ? 'DESCONECTAR'
+                                                              : 'CONECTARSE',
+                                                          style: TextStyle(
+                                                            fontSize: 12,
+                                                            color: _estaEnLinea
+                                                                ? Colors.white
+                                                                : const Color(
+                                                                    0xff3AF500),
+                                                            fontWeight:
+                                                                FontWeight.bold,
+                                                          ),
+                                                        ),
+                                                ),
                                               ),
                                             ),
                                           ],
                                         ),
-                                        const SizedBox(height: 10),
-                                        SizedBox(
-                                          width: double.infinity,
-                                          child: OutlinedButton.icon(
-                                            style: OutlinedButton.styleFrom(
-                                              foregroundColor: Colors.red,
-                                              side: const BorderSide(
-                                                color: Colors.red,
-                                              ),
-                                            ),
-                                            onPressed: _procesando
-                                                ? null
-                                                : _salirDelParadero,
-                                            icon: const Icon(
-                                              Icons.exit_to_app,
-                                              size: 16,
-                                            ),
-                                            label: const Text(
-                                              'SALIR DEL PARADERO',
-                                              style: TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 11,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                ),
-                                _construirFilaVirtual(usuariosTotales),
-                                const SizedBox(height: 10),
-                              ],
-
-                              // ---- TARJETA DOMICILIO ACTIVO ----
-                              if (_pedidoDomicilioActivo != null)
-                                _buildTarjetaDomicilio(),
-
-                              if (_serviciosActivosData.isNotEmpty) ...[
-                                Padding(
-                                  padding: const EdgeInsets.only(bottom: 6, left: 2, top: 4),
-                                  child: Row(children: [
-                                    Icon(Icons.local_shipping_outlined, size: 13, color: Colors.black38),
-                                    const SizedBox(width: 5),
-                                    const Text(
-                                      'ÓRDENES EN CURSO',
-                                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.black38, letterSpacing: 0.8),
-                                    ),
-                                  ]),
-                                ),
-                                ..._serviciosActivosData.map(
-                                  (servicio) => KeyedSubtree(
-                                    key: ValueKey('activa_${servicio['id']}'),
-                                    child: _construirTarjetaActiva(
-                                      servicio,
-                                      esMaster: esMaster,
-                                    ),
-                                  ),
-                                ),
-                              ],
-
-                              // ---> DESTRUCCIÓN DEL CANDADO VISUAL AQUÍ <---
-                              if (tienePermisoDeRadar ||
-                                  pendientes.isNotEmpty) ...[
-                                Padding(
-                                  padding: const EdgeInsets.only(bottom: 6, left: 2, top: 4),
-                                  child: Row(children: [
-                                    Icon(Icons.radar, size: 13, color: Colors.black38),
-                                    const SizedBox(width: 5),
-                                    const Text(
-                                      'RADAR DE DISPONIBLES',
-                                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.black38, letterSpacing: 0.8),
-                                    ),
-                                  ]),
-                                ),
-                                if (pendientes.isEmpty)
-                                  const Padding(
-                                    padding: EdgeInsets.only(top: 20),
-                                    child: Center(
-                                      child: Text(
-                                        'Radar limpio. Sin Servicios.',
-                                        style: TextStyle(
-                                          color: Colors.grey,
-                                          fontWeight: FontWeight.bold,
-                                        ),
                                       ),
                                     ),
-                                  )
-                                else
-                                  ...pendientes.map(
-                                    (servicio) => KeyedSubtree(
-                                      key: ValueKey('pendiente_${servicio['id']}'),
-                                      child: _construirTarjetaPendiente(
-                                        servicio,
-                                                                      esMaster: esMaster,
+                                    Expanded(
+                                      child: AnimatedSwitcher(
+                                        duration: Duration.zero,
+                                        switchInCurve: Curves.easeOut,
+                                        switchOutCurve: Curves.easeIn,
+                                        transitionBuilder: (child, anim) =>
+                                            FadeTransition(
+                                          opacity: anim,
+                                          child: child,
+                                        ),
+                                        child: !_estaEnLinea
+                                            ? const Center(
+                                                key: ValueKey('offline_area'),
+                                                child: Text(
+                                                  'ESTÁS FUERA DE LÍNEA\nConéctate para recibir servicios.',
+                                                  textAlign: TextAlign.center,
+                                                  style: TextStyle(
+                                                    color: Colors.grey,
+                                                    fontSize: 16,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                ),
+                                              )
+                                            : StreamBuilder<
+                                                List<Map<String, dynamic>>>(
+                                                key: const ValueKey(
+                                                    'online_area'),
+                                                stream: _streamServicios,
+                                                initialData:
+                                                    _cacheServicios, // evita spinner al conectarse
+                                                builder: (context, snapshot) {
+                                                  if (snapshot.hasError)
+                                                    return _pantallaErrorStream(
+                                                        'servicios',
+                                                        snapshot.error);
+                                                  if (!snapshot.hasData)
+                                                    return const Center(
+                                                      child:
+                                                          CircularProgressIndicator(
+                                                        color: Colors.black,
+                                                      ),
+                                                    );
+                                                  final todos =
+                                                      snapshot.data ?? [];
+
+                                                  _serviciosActivosData = todos
+                                                      .where(
+                                                        (s) =>
+                                                            s['movil_id'] ==
+                                                                widget.usuario[
+                                                                    'id'] &&
+                                                            [
+                                                              'en_ruta_origen',
+                                                              'en_origen',
+                                                              'en_ruta_destino',
+                                                              'problema',
+                                                            ].contains(
+                                                                s['estado']) &&
+                                                            !_serviciosOcultosLocales
+                                                                .contains(
+                                                                    s['id']),
+                                                      )
+                                                      .toList();
+
+                                                  // SAFETY NET: si el móvil reconecta con un servicio activo
+                                                  // pero paradero_actual quedó sucio de la sesión anterior,
+                                                  // lo expulsamos de la fila automáticamente.
+                                                  if (_miParaderoCache !=
+                                                          null &&
+                                                      _serviciosActivosData
+                                                          .isNotEmpty) {
+                                                    final paraderoQueDejo =
+                                                        _miParaderoCache;
+                                                    _miParaderoCache =
+                                                        null; // evita re-disparar en siguientes builds
+                                                    WidgetsBinding.instance
+                                                        .addPostFrameCallback(
+                                                            (_) async {
+                                                      if (!mounted) {
+                                                        _miParaderoCache =
+                                                            paraderoQueDejo;
+                                                        return;
+                                                      }
+                                                      try {
+                                                        await Supabase
+                                                            .instance.client
+                                                            .from('usuarios')
+                                                            .update({
+                                                          'paradero_actual':
+                                                              null,
+                                                          'ingreso_fila': null,
+                                                        }).eq(
+                                                                'id',
+                                                                widget.usuario[
+                                                                    'id']);
+                                                        if (mounted) {
+                                                          ScaffoldMessenger.of(
+                                                                  context)
+                                                              .showSnackBar(
+                                                            SnackBar(
+                                                              content: Text(
+                                                                '📍 Tienes un servicio activo — te sacamos de la fila $paraderoQueDejo.',
+                                                              ),
+                                                              backgroundColor:
+                                                                  Colors.orange[
+                                                                      800],
+                                                              duration:
+                                                                  const Duration(
+                                                                      seconds:
+                                                                          4),
+                                                            ),
+                                                          );
+                                                        }
+                                                      } catch (_) {
+                                                        _miParaderoCache =
+                                                            paraderoQueDejo; // reintento en próximo tick
+                                                      }
+                                                    });
+                                                  }
+
+                                                  // Actualizar _tieneServicioActivo en el próximo frame
+                                                  // para que el AppBar lo refleje sin llamar setState dentro de build().
+                                                  final hayServicio =
+                                                      _serviciosActivosData
+                                                          .isNotEmpty;
+                                                  if (hayServicio !=
+                                                      _tieneServicioActivo) {
+                                                    WidgetsBinding.instance
+                                                        .addPostFrameCallback(
+                                                            (_) {
+                                                      if (mounted)
+                                                        setState(() =>
+                                                            _tieneServicioActivo =
+                                                                hayServicio);
+                                                    });
+                                                  }
+
+                                                  // Límite de servicios simultáneos según rango
+                                                  final int limiteRango =
+                                                      _limitePorRango(
+                                                    miPerfilEnVivo[
+                                                            'rango_movil']
+                                                        ?.toString(),
+                                                  );
+                                                  final bool tieneCapacidad =
+                                                      _serviciosActivosData
+                                                              .length <
+                                                          limiteRango;
+                                                  bool tienePermisoDeRadar =
+                                                      tieneCapacidad &&
+                                                          radarAbierto;
+
+                                                  // --- EMBUDO TÁCTICO DE TIEMPOS Y PARADEROS (JERARQUÍA MASTER) ---
+                                                  final ahoraUtc =
+                                                      DateTime.now().toUtc();
+                                                  List<Map<String, dynamic>>
+                                                      pendientes = [];
+
+                                                  final bool esMaster =
+                                                      miPerfilEnVivo[
+                                                                  'rango_movil']
+                                                              ?.toString()
+                                                              .toUpperCase() ==
+                                                          'MASTER';
+                                                  final Distance
+                                                      medidorDistancia =
+                                                      const Distance();
+
+                                                  // Helper: tiempo canónico de un servicio (GREATEST fix)
+                                                  DateTime _canonTime(
+                                                      Map<String, dynamic> s) {
+                                                    final ca = s[
+                                                                'created_at'] !=
+                                                            null
+                                                        ? DateTime.parse(
+                                                                s['created_at'])
+                                                            .toUtc()
+                                                        : ahoraUtc;
+                                                    final lib = s[
+                                                                'liberacion_at'] !=
+                                                            null
+                                                        ? DateTime.parse(s[
+                                                                'liberacion_at'])
+                                                            .toUtc()
+                                                        : null;
+                                                    return (lib != null &&
+                                                            lib.isAfter(ca))
+                                                        ? lib
+                                                        : ca;
+                                                  }
+
+                                                  for (var s in todos.where(
+                                                    (x) =>
+                                                        x['estado'] ==
+                                                        'pendiente',
+                                                  )) {
+                                                    if (_serviciosOcultosLocales
+                                                        .contains(s['id'])) {
+                                                      continue;
+                                                    }
+
+                                                    // 1. Leemos el reloj inteligente (GREATEST fix)
+                                                    final targetUtc =
+                                                        _canonTime(s);
+                                                    final int segundos =
+                                                        ahoraUtc
+                                                            .difference(
+                                                                targetUtc)
+                                                            .inSeconds;
+
+                                                    // 2. FILTRO FANTASMA (Diferidos):
+                                                    if (segundos < 0 &&
+                                                        !esMaster) continue;
+
+                                                    bool puedeVer = false;
+
+                                                    // ═══ REGLA FN (FARMANORTE) — escalamiento 3 fases ═══
+                                                    // Sistema PROPIO de FN — completamente separado del
+                                                    // embudo de paraderos/zonas de Serviexpress normal.
+                                                    //
+                                                    // El timing se mide desde fn_radar_t0 (momento exacto
+                                                    // en que el servicio entró al radar). Si fn_radar_t0
+                                                    // no está seteado (servicios legacy), cae a created_at.
+                                                    //
+                                                    //  FASE 1 (0–30s)   → SOLO Masters (card con detalles + aceptar)
+                                                    //  FASE 2 (30–60s)  → Auto-asignación via pg_cron al más cercano
+                                                    //                     (fn_fase2_movil_id). Masters ven como fallback.
+                                                    //  FASE 3 (60–90s)  → No-masters en radio 2km (card + aceptar)
+                                                    //  FASE 4 (90s+)    → Todos los FN habilitados (card + aceptar)
+                                                    //
+                                                    // Para servicios FN el límite de capacidad NO aplica:
+                                                    // los móviles pueden recibir y ver todos los servicios
+                                                    // FN independientemente de sus servicios activos.
+                                                    if (s['tipo_fn'] == true) {
+                                                      // ── ASIGNACIÓN DIRECTA (directo_presel) ─────────
+                                                      // Verificar PRIMERO si ya tiene movil_id asignado.
+                                                      // Si soy el asignado → mostrar sin importar rango ni fase.
+                                                      // Si es otro → invisible para mí (incluidos Masters).
+                                                      // Se evalúa antes de tienePermFN para que un Novato/Pro/Elite
+                                                      // directamente asignado siempre pueda ver y aceptar su servicio.
+                                                      final int? svcMovilId =
+                                                          s['movil_id'] as int?;
+                                                      if (svcMovilId != null) {
+                                                        if (svcMovilId ==
+                                                            (widget.usuario[
+                                                                'id'] as int)) {
+                                                          pendientes.add(
+                                                              s); // soy el asignado directo
+                                                        }
+                                                        continue; // salta fases en todos los casos
+                                                      }
+
+                                                      // ── CASCADA ABIERTA ──────────────────────────────
+                                                      // Permiso base: ser MASTER o tener tiene_fn habilitado
+                                                      final bool tienePermFN =
+                                                          esMaster ||
+                                                              miPerfilEnVivo[
+                                                                      'tiene_fn'] ==
+                                                                  true;
+
+                                                      // Sin permiso FN → invisible
+                                                      if (!tienePermFN) {
+                                                        continue; // salta embudo estándar
+                                                      }
+
+                                                      // Anchor de tiempo: fn_radar_t0 > created_at (fallback)
+                                                      final String t0Raw = s[
+                                                                  'fn_radar_t0']
+                                                              ?.toString() ??
+                                                          s['created_at']
+                                                              ?.toString() ??
+                                                          '';
+                                                      // Fallback 0 (no 9999): si no hay anchor de tiempo
+                                                      // tratamos el servicio como recién creado → Fase 1
+                                                      // (solo Masters). Evita el flash de Fase 4 cuando
+                                                      // fn_radar_t0 aún no propagó al realtime.
+                                                      final int segFn = t0Raw
+                                                              .isNotEmpty
+                                                          ? ahoraUtc
+                                                              .difference(
+                                                                  DateTime.parse(
+                                                                          t0Raw)
+                                                                      .toUtc())
+                                                              .inSeconds
+                                                          : 0;
+
+                                                      if (segFn < 30) {
+                                                        // FASE 1 (0-30s): exclusivo de MASTER
+                                                        // Masters ven la card con detalles completos y
+                                                        // botón de aceptar. Nadie más puede ver el servicio.
+                                                        puedeVer = esMaster;
+                                                      } else if (segFn < 60) {
+                                                        // FASE 2 (30-60s): el más cercano es auto-asignado
+                                                        // por pg_cron (fn-auto-asignar-fase2). Los Masters
+                                                        // siguen viéndolo como fallback mientras llega el cron.
+                                                        // El fn_fase2_movil_id NO ve la card — ya está siendo
+                                                        // asignado automáticamente sin necesidad de aceptar.
+                                                        puedeVer = esMaster;
+                                                      } else if (segFn < 90) {
+                                                        // FASE 3 (60-90s): zona 2km alrededor de la sede.
+                                                        // Muestra card con botón ACEPTAR a los no-masters cercanos.
+                                                        if (esMaster) {
+                                                          puedeVer = true;
+                                                        } else {
+                                                          final svcLat =
+                                                              (s['origen_lat']
+                                                                      as num?)
+                                                                  ?.toDouble();
+                                                          final svcLng =
+                                                              (s['origen_lng']
+                                                                      as num?)
+                                                                  ?.toDouble();
+                                                          if (svcLat != null &&
+                                                              svcLng != null &&
+                                                              _ultimaPosicionConocida !=
+                                                                  null) {
+                                                            final distFn =
+                                                                medidorDistancia
+                                                                    .as(
+                                                              LengthUnit.Meter,
+                                                              LatLng(
+                                                                  _ultimaPosicionConocida!
+                                                                      .latitude,
+                                                                  _ultimaPosicionConocida!
+                                                                      .longitude),
+                                                              LatLng(svcLat,
+                                                                  svcLng),
+                                                            );
+                                                            puedeVer =
+                                                                distFn <= 2000;
+                                                          } else {
+                                                            puedeVer = false;
+                                                          }
+                                                        }
+                                                      } else {
+                                                        // FASE 4 (90s+): SIN CUBRIR — todos ven la card y
+                                                        // pueden aceptar. Masters ven detalles completos
+                                                        // (igual que FASE 1). No-Masters ven card estándar.
+                                                        // El push ya llegó a todos — la card debe estar visible
+                                                        // para que no haya confusión "recibí push pero no veo nada".
+                                                        puedeVer = true;
+                                                      }
+
+                                                      if (puedeVer)
+                                                        pendientes.add(s);
+                                                      continue; // salta embudo estándar
+                                                    }
+
+                                                    // 3. CÁLCULO DE DISTANCIA OPERATIVA DESDE EL LOCAL
+                                                    double distMetros = 999999;
+                                                    if (_ultimaPosicionConocida !=
+                                                            null &&
+                                                        s['origen_lat'] !=
+                                                            null &&
+                                                        s['origen_lng'] !=
+                                                            null) {
+                                                      distMetros =
+                                                          medidorDistancia.as(
+                                                        LengthUnit.Meter,
+                                                        LatLng(
+                                                          _ultimaPosicionConocida!
+                                                              .latitude,
+                                                          _ultimaPosicionConocida!
+                                                              .longitude,
+                                                        ),
+                                                        LatLng(
+                                                          (s['origen_lat']
+                                                                  as num)
+                                                              .toDouble(),
+                                                          (s['origen_lng']
+                                                                  as num)
+                                                              .toDouble(),
+                                                        ),
+                                                      );
+                                                    }
+
+                                                    // 4. REGLA SUPREMA: MASTERS VEN todo (T=0)
+                                                    if (esMaster) {
+                                                      puedeVer = true;
+                                                    }
+                                                    // 5. EMBUDO DE TIEMPO — 4 FASES DE 30s (total 2 min)
+                                                    else {
+                                                      if (segundos < 30) {
+                                                        // FASE 1 (0–29s): exclusivo del Master.
+                                                        // Nadie más lo ve. Masters tienen 30s para aceptar.
+                                                        puedeVer = false;
+                                                      } else if (segundos <
+                                                          60) {
+                                                        // FASE 2 (30–59s): pg_cron auto-asigna al #1 del
+                                                        // paradero (paradero_auto_movil_id). Los no-masters
+                                                        // no deben ver la card — el #1 será asignado sin
+                                                        // necesidad de aceptar. Masters siguen como fallback.
+                                                        puedeVer = false;
+                                                      } else if (segundos <
+                                                          90) {
+                                                        // FASE 3 (60–89s): Zona 2km desde el origen.
+                                                        // No-masters con capacidad dentro del radio ven la card.
+                                                        if (tieneCapacidad &&
+                                                            distMetros <=
+                                                                2000) {
+                                                          puedeVer = true;
+                                                        }
+                                                      } else {
+                                                        // FASE 4 (90s+): Todos los disponibles con capacidad.
+                                                        if (tieneCapacidad) {
+                                                          puedeVer = true;
+                                                        }
+                                                      }
+                                                    }
+
+                                                    if (puedeVer) {
+                                                      pendientes.add(s);
+                                                    }
+                                                  }
+                                                  // --- ORDENAMIENTO FIFO ABSOLUTO ---
+                                                  // El primero que pidió (o el que más tiempo lleva esperando) sale de primero.
+                                                  if (pendientes.isNotEmpty) {
+                                                    // _canonTime ya está definido arriba — reutilizamos
+                                                    pendientes.sort((a, b) =>
+                                                        _canonTime(a).compareTo(
+                                                            _canonTime(b)));
+                                                  }
+                                                  // --------------------------------------------------------
+
+                                                  // --- AUTO-EXPANSIÓN ACORDEÓN ---
+                                                  // Cuando llega un servicio nuevo (no visto aún),
+                                                  // colapsa todos los demás y expande solo el nuevo.
+                                                  // Los colapsados manualmente por el usuario no
+                                                  // se re-expanden (están en _serviciosVistos pero
+                                                  // no en _serviciosExpandidos).
+                                                  final nuevosIds =
+                                                      _serviciosActivosData
+                                                          .map((s) =>
+                                                              s['id'] as int)
+                                                          .where((id) =>
+                                                              !_serviciosVistos
+                                                                  .contains(id))
+                                                          .toList();
+                                                  if (nuevosIds.isNotEmpty) {
+                                                    _serviciosExpandidos
+                                                        .clear();
+                                                    _serviciosExpandidos
+                                                        .add(nuevosIds.last);
+                                                    _serviciosVistos
+                                                        .addAll(nuevosIds);
+                                                  }
+                                                  // Limpiar IDs de servicios que ya no existen.
+                                                  _serviciosExpandidos
+                                                      .removeWhere(
+                                                    (id) =>
+                                                        !_serviciosActivosData
+                                                            .any((s) =>
+                                                                s['id'] == id),
+                                                  );
+                                                  _serviciosVistos.removeWhere(
+                                                    (id) =>
+                                                        !_serviciosActivosData
+                                                            .any((s) =>
+                                                                s['id'] == id),
+                                                  );
+
+                                                  /// --- ALARMA DE NUEVO PEDIDO ---
+                                                  WidgetsBinding.instance
+                                                      .addPostFrameCallback((
+                                                    _,
+                                                  ) async {
+                                                    if (mounted) {
+                                                      // INYECCIÓN TÁCTICA: Permite sonar si tienes permiso O SI un misil rompió el candado (pendientes.isNotEmpty)
+                                                      if ((tienePermisoDeRadar ||
+                                                              pendientes
+                                                                  .isNotEmpty) &&
+                                                          pendientes.length >
+                                                              _cantidadPendientesAnterior) {
+                                                        if (!_reproduciendoAudio) {
+                                                          _reproduciendoAudio =
+                                                              true;
+
+                                                          // 1. Disparo Auditivo — suprimido si venimos
+                                                          // de background (el push ya sonó via OS).
+                                                          if (!_vieneDeBackground) {
+                                                            _sonidos.reproducir(
+                                                                Sonidos.alerta);
+                                                          }
+                                                          _vieneDeBackground =
+                                                              false;
+
+                                                          // 2. Disparo Visual (Notificación emergente tipo WhatsApp en el TECHO)
+                                                          ScaffoldMessenger.of(
+                                                                  context)
+                                                              .showSnackBar(
+                                                            SnackBar(
+                                                              content: Row(
+                                                                children: [
+                                                                  Icon(
+                                                                    Icons.radar,
+                                                                    color: Colors
+                                                                        .white,
+                                                                    size: 28,
+                                                                  ),
+                                                                  SizedBox(
+                                                                      width:
+                                                                          12),
+                                                                  Expanded(
+                                                                    child:
+                                                                        Column(
+                                                                      mainAxisSize:
+                                                                          MainAxisSize
+                                                                              .min,
+                                                                      crossAxisAlignment:
+                                                                          CrossAxisAlignment
+                                                                              .start,
+                                                                      children: [
+                                                                        Text(
+                                                                          '🚨 ¡NUEVO SERVICIO EN RADAR!',
+                                                                          style:
+                                                                              TextStyle(
+                                                                            fontWeight:
+                                                                                FontWeight.bold,
+                                                                            fontSize:
+                                                                                14,
+                                                                            color:
+                                                                                Colors.white,
+                                                                          ),
+                                                                        ),
+                                                                        Text(
+                                                                          'Revisa el radar para ver el servicio.',
+                                                                          style:
+                                                                              TextStyle(
+                                                                            fontSize:
+                                                                                12,
+                                                                            color:
+                                                                                Colors.white70,
+                                                                          ),
+                                                                        ),
+                                                                      ],
+                                                                    ),
+                                                                  ),
+                                                                ],
+                                                              ),
+                                                              backgroundColor:
+                                                                  Colors.green,
+                                                              duration:
+                                                                  const Duration(
+                                                                      seconds:
+                                                                          4),
+                                                              behavior:
+                                                                  SnackBarBehavior
+                                                                      .floating,
+                                                              // ---> MAGIA MATEMÁTICA: Lo empuja hasta el techo de la pantalla <---
+                                                              margin: EdgeInsets
+                                                                  .only(
+                                                                bottom: MediaQuery.of(
+                                                                            context)
+                                                                        .size
+                                                                        .height -
+                                                                    150,
+                                                                left: 12,
+                                                                right: 12,
+                                                              ),
+                                                              dismissDirection:
+                                                                  DismissDirection
+                                                                      .up,
+                                                              shape:
+                                                                  RoundedRectangleBorder(
+                                                                borderRadius:
+                                                                    BorderRadius
+                                                                        .circular(
+                                                                            12),
+                                                              ),
+                                                              elevation: 10,
+                                                            ),
+                                                          );
+
+                                                          // Seguro táctico para que el audio no se superponga si caen 3 pedidos de golpe
+                                                          Future.delayed(
+                                                            const Duration(
+                                                                seconds: 2),
+                                                            () {
+                                                              if (mounted)
+                                                                _reproduciendoAudio =
+                                                                    false;
+                                                            },
+                                                          );
+                                                        }
+                                                      }
+                                                      // Actualizamos la memoria del radar
+                                                      _cantidadPendientesAnterior =
+                                                          pendientes.length;
+                                                      // Limpiar el flag solo si la app está en primer
+                                                      // plano. En background el isolate Dart sigue vivo
+                                                      // y el StreamBuilder sigue disparando — si
+                                                      // reseteamos aquí, el flag llega vacío cuando el
+                                                      // moto abre la app y el OS ya había sonado.
+                                                      if (WidgetsBinding
+                                                              .instance
+                                                              .lifecycleState ==
+                                                          AppLifecycleState
+                                                              .resumed) {
+                                                        _vieneDeBackground =
+                                                            false;
+                                                      }
+                                                    }
+                                                  });
+
+                                                  // ---> INYECCIÓN: CÁLCULO DE CAJA EN VIVO <---
+                                                  double producidoHoy = 0.0;
+                                                  final hoyLocal =
+                                                      DateTime.now().toLocal();
+                                                  for (var s in todos) {
+                                                    if (s['estado'] ==
+                                                            'finalizado' &&
+                                                        s['movil_id'] ==
+                                                            widget.usuario[
+                                                                'id'] &&
+                                                        s['created_at'] !=
+                                                            null) {
+                                                      final fechaSvc =
+                                                          DateTime.parse(
+                                                        s['created_at'],
+                                                      ).toLocal();
+                                                      if (fechaSvc.year ==
+                                                              hoyLocal.year &&
+                                                          fechaSvc.month ==
+                                                              hoyLocal.month &&
+                                                          fechaSvc.day ==
+                                                              hoyLocal.day) {
+                                                        producidoHoy += (s[
+                                                                        'tarifa']
+                                                                    as num?)
+                                                                ?.toDouble() ??
+                                                            0.0;
+                                                      }
+                                                    }
+                                                  }
+                                                  // --------------------------------------------
+
+                                                  return ListView(
+                                                    padding: const EdgeInsets
+                                                        .fromLTRB(
+                                                        12, 4, 12, 12),
+                                                    children: [
+                                                      if (_estaEnLinea)
+                                                        Container(
+                                                          margin:
+                                                              const EdgeInsets
+                                                                  .only(
+                                                                  bottom: 10),
+                                                          padding:
+                                                              const EdgeInsets
+                                                                  .symmetric(
+                                                                  horizontal:
+                                                                      14,
+                                                                  vertical: 10),
+                                                          decoration:
+                                                              BoxDecoration(
+                                                            color: Colors.white,
+                                                            borderRadius:
+                                                                BorderRadius
+                                                                    .circular(
+                                                                        12),
+                                                            border: Border.all(
+                                                                color:
+                                                                    Colors.grey[
+                                                                        200]!),
+                                                          ),
+                                                          child: Row(
+                                                            children: [
+                                                              Icon(
+                                                                  Icons
+                                                                      .bar_chart,
+                                                                  size: 14,
+                                                                  color: Colors
+                                                                      .black45),
+                                                              const SizedBox(
+                                                                  width: 6),
+                                                              const Text(
+                                                                'PRODUCIDO HOY',
+                                                                style:
+                                                                    TextStyle(
+                                                                  fontSize: 10,
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .bold,
+                                                                  color: Colors
+                                                                      .black45,
+                                                                  letterSpacing:
+                                                                      0.8,
+                                                                ),
+                                                              ),
+                                                              const Spacer(),
+                                                              Text(
+                                                                _formatearMoneda(
+                                                                    producidoHoy,
+                                                                    mostrarCero:
+                                                                        true),
+                                                                style:
+                                                                    TextStyle(
+                                                                  fontSize: 15,
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .bold,
+                                                                  color: Colors
+                                                                          .green[
+                                                                      700],
+                                                                ),
+                                                              ),
+                                                            ],
+                                                          ),
+                                                        ),
+                                                      // -------------------------------------------
+                                                      if (_serviciosActivosData
+                                                          .isEmpty) ...[
+                                                        Container(
+                                                          width:
+                                                              double.infinity,
+                                                          padding:
+                                                              const EdgeInsets
+                                                                  .all(14),
+                                                          margin:
+                                                              const EdgeInsets
+                                                                  .only(
+                                                                  bottom: 8),
+                                                          decoration:
+                                                              BoxDecoration(
+                                                            color: Colors.white,
+                                                            borderRadius:
+                                                                BorderRadius
+                                                                    .circular(
+                                                                        10),
+                                                            border: Border.all(
+                                                                color:
+                                                                    Colors.grey[
+                                                                        300]!),
+                                                          ),
+                                                          child: Column(
+                                                            children: [
+                                                              if (paraderoActual ==
+                                                                  null) ...[
+                                                                Text(
+                                                                  'No estás en la fila de ningún paradero',
+                                                                  style:
+                                                                      TextStyle(
+                                                                    fontWeight:
+                                                                        FontWeight
+                                                                            .w600,
+                                                                    fontSize:
+                                                                        13,
+                                                                    color: Colors
+                                                                            .grey[
+                                                                        800],
+                                                                  ),
+                                                                ),
+                                                                const SizedBox(
+                                                                    height: 10),
+                                                                SizedBox(
+                                                                  width: double
+                                                                      .infinity,
+                                                                  child:
+                                                                      ElevatedButton
+                                                                          .icon(
+                                                                    style: ElevatedButton
+                                                                        .styleFrom(
+                                                                      backgroundColor:
+                                                                          Colors
+                                                                              .black,
+                                                                      padding: const EdgeInsets
+                                                                          .symmetric(
+                                                                          vertical:
+                                                                              12),
+                                                                    ),
+                                                                    onPressed:
+                                                                        _procesando
+                                                                            ? null
+                                                                            : _intentarRegistroParadero,
+                                                                    icon:
+                                                                        const Icon(
+                                                                      Icons
+                                                                          .location_on,
+                                                                      color: Color(
+                                                                          0xff3AF500),
+                                                                      size: 18,
+                                                                    ),
+                                                                    label: _procesando
+                                                                        ? SizedBox(
+                                                                            width:
+                                                                                16,
+                                                                            height:
+                                                                                16,
+                                                                            child:
+                                                                                CircularProgressIndicator(
+                                                                              color: Colors.white,
+                                                                              strokeWidth: 2,
+                                                                            ),
+                                                                          )
+                                                                        : const Text(
+                                                                            'REGISTRARME EN PARADERO',
+                                                                            style:
+                                                                                TextStyle(
+                                                                              color: Color(0xff3AF500),
+                                                                              fontWeight: FontWeight.bold,
+                                                                              fontSize: 13,
+                                                                            ),
+                                                                          ),
+                                                                  ),
+                                                                ),
+                                                              ] else ...[
+                                                                Row(
+                                                                  children: [
+                                                                    Container(
+                                                                      width: 8,
+                                                                      height: 8,
+                                                                      decoration:
+                                                                          const BoxDecoration(
+                                                                        color: Color(
+                                                                            0xff3AF500),
+                                                                        shape: BoxShape
+                                                                            .circle,
+                                                                      ),
+                                                                    ),
+                                                                    const SizedBox(
+                                                                        width:
+                                                                            8),
+                                                                    Text(
+                                                                      'En fila: $paraderoActual',
+                                                                      style:
+                                                                          TextStyle(
+                                                                        fontWeight:
+                                                                            FontWeight.w600,
+                                                                        fontSize:
+                                                                            13,
+                                                                        color: Colors
+                                                                            .grey[800],
+                                                                      ),
+                                                                    ),
+                                                                  ],
+                                                                ),
+                                                                const SizedBox(
+                                                                    height: 10),
+                                                                SizedBox(
+                                                                  width: double
+                                                                      .infinity,
+                                                                  child:
+                                                                      OutlinedButton
+                                                                          .icon(
+                                                                    style: OutlinedButton
+                                                                        .styleFrom(
+                                                                      foregroundColor:
+                                                                          Colors
+                                                                              .red,
+                                                                      side:
+                                                                          const BorderSide(
+                                                                        color: Colors
+                                                                            .red,
+                                                                      ),
+                                                                    ),
+                                                                    onPressed:
+                                                                        _procesando
+                                                                            ? null
+                                                                            : _salirDelParadero,
+                                                                    icon:
+                                                                        const Icon(
+                                                                      Icons
+                                                                          .exit_to_app,
+                                                                      size: 16,
+                                                                    ),
+                                                                    label:
+                                                                        const Text(
+                                                                      'SALIR DEL PARADERO',
+                                                                      style:
+                                                                          TextStyle(
+                                                                        fontWeight:
+                                                                            FontWeight.bold,
+                                                                        fontSize:
+                                                                            11,
+                                                                      ),
+                                                                    ),
+                                                                  ),
+                                                                ),
+                                                              ],
+                                                            ],
+                                                          ),
+                                                        ),
+                                                        _construirFilaVirtual(
+                                                            enFila),
+                                                        const SizedBox(
+                                                            height: 10),
+                                                      ],
+
+                                                      // ---- TARJETA DOMICILIO ACTIVO ----
+                                                      if (_pedidoDomicilioActivo !=
+                                                          null)
+                                                        _buildTarjetaDomicilio(),
+
+                                                      if (_serviciosActivosData
+                                                          .isNotEmpty) ...[
+                                                        Padding(
+                                                          padding:
+                                                              const EdgeInsets
+                                                                  .only(
+                                                                  bottom: 6,
+                                                                  left: 2,
+                                                                  top: 4),
+                                                          child: Row(children: [
+                                                            Icon(
+                                                                Icons
+                                                                    .local_shipping_outlined,
+                                                                size: 13,
+                                                                color: Colors
+                                                                    .black38),
+                                                            const SizedBox(
+                                                                width: 5),
+                                                            const Text(
+                                                              'ÓRDENES EN CURSO',
+                                                              style: TextStyle(
+                                                                  fontSize: 10,
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .bold,
+                                                                  color: Colors
+                                                                      .black38,
+                                                                  letterSpacing:
+                                                                      0.8),
+                                                            ),
+                                                          ]),
+                                                        ),
+                                                        ..._serviciosActivosData
+                                                            .map(
+                                                          (servicio) =>
+                                                              KeyedSubtree(
+                                                            key: ValueKey(
+                                                                'activa_${servicio['id']}'),
+                                                            child:
+                                                                _construirTarjetaActiva(
+                                                              servicio,
+                                                              esMaster:
+                                                                  esMaster,
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ],
+
+                                                      // ---> DESTRUCCIÓN DEL CANDADO VISUAL AQUÍ <---
+                                                      if (tienePermisoDeRadar ||
+                                                          pendientes
+                                                              .isNotEmpty) ...[
+                                                        Padding(
+                                                          padding:
+                                                              const EdgeInsets
+                                                                  .only(
+                                                                  bottom: 6,
+                                                                  left: 2,
+                                                                  top: 4),
+                                                          child: Row(children: [
+                                                            Icon(Icons.radar,
+                                                                size: 13,
+                                                                color: Colors
+                                                                    .black38),
+                                                            const SizedBox(
+                                                                width: 5),
+                                                            const Text(
+                                                              'RADAR DE DISPONIBLES',
+                                                              style: TextStyle(
+                                                                  fontSize: 10,
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .bold,
+                                                                  color: Colors
+                                                                      .black38,
+                                                                  letterSpacing:
+                                                                      0.8),
+                                                            ),
+                                                          ]),
+                                                        ),
+                                                        if (pendientes.isEmpty)
+                                                          const Padding(
+                                                            padding:
+                                                                EdgeInsets.only(
+                                                                    top: 20),
+                                                            child: Center(
+                                                              child: Text(
+                                                                'Radar limpio. Sin Servicios.',
+                                                                style:
+                                                                    TextStyle(
+                                                                  color: Colors
+                                                                      .grey,
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .bold,
+                                                                ),
+                                                              ),
+                                                            ),
+                                                          )
+                                                        else
+                                                          ...pendientes.map(
+                                                            (servicio) =>
+                                                                KeyedSubtree(
+                                                              key: ValueKey(
+                                                                  'pendiente_${servicio['id']}'),
+                                                              child:
+                                                                  _construirTarjetaPendiente(
+                                                                servicio,
+                                                                esMaster:
+                                                                    esMaster,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                      ] else if (_serviciosActivosData
+                                                              .isEmpty &&
+                                                          !radarAbierto) ...[
+                                                        Padding(
+                                                          padding:
+                                                              const EdgeInsets
+                                                                  .only(
+                                                                  top: 10),
+                                                          child: Container(
+                                                            padding:
+                                                                const EdgeInsets
+                                                                    .all(16),
+                                                            decoration:
+                                                                BoxDecoration(
+                                                              color: Colors
+                                                                  .orange[50]!,
+                                                              borderRadius:
+                                                                  BorderRadius
+                                                                      .circular(
+                                                                          12),
+                                                              border: Border.all(
+                                                                  color: Colors
+                                                                          .orange[
+                                                                      200]!),
+                                                            ),
+                                                            child: Column(
+                                                              children: [
+                                                                Icon(
+                                                                  Icons
+                                                                      .lock_clock_outlined,
+                                                                  color: Colors
+                                                                          .orange[
+                                                                      700],
+                                                                  size: 32,
+                                                                ),
+                                                                const SizedBox(
+                                                                    height: 10),
+                                                                Text(
+                                                                  mensajeBloqueo
+                                                                          .isNotEmpty
+                                                                      ? mensajeBloqueo
+                                                                      : 'Regístrate en un paradero para recibir servicios.',
+                                                                  textAlign:
+                                                                      TextAlign
+                                                                          .center,
+                                                                  style:
+                                                                      TextStyle(
+                                                                    fontSize:
+                                                                        13,
+                                                                    color: Colors
+                                                                            .orange[
+                                                                        900],
+                                                                    fontWeight:
+                                                                        FontWeight
+                                                                            .w500,
+                                                                    height: 1.4,
+                                                                  ),
+                                                                ),
+                                                              ],
+                                                            ),
+                                                          ),
+                                                        ),
+                                                        if (esMaster ||
+                                                            miPerfilEnVivo[
+                                                                    'tiene_fn'] ==
+                                                                true)
+                                                          Padding(
+                                                            padding:
+                                                                const EdgeInsets
+                                                                    .only(
+                                                                    top: 10),
+                                                            child: Container(
+                                                              padding:
+                                                                  const EdgeInsets
+                                                                      .all(16),
+                                                              decoration:
+                                                                  BoxDecoration(
+                                                                color: Colors
+                                                                    .indigo[50]!,
+                                                                borderRadius:
+                                                                    BorderRadius
+                                                                        .circular(
+                                                                            12),
+                                                                border: Border.all(
+                                                                    color: Colors
+                                                                            .indigo[
+                                                                        200]!),
+                                                              ),
+                                                              child: Column(
+                                                                children: [
+                                                                  Icon(
+                                                                    Icons
+                                                                        .local_pharmacy_outlined,
+                                                                    color: Colors
+                                                                            .indigo[
+                                                                        700],
+                                                                    size: 32,
+                                                                  ),
+                                                                  const SizedBox(
+                                                                      height:
+                                                                          10),
+                                                                  Text(
+                                                                    'Radar disponible para Turnos de FN',
+                                                                    textAlign:
+                                                                        TextAlign
+                                                                            .center,
+                                                                    style: TextStyle(
+                                                                        fontSize:
+                                                                            14,
+                                                                        fontWeight:
+                                                                            FontWeight
+                                                                                .bold,
+                                                                        color: Colors
+                                                                                .indigo[
+                                                                            800]),
+                                                                  ),
+                                                                  const SizedBox(
+                                                                      height: 6),
+                                                                  Text(
+                                                                    'No hace falta registrarte en un paradero para recibir turnos de Farmanorte (FN).',
+                                                                    textAlign:
+                                                                        TextAlign
+                                                                            .center,
+                                                                    style: TextStyle(
+                                                                        fontSize:
+                                                                            12,
+                                                                        color: Colors
+                                                                                .indigo[
+                                                                            700],
+                                                                        height:
+                                                                            1.4),
+                                                                  ),
+                                                                ],
+                                                              ),
+                                                            ),
+                                                          ),
+                                                      ],
+                                                    ],
+                                                  );
+                                                },
+                                              ),
                                       ),
                                     ),
-                                  ),
-                              ] else if (_serviciosActivosData.isEmpty &&
-                                  !radarAbierto) ...[
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 10),
-                                  child: Container(
-                                    padding: const EdgeInsets.all(16),
-                                    decoration: BoxDecoration(
-                                      color: Colors.orange[50]!,
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(color: Colors.orange[200]!),
-                                    ),
-                                    child: Column(
-                                      children: [
-                                        Icon(
-                                          Icons.lock_clock_outlined,
-                                          color: Colors.orange[700],
-                                          size: 32,
-                                        ),
-                                        const SizedBox(height: 10),
-                                        Text(
-                                          mensajeBloqueo.isNotEmpty
-                                              ? mensajeBloqueo
-                                              : 'Regístrate en un paradero para recibir servicios.',
-                                          textAlign: TextAlign.center,
-                                          style: TextStyle(
-                                            fontSize: 13,
-                                            color: Colors.orange[900],
-                                            fontWeight: FontWeight.w500,
-                                            height: 1.4,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ],
-                          );
-                        },
-                      ),
-                ),
-              ),
-            ],
-          );
-        },
-          ),
-                    ), // TickerMode servicios
-                  ), // RepaintBoundary servicios
-                  // Pestaña perfil — RepaintBoundary + TickerMode
-                  // (animaciones desactivadas cuando no está visible)
-                  RepaintBoundary(
-                    child: TickerMode(
-                      enabled: _tabActual == 1,
-                      child: _construirPerfilTab(),
-                    ),
-                  ),
-                ],
-              ), // IndexedStack
-          ), // ValueListenableBuilder
-        ),  // Expanded
-        ],
-      ), // Column
-      // #91: overlay "Has perdido la conexión" — solo cuando stream falla con caché disponible
-      if (_conexionPerdida) _overlayDesconexion(),
-        ], // Stack children
-      ), // Stack
-    bottomNavigationBar: BottomNavigationBar(
-      currentIndex: _tabActual,
-      onTap: _cambiarTab,
-      selectedItemColor: const Color(0xff3AF500),
-      unselectedItemColor: Colors.white38,
-      backgroundColor: const Color(0xFF0D0D0D),
-      type: BottomNavigationBarType.fixed,
-      items: const [
-        BottomNavigationBarItem(
-          icon: Icon(Icons.radar),
-          label: 'Servicios',
+                                  ],
+                                ); // cierra Column (return del ValueListenableBuilder builder)
+                                  }, // cierra ValueListenableBuilder builder
+                                ); // cierra ValueListenableBuilder (return del snapMiPerfil builder)
+                              }, // cierra StreamBuilder(_streamMiPerfil) builder
+                            ), // cierra StreamBuilder(_streamMiPerfil)
+                          ), // TickerMode servicios
+                        ), // RepaintBoundary servicios
+                        // Pestaña perfil — RepaintBoundary + TickerMode
+                        // (animaciones desactivadas cuando no está visible)
+                        RepaintBoundary(
+                          child: TickerMode(
+                            enabled: _tabActual == 1,
+                            child: _construirPerfilTab(),
+                          ),
+                        ),
+                      ],
+                    ), // IndexedStack
+                  ), // ValueListenableBuilder
+                ), // Expanded
+              ],
+            ), // Column
+            // #91: overlay "Has perdido la conexión" — solo cuando stream falla con caché disponible
+            if (_conexionPerdida) _overlayDesconexion(),
+          ], // Stack children
+        ), // Stack
+        bottomNavigationBar: BottomNavigationBar(
+          currentIndex: _tabActual,
+          onTap: _cambiarTab,
+          selectedItemColor: const Color(0xff3AF500),
+          unselectedItemColor: Colors.white38,
+          backgroundColor: const Color(0xFF0D0D0D),
+          type: BottomNavigationBarType.fixed,
+          items: const [
+            BottomNavigationBarItem(
+              icon: Icon(Icons.radar),
+              label: 'Servicios',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.person_outline),
+              label: 'Perfil',
+            ),
+          ],
         ),
-        BottomNavigationBarItem(
-          icon: Icon(Icons.person_outline),
-          label: 'Perfil',
-        ),
-      ],
-    ),
-    ), // ← cierra Scaffold (child: Scaffold)
+      ), // ← cierra Scaffold (child: Scaffold)
     ); // ← cierra PopScope
   }
 }
 
-// ===========================================================================
-// PAINTER: Overlay circular oscuro con hueco (tutorial de pantalla)
 // ===========================================================================

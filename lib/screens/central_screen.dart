@@ -154,6 +154,10 @@ class _CentralScreenState extends State<CentralScreen>
   // para que _construirBloqueServicios pueda resolver movil_id → #numero real.
   List<Map<String, dynamic>> _movilesCache = [];
 
+  // Caché de servicios para FAB de chats pendientes
+  List<Map<String, dynamic>> _cacheSvcMonitor = [];
+  final ValueNotifier<int> _chatServicioTotal = ValueNotifier(0);
+
   // Usuarios pendientes de activación (activo=false)
   int _usuariosPendientes = 0;
 
@@ -636,6 +640,10 @@ class _CentralScreenState extends State<CentralScreen>
     _subServiciosMonitor = crudoServicios.listen(
       (data) {
         _ultimaActualizacion = DateTime.now();
+        _cacheSvcMonitor = List<Map<String, dynamic>>.from(data);
+        _chatServicioTotal.value = _cacheSvcMonitor.where((s) =>
+            s['chat_movil_central'] == true ||
+            s['chat_cliente_central'] == true).length;
         if (!_ctrlServiciosMonitor.isClosed) _ctrlServiciosMonitor.add(data);
       },
       onError: (e) {
@@ -654,6 +662,59 @@ class _CentralScreenState extends State<CentralScreen>
       if (!mounted) return;
       _construirStreams();
     });
+  }
+
+  // =========================================================================
+  // FAB CHAT — abre el chat del servicio pendiente más reciente
+  // =========================================================================
+  void _abrirChatServicioPendiente() {
+    final svc = _cacheSvcMonitor.firstWhere(
+      (s) => s['chat_movil_central'] == true || s['chat_cliente_central'] == true,
+      orElse: () => {},
+    );
+    if (svc.isEmpty) return;
+    final id = svc['id'] as int;
+
+    if (svc['chat_movil_central'] == true) {
+      Supabase.instance.client
+          .from('servicios')
+          .update({'chat_movil_central': false}).eq('id', id);
+      final movil = _movilesCache.firstWhere(
+        (m) => m['id'] == svc['movil_id'],
+        orElse: () => {},
+      );
+      final nom = _formatearNombreCentral(movil.isEmpty ? null : movil);
+      Navigator.push(context, MaterialPageRoute(
+        builder: (_) => ChatScreen(
+          salaId: 'soporte_movil_$id',
+          miId: 0,
+          miNombre: 'Central',
+          titulo: 'Chat con $nom',
+          servicioId: id,
+          alarmaLocal: 'chat_movil_central',
+          alarmaDestino: 'chat_central_movil',
+          destinatarioId: (svc['movil_id'] as num?)?.toInt(),
+          tipoFaq: TipoFaqChat.central,
+        ),
+      ));
+    } else {
+      Supabase.instance.client
+          .from('servicios')
+          .update({'chat_cliente_central': false}).eq('id', id);
+      Navigator.push(context, MaterialPageRoute(
+        builder: (_) => ChatScreen(
+          salaId: 'soporte_cliente_$id',
+          miId: 0,
+          miNombre: 'Central',
+          titulo: 'Chat con Cliente',
+          servicioId: id,
+          alarmaLocal: 'chat_cliente_central',
+          alarmaDestino: 'chat_central_cliente',
+          destinatarioId: (svc['cliente_id'] as num?)?.toInt(),
+          tipoFaq: TipoFaqChat.central,
+        ),
+      ));
+    }
   }
 
   @override
@@ -692,6 +753,7 @@ class _CentralScreenState extends State<CentralScreen>
     _busquedaCtrl.dispose();
     _filtroVersion.dispose();
     _seleccionadoId.dispose();
+    _chatServicioTotal.dispose();
     _sonidos.silenciar();
     super.dispose();
   }
@@ -1014,47 +1076,93 @@ class _CentralScreenState extends State<CentralScreen>
               ],
       ),
 
-      // ---> BOTÓN FLOTANTE DE SOPORTE <---
-      floatingActionButton: StreamBuilder<List<Map<String, dynamic>>>(
-        stream: Supabase.instance.client
-            .from('usuarios')
-            .stream(primaryKey: ['id']).eq('alarma_soporte', true),
-        builder: (context, snap) {
-          final lista = snap.data ?? [];
-          if (lista.isEmpty) return const SizedBox.shrink();
-          return PulsingPanicoButton(
-            color: Colors.red,
-            child: FloatingActionButton(
-              backgroundColor: Colors.red,
-              onPressed: () => _abrirBuzonSoporte(context, lista),
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  const Icon(Icons.support_agent, color: Colors.white),
-                  Positioned(
-                    right: -6,
-                    top: -6,
-                    child: Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: const BoxDecoration(
-                        color: Colors.white,
-                        shape: BoxShape.circle,
-                      ),
-                      child: Text(
-                        '${lista.length}',
-                        style: const TextStyle(
-                          color: Colors.red,
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
+      // ---> BOTONES FLOTANTES: chats de servicio + soporte general <---
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          // FAB 1: chats de servicios pendientes (móvil o cliente → central)
+          ValueListenableBuilder<int>(
+            valueListenable: _chatServicioTotal,
+            builder: (_, total, __) {
+              if (total == 0) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: PulsingPanicoButton(
+                  color: Colors.orange,
+                  child: FloatingActionButton.extended(
+                    heroTag: 'fab_chat_svc',
+                    backgroundColor: Colors.orange[800],
+                    onPressed: _abrirChatServicioPendiente,
+                    icon: const Icon(Icons.chat_rounded, color: Colors.white, size: 20),
+                    label: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        const Text('Servicio', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                        Positioned(
+                          top: -10, right: -18,
+                          child: Container(
+                            padding: const EdgeInsets.all(3),
+                            decoration: BoxDecoration(
+                              color: Colors.yellow[600],
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.orange[900]!, width: 1),
+                            ),
+                            constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                            child: Text('$total', style: const TextStyle(color: Colors.black, fontSize: 10, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+                          ),
                         ),
-                      ),
+                      ],
                     ),
                   ),
-                ],
-              ),
-            ),
-          );
-        },
+                ),
+              );
+            },
+          ),
+          // FAB 2: soporte general (alarma_soporte)
+          StreamBuilder<List<Map<String, dynamic>>>(
+            stream: Supabase.instance.client
+                .from('usuarios')
+                .stream(primaryKey: ['id']).eq('alarma_soporte', true),
+            builder: (context, snap) {
+              final lista = snap.data ?? [];
+              if (lista.isEmpty) return const SizedBox.shrink();
+              return PulsingPanicoButton(
+                color: Colors.red,
+                child: FloatingActionButton(
+                  heroTag: 'fab_soporte',
+                  backgroundColor: Colors.red,
+                  onPressed: () => _abrirBuzonSoporte(context, lista),
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      const Icon(Icons.support_agent, color: Colors.white),
+                      Positioned(
+                        right: -6,
+                        top: -6,
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: const BoxDecoration(
+                            color: Colors.white,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Text(
+                            '${lista.length}',
+                            style: const TextStyle(
+                              color: Colors.red,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
       ),
 
       body: esPantallaGrande

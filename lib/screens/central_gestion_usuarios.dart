@@ -21,12 +21,15 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
   List<Map<String, dynamic>> _registros = [];
   List<Map<String, dynamic>> _solicitudesDescansoList = [];
   List<Map<String, dynamic>> _eliminados = [];
+  List<Map<String, dynamic>> _locales = [];
+  List<Map<String, dynamic>> _clientes = [];
+  List<Map<String, dynamic>> _sedesFn = [];
   bool _cargando = true;
 
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: 7, vsync: this, initialIndex: widget.tabInicial);
+    _tabCtrl = TabController(length: 10, vsync: this, initialIndex: widget.tabInicial);
     _cargar();
   }
 
@@ -40,7 +43,9 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
   Future<void> _cargar() async {
     setState(() => _cargando = true);
     try {
-      final hace30 = DateTime.now().subtract(const Duration(days: 30)).toIso8601String();
+      // Medianoche local de hoy → "Recientes" se reinicia cada día
+      final hoy = DateTime.now();
+      final hoyMedianoche = DateTime(hoy.year, hoy.month, hoy.day).toIso8601String();
       final results = await Future.wait([
         _db.from('usuarios')
             .select('id, nombre, usuario, correo, telefono, direccion_local, tipo_negocio, zona_cobertura, created_at')
@@ -48,6 +53,7 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
         _db.from('usuarios')
             .select('id, nombre, usuario, rol, telefono, correo, activo, suspendido, created_at, numero_movil, tipo_plan_movil, doc_perfil_url, doc_cedula_url, doc_licencia_url, doc_soat_url')
             .eq('activo', false)
+            .neq('rol', 'local')   // locales van en "Solicitudes", no aquí
             .or('suspendido.is.null,suspendido.eq.false')
             .or('eliminado.is.null,eliminado.eq.false')
             .order('created_at'),
@@ -56,7 +62,7 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
             .eq('rol', 'movil').order('usuario', ascending: true),
         _db.from('usuarios')
             .select('id, nombre, usuario, rol, estado_local, activo, suspendido, created_at')
-            .gte('created_at', hace30).order('created_at', ascending: false),
+            .gte('created_at', hoyMedianoche).order('created_at', ascending: false),
         _db.from('solicitudes_descanso')
             .select('id, movil_id, fecha_inicio, fecha_fin, dias_solicitados, razon, estado, aprobado_por, rechazado_motivo, created_at, usuarios(nombre, usuario)')
             .order('created_at', ascending: false)
@@ -65,6 +71,19 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
             .select('id, nombre, usuario, rol, correo, telefono, tipo_plan_movil, rango_movil, numero_movil, eliminado_at, eliminado_por, created_at')
             .eq('eliminado', true)
             .order('eliminado_at', ascending: false),
+        _db.from('usuarios')
+            .select('id, nombre, usuario, correo, telefono, direccion_local, tipo_negocio, zona_cobertura, activo, created_at')
+            .eq('rol', 'local')
+            .eq('estado_local', 'activo')
+            .order('nombre', ascending: true),
+        _db.from('usuarios')
+            .select('id, nombre, usuario, correo, telefono, created_at')
+            .eq('rol', 'cliente')
+            .or('eliminado.is.null,eliminado.eq.false')
+            .order('created_at', ascending: false),
+        _db.from('fn_sedes')
+            .select('id, nombre, numero, tipo_sede, zona_fn, sector, activo')
+            .order('nombre', ascending: true),
       ]);
       if (!mounted) return;
       setState(() {
@@ -74,6 +93,9 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
         _registros                = List<Map<String, dynamic>>.from(results[3]);
         _solicitudesDescansoList  = List<Map<String, dynamic>>.from(results[4]);
         _eliminados               = List<Map<String, dynamic>>.from(results[5]);
+        _locales                  = List<Map<String, dynamic>>.from(results[6]);
+        _clientes                 = List<Map<String, dynamic>>.from(results[7]);
+        _sedesFn                  = List<Map<String, dynamic>>.from(results[8]);
         _cargando = false;
       });
     } catch (e) {
@@ -559,6 +581,12 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                         const Color(0xFF818CF8),
                         onTap: () => _tabCtrl.animateTo(6),
                       ),
+                      const SizedBox(width: 8),
+                      _statBox('${_locales.length}', 'Locales', const Color(0xFFF59E0B), onTap: () => _tabCtrl.animateTo(7)),
+                      const SizedBox(width: 8),
+                      _statBox('${_clientes.length}', 'Clientes', const Color(0xFF22C55E), onTap: () => _tabCtrl.animateTo(8)),
+                      const SizedBox(width: 8),
+                      _statBox('${_sedesFn.length}', 'Sedes FN', Colors.indigo[400]!, onTap: () => _tabCtrl.animateTo(9)),
                     ],
                   ),
                 ),
@@ -594,6 +622,9 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                 _tabDescansos(),
                 _tabEliminados(),
                 _tabWallet(),
+                _tabLocales(),
+                _tabClientes(),
+                _tabSedesFn(),
               ])),
             ]),
       ),
@@ -1119,10 +1150,10 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
     );
   }
 
-  // ── Tab 3: Registros recientes (últimos 30 días) ──────────────────────────
+  // ── Tab 3: Registros de hoy (se reinicia a medianoche) ───────────────────
   Widget _tabRecientes() {
     final lista = _filtrar(_registros);
-    if (lista.isEmpty) return _empty(Icons.person_add_rounded, 'Sin registros en los últimos 30 días');
+    if (lista.isEmpty) return _empty(Icons.person_add_rounded, 'Sin registros nuevos hoy');
     return Column(children: [
       Container(
         width: double.infinity,
@@ -2043,6 +2074,434 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
     }
+  }
+
+  // ── Tab 7: Locales activos + toggle activar/desactivar ────────────────────
+  Widget _tabLocales() {
+    final lista = _filtrar(_locales);
+    if (lista.isEmpty) return _empty(Icons.store_rounded, 'Sin locales activos');
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(14, 6, 14, 24),
+      itemCount: lista.length,
+      itemBuilder: (_, i) {
+        final l = lista[i];
+        final activo = l['activo'] as bool? ?? true;
+        return Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          decoration: BoxDecoration(
+            color: const Color(0xFF141414),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: activo
+                  ? const Color(0xFFF59E0B).withValues(alpha: 0.3)
+                  : Colors.white12,
+            ),
+          ),
+          child: Column(children: [
+            // Header
+            Container(
+              padding: const EdgeInsets.fromLTRB(14, 12, 10, 10),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(colors: [
+                  (activo ? const Color(0xFFF59E0B) : Colors.grey).withValues(alpha: 0.1),
+                  Colors.transparent,
+                ]),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+              ),
+              child: Row(children: [
+                CircleAvatar(
+                  radius: 20,
+                  backgroundColor: (activo ? const Color(0xFFF59E0B) : Colors.grey).withValues(alpha: 0.2),
+                  child: Text(
+                    _iniciales(l['nombre']),
+                    style: TextStyle(
+                      color: activo ? const Color(0xFFF59E0B) : Colors.grey,
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(
+                    l['nombre'] ?? '—',
+                    style: TextStyle(
+                      color: activo ? Colors.white : Colors.white38,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  if ((l['tipo_negocio'] ?? '').toString().isNotEmpty)
+                    Text(
+                      l['tipo_negocio'].toString(),
+                      style: const TextStyle(color: Colors.white38, fontSize: 11),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                ])),
+                // Toggle activar/desactivar
+                Column(children: [
+                  Switch(
+                    value: activo,
+                    activeColor: const Color(0xFFF59E0B),
+                    inactiveThumbColor: Colors.grey,
+                    onChanged: (val) async {
+                      final confirmar = await showDialog<bool>(
+                        context: context,
+                        builder: (d) => AlertDialog(
+                          backgroundColor: const Color(0xFF1A1A1A),
+                          title: Text(
+                            val ? '¿Activar local?' : '¿Desactivar local?',
+                            style: const TextStyle(color: Colors.white, fontSize: 15),
+                          ),
+                          content: Text(
+                            val
+                                ? '${l['nombre']} podrá operar nuevamente.'
+                                : '${l['nombre']} no podrá acceder hasta reactivarlo.',
+                            style: const TextStyle(color: Colors.white70, fontSize: 13),
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(d, false),
+                              child: const Text('Cancelar', style: TextStyle(color: Colors.white38)),
+                            ),
+                            ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: val ? Colors.green[700] : Colors.red[800],
+                              ),
+                              onPressed: () => Navigator.pop(d, true),
+                              child: Text(
+                                val ? 'Activar' : 'Desactivar',
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (confirmar != true || !mounted) return;
+                      try {
+                        await _db.from('usuarios').update({'activo': val}).eq('id', l['id']);
+                        setState(() => l['activo'] = val);
+                      } catch (e) {
+                        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+                        );
+                      }
+                    },
+                  ),
+                  Text(
+                    activo ? 'Activo' : 'Inactivo',
+                    style: TextStyle(
+                      color: activo ? const Color(0xFFF59E0B) : Colors.white38,
+                      fontSize: 9,
+                    ),
+                  ),
+                ]),
+              ]),
+            ),
+            // Info rows
+            if ((l['telefono'] ?? '').toString().isNotEmpty ||
+                (l['direccion_local'] ?? '').toString().isNotEmpty ||
+                (l['zona_cobertura'] ?? '').toString().isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 4, 14, 12),
+                child: Column(children: [
+                  if ((l['telefono'] ?? '').toString().isNotEmpty)
+                    _infoR(Icons.phone_outlined, l['telefono'].toString(), Colors.white38),
+                  if ((l['direccion_local'] ?? '').toString().isNotEmpty)
+                    _infoR(Icons.location_on_outlined, l['direccion_local'].toString(), Colors.white38),
+                  if ((l['zona_cobertura'] ?? '').toString().isNotEmpty)
+                    _infoR(Icons.map_outlined, 'Zona: ${l['zona_cobertura']}', Colors.white38),
+                  if ((l['correo'] ?? '').toString().isNotEmpty)
+                    _infoR(Icons.email_outlined, l['correo'].toString(), Colors.white38),
+                ]),
+              ),
+          ]),
+        );
+      },
+    );
+  }
+
+  // ── Tab 8: Clientes ────────────────────────────────────────────────────────
+  Widget _tabClientes() {
+    final lista = _filtrar(_clientes);
+    if (lista.isEmpty) return _empty(Icons.people_alt_rounded, 'Sin clientes registrados');
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(14, 6, 14, 24),
+      itemCount: lista.length,
+      itemBuilder: (_, i) {
+        final c = lista[i];
+        final fecha = c['created_at'] != null
+            ? DateTime.tryParse(c['created_at'].toString())?.toLocal()
+            : null;
+        final fechaStr = fecha != null
+            ? '${fecha.day.toString().padLeft(2, '0')}/${fecha.month.toString().padLeft(2, '0')}/${fecha.year}'
+            : '—';
+        return Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          decoration: BoxDecoration(
+            color: const Color(0xFF141414),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFF22C55E).withValues(alpha: 0.2)),
+          ),
+          child: Column(children: [
+            // Header
+            Container(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(colors: [
+                  const Color(0xFF22C55E).withValues(alpha: 0.08),
+                  Colors.transparent,
+                ]),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+              ),
+              child: Row(children: [
+                CircleAvatar(
+                  radius: 19,
+                  backgroundColor: const Color(0xFF22C55E).withValues(alpha: 0.18),
+                  child: Text(
+                    _iniciales(c['nombre']),
+                    style: const TextStyle(color: Color(0xFF22C55E), fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(
+                    c['nombre'] ?? '—',
+                    style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    '@${c['usuario'] ?? '—'}',
+                    style: const TextStyle(color: Colors.white38, fontSize: 11),
+                  ),
+                ])),
+                Text(
+                  fechaStr,
+                  style: const TextStyle(color: Colors.white24, fontSize: 10),
+                ),
+              ]),
+            ),
+            // Info
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 2, 14, 12),
+              child: Column(children: [
+                if ((c['telefono'] ?? '').toString().isNotEmpty)
+                  _infoR(Icons.phone_outlined, c['telefono'].toString(), Colors.white38),
+                if ((c['correo'] ?? '').toString().isNotEmpty)
+                  _infoR(Icons.email_outlined, c['correo'].toString(), Colors.white38),
+              ]),
+            ),
+          ]),
+        );
+      },
+    );
+  }
+
+  // ── Tab 9: Sedes FN ─────────────────────────────────────────────────────────
+  Widget _tabSedesFn() {
+    if (_sedesFn.isEmpty) return _empty(Icons.local_pharmacy_rounded, 'Sin sedes FN registradas');
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(14, 6, 14, 24),
+      itemCount: _sedesFn.length,
+      itemBuilder: (_, i) => _CardSedeFn(sede: _sedesFn[i], db: _db),
+    );
+  }
+}
+
+// ── Card editable de sede FN ──────────────────────────────────────────────────
+class _CardSedeFn extends StatefulWidget {
+  final Map<String, dynamic> sede;
+  final dynamic db;
+  const _CardSedeFn({required this.sede, required this.db});
+  @override
+  State<_CardSedeFn> createState() => _CardSedeFnState();
+}
+
+class _CardSedeFnState extends State<_CardSedeFn> {
+  late String? _zonaSel;
+  late final TextEditingController _sectorCtrl;
+  bool _guardando = false;
+
+  static const _zonas = [
+    {'code': 'CUCUTA',      'label': 'Cúcuta'},
+    {'code': 'V_ROSARIO',   'label': 'Villa del Rosario'},
+    {'code': 'LOS_PATIOS',  'label': 'Los Patios'},
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _zonaSel = widget.sede['zona_fn']?.toString();
+    _sectorCtrl = TextEditingController(text: widget.sede['sector']?.toString() ?? '');
+  }
+
+  @override
+  void dispose() {
+    _sectorCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _guardar() async {
+    setState(() => _guardando = true);
+    try {
+      await widget.db.from('fn_sedes').update({
+        'zona_fn': _zonaSel,
+        'sector':  _sectorCtrl.text.trim().isEmpty ? null : _sectorCtrl.text.trim(),
+      }).eq('id', widget.sede['id']);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('✅ Sede actualizada'), backgroundColor: Colors.indigo),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _guardando = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final nombre    = widget.sede['nombre']?.toString() ?? '—';
+    final numero    = widget.sede['numero']?.toString() ?? '';
+    final tipoSede  = widget.sede['tipo_sede']?.toString() ?? '';
+    final activo    = widget.sede['activo'] == true;
+    final color     = Colors.indigo[400]!;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF141414),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withValues(alpha: 0.25)),
+      ),
+      child: Column(children: [
+        // ── Header ──────────────────────────────────────────────────────────
+        Container(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(colors: [
+              color.withValues(alpha: 0.09),
+              Colors.transparent,
+            ]),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+          ),
+          child: Row(children: [
+            Container(
+              width: 36, height: 36,
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.local_pharmacy_rounded, color: color, size: 18),
+            ),
+            const SizedBox(width: 10),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(
+                nombre,
+                style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700),
+                overflow: TextOverflow.ellipsis,
+              ),
+              if (numero.isNotEmpty || tipoSede.isNotEmpty)
+                Text(
+                  [if (numero.isNotEmpty) '#$numero', if (tipoSede.isNotEmpty) tipoSede].join(' · '),
+                  style: const TextStyle(color: Colors.white38, fontSize: 11),
+                ),
+            ])),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: (activo ? Colors.green : Colors.grey).withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                activo ? 'Activa' : 'Inactiva',
+                style: TextStyle(
+                  color: activo ? Colors.green[300] : Colors.grey,
+                  fontSize: 10, fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ]),
+        ),
+        // ── Formulario ──────────────────────────────────────────────────────
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 4, 14, 14),
+          child: Column(children: [
+            // Municipio dropdown
+            DropdownButtonFormField<String>(
+              value: _zonas.any((z) => z['code'] == _zonaSel) ? _zonaSel : null,
+              decoration: InputDecoration(
+                labelText: 'Municipio',
+                labelStyle: TextStyle(color: color, fontSize: 12),
+                filled: true,
+                fillColor: Colors.white.withValues(alpha: 0.04),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide(color: color.withValues(alpha: 0.3)),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide(color: color.withValues(alpha: 0.2)),
+                ),
+              ),
+              dropdownColor: const Color(0xFF1E1E2E),
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+              hint: const Text('Seleccionar municipio', style: TextStyle(color: Colors.white38, fontSize: 12)),
+              items: _zonas.map((z) => DropdownMenuItem<String>(
+                value: z['code'],
+                child: Text(z['label']!, style: const TextStyle(color: Colors.white, fontSize: 13)),
+              )).toList(),
+              onChanged: (v) => setState(() => _zonaSel = v),
+            ),
+            const SizedBox(height: 10),
+            // Sector / barrio
+            TextField(
+              controller: _sectorCtrl,
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+              decoration: InputDecoration(
+                labelText: 'Sector / Barrio',
+                labelStyle: TextStyle(color: color, fontSize: 12),
+                hintText: 'Ej: Bocono, Centro, El Llano...',
+                hintStyle: const TextStyle(color: Colors.white24, fontSize: 12),
+                filled: true,
+                fillColor: Colors.white.withValues(alpha: 0.04),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide(color: color.withValues(alpha: 0.3)),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide(color: color.withValues(alpha: 0.2)),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: color,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                onPressed: _guardando ? null : _guardar,
+                child: _guardando
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Text('GUARDAR', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              ),
+            ),
+          ]),
+        ),
+      ]),
+    );
   }
 }
 

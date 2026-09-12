@@ -100,10 +100,56 @@ class _LoginScreenState extends State<LoginScreen>
     // completo de la app (lo gestiona main.dart con AppLifecycleState.detached).
     final sesionJson = prefs.getString('sesion_usuario_json');
 
-    // CAMINO RÁPIDO — sesión real guardada. Cero red, entra al instante.
+    // CAMINO RÁPIDO — sesión real guardada. Verifica en DB que el usuario
+    // siga existiendo (protege contra "cuentas fantasma" tras resets).
     if (sesionJson != null) {
       try {
         final Map<String, dynamic> usuario = jsonDecode(sesionJson);
+        final int? uid = usuario['id'] as int?;
+
+        // Verificación ligera: confirmar que el ID aún existe en la tabla.
+        bool existe = false;
+        if (uid != null) {
+          try {
+            final check = await Supabase.instance.client
+                .from('usuarios')
+                .select('id')
+                .eq('id', uid)
+                .maybeSingle()
+                .timeout(const Duration(seconds: 6));
+            existe = check != null;
+          } catch (_) {
+            // Sin red — asumimos válido para no bloquear el acceso offline.
+            existe = true;
+          }
+        }
+
+        if (!existe) {
+          // Cuenta ya no existe en la BD — limpiar sesión y avisar.
+          await prefs.remove('sesion_usuario_json');
+          await prefs.setBool('auto_login', false);
+          if (mounted) {
+            showDialog(
+              context: context,
+              barrierDismissible: false,
+              builder: (ctx) => AlertDialog(
+                title: const Text('Cuenta no encontrada'),
+                content: const Text(
+                  'Tu cuenta ya no está registrada en el sistema. '
+                  'Contacta a la central para más información.',
+                ),
+                actions: [
+                  ElevatedButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('Entendido'),
+                  ),
+                ],
+              ),
+            );
+          }
+          return;
+        }
+
         if (mounted) _navegarSegunRol(usuario);
         return;
       } catch (_) {

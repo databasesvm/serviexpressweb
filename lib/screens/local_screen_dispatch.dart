@@ -270,7 +270,7 @@ mixin _DispatchMixin on State<LocalScreen> {
                 final movilesStd = await Supabase.instance.client
                     .from('usuarios').select('id, latitud, longitud')
                     .eq('rol', 'movil').eq('en_linea', true).eq('tiene_se', true).neq('suspendido', true)
-                    .not('rango_movil', 'in', '("MASTER")');
+                    .or('rango_movil.is.null,rango_movil.neq.MASTER');
                 final idsZonaStd = movilesStd.where((u) {
                   final id = u['id'].toString();
                   if (masterStdIds.contains(id) || pilotosParadero.contains(id)) return false;
@@ -525,7 +525,8 @@ mixin _DispatchMixin on State<LocalScreen> {
           .eq('en_linea', true)
           .eq('tiene_se', true)
           .neq('suspendido', true)
-          .not('rango_movil', 'in', '("MASTER")');
+          // rango_movil=null = "Nuevo/Novato" → incluirlos (NULL NOT IN no funciona en PG)
+          .or('rango_movil.is.null,rango_movil.neq.MASTER');
 
       // Fase 3 (T+60s): 2km alrededor del local
       final List<String> ids2km = movilesNoMaster.where((u) {
@@ -1154,7 +1155,8 @@ mixin _DispatchMixin on State<LocalScreen> {
           final movilesInm3 = await Supabase.instance.client
               .from('usuarios').select('id, latitud, longitud')
               .eq('rol', 'movil').eq('en_linea', true).eq('tiene_se', true).neq('suspendido', true)
-              .not('rango_movil', 'in', '("MASTER")');
+              // rango_movil=null = "Nuevo/Novato" → incluirlos (NULL NOT IN no funciona en PG)
+              .or('rango_movil.is.null,rango_movil.neq.MASTER');
           final idsZona3 = movilesInm3.where((u) {
             final id = u['id'].toString();
             if (_mSnap3.contains(id) || _pSnap3.contains(id)) return false;

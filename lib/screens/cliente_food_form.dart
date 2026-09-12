@@ -282,7 +282,7 @@ class _ClienteFoodFormState extends State<ClienteFoodForm> {
             final movilesData = await Supabase.instance.client
                 .from('usuarios').select('id')
                 .eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true)
-                .not('rango_movil', 'in', '("MASTER")');
+                .or('rango_movil.is.null,rango_movil.neq.MASTER');
             final idsMoviles = movilesData
                 .map((u) => u['id'].toString())
                 .where((id) => !masterIds.contains(id))

@@ -45,6 +45,9 @@ class _ClienteScreenState extends State<ClienteScreen>
   StreamSubscription<List<Map<String, dynamic>>>? _subMiPerfil;
   Timer? _reconexionTimer;
 
+  List<Map<String, dynamic>>? _cacheServiciosActivos;
+  final ValueNotifier<int> _chatClienteCount = ValueNotifier(0);
+
   final Set<int> _dialogosDeCalificacionMostrados = {};
   int _tabActual = 0;
 
@@ -81,6 +84,8 @@ class _ClienteScreenState extends State<ClienteScreen>
 
     _subServiciosActivos = crudoServicios.listen(
       (data) {
+        _cacheServiciosActivos = List<Map<String, dynamic>>.from(data);
+        _chatClienteCount.value = _cacheServiciosActivos!.where((s) => s['chat_cliente'] == true).length;
         if (!_ctrlServiciosActivos.isClosed) _ctrlServiciosActivos.add(data);
       },
       onError: (e) {
@@ -125,7 +130,28 @@ class _ClienteScreenState extends State<ClienteScreen>
     _subMiPerfil?.cancel();
     _ctrlServiciosActivos.close();
     _ctrlMiPerfil.close();
+    _chatClienteCount.dispose();
     super.dispose();
+  }
+
+  // Abre el chat del servicio donde el móvil escribió al cliente
+  void _abrirChatPendienteCliente() {
+    final svc = _cacheServiciosActivos?.where((s) => s['chat_cliente'] == true).firstOrNull;
+    if (svc == null) return;
+    Supabase.instance.client.from('servicios').update({'chat_cliente': false}).eq('id', svc['id']);
+    Navigator.push(context, MaterialPageRoute(
+      builder: (_) => ChatScreen(
+        salaId: 'servicio_${svc['id']}',
+        miId: widget.usuario['id'],
+        miNombre: widget.usuario['nombre']?.toString() ?? 'Cliente',
+        titulo: 'Chat con Móvil',
+        servicioId: svc['id'],
+        alarmaLocal: 'chat_cliente',
+        alarmaDestino: 'chat_movil',
+        destinatarioId: (svc['movil_id'] as num?)?.toInt(),
+        tipoFaq: TipoFaqChat.cliente,
+      ),
+    ));
   }
 
   // ---> PONLA AQUÍ, JUSTO DEBAJO DEL INITSTATE <---
@@ -270,12 +296,25 @@ class _ClienteScreenState extends State<ClienteScreen>
   }
 
   Future<void> _cancelarPedido(int id) async {
-    // ... tu código sigue igual
     try {
-      await Supabase.instance.client
+      final res = await Supabase.instance.client
           .from('servicios')
           .update({'estado': 'cancelado'})
-          .eq('id', id);
+          .eq('id', id)
+          .select('movil_id')
+          .maybeSingle();
+      // Notificar al móvil si ya tenía uno asignado
+      final movilId = res?['movil_id']?.toString();
+      if (movilId != null && movilId.isNotEmpty && movilId != 'null') {
+        MotorNotificaciones.dispararMisil(
+          idDestino: movilId,
+          titulo: '❌ Servicio cancelado',
+          mensaje: 'El servicio #$id fue cancelado por el cliente.',
+          urgente: false,
+          sonido: 'central_cancelado',
+          canalAndroidId: MotorNotificaciones.canalCanceladoId,
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -356,7 +395,7 @@ class _ClienteScreenState extends State<ClienteScreen>
       final movilesK = await Supabase.instance.client
           .from('usuarios').select('id, latitud, longitud')
           .eq('rol', 'movil').eq('en_linea', true).eq('tiene_se', true).neq('suspendido', true)
-          .not('rango_movil', 'in', '("MASTER")');
+          .or('rango_movil.is.null,rango_movil.neq.MASTER');
       final idsZonaK = movilesK.where((u) {
         final uid = u['id'].toString();
         if (masterIds.contains(uid) || paraderoIds.contains(uid)) return false;
@@ -637,6 +676,7 @@ class _ClienteScreenState extends State<ClienteScreen>
                         servicioId: servicio['id'],
                         alarmaLocal: 'chat_cliente',
                         alarmaDestino: 'chat_movil',
+                        destinatarioId: (servicio['movil_id'] as num?)?.toInt(),
                         tipoFaq: TipoFaqChat.cliente,
                       ),
                     ),
@@ -1177,6 +1217,25 @@ class _ClienteScreenState extends State<ClienteScreen>
         ],
       ),
       body: _buildBodyTab(),
+      floatingActionButton: ValueListenableBuilder<int>(
+        valueListenable: _chatClienteCount,
+        builder: (_, total, __) {
+          if (total == 0) return const SizedBox.shrink();
+          return PulsingPanicoButton(
+            color: const Color(0xFF3AF500),
+            child: FloatingActionButton.extended(
+              heroTag: 'fab_chat_cliente',
+              backgroundColor: const Color(0xFF1B5E20),
+              onPressed: _abrirChatPendienteCliente,
+              icon: const Icon(Icons.chat_rounded, color: Colors.white),
+              label: Text(
+                total > 1 ? '💬 CHAT ($total)' : '💬 MENSAJE',
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+            ),
+          );
+        },
+      ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _tabActual,
         onTap: (i) => setState(() => _tabActual = i),

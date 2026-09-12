@@ -1854,7 +1854,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                                   .from('usuarios').select('id, latitud, longitud')
                                   .eq('rol', 'movil').eq('en_linea', true).eq('tiene_se', true)
                                   .neq('suspendido', true)
-                                  .not('rango_movil', 'in', '("MASTER")');
+                                  .or('rango_movil.is.null,rango_movil.neq.MASTER');
                               final idsZona60 = movilesInm.where((u) {
                                 final id = u['id'].toString();
                                 if (_mSnap.contains(id) || _pSnap.contains(id)) return false;

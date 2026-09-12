@@ -2076,6 +2076,9 @@ extension CentralScreenFormularios on _CentralScreenState {
                               'accepted_at': ahora,
                               'fn_asignacion_tipo': 'directa',
                               'fn_asignado_por': 'Central',
+                              if (sede['sector'] != null &&
+                                  (sede['sector'] as String).trim().isNotEmpty)
+                                'fn_sector_sede': (sede['sector'] as String).trim(),
                               if (sLat != null) 'origen_lat': sLat,
                               if (sLng != null) 'origen_lng': sLng,
                               if (sede['telefono_whatsapp'] != null &&
@@ -2250,6 +2253,9 @@ extension CentralScreenFormularios on _CentralScreenState {
                                   'paradero_origen': paraderoFN,
                                   if (masterIdsP.isNotEmpty)
                                     'fn_notificados_fase1': masterIdsP,
+                                  if (sede['sector'] != null &&
+                                      (sede['sector'] as String).trim().isNotEmpty)
+                                    'fn_sector_sede': (sede['sector'] as String).trim(),
                                   if (refLat != null) 'origen_lat': refLat,
                                   if (refLng != null) 'origen_lng': refLng,
                                   if (sede['telefono_whatsapp'] != null &&
@@ -2482,6 +2488,9 @@ extension CentralScreenFormularios on _CentralScreenState {
                                     'fn_fase2_movil_id': fase2MovilId,
                                   if (masterIds.isNotEmpty)
                                     'fn_notificados_fase1': masterIds,
+                                  if (sede['sector'] != null &&
+                                      (sede['sector'] as String).trim().isNotEmpty)
+                                    'fn_sector_sede': (sede['sector'] as String).trim(),
                                   if (refLat != null) 'origen_lat': refLat,
                                   if (refLng != null) 'origen_lng': refLng,
                                   if (sede['telefono_whatsapp'] != null &&
@@ -2745,6 +2754,18 @@ extension CentralScreenFormularios on _CentralScreenState {
                                           'SISTEMA: Fusionado dentro del bloque #${svcPrincipal['id']}',
                                     })
                                     .eq('id', svcSecundario['id']);
+                                // Notificar al móvil del secundario si tenía uno asignado
+                                final movilIdSec = svcSecundario['movil_id']?.toString();
+                                if (movilIdSec != null && movilIdSec.isNotEmpty && movilIdSec != 'null') {
+                                  MotorNotificaciones.dispararMisil(
+                                    idDestino: movilIdSec,
+                                    titulo: '❌ Servicio cancelado',
+                                    mensaje: 'El servicio #${svcSecundario['id']} fue fusionado y cancelado.',
+                                    urgente: false,
+                                    sonido: 'central_cancelado',
+                                    canalAndroidId: MotorNotificaciones.canalCanceladoId,
+                                  );
+                                }
 
                                 if (ctx.mounted) {
                                   Navigator.pop(ctx);

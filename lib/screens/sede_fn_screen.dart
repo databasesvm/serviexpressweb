@@ -502,12 +502,13 @@ class _FormularioTabState extends State<_FormularioTab> {
     return total;
   }
 
-  /// Precio final = precio base (particular o convenio) + recargo sedes extra + datáfono + lluvia
-  /// Retorna null si no hay precio base O si hay sedes extra sin coordenadas
+  /// Precio final = precio base (convenio o particular) + recargo sedes extra + datáfono + lluvia
+  /// Retorna null si ningún tipo está activo O si no hay precio base O sedes extra sin coordenadas
   double? get _tarifaEfectiva {
-    final base = (_esConvenio && _precioConvenio != null)
-        ? _precioConvenio
-        : _precioSugerido;
+    if (!_esConvenio && !_esParticular) return null; // sin tipo activo
+    final base = _esConvenio
+        ? (_precioConvenio ?? _precioSugerido)  // convenio primero; fallback a particular si no hay convenio
+        : _precioSugerido;                       // particular
     if (base == null) return null;
     if (_haySedesExtraSinCoordenadas) return null;
     return base +
@@ -534,7 +535,8 @@ class _FormularioTabState extends State<_FormularioTab> {
   Map<int, String> _sectorNombresMap = {}; // sector_id → nombre (para mostrar en tile)
   Map<int, int> _mapaPreciosConvenioDir = {}; // dir_id → precio_convenio
   Map<int, int> _tarifasSedeConvenio = {}; // sector_id → precio_convenio
-  bool _esConvenio = false; // toggle convenio activo
+  bool _esConvenio = false;    // toggle convenio activo (7:00–23:00)
+  bool _esParticular = false;  // toggle particular (siempre disponible)
   double? _precioConvenio; // precio convenio de la dirección seleccionada
   List<Map<String, dynamic>> _sectoresSede = []; // sectores con nombre y precio (puede ser null = sin precio)
   double? _precioSugerido; // precio de la dirección seleccionada de la red
@@ -756,10 +758,13 @@ class _FormularioTabState extends State<_FormularioTab> {
         final precioPropio = mapa[sid];
         final parentId = parentMapa[sid];
         final precioEfectivo = precioPropio ?? (parentId != null ? mapa[parentId] : null);
+        final convenioPropio = mapaConvenioSector[sid];
+        final convenioPadre = parentId != null ? mapaConvenioSector[parentId] : null;
         sects.add({
           'id': sid,
           'nombre': s['nombre']?.toString() ?? '',
           'precio_efectivo': precioEfectivo, // null = sin precio configurado
+          'precio_convenio_efectivo': convenioPropio ?? convenioPadre, // null = sin convenio
           'parent_id': parentId,
         });
       }
@@ -850,13 +855,16 @@ class _FormularioTabState extends State<_FormularioTab> {
       if (coincide) {
         final parentId = sect['parent_id'] as int?;
         final parentNombre = parentId != null ? _sectorNombresMap[parentId] : null;
+        final precioConvSect = (sect['precio_convenio_efectivo'] as int?)?.toDouble();
         sectorMatches.add({
           'tipo': 'sector',
           'id': sectorId,
           'nombre': sect['nombre'],
           'direccion': 'Sector ${sect['nombre']} — precio estimado',
           'precio': precio ?? 0.0,
+          'precio_convenio': precioConvSect ?? 0.0,
           'tiene_precio': precio != null,
+          'tiene_convenio': precioConvSect != null,
           'parent_nombre': parentNombre,
           'sector_id': sectorId,
         });
@@ -1211,6 +1219,11 @@ class _FormularioTabState extends State<_FormularioTab> {
             },
             if (_instruccionesCtrl.text.trim().isNotEmpty)
               'instrucciones_especiales': _instruccionesCtrl.text.trim(),
+            // Municipio y sector de la sede para que el card del móvil lo muestre
+            if (widget.sede?['zona_fn'] != null)
+              'zona_fn': widget.sede!['zona_fn'],
+            if (widget.sede?['sector'] != null && (widget.sede!['sector'] as String).trim().isNotEmpty)
+              'fn_sector_sede': (widget.sede!['sector'] as String).trim(),
             // Coordenadas de la primera sede de recogida como origen (solo si es sede oficial)
             if (primeraRecogida['lat'] != null)
               'origen_lat': (primeraRecogida['lat'] as num).toDouble(),
@@ -1595,13 +1608,113 @@ class _FormularioTabState extends State<_FormularioTab> {
               const SizedBox(height: 16),
 
               // ── Destino ─────────────────────────────────────────────────────
-              _seccionLabel('🏁 Destino de entrega'),
+              Builder(builder: (ctx) {
+                final hora = DateTime.now().hour;
+                final convenioHorario = hora >= 7 && hora <= 22;
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    _seccionLabel('🏁 Destino de entrega'),
+                    const Spacer(),
+                    // Toggle Convenio (compacto)
+                    Tooltip(
+                      message: convenioHorario ? '' : 'Fuera de horario de convenio',
+                      child: GestureDetector(
+                        onTap: convenioHorario
+                            ? () => setState(() {
+                                  _esConvenio = !_esConvenio;
+                                  if (_esConvenio) _esParticular = false;
+                                })
+                            : null,
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: _esConvenio
+                                ? Colors.amber[900]!.withValues(alpha: 0.30)
+                                : convenioHorario ? Colors.white10 : Colors.white.withValues(alpha: 0.03),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(
+                              color: _esConvenio
+                                  ? Colors.amberAccent
+                                  : convenioHorario ? Colors.white30 : Colors.white12,
+                            ),
+                          ),
+                          child: Row(mainAxisSize: MainAxisSize.min, children: [
+                            Icon(
+                              _esConvenio ? Icons.handshake : Icons.handshake_outlined,
+                              color: _esConvenio ? Colors.amberAccent : convenioHorario ? Colors.white54 : Colors.white24,
+                              size: 13,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Convenio',
+                              style: TextStyle(
+                                color: _esConvenio ? Colors.amberAccent : convenioHorario ? Colors.white54 : Colors.white24,
+                                fontSize: 11,
+                                fontWeight: _esConvenio ? FontWeight.bold : FontWeight.normal,
+                              ),
+                            ),
+                            if (!convenioHorario)
+                              const Padding(
+                                padding: EdgeInsets.only(left: 3),
+                                child: Icon(Icons.access_time, color: Colors.white24, size: 11),
+                              ),
+                          ]),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    // Toggle Particular (compacto)
+                    GestureDetector(
+                      onTap: () => setState(() {
+                        _esParticular = !_esParticular;
+                        if (_esParticular) _esConvenio = false;
+                      }),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: _esParticular ? const Color(0xFF1E3A5F) : Colors.white10,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: _esParticular ? Colors.blueAccent : Colors.white30,
+                          ),
+                        ),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          Icon(
+                            _esParticular ? Icons.person : Icons.person_outline,
+                            color: _esParticular ? Colors.blueAccent : Colors.white54,
+                            size: 13,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Particular',
+                            style: TextStyle(
+                              color: _esParticular ? Colors.blueAccent : Colors.white54,
+                              fontSize: 11,
+                              fontWeight: _esParticular ? FontWeight.bold : FontWeight.normal,
+                            ),
+                          ),
+                        ]),
+                      ),
+                    ),
+                  ],
+                );
+              }),
               const SizedBox(height: 8),
               TextFormField(
                 controller: _destinoCtrl,
+                enabled: _esConvenio || _esParticular,
                 textCapitalization: TextCapitalization.characters,
-                style: const TextStyle(color: Colors.white),
-                decoration: _inputDeco('Dirección de entrega'),
+                style: TextStyle(
+                  color: (_esConvenio || _esParticular) ? Colors.white : Colors.white30,
+                ),
+                decoration: _inputDeco(
+                  (_esConvenio || _esParticular)
+                      ? 'Dirección de entrega'
+                      : 'Activa un tipo de tarifa primero',
+                ),
                 autofillHints: const <String>[],
                 // Listener en _destinoCtrl maneja las sugerencias
                 validator: (v) =>
@@ -1621,11 +1734,20 @@ class _FormularioTabState extends State<_FormularioTab> {
                   child: Column(
                     children: _sugerencias.map((dir) {
                       final esSector = dir['tipo'] == 'sector';
-                      final precio = esSector
+                      // Precio según toggle activo
+                      final precioParticular = esSector
                           ? (dir['precio'] as num).toDouble()
                           : _precioDeDir(dir);
+                      final precioConvDir = esSector
+                          ? (dir['precio_convenio'] as num? ?? 0).toDouble()
+                          : (_precioConvenioDeDir(dir) ?? 0.0);
+                      final precio = (_esConvenio && precioConvDir > 0)
+                          ? precioConvDir
+                          : precioParticular;
                       final tienePrecio = esSector
-                          ? (dir['tiene_precio'] as bool? ?? precio > 0)
+                          ? (_esConvenio
+                              ? (dir['tiene_convenio'] as bool? ?? precioConvDir > 0)
+                              : (dir['tiene_precio'] as bool? ?? precioParticular > 0))
                           : precio > 0;
 
                       // Subtítulo con contexto geográfico (#98)
@@ -1669,7 +1791,6 @@ class _FormularioTabState extends State<_FormularioTab> {
                             } else {
                               _precioConvenio = _precioConvenioDeDir(dir);
                             }
-                            _esConvenio = false; // reset al seleccionar nuevo destino
                             if (!esSector) {
                               _destinoBase =
                                   dir['direccion'].toString().toUpperCase();
@@ -2023,67 +2144,6 @@ class _FormularioTabState extends State<_FormularioTab> {
                   }),
                 ),
 
-              // ── Toggle Convenio (visible solo si el destino tiene precio convenio) ──
-              if (_precioConvenio != null && _redDireccionSelId != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: GestureDetector(
-                    onTap: () => setState(() => _esConvenio = !_esConvenio),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: _esConvenio
-                            ? Colors.amber[900]!.withValues(alpha: 0.25)
-                            : Colors.white10,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                          color: _esConvenio
-                              ? Colors.amberAccent
-                              : Colors.white24,
-                        ),
-                      ),
-                      child: Row(children: [
-                        Icon(
-                          _esConvenio
-                              ? Icons.handshake
-                              : Icons.handshake_outlined,
-                          color: _esConvenio
-                              ? Colors.amberAccent
-                              : Colors.white38,
-                          size: 16,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            _esConvenio
-                                ? 'Convenio: \$${_miles(_precioConvenio!.toInt())}'
-                                : 'Tarifa convenio disponible — toca para activar',
-                            style: TextStyle(
-                              color: _esConvenio
-                                  ? Colors.amberAccent
-                                  : Colors.white38,
-                              fontSize: 12,
-                              fontWeight: _esConvenio
-                                  ? FontWeight.bold
-                                  : FontWeight.normal,
-                            ),
-                          ),
-                        ),
-                        Icon(
-                          _esConvenio
-                              ? Icons.check_circle
-                              : Icons.radio_button_unchecked,
-                          color: _esConvenio
-                              ? Colors.amberAccent
-                              : Colors.white24,
-                          size: 16,
-                        ),
-                      ]),
-                    ),
-                  ),
-                ),
-
               const SizedBox(height: 16),
 
               // ── Condiciones de pago ─────────────────────────────────────────
@@ -2131,15 +2191,17 @@ class _FormularioTabState extends State<_FormularioTab> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _enviando
                         ? null
-                        : (_movilPreselId != null || _tarifaEfectiva != null)
-                            ? const Color(0xFF002DA2)   // azul → servicio directo
-                            : const Color(0xFFE65100),  // naranja → cotización
+                        : (!_esConvenio && !_esParticular)
+                            ? Colors.grey[800]           // sin tipo → bloqueado
+                            : (_movilPreselId != null || _tarifaEfectiva != null)
+                                ? const Color(0xFF002DA2) // azul → servicio directo
+                                : const Color(0xFFE65100), // naranja → cotización
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(10)),
                   ),
-                  onPressed: _enviando ? null : _enviar,
+                  onPressed: (_enviando || (!_esConvenio && !_esParticular)) ? null : _enviar,
                   icon: _enviando
                       ? const SizedBox(
                           width: 18,
@@ -2728,6 +2790,18 @@ class _ActivosTabState extends State<_ActivosTab> {
         'estado': 'cancelado',
         'observacion': 'Cancelado por la sede dentro de los 5 minutos.',
       }).eq('id', s['id']);
+      // Notificar al móvil si ya tenía uno asignado
+      final movilId = s['movil_id']?.toString();
+      if (movilId != null && movilId.isNotEmpty && movilId != 'null') {
+        MotorNotificaciones.dispararMisil(
+          idDestino: movilId,
+          titulo: '❌ Servicio cancelado',
+          mensaje: 'El servicio #${s['id']} fue cancelado por la sede.',
+          urgente: false,
+          sonido: 'central_cancelado',
+          canalAndroidId: MotorNotificaciones.canalCanceladoId,
+        );
+      }
     } catch (e) {
       _snack('Error: $e');
     }

@@ -217,6 +217,18 @@ extension CentralScreenMonitor on _CentralScreenState {
                           'Central canceló la cotización por falta de respuesta.',
                     })
                     .eq('id', id);
+                // Notificar al móvil si ya tenía uno asignado
+                final movilId = servicio['movil_id']?.toString();
+                if (movilId != null && movilId.isNotEmpty && movilId != 'null') {
+                  MotorNotificaciones.dispararMisil(
+                    idDestino: movilId,
+                    titulo: '❌ Servicio cancelado',
+                    mensaje: 'El servicio #$id fue cancelado.',
+                    urgente: false,
+                    sonido: 'central_cancelado',
+                    canalAndroidId: MotorNotificaciones.canalCanceladoId,
+                  );
+                }
                 if (context.mounted) Navigator.pop(context);
               },
               child: const Text(
@@ -874,6 +886,18 @@ extension CentralScreenMonitor on _CentralScreenState {
                           'fn_notif_fase4b': null,
                         })
                         .eq('id', id);
+                    // Notificar al móvil si ya tenía uno asignado
+                    final movilId = servicio['movil_id']?.toString();
+                    if (movilId != null && movilId.isNotEmpty && movilId != 'null') {
+                      MotorNotificaciones.dispararMisil(
+                        idDestino: movilId,
+                        titulo: '❌ Servicio cancelado',
+                        mensaje: 'El servicio #$id fue cancelado.',
+                        urgente: false,
+                        sonido: 'central_cancelado',
+                        canalAndroidId: MotorNotificaciones.canalCanceladoId,
+                      );
+                    }
                     if (context.mounted) Navigator.pop(context);
                   },
                   child: const Text(
@@ -1256,13 +1280,7 @@ extension CentralScreenMonitor on _CentralScreenState {
 
     final ahora = DateTime.now().toUtc();
     final motos = _movilesCache
-        .where((m) => m['en_linea'] == true || (() {
-              if (m['ultimo_ping'] == null) return false;
-              final mins = ahora
-                  .difference(DateTime.parse(m['ultimo_ping'].toString()).toUtc())
-                  .inMinutes;
-              return mins < 10;
-            })())
+        .where((m) => m['en_linea'] == true) // solo conectados
         .toList()
       ..sort((a, b) {
         int pingMin(Map<String, dynamic> m) {
@@ -1365,7 +1383,9 @@ extension CentralScreenMonitor on _CentralScreenState {
   Future<void> _asignarMotoManual(
       BuildContext context, Map<String, dynamic> servicio) async {
     final ahora = DateTime.now().toUtc();
-    final motos = List<Map<String, dynamic>>.from(_movilesCache)
+    final motos = _movilesCache
+        .where((m) => m['en_linea'] == true) // solo conectados
+        .toList()
       ..sort((a, b) {
         final pa = a['ultimo_ping'] != null
             ? DateTime.parse(a['ultimo_ping']).toUtc()
@@ -1420,7 +1440,7 @@ extension CentralScreenMonitor on _CentralScreenState {
             const Divider(height: 1),
             Expanded(
               child: motos.isEmpty
-                  ? const Center(child: Text('Sin motos registradas'))
+                  ? const Center(child: Text('Sin móviles conectados'))
                   : ListView.builder(
                       itemCount: motos.length,
                       itemBuilder: (ctx, i) {
@@ -1574,6 +1594,18 @@ extension CentralScreenMonitor on _CentralScreenState {
         if (esFn) 'fn_notif_fase4b': null,
         if (esFn) 'fn_notificados_fase1': <String>[],
       }).eq('id', servicio['id']);
+      // Notificar al móvil si ya tenía uno asignado
+      final movilId = servicio['movil_id']?.toString();
+      if (movilId != null && movilId.isNotEmpty && movilId != 'null') {
+        MotorNotificaciones.dispararMisil(
+          idDestino: movilId,
+          titulo: '❌ Servicio cancelado',
+          mensaje: 'El servicio #${servicio['id']} fue cancelado.',
+          urgente: false,
+          sonido: 'central_cancelado',
+          canalAndroidId: MotorNotificaciones.canalCanceladoId,
+        );
+      }
       _seleccionadoId.value = null;
     }
   }
@@ -2304,26 +2336,37 @@ extension CentralScreenMonitor on _CentralScreenState {
               tileBackground = const Color(0xffe0f2f1); // Verde agua muy claro
               tileBorder = Colors.teal[600]!;
             }
+            // FN: fondo azul claro + borde azul (sin importar la sección:
+            // radar disponibles, en curso, etc.) — sobreescribe amber/verde.
+            if (servicio['tipo_fn'] == true) {
+              tileBackground = const Color(0xffe8f4fd); // azul muy claro
+              tileBorder = Colors.blue[700]!;
+            }
           }
 
           bool alarmaCentral =
               servicio['chat_movil_central'] == true ||
               servicio['chat_cliente_central'] == true;
 
-          return FadeSlideIn(
+          return Stack(
+            clipBehavior: Clip.none,
+            children: [
+            FadeSlideIn(
             key: ValueKey('monitor_${servicio['id']}'),
             child: Card(
               margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              elevation: 0,
+              elevation: alarmaCentral ? 4 : 0,
               clipBehavior: Clip.antiAlias,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(6),
                 side: BorderSide(
                   color: alarmaCentral ? Colors.red[700]! : tileBorder,
-                  width: alarmaCentral ? 2.5 : 1.2,
+                  width: alarmaCentral ? 3.0 : 1.2,
                 ),
               ),
-              color: tileBackground,
+              color: alarmaCentral
+                  ? Colors.red.withValues(alpha: 0.06)
+                  : tileBackground,
               child: InkWell(
                 onTap: () {
                   final thisId = servicio['id'] as int;
@@ -2380,9 +2423,21 @@ extension CentralScreenMonitor on _CentralScreenState {
                             ),
                           ),
                           if (alarmaCentral)
-                            const Padding(
-                              padding: EdgeInsets.only(left: 4),
-                              child: Icon(Icons.mark_email_unread, color: Colors.red, size: 15),
+                            Container(
+                              margin: const EdgeInsets.only(left: 5),
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.red[700],
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.chat_bubble_rounded, color: Colors.white, size: 10),
+                                  SizedBox(width: 3),
+                                  Text('MSG', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
+                                ],
+                              ),
                             ),
                           const SizedBox(width: 4),
                           Icon(icono, color: colorBase, size: 14),
@@ -2511,6 +2566,7 @@ extension CentralScreenMonitor on _CentralScreenState {
                       ],
                       // ── FILA 4: badges opcionales (wrap) ─────────────────────
                       if (alertaRetraso ||
+                          servicio['tipo_fn'] == true ||
                           (servicio['creador'] != null &&
                               servicio['creador'] != 'Central') ||
                           (estado == 'programado' &&
@@ -2526,6 +2582,23 @@ extension CentralScreenMonitor on _CentralScreenState {
                           spacing: 4,
                           runSpacing: 2,
                           children: [
+                            // Badge FN — visible en todas las secciones
+                            if (servicio['tipo_fn'] == true)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 5, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.blue[700],
+                                  borderRadius: BorderRadius.circular(3),
+                                ),
+                                child: const Text(
+                                  '🔵 FN',
+                                  style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 8,
+                                      fontWeight: FontWeight.bold),
+                                ),
+                              ),
                             if (alertaRetraso)
                               Container(
                                 padding: const EdgeInsets.symmetric(
@@ -2627,11 +2700,11 @@ extension CentralScreenMonitor on _CentralScreenState {
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                                 decoration: BoxDecoration(
-                                  color: Colors.orange[800],
+                                  color: Colors.deepOrange[700],
                                   borderRadius: BorderRadius.circular(3),
                                 ),
                                 child: const Text(
-                                  '📦 RECOGIDA',
+                                  '🏪 RECOGIDA LOCAL',
                                   style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
                                 ),
                               ),
@@ -2795,7 +2868,86 @@ extension CentralScreenMonitor on _CentralScreenState {
                 ),
               ),
             ),
-          );  // FadeSlideIn
+          ),  // FadeSlideIn
+          // ── Badge flotante de MENSAJE cuando el móvil/cliente escribió ──
+          if (alarmaCentral)
+            Positioned(
+              top: -2, right: 14,
+              child: GestureDetector(
+                onTap: () {
+                  final svcId = servicio['id'] as int;
+                  if (servicio['chat_movil_central'] == true) {
+                    Supabase.instance.client.from('servicios')
+                        .update({'chat_movil_central': false}).eq('id', svcId);
+                    Navigator.push(context, MaterialPageRoute(
+                      builder: (_) => ChatScreen(
+                        salaId: 'soporte_movil_$svcId',
+                        miId: 0,
+                        miNombre: 'Central',
+                        titulo: 'Chat con Móvil',
+                        servicioId: svcId,
+                        alarmaLocal: 'chat_movil_central',
+                        alarmaDestino: 'chat_central_movil',
+                        destinatarioId: (servicio['movil_id'] as num?)?.toInt(),
+                        tipoFaq: TipoFaqChat.central,
+                      ),
+                    ));
+                  } else {
+                    Supabase.instance.client.from('servicios')
+                        .update({'chat_cliente_central': false}).eq('id', svcId);
+                    Navigator.push(context, MaterialPageRoute(
+                      builder: (_) => ChatScreen(
+                        salaId: 'soporte_cliente_$svcId',
+                        miId: 0,
+                        miNombre: 'Central',
+                        titulo: 'Chat con Cliente',
+                        servicioId: svcId,
+                        alarmaLocal: 'chat_cliente_central',
+                        alarmaDestino: 'chat_central_cliente',
+                        destinatarioId: (servicio['cliente_id'] as num?)?.toInt(),
+                        tipoFaq: TipoFaqChat.central,
+                      ),
+                    ));
+                  }
+                },
+                child: PulsingPanicoButton(
+                  color: Colors.red,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: Colors.red[800],
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.red.withValues(alpha: 0.5),
+                          blurRadius: 8,
+                          spreadRadius: 2,
+                        ),
+                      ],
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.mark_email_unread_rounded,
+                            color: Colors.white, size: 13),
+                        SizedBox(width: 5),
+                        Text(
+                          '💬 MENSAJE',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],  // Stack.children
+        );  // Stack
         }),
       ],
     );

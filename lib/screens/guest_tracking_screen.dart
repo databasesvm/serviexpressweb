@@ -111,7 +111,7 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
         final movilesG = await Supabase.instance.client
             .from('usuarios').select('id, latitud, longitud')
             .eq('rol', 'movil').eq('en_linea', true).eq('tiene_se', true).neq('suspendido', true)
-            .not('rango_movil', 'in', '("MASTER")');
+            .or('rango_movil.is.null,rango_movil.neq.MASTER');
         final idsZonaG = movilesG.where((u) {
           final id = u['id'].toString();
           if (masterIds.contains(id) || paraderoIds.contains(id)) return false;

@@ -77,6 +77,9 @@ class _LocalScreenState extends State<LocalScreen>
   List<Map<String, dynamic>>? _cachePerfilPropio;
   List<Map<String, dynamic>>? _cacheServiciosLocal;
 
+  // FAB chat: se activa cuando el móvil escribe al local en un servicio activo
+  final ValueNotifier<int> _chatLocalCount = ValueNotifier(0);
+
   @override
   void initState() {
     super.initState();
@@ -196,12 +199,33 @@ class _LocalScreenState extends State<LocalScreen>
     _subServiciosLocal = crudoServicios.listen(
       (data) {
         _cacheServiciosLocal = data;
+        _chatLocalCount.value = data.where((s) => s['chat_cliente'] == true).length;
         if (!_ctrlServiciosLocal.isClosed) _ctrlServiciosLocal.add(data);
       },
       onError: (e) {
         if (!_ctrlServiciosLocal.isClosed) _ctrlServiciosLocal.addError(e);
       },
     );
+  }
+
+  // Abre el chat del servicio donde el móvil escribió al local
+  void _abrirChatPendienteLocal() {
+    final svc = _cacheServiciosLocal?.where((s) => s['chat_cliente'] == true).firstOrNull;
+    if (svc == null) return;
+    Supabase.instance.client.from('servicios').update({'chat_cliente': false}).eq('id', svc['id']);
+    Navigator.push(context, MaterialPageRoute(
+      builder: (_) => ChatScreen(
+        salaId: 'servicio_${svc['id']}',
+        miId: widget.usuario['id'],
+        miNombre: widget.usuario['nombre']?.toString() ?? 'Local',
+        titulo: 'Chat del Servicio',
+        servicioId: svc['id'],
+        alarmaLocal: 'chat_cliente',
+        alarmaDestino: 'chat_movil',
+        destinatarioId: (svc['movil_id'] as num?)?.toInt(),
+        tipoFaq: TipoFaqChat.local,
+      ),
+    ));
   }
 
   // Reconstruye cada 30s. No usa setState() — la reconexión es
@@ -237,6 +261,7 @@ class _LocalScreenState extends State<LocalScreen>
     _ctrlServiciosLocal.close();
     _telLocalController.dispose();
     _instruccionesController.dispose();
+    _chatLocalCount.dispose();
     // _expansionTick se dispone en _CardsMixin.dispose() via super chain
     _sonidos.silenciar();
     super.dispose();
@@ -1247,6 +1272,25 @@ class _LocalScreenState extends State<LocalScreen>
                       ),
                     ),
                   ],
+                );
+              },
+            ),
+            floatingActionButton: ValueListenableBuilder<int>(
+              valueListenable: _chatLocalCount,
+              builder: (_, total, __) {
+                if (total == 0) return const SizedBox.shrink();
+                return PulsingPanicoButton(
+                  color: const Color(0xFF3AF500),
+                  child: FloatingActionButton.extended(
+                    heroTag: 'fab_chat_local',
+                    backgroundColor: const Color(0xFF1B5E20),
+                    onPressed: _abrirChatPendienteLocal,
+                    icon: const Icon(Icons.chat_rounded, color: Colors.white),
+                    label: Text(
+                      total > 1 ? '💬 CHAT ($total)' : '💬 MENSAJE',
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                    ),
+                  ),
                 );
               },
             ),

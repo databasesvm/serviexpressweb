@@ -351,7 +351,7 @@ class _ClienteMototaxiFormState extends State<ClienteMototaxiForm> {
             final candidatos = await Supabase.instance.client
                 .from('usuarios').select('id, latitud, longitud')
                 .eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true)
-                .not('rango_movil', 'in', '("MASTER")');
+                .or('rango_movil.is.null,rango_movil.neq.MASTER');
             final idsZonales = candidatos.where((u) {
               if (masterIds.contains(u['id'].toString())) return false;
               if (_origenLat == null || _origenLng == null) return true;

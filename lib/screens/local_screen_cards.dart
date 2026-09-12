@@ -54,7 +54,7 @@ mixin _CardsMixin on State<LocalScreen> {
           .from('servicios')
           .update({'estado': 'cancelado'})
           .eq('id', id)
-          .select('onesignal_2m, onesignal_5m')
+          .select('onesignal_2m, onesignal_5m, movil_id')
           .maybeSingle();
 
       // 2. Intentamos bajar las notificaciones programadas de forma silenciosa
@@ -90,6 +90,20 @@ mixin _CardsMixin on State<LocalScreen> {
         await anularMisil(res['onesignal_5m']);
       }
 
+      // Notificar al móvil si ya tenía uno asignado
+      if (res != null) {
+        final movilId = res['movil_id']?.toString();
+        if (movilId != null && movilId.isNotEmpty && movilId != 'null') {
+          MotorNotificaciones.dispararMisil(
+            idDestino: movilId,
+            titulo: '❌ Servicio cancelado',
+            mensaje: 'El servicio #$id fue cancelado por el local.',
+            urgente: false,
+            sonido: 'central_cancelado',
+            canalAndroidId: MotorNotificaciones.canalCanceladoId,
+          );
+        }
+      }
       // Notificar a la Central que el pedido fue cancelado por el local
       MotorNotificaciones.dispararACentral(
         titulo: '❌ PEDIDO CANCELADO',
@@ -398,7 +412,7 @@ mixin _CardsMixin on State<LocalScreen> {
                 final oLng = (servicio['origen_lng'] as num?)?.toDouble();
                 final movilesStd = await db.from('usuarios').select('id, latitud, longitud')
                     .eq('rol', 'movil').eq('en_linea', true).eq('tiene_se', true).neq('suspendido', true)
-                    .not('rango_movil', 'in', '("MASTER")');
+                    .or('rango_movil.is.null,rango_movil.neq.MASTER');
                 final idsZona = movilesStd.where((u) {
                   final id = u['id'].toString();
                   if (masterIds.contains(id) || pilotosParadero.contains(id)) return false;
@@ -943,6 +957,7 @@ mixin _CardsMixin on State<LocalScreen> {
                                               servicioId: servicio['id'],
                                               alarmaLocal: 'chat_cliente',
                                               alarmaDestino: 'chat_movil',
+                                              destinatarioId: (servicio['movil_id'] as num?)?.toInt(),
                                               tipoFaq: TipoFaqChat.local,
                                             ),
                                           ),
@@ -1383,7 +1398,8 @@ mixin _CardsMixin on State<LocalScreen> {
                   children: [
                     Text(title,
                         style: const TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 14)),
+                            fontWeight: FontWeight.bold, fontSize: 14,
+                            color: Colors.white)),
                     if (subtitle != null) ...[
                       const SizedBox(height: 2),
                       Text(subtitle,

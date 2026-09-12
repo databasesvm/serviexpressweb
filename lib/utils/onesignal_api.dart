@@ -201,7 +201,29 @@ class MotorNotificaciones {
   }
 
   // -----------------------------------------------------------------------
-  // 5. CANCELAR MISIL PROGRAMADO — Aborta una notificación por su ID
+  // 5. PUSH SILENCIOSO — Solo datos, sin notificación visible ni sonido
+  //    Úsalo para heartbeats, sincronizaciones y actualizaciones internas.
+  //    Android: android_background_data:true → llega como background intent.
+  //    iOS:     content_available:1          → llega al background handler.
+  // -----------------------------------------------------------------------
+  static Future<void> dispararSilencioso({
+    required List<String> idsDestinos,
+    required Map<String, dynamic> data,
+  }) async {
+    if (idsDestinos.isEmpty) return;
+    await _enviarPush(
+      body: {
+        'app_id': _appId,
+        'include_external_user_ids': idsDestinos,
+        'android_background_data': true,
+        'content_available': true,
+        'data': data,
+      },
+    );
+  }
+
+  // -----------------------------------------------------------------------
+  // 6. CANCELAR MISIL PROGRAMADO — Aborta una notificación por su ID
   //    Llama a la Edge Function con action='cancel' (REST key server-side).
   // -----------------------------------------------------------------------
   static Future<void> cancelarMisil(String notificationId) async {

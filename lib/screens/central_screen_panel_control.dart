@@ -1342,11 +1342,8 @@ extension CentralScreenPanelControl on _CentralScreenState {
                               .map((m) => m['id'].toString())
                               .toList();
                           if (ids.isNotEmpty) {
-                            await MotorNotificaciones.dispararRafa(
+                            await MotorNotificaciones.dispararSilencioso(
                               idsDestinos: ids,
-                              titulo: 'heartbeat',
-                              mensaje: 'heartbeat',
-                              urgente: false,
                               data: {'tipo': 'heartbeat'},
                             );
                           }

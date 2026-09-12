@@ -402,37 +402,37 @@ class _TabSectoresState extends State<_TabSectores>
                   ),
                 ),
                 const SizedBox(height: 12),
-                // 3a. Precio particular
-                TextField(
-                  controller: precioCtrl,
-                  style: const TextStyle(color: Colors.white),
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Tarifa particular (\$)',
-                    labelStyle: TextStyle(color: Colors.white54),
-                    hintText: 'Dejar vacío para no asignar',
-                    hintStyle: TextStyle(color: Colors.white24),
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                    prefixText: '\$ ',
-                    prefixStyle: TextStyle(color: Colors.white70),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                // 3b. Precio convenio
+                // 3a. Precio convenio (principal)
                 TextField(
                   controller: precioConvenioCtrl,
                   style: const TextStyle(color: Colors.white),
                   keyboardType: TextInputType.number,
                   decoration: const InputDecoration(
-                    labelText: 'Tarifa convenio (\$) — opcional',
-                    labelStyle: TextStyle(color: Colors.white54),
-                    hintText: 'Solo si aplica precio especial',
+                    labelText: 'Tarifa convenio (\$)',
+                    labelStyle: TextStyle(color: Colors.amber),
+                    hintText: 'Precio principal del sector',
                     hintStyle: TextStyle(color: Colors.white24),
                     border: OutlineInputBorder(),
                     isDense: true,
                     prefixText: '\$ ',
                     prefixStyle: TextStyle(color: Colors.amber),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                // 3b. Precio particular (opcional)
+                TextField(
+                  controller: precioCtrl,
+                  style: const TextStyle(color: Colors.white),
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Tarifa particular (\$) — opcional',
+                    labelStyle: TextStyle(color: Colors.white54),
+                    hintText: 'Solo si difiere del convenio',
+                    hintStyle: TextStyle(color: Colors.white24),
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                    prefixText: '\$ ',
+                    prefixStyle: TextStyle(color: Colors.white70),
                   ),
                 ),
                 if (sector != null) ...[
@@ -496,14 +496,19 @@ class _TabSectoresState extends State<_TabSectores>
                     }).eq('id', sector['id']);
                     newSectorId = sector['id'] as int;
                   }
-                  // Guardar tarifa si se ingresó precio válido
-                  final precioTexto = precioCtrl.text.trim();
-                  final precio = int.tryParse(precioTexto);
-                  final precioConvenio = int.tryParse(precioConvenioCtrl.text.trim());
-                  if (precio != null && precio > 0) {
-                    await _guardarTarifa(newSectorId, precio, precioConvenio: precioConvenio);
-                  } else if (precioTexto.isEmpty && sector != null) {
-                    // Usuario borró el precio → eliminar tarifa existente
+                  // Tarifa convenio = principal (obligatoria); particular = opcional
+                  final convenioTexto = precioConvenioCtrl.text.trim();
+                  final precioConvenio = int.tryParse(convenioTexto);
+                  final precioParticular = int.tryParse(precioCtrl.text.trim());
+                  if (precioConvenio != null && precioConvenio > 0) {
+                    // Si no se ingresó particular, se usa el convenio como fallback
+                    await _guardarTarifa(
+                      newSectorId,
+                      precioParticular ?? precioConvenio,
+                      precioConvenio: precioConvenio,
+                    );
+                  } else if (convenioTexto.isEmpty && sector != null) {
+                    // Usuario borró la tarifa convenio → eliminar tarifa existente
                     await widget.db
                         .from('fn_tarifas_sede')
                         .delete()
