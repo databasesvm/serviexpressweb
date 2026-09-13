@@ -13409,7 +13409,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                         radarAbierto = false;
                                         mensajeBloqueo = enFila.isEmpty
                                             ? 'Radar bloqueado para Servicios de ServiExpress.\nDirígete a un paradero y regístrate para recibir Turnos.'
-                                            : 'Hay compañeros en fila.\nDirígete a un paradero y regístrate para entrar en turno.';
+                                            : 'Hay móviles en filas.\nDirígete a un paradero y regístrate para recibir turnos.';
                                       }
                                     } else {
                                       // BLINDAJE TÁCTICO: Solo comparamos tu turno contra los que están en tu MISMO paradero

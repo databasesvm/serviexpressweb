@@ -277,710 +277,471 @@ extension CentralScreenMonitor on _CentralScreenState {
         ? 'Sin fijar'
         : _formatearMonedaCentral(tarifaActual);
 
-    showDialog(
+    showModalBottomSheet(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(
-          'CONTROL DE ORDEN #${_consec(id)}',
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
-        content: SingleChildScrollView(
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.85,
+        minChildSize: 0.4,
+        maxChildSize: 0.95,
+        builder: (_, scrollCtrl) => Container(
+          decoration: const BoxDecoration(
+            color: Color(0xFF1A1A2E),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
           child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ── FICHA COMPLETA DEL SERVICIO ──────────────────────────
-            Container(
-              padding: const EdgeInsets.all(10),
-              margin: const EdgeInsets.only(bottom: 10),
-              decoration: BoxDecoration(
-                color: Colors.grey[100],
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.grey[300]!),
+            children: [
+              // Handle
+              Center(
+                child: Container(
+                  margin: const EdgeInsets.only(top: 10, bottom: 6),
+                  width: 40, height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                      decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(4)),
-                      child: Text((servicio['tipo_servicio'] ?? 'domicilio').toString().toUpperCase(),
-                          style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-                    ),
-                    const SizedBox(width: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                      decoration: BoxDecoration(color: Colors.blueGrey[700], borderRadius: BorderRadius.circular(4)),
-                      child: Text(estado.toUpperCase().replaceAll('_', ' '),
-                          style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-                    ),
-                    if (servicio['es_vip'] == true) ...[
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                        decoration: BoxDecoration(color: Colors.amber[700], borderRadius: BorderRadius.circular(4)),
-                        child: const Text('👑 VIP', style: TextStyle(color: Colors.black, fontSize: 10, fontWeight: FontWeight.bold)),
+              // Header oscuro
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'ORDEN #${_consec(id)}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
+                          letterSpacing: 1,
+                        ),
                       ),
+                    ),
+                    _badgeDark((servicio['tipo_servicio'] ?? 'domicilio').toString().toUpperCase(), Colors.white12, Colors.white),
+                    const SizedBox(width: 5),
+                    _badgeDark(estado.toUpperCase().replaceAll('_', ' '), const Color(0xFF16213E), Colors.cyanAccent),
+                    if (servicio['es_vip'] == true) ...[
+                      const SizedBox(width: 5),
+                      _badgeDark('👑 VIP', const Color(0xFF7B5800), Colors.amber),
                     ],
                     if (servicio['es_punto_a_punto'] == true) ...[
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                        decoration: BoxDecoration(color: Colors.purple[700], borderRadius: BorderRadius.circular(4)),
-                        child: const Text('🏁 P.A.P', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-                      ),
+                      const SizedBox(width: 5),
+                      _badgeDark('PAP', Colors.purple.shade900, Colors.purpleAccent),
                     ],
-                  ]),
-                  const SizedBox(height: 8),
-                  Text('📍 Origen: ${servicio['origen']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                  Text('🏁 Destino: ${servicio['destino']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                  if (fechaCreado.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text('🕐 Creado: $fechaCreado',
-                      style: const TextStyle(fontSize: 12, color: Colors.black54)),
                   ],
-                  const SizedBox(height: 4),
-                  Text('💵 Tarifa: $tarifaTexto',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold,
-                        color: tarifaActual == 0.0 ? Colors.orange[800] : Colors.green[800])),
-                  if (telReceptor != null) ...[
-                    const SizedBox(height: 4),
-                    Text('📞 Tel. Receptor: $telReceptor',
-                        style: const TextStyle(fontSize: 12, color: Colors.blue, fontWeight: FontWeight.bold)),
-                  ],
-                  if (numLocal != null || numCliente != null) ...[
-                    const SizedBox(height: 4),
-                    Row(children: [
-                      if (numLocal != null)
-                        Text('🏪 Local #$numLocal  ', style: const TextStyle(fontSize: 12)),
-                      if (numCliente != null)
-                        Text('👤 Cliente #$numCliente', style: const TextStyle(fontSize: 12)),
-                    ]),
-                  ],
-                  if (servicio['instrucciones_especiales'] != null &&
-                      servicio['instrucciones_especiales'].toString().isNotEmpty) ...[
-                    const SizedBox(height: 6),
-                    Container(
-                      padding: const EdgeInsets.all(6),
-                      decoration: BoxDecoration(color: Colors.amber[50], borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: Colors.amber[300]!)),
-                      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        const Text('📝 ', style: TextStyle(fontSize: 12)),
-                        Expanded(child: Text(servicio['instrucciones_especiales'].toString(),
-                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500))),
-                      ]),
-                    ),
-                  ],
-                  if (servicio['observacion'] != null && servicio['observacion'].toString().isNotEmpty) ...[
-                    const SizedBox(height: 6),
-                    Container(
-                      padding: const EdgeInsets.all(6),
-                      decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(6)),
-                      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        const Text('⚠️ ', style: TextStyle(fontSize: 12)),
-                        Expanded(child: Text(servicio['observacion'].toString(),
-                            style: const TextStyle(fontSize: 11, color: Colors.black87))),
-                      ]),
-                    ),
-                  ],
-                  // ── Recogidas adicionales ──────────────────────────────
-                  if (servicio['recogidas'] != null &&
-                      (servicio['recogidas'] as List).isNotEmpty) ...[
-                    const SizedBox(height: 6),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(6),
-                      decoration: BoxDecoration(
-                        color: Colors.blue[50],
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: Colors.blue[200]!),
-                      ),
+                ),
+              ),
+              const Divider(color: Colors.white12, height: 1),
+              // Cuerpo scrollable
+              Expanded(
+                child: ListView(
+                  controller: scrollCtrl,
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+                  children: [
+                    // ── RUTA ──────────────────────────────────────────────
+                    _seccion(
+                      icon: Icons.route,
+                      color: Colors.cyanAccent,
+                      titulo: 'RUTA',
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('🔵 Recogidas:',
-                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.blue)),
-                          const SizedBox(height: 2),
-                          ...((servicio['recogidas'] as List).map((r) => Text(
-                            '• ${r['nombre'] ?? r['zona'] ?? ''}',
-                            style: const TextStyle(fontSize: 11, color: Colors.blue),
-                          ))),
+                          Row(children: [
+                            const Icon(Icons.trip_origin, size: 14, color: Colors.greenAccent),
+                            const SizedBox(width: 8),
+                            Expanded(child: Text(servicio['origen']?.toString() ?? '',
+                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14))),
+                          ]),
+                          const Padding(
+                            padding: EdgeInsets.only(left: 6),
+                            child: Text('│', style: TextStyle(color: Colors.white24, fontSize: 12)),
+                          ),
+                          Row(children: [
+                            const Icon(Icons.location_on, size: 14, color: Colors.redAccent),
+                            const SizedBox(width: 8),
+                            Expanded(child: Text(servicio['destino']?.toString() ?? '',
+                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14))),
+                          ]),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // ── DETALLES ───────────────────────────────────────────
+                    _seccion(
+                      icon: Icons.info_outline,
+                      color: Colors.amberAccent,
+                      titulo: 'DETALLES',
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        children: [
+                          _infoBadge('💵 Tarifa', tarifaTexto,
+                              tarifaActual == 0.0 ? Colors.orange.shade900 : const Color(0xFF1B5E20),
+                              tarifaActual == 0.0 ? Colors.orangeAccent : Colors.greenAccent),
+                          if (fechaCreado.isNotEmpty)
+                            _infoBadge('🕐 Creado', fechaCreado, const Color(0xFF0D1B2A), Colors.white70),
+                          if (telReceptor != null)
+                            _infoBadge('📞 Receptor', telReceptor, const Color(0xFF0D1B4A), Colors.lightBlueAccent),
+                          if (numLocal != null)
+                            _infoBadge('🏪 Local', '#$numLocal', const Color(0xFF1A0A2E), Colors.purpleAccent),
+                          if (numCliente != null)
+                            _infoBadge('👤 Cliente', '#$numCliente', const Color(0xFF0A1A0A), Colors.lightGreenAccent),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // ── NOTAS ─────────────────────────────────────────────
+                    if ((servicio['instrucciones_especiales']?.toString().isNotEmpty ?? false) ||
+                        (servicio['observacion']?.toString().isNotEmpty ?? false) ||
+                        (servicio['recogidas'] != null && (servicio['recogidas'] as List).isNotEmpty)) ...[
+                      _seccion(
+                        icon: Icons.notes,
+                        color: Colors.orangeAccent,
+                        titulo: 'NOTAS',
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (servicio['instrucciones_especiales']?.toString().isNotEmpty ?? false)
+                              _notaBadge('📝', servicio['instrucciones_especiales'].toString(),
+                                  Colors.amber.shade900.withValues(alpha: 0.3), Colors.amber.shade200),
+                            if (servicio['observacion']?.toString().isNotEmpty ?? false) ...[
+                              if (servicio['instrucciones_especiales']?.toString().isNotEmpty ?? false)
+                                const SizedBox(height: 6),
+                              _notaBadge('⚠️', servicio['observacion'].toString(),
+                                  Colors.red.shade900.withValues(alpha: 0.2), Colors.red.shade200),
+                            ],
+                            if (servicio['recogidas'] != null && (servicio['recogidas'] as List).isNotEmpty) ...[
+                              const SizedBox(height: 6),
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: Colors.blue.shade900.withValues(alpha: 0.3),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text('🔵 Recogidas:',
+                                        style: TextStyle(color: Colors.lightBlueAccent, fontSize: 11, fontWeight: FontWeight.bold)),
+                                    const SizedBox(height: 4),
+                                    ...((servicio['recogidas'] as List).map((r) => Text(
+                                      '• ${r['nombre'] ?? r['zona'] ?? ''}',
+                                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                                    ))),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+
+                    // ── FIJAR TARIFA ──────────────────────────────────────
+                    if (!['finalizado', 'finalizado_por_demora', 'finalizado_con_problema'].contains(estado)) ...[
+                      _seccion(
+                        icon: Icons.attach_money,
+                        color: Colors.greenAccent,
+                        titulo: 'FIJAR TARIFA',
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                inputFormatters: [CurrencyInputFormatter()],
+                                controller: tarifaController,
+                                keyboardType: TextInputType.number,
+                                style: const TextStyle(color: Colors.white),
+                                decoration: InputDecoration(
+                                  hintText: tarifaActual == 0.0 ? 'Ej: \$15.000' : tarifaTexto,
+                                  hintStyle: const TextStyle(color: Colors.white38),
+                                  filled: true,
+                                  fillColor: const Color(0xFF0D2818),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                    borderSide: const BorderSide(color: Colors.green, width: 1),
+                                  ),
+                                  enabledBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                    borderSide: BorderSide(color: Colors.green.shade800, width: 1),
+                                  ),
+                                  isDense: true,
+                                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                  suffixIcon: IconButton(
+                                    icon: const Icon(Icons.clear, size: 16, color: Colors.white38),
+                                    onPressed: () => tarifaController.clear(),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.green[800],
+                                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                              onPressed: () async {
+                                String tarifaLimpia = tarifaController.text
+                                    .replaceAll('\$', '').replaceAll('.', '').replaceAll(',', '').trim();
+                                double nuevoPrecio = double.tryParse(tarifaLimpia) ?? 0.0;
+                                if (nuevoPrecio > 0) {
+                                  await Supabase.instance.client
+                                      .from('servicios')
+                                      .update({
+                                        'tarifa': nuevoPrecio,
+                                        'tarifa_detalle': {
+                                          'total': nuevoPrecio,
+                                          'fuente': 'central_manual',
+                                          'ajuste_manual': nuevoPrecio,
+                                        },
+                                      })
+                                      .eq('id', id);
+                                  if (context.mounted) {
+                                    Navigator.pop(context);
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('✅ Tarifa inyectada con éxito'),
+                                        backgroundColor: Colors.green,
+                                      ),
+                                    );
+                                  }
+                                }
+                              },
+                              child: const Text('FIJAR', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+
+                    // ── LÍNEAS DIRECTAS ───────────────────────────────────
+                    if (servicio['movil_id'] != null || servicio['cliente_id'] != null)
+                      _seccion(
+                        icon: Icons.contact_phone,
+                        color: Colors.lightBlueAccent,
+                        titulo: 'LÍNEAS DIRECTAS',
+                        child: Column(
+                          children: [
+                            if (servicio['movil_id'] != null)
+                              FutureBuilder<Map<String, dynamic>?>(
+                                future: Supabase.instance.client
+                                    .from('usuarios')
+                                    .select('telefono, nombre, usuario, rol')
+                                    .eq('id', servicio['movil_id'])
+                                    .maybeSingle(),
+                                builder: (ctx, snap) {
+                                  final tel = snap.data?['telefono']?.toString() ?? '';
+                                  final nom = _formatearNombreCentral(snap.data);
+                                  bool alarmaMovil = servicio['chat_movil_central'] == true;
+                                  return _contactRow(
+                                    icono: Icons.motorcycle,
+                                    nombre: nom.isNotEmpty ? nom : 'Móvil',
+                                    colorIcono: Colors.greenAccent,
+                                    wsLabel: 'WS MÓVIL',
+                                    wsColor: const Color(0xff25D366),
+                                    onWs: () => _abrirWhatsAppCentral(tel, id),
+                                    chatLabel: alarmaMovil
+                                        ? ((_noLeidos['soporte_movil_$id'] ?? 0) > 0
+                                            ? '${_noLeidos['soporte_movil_$id']} SIN LEER'
+                                            : 'NUEVO MSG')
+                                        : 'CHAT MÓVIL',
+                                    chatColor: alarmaMovil ? Colors.red.shade700 : Colors.blueGrey.shade700,
+                                    chatIcon: alarmaMovil ? Icons.mark_email_unread : Icons.chat_bubble_outline,
+                                    onChat: () {
+                                      final salaMovil = 'soporte_movil_$id';
+                                      setState(() => _noLeidos.remove(salaMovil));
+                                      Supabase.instance.client
+                                          .from('servicios')
+                                          .update({'chat_movil_central': false})
+                                          .eq('id', id);
+                                      Navigator.push(context, MaterialPageRoute(
+                                        builder: (_) => ChatScreen(
+                                          salaId: salaMovil,
+                                          miId: 0,
+                                          miNombre: 'Central',
+                                          titulo: 'Chat con $nom',
+                                          servicioId: id,
+                                          alarmaLocal: 'chat_movil_central',
+                                          alarmaDestino: 'chat_central_movil',
+                                          destinatarioId: servicio['movil_id'] as int?,
+                                          tipoFaq: TipoFaqChat.central,
+                                        ),
+                                      ));
+                                    },
+                                  );
+                                },
+                              ),
+                            if (servicio['movil_id'] != null && servicio['cliente_id'] != null)
+                              const SizedBox(height: 8),
+                            if (servicio['cliente_id'] != null)
+                              FutureBuilder<Map<String, dynamic>?>(
+                                future: Supabase.instance.client
+                                    .from('usuarios')
+                                    .select('telefono, nombre')
+                                    .eq('id', servicio['cliente_id'])
+                                    .maybeSingle(),
+                                builder: (ctx, snap) {
+                                  final tel = snap.data?['telefono']?.toString() ?? '';
+                                  final nom = snap.data?['nombre']?.toString() ?? 'Cliente';
+                                  bool alarmaCliente = servicio['chat_cliente_central'] == true;
+                                  return _contactRow(
+                                    icono: Icons.person,
+                                    nombre: nom,
+                                    colorIcono: Colors.lightGreenAccent,
+                                    wsLabel: 'WS CLIENTE',
+                                    wsColor: const Color(0xff128C7E),
+                                    onWs: () => _abrirWhatsAppCentral(tel, id),
+                                    chatLabel: alarmaCliente
+                                        ? ((_noLeidos['soporte_cliente_$id'] ?? 0) > 0
+                                            ? '${_noLeidos['soporte_cliente_$id']} SIN LEER'
+                                            : 'NUEVO MSG')
+                                        : 'CHAT CLIENTE',
+                                    chatColor: alarmaCliente ? Colors.red.shade700 : Colors.teal.shade800,
+                                    chatIcon: alarmaCliente ? Icons.mark_email_unread : Icons.chat_bubble_outline,
+                                    onChat: () {
+                                      final salaCliente = 'soporte_cliente_$id';
+                                      setState(() => _noLeidos.remove(salaCliente));
+                                      Supabase.instance.client
+                                          .from('servicios')
+                                          .update({'chat_cliente_central': false})
+                                          .eq('id', id);
+                                      Navigator.push(context, MaterialPageRoute(
+                                        builder: (_) => ChatScreen(
+                                          salaId: salaCliente,
+                                          miId: 0,
+                                          miNombre: 'Central',
+                                          titulo: 'Chat con $nom',
+                                          servicioId: id,
+                                          alarmaLocal: 'chat_cliente_central',
+                                          alarmaDestino: 'chat_central_cliente',
+                                          destinatarioId: servicio['cliente_id'] as int?,
+                                          tipoFaq: TipoFaqChat.central,
+                                        ),
+                                      ));
+                                    },
+                                  );
+                                },
+                              ),
+                          ],
+                        ),
+                      ),
+                    const SizedBox(height: 12),
+
+                    // ── ACCIONES ──────────────────────────────────────────
+                    _seccion(
+                      icon: Icons.flash_on,
+                      color: Colors.white,
+                      titulo: 'ACCIONES',
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          if (estado == 'pendiente')
+                            _accionBtn('FUSIONAR', Colors.purple.shade700, Colors.white,
+                                () => _mostrarMenuFusion(context, servicio)),
+                          if (!['finalizado', 'finalizado_por_demora', 'finalizado_con_problema', 'cancelado', 'caducado'].contains(estado))
+                            _accionBtnIcon(Icons.my_location, 'GPS', Colors.blue.shade700, Colors.white, () async {
+                              final link = 'https://oukiofdtargjrclualgm.supabase.co/functions/v1/capturar-ubicacion?id=$id';
+                              final mensaje = Uri.encodeComponent(
+                                'Hola 👋 Para que el conductor llegue exactamente donde estás, toca este enlace y activa tu GPS (un segundo):\n$link',
+                              );
+                              final uri = Uri.parse('https://wa.me/?text=$mensaje');
+                              if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
+                            }),
+                          if (['cancelado', 'finalizado_por_demora', 'finalizado_con_problema', 'caducado'].contains(estado))
+                            _accionBtn('REACTIVAR', const Color(0xff3AF500), Colors.black, () async {
+                              await Supabase.instance.client
+                                  .from('servicios')
+                                  .update({'estado': 'pendiente', 'movil_id': null, 'observacion': null,
+                                           'accepted_at': null, 'picked_up_at': null, 'extension_minutes': 0})
+                                  .eq('id', id);
+                              if (context.mounted) Navigator.pop(context);
+                            }),
+                          if (!['finalizado', 'finalizado_por_demora', 'finalizado_con_problema', 'cancelado', 'caducado'].contains(estado))
+                            _accionBtn('EDITAR', Colors.orange.shade800, Colors.white, () {
+                              Navigator.pop(context);
+                              _editarServicio(context, servicio);
+                            }),
+                          _accionBtn('REASIGNAR', Colors.blue.shade800, Colors.white, () {
+                            Navigator.pop(context);
+                            _asignarMotoManual(context, servicio);
+                          }),
+                          if (estado != 'cancelado' && estado != 'finalizado')
+                            _accionBtn('CANCELAR', Colors.red.shade800, Colors.white, () async {
+                              for (final campo in ['onesignal_30s', 'onesignal_2m', 'onesignal_5m']) {
+                                final nId = servicio[campo]?.toString();
+                                if (nId != null && nId.isNotEmpty && nId != 'null')
+                                  MotorNotificaciones.cancelarMisil(nId).catchError((_) {});
+                              }
+                              for (final campo in ['fn_notif_fase2', 'fn_notif_fase3', 'fn_notif_fase4', 'fn_notif_fase4b']) {
+                                final nId = servicio[campo]?.toString();
+                                if (nId != null && nId.isNotEmpty && nId != 'null')
+                                  MotorNotificaciones.cancelarMisil(nId).catchError((_) {});
+                              }
+                              await Supabase.instance.client
+                                  .from('servicios')
+                                  .update({'estado': 'cancelado', 'onesignal_30s': null, 'onesignal_2m': null, 'onesignal_5m': null,
+                                           'fn_notif_fase2': null, 'fn_notif_fase3': null, 'fn_notif_fase4': null, 'fn_notif_fase4b': null})
+                                  .eq('id', id);
+                              final movilId = servicio['movil_id']?.toString();
+                              if (movilId != null && movilId.isNotEmpty && movilId != 'null') {
+                                MotorNotificaciones.dispararMisil(
+                                  idDestino: movilId,
+                                  titulo: '❌ Servicio cancelado',
+                                  mensaje: 'El servicio #$id fue cancelado.',
+                                  urgente: false,
+                                  sonido: 'central_cancelado',
+                                  canalAndroidId: MotorNotificaciones.canalCanceladoId,
+                                );
+                              }
+                              if (context.mounted) Navigator.pop(context);
+                            }),
+                          if (estado != 'finalizado')
+                            _accionBtn('FINALIZAR', Colors.black, const Color(0xff3AF500), () async {
+                              String obsAnterior = servicio['observacion'] ?? '';
+                              String nuevaObs = obsAnterior;
+                              if (['cancelado', 'finalizado_por_demora', 'finalizado_con_problema'].contains(estado)) {
+                                nuevaObs = '[MARCA DE FALLA] ${obsAnterior.isEmpty ? 'Cerrado forzoso por Central' : obsAnterior}';
+                              }
+                              for (final campo in ['onesignal_30s', 'onesignal_2m', 'onesignal_5m']) {
+                                final nId = servicio[campo]?.toString();
+                                if (nId != null && nId.isNotEmpty && nId != 'null')
+                                  MotorNotificaciones.cancelarMisil(nId).catchError((_) {});
+                              }
+                              for (final campo in ['fn_notif_fase2', 'fn_notif_fase3', 'fn_notif_fase4', 'fn_notif_fase4b']) {
+                                final nId = servicio[campo]?.toString();
+                                if (nId != null && nId.isNotEmpty && nId != 'null')
+                                  MotorNotificaciones.cancelarMisil(nId).catchError((_) {});
+                              }
+                              await Supabase.instance.client
+                                  .from('servicios')
+                                  .update({
+                                    'estado': 'finalizado',
+                                    'observacion': nuevaObs.isEmpty ? null : nuevaObs,
+                                    'onesignal_30s': null, 'onesignal_2m': null, 'onesignal_5m': null,
+                                    'fn_notif_fase2': null, 'fn_notif_fase3': null, 'fn_notif_fase4': null, 'fn_notif_fase4b': null,
+                                    'paradero_auto_movil_id': null, 'fn_fase2_movil_id': null,
+                                  })
+                                  .eq('id', id);
+                              if (context.mounted) Navigator.pop(context);
+                            }),
+                          _accionBtn('VOLVER', const Color(0xFF2A2A3E), Colors.white70,
+                              () => Navigator.pop(context)),
                         ],
                       ),
                     ),
                   ],
-                ],
-              ),
-            ),
-            // (tel. receptor ya aparece en la ficha superior)
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    inputFormatters: [CurrencyInputFormatter()],
-                    controller: tarifaController,
-                    keyboardType: TextInputType.number,
-                    decoration: InputDecoration(
-                      labelText: (tarifaActual == 0.0)
-                          ? 'Fijar Tarifa de Central (\$)'
-                          : 'Modificar Tarifa',
-                      border: const OutlineInputBorder(),
-                      isDense: true,
-                      filled: true,
-                      fillColor: Colors.green[50],
-                      suffixIcon: IconButton(
-                        icon: const Icon(Icons.clear, size: 18),
-                        tooltip: 'Borrar',
-                        onPressed: () => tarifaController.clear(),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                SizedBox(
-                  height: 48,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green[800],
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                    ),
-                    onPressed: () async {
-                      // --- INYECCIÓN DE LIMPIEZA TÁCTICA ---
-                      String tarifaLimpia = tarifaController.text
-                          .replaceAll('\$', '')
-                          .replaceAll('.', '')
-                          .replaceAll(',', '')
-                          .trim();
-                      double nuevoPrecio = double.tryParse(tarifaLimpia) ?? 0.0;
-
-                      if (nuevoPrecio > 0) {
-                        await Supabase.instance.client
-                            .from('servicios')
-                            .update({
-                              'tarifa': nuevoPrecio,
-                              'tarifa_detalle': {
-                                'total': nuevoPrecio,
-                                'fuente': 'central_manual',
-                                'ajuste_manual': nuevoPrecio,
-                              },
-                            })
-                            .eq('id', id);
-                        if (context.mounted) {
-                          Navigator.pop(context);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('✅ Tarifa inyectada con éxito'),
-                              backgroundColor: Colors.green,
-                            ),
-                          );
-                        }
-                      }
-                    },
-                    child: const Text(
-                      'FIJAR',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            // (observación ya aparece en la ficha superior)
-            const SizedBox(height: 15),
-            const Text(
-              'LÍNEAS DIRECTAS:',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-                color: Colors.black54,
-              ),
-            ),
-            const SizedBox(height: 6),
-
-            // FILA DEL MÓVIL
-            if (servicio['movil_id'] != null)
-              FutureBuilder<Map<String, dynamic>?>(
-                future: Supabase.instance.client
-                    .from('usuarios')
-                    .select('telefono, nombre, usuario, rol')
-                    .eq('id', servicio['movil_id'])
-                    .maybeSingle(),
-                builder: (ctx, snap) {
-                  final tel = snap.data?['telefono']?.toString() ?? '';
-                  final nom = _formatearNombreCentral(snap.data);
-                  bool alarmaMovil = servicio['chat_movil_central'] == true;
-
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 6),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xff25D366),
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 4,
-                              ),
-                            ),
-                            onPressed: () => _abrirWhatsAppCentral(tel, id),
-                            icon: const Icon(Icons.wechat, size: 14),
-                            label: const Text(
-                              'WS MÓVIL',
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: alarmaMovil
-                                  ? Colors.red[700]
-                                  : Colors.black,
-                              foregroundColor: alarmaMovil
-                                  ? Colors.white
-                                  : Colors.blue,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 4,
-                              ),
-                            ),
-                            onPressed: () {
-                              final salaMovil = 'soporte_movil_$id';
-                              setState(() => _noLeidos.remove(salaMovil));
-                              Supabase.instance.client
-                                  .from('servicios')
-                                  .update({'chat_movil_central': false})
-                                  .eq('id', id);
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => ChatScreen(
-                                    salaId: salaMovil,
-                                    miId: 0,
-                                    miNombre: 'Central',
-                                    titulo: 'Chat con $nom',
-                                    servicioId: id,
-                                    alarmaLocal: 'chat_movil_central',
-                                    alarmaDestino: 'chat_central_movil',
-                                    destinatarioId: servicio['movil_id'] as int?,
-                                    tipoFaq: TipoFaqChat.central,
-                                  ),
-                                ),
-                              );
-                            },
-                            icon: Icon(
-                              alarmaMovil
-                                  ? Icons.mark_email_unread
-                                  : Icons.chat,
-                              size: 14,
-                            ),
-                            label: Builder(builder: (_) {
-                              final cnt = _noLeidos['soporte_movil_$id'] ?? 0;
-                              return Text(
-                                alarmaMovil
-                                    ? (cnt > 0 ? '$cnt SIN LEER' : 'NUEVO MSG')
-                                    : 'CHAT MÓVIL',
-                                style: const TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              );
-                            }),
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-
-            // FILA DEL CLIENTE
-            if (servicio['cliente_id'] != null)
-              FutureBuilder<Map<String, dynamic>?>(
-                future: Supabase.instance.client
-                    .from('usuarios')
-                    .select('telefono, nombre')
-                    .eq('id', servicio['cliente_id'])
-                    .maybeSingle(),
-                builder: (ctx, snap) {
-                  final tel = snap.data?['telefono']?.toString() ?? '';
-                  final nom = snap.data?['nombre']?.toString() ?? 'Cliente';
-                  bool alarmaCliente = servicio['chat_cliente_central'] == true;
-
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 6),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xff128C7E),
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 4,
-                              ),
-                            ),
-                            onPressed: () => _abrirWhatsAppCentral(tel, id),
-                            icon: const Icon(Icons.wechat, size: 14),
-                            label: const Text(
-                              'WS CLIENTE',
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: alarmaCliente
-                                  ? Colors.red[700]
-                                  : Colors.black,
-                              foregroundColor: alarmaCliente
-                                  ? Colors.white
-                                  : const Color(0xff3AF500),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 4,
-                              ),
-                            ),
-                            onPressed: () {
-                              final salaCliente = 'soporte_cliente_$id';
-                              setState(() => _noLeidos.remove(salaCliente));
-                              Supabase.instance.client
-                                  .from('servicios')
-                                  .update({'chat_cliente_central': false})
-                                  .eq('id', id);
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => ChatScreen(
-                                    salaId: salaCliente,
-                                    miId: 0,
-                                    miNombre: 'Central',
-                                    titulo: 'Chat con $nom',
-                                    servicioId: id,
-                                    alarmaLocal: 'chat_cliente_central',
-                                    alarmaDestino: 'chat_central_cliente',
-                                    destinatarioId: servicio['cliente_id'] as int?,
-                                    tipoFaq: TipoFaqChat.central,
-                                  ),
-                                ),
-                              );
-                            },
-                            icon: Icon(
-                              alarmaCliente
-                                  ? Icons.mark_email_unread
-                                  : Icons.chat,
-                              size: 14,
-                            ),
-                            label: Builder(builder: (_) {
-                              final cnt = _noLeidos['soporte_cliente_$id'] ?? 0;
-                              return Text(
-                                alarmaCliente
-                                    ? (cnt > 0
-                                        ? '$cnt SIN LEER'
-                                        : 'NUEVO MSG')
-                                    : 'CHAT CLIENTE',
-                                style: const TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              );
-                            }),
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-          ],
-        ),  // Column
-        ),  // SingleChildScrollView
-        actions: [
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            alignment: WrapAlignment.end,
-            children: [
-              // ---> INYECTA EL BOTÓN DE FUSIÓN AQUÍ <---
-              if (estado == 'pendiente')
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.purple[800],
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 0,
-                    ),
-                  ),
-                  onPressed: () => _mostrarMenuFusion(context, servicio),
-                  child: const Text(
-                    'FUSIONAR',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 11,
-                    ),
-                  ),
-                ),
-              // ------------------------------------------
-
-              // ── BOTÓN GPS (solo servicios activos) ───────────────────
-              if (!['finalizado', 'finalizado_por_demora',
-                    'finalizado_con_problema', 'cancelado', 'caducado']
-                  .contains(estado))
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue[700],
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 0),
-                  ),
-                  icon: const Icon(Icons.my_location,
-                      color: Colors.white, size: 13),
-                  label: const Text(
-                    'PEDIR GPS',
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 11),
-                  ),
-                  onPressed: () async {
-                    final link =
-                        'https://oukiofdtargjrclualgm.supabase.co'
-                        '/functions/v1/capturar-ubicacion?id=$id';
-                    final mensaje = Uri.encodeComponent(
-                      'Hola 👋 Para que el conductor llegue exactamente '
-                      'donde estás, toca este enlace y activa tu GPS '
-                      '(un segundo):\n$link',
-                    );
-                    final uri = Uri.parse('https://wa.me/?text=$mensaje');
-                    if (await canLaunchUrl(uri)) {
-                      await launchUrl(uri,
-                          mode: LaunchMode.externalApplication);
-                    }
-                  },
-                ),
-              // ── FIN BOTÓN GPS ─────────────────────────────────────────
-              if ([
-                'cancelado',
-                'finalizado_por_demora',
-                'finalizado_con_problema',
-                'caducado',
-              ].contains(estado))
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xff3AF500),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 0,
-                    ),
-                  ),
-                  onPressed: () async {
-                    await Supabase.instance.client
-                        .from('servicios')
-                        .update({
-                          'estado': 'pendiente',
-                          'movil_id': null,
-                          'observacion': null,
-                          'accepted_at': null,
-                          'picked_up_at': null,
-                          'extension_minutes': 0,
-                        })
-                        .eq('id', id);
-                    if (context.mounted) Navigator.pop(context);
-                  },
-                  child: const Text(
-                    'REACTIVAR',
-                    style: TextStyle(
-                      color: Colors.black,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 11,
-                    ),
-                  ),
-                ),
-              if (!['finalizado', 'finalizado_por_demora',
-                    'finalizado_con_problema', 'cancelado', 'caducado']
-                  .contains(estado))
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.orange[800],
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 0,
-                    ),
-                  ),
-                  onPressed: () {
-                    Navigator.pop(context);
-                    _editarServicio(context, servicio);
-                  },
-                  child: const Text(
-                    'EDITAR',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 11,
-                    ),
-                  ),
-                ),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue[800],
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 0,
-                  ),
-                ),
-                onPressed: () { Navigator.pop(context); _asignarMotoManual(context, servicio); },
-                child: const Text(
-                  'REASIGNAR',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 11,
-                  ),
-                ),
-              ),
-              if (estado != 'cancelado' && estado != 'finalizado')
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red[800],
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 0,
-                    ),
-                  ),
-                  onPressed: () async {
-                    // SE: cancelar cascada
-                    for (final campo in ['onesignal_30s', 'onesignal_2m', 'onesignal_5m']) {
-                      final nId = servicio[campo]?.toString();
-                      if (nId != null && nId.isNotEmpty && nId != 'null')
-                        MotorNotificaciones.cancelarMisil(nId).catchError((_) {});
-                    }
-                    // FN: cancelar cascada
-                    for (final campo in ['fn_notif_fase2', 'fn_notif_fase3', 'fn_notif_fase4', 'fn_notif_fase4b']) {
-                      final nId = servicio[campo]?.toString();
-                      if (nId != null && nId.isNotEmpty && nId != 'null')
-                        MotorNotificaciones.cancelarMisil(nId).catchError((_) {});
-                    }
-                    await Supabase.instance.client
-                        .from('servicios')
-                        .update({
-                          'estado': 'cancelado',
-                          'onesignal_30s': null,
-                          'onesignal_2m': null,
-                          'onesignal_5m': null,
-                          'fn_notif_fase2': null,
-                          'fn_notif_fase3': null,
-                          'fn_notif_fase4': null,
-                          'fn_notif_fase4b': null,
-                        })
-                        .eq('id', id);
-                    // Notificar al móvil si ya tenía uno asignado
-                    final movilId = servicio['movil_id']?.toString();
-                    if (movilId != null && movilId.isNotEmpty && movilId != 'null') {
-                      MotorNotificaciones.dispararMisil(
-                        idDestino: movilId,
-                        titulo: '❌ Servicio cancelado',
-                        mensaje: 'El servicio #$id fue cancelado.',
-                        urgente: false,
-                        sonido: 'central_cancelado',
-                        canalAndroidId: MotorNotificaciones.canalCanceladoId,
-                      );
-                    }
-                    if (context.mounted) Navigator.pop(context);
-                  },
-                  child: const Text(
-                    'CANCELAR',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 11,
-                    ),
-                  ),
-                ),
-              if (estado != 'finalizado')
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.black,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 0,
-                    ),
-                  ),
-                  onPressed: () async {
-                    String obsAnterior = servicio['observacion'] ?? '';
-                    String nuevaObs = obsAnterior;
-                    if ([
-                      'cancelado',
-                      'finalizado_por_demora',
-                      'finalizado_con_problema',
-                    ].contains(estado)) {
-                      nuevaObs =
-                          '[MARCA DE FALLA] ${obsAnterior.isEmpty ? 'Cerrado forzoso por Central' : obsAnterior}';
-                    }
-                    // Cancelar cascada SE + FN pendiente
-                    for (final campo in ['onesignal_30s', 'onesignal_2m', 'onesignal_5m']) {
-                      final nId = servicio[campo]?.toString();
-                      if (nId != null && nId.isNotEmpty && nId != 'null')
-                        MotorNotificaciones.cancelarMisil(nId).catchError((_) {});
-                    }
-                    for (final campo in ['fn_notif_fase2', 'fn_notif_fase3', 'fn_notif_fase4', 'fn_notif_fase4b']) {
-                      final nId = servicio[campo]?.toString();
-                      if (nId != null && nId.isNotEmpty && nId != 'null')
-                        MotorNotificaciones.cancelarMisil(nId).catchError((_) {});
-                    }
-                    await Supabase.instance.client
-                        .from('servicios')
-                        .update({
-                          'estado': 'finalizado',
-                          'observacion': nuevaObs.isEmpty ? null : nuevaObs,
-                          'onesignal_30s': null,
-                          'onesignal_2m': null,
-                          'onesignal_5m': null,
-                          'fn_notif_fase2': null,
-                          'fn_notif_fase3': null,
-                          'fn_notif_fase4': null,
-                          'fn_notif_fase4b': null,
-                          'paradero_auto_movil_id': null,
-                          'fn_fase2_movil_id': null,
-                        })
-                        .eq('id', id);
-                    if (context.mounted) Navigator.pop(context);
-                  },
-                  child: const Text(
-                    'FINALIZAR',
-                    style: TextStyle(
-                      color: Color(0xff3AF500),
-                      fontWeight: FontWeight.bold,
-                      fontSize: 11,
-                    ),
-                  ),
-                ),
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text(
-                  'VOLVER',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black87,
-                    fontSize: 11,
-                  ),
                 ),
               ),
             ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -3026,5 +2787,134 @@ extension CentralScreenMonitor on _CentralScreenState {
       }
     }
   }
+
+  // ── HELPERS PARA _abrirMenuGestion (BottomSheet moderno) ─────────────────
+
+  Widget _badgeDark(String texto, Color bg, Color fg) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+    decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(5)),
+    child: Text(texto, style: TextStyle(color: fg, fontSize: 9, fontWeight: FontWeight.bold)),
+  );
+
+  Widget _seccion({
+    required IconData icon,
+    required Color color,
+    required String titulo,
+    required Widget child,
+  }) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Row(children: [
+        Icon(icon, size: 13, color: color),
+        const SizedBox(width: 5),
+        Text(titulo, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.8)),
+      ]),
+      const SizedBox(height: 8),
+      child,
+    ],
+  );
+
+  Widget _infoBadge(String label, String value, Color bg, Color fg) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+    decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(8)),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: const TextStyle(color: Colors.white38, fontSize: 9)),
+        const SizedBox(height: 2),
+        Text(value, style: TextStyle(color: fg, fontWeight: FontWeight.bold, fontSize: 12)),
+      ],
+    ),
+  );
+
+  Widget _notaBadge(String icono, String texto, Color bg, Color fg) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(8),
+    decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(8)),
+    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(icono, style: const TextStyle(fontSize: 13)),
+      const SizedBox(width: 8),
+      Expanded(child: Text(texto, style: TextStyle(color: fg, fontSize: 12, height: 1.4))),
+    ]),
+  );
+
+  Widget _contactRow({
+    required IconData icono,
+    required String nombre,
+    required Color colorIcono,
+    required String wsLabel,
+    required Color wsColor,
+    required VoidCallback onWs,
+    required String chatLabel,
+    required Color chatColor,
+    required IconData chatIcon,
+    required VoidCallback onChat,
+  }) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+    decoration: BoxDecoration(
+      color: const Color(0xFF0D1B2E),
+      borderRadius: BorderRadius.circular(10),
+    ),
+    child: Row(
+      children: [
+        Icon(icono, color: colorIcono, size: 18),
+        const SizedBox(width: 8),
+        Expanded(child: Text(nombre,
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+            overflow: TextOverflow.ellipsis)),
+        const SizedBox(width: 8),
+        ElevatedButton.icon(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: wsColor,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            minimumSize: Size.zero,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+          onPressed: onWs,
+          icon: const Icon(Icons.wechat, size: 12, color: Colors.white),
+          label: Text(wsLabel, style: const TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.bold)),
+        ),
+        const SizedBox(width: 6),
+        ElevatedButton.icon(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: chatColor,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            minimumSize: Size.zero,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+          onPressed: onChat,
+          icon: Icon(chatIcon, size: 12, color: Colors.white),
+          label: Text(chatLabel, style: const TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.bold)),
+        ),
+      ],
+    ),
+  );
+
+  Widget _accionBtn(String label, Color bg, Color fg, VoidCallback onTap) => ElevatedButton(
+    style: ElevatedButton.styleFrom(
+      backgroundColor: bg,
+      foregroundColor: fg,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      minimumSize: Size.zero,
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    ),
+    onPressed: onTap,
+    child: Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: fg)),
+  );
+
+  Widget _accionBtnIcon(IconData icon, String label, Color bg, Color fg, VoidCallback onTap) => ElevatedButton.icon(
+    style: ElevatedButton.styleFrom(
+      backgroundColor: bg,
+      foregroundColor: fg,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      minimumSize: Size.zero,
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    ),
+    onPressed: onTap,
+    icon: Icon(icon, size: 13, color: fg),
+    label: Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: fg)),
+  );
 
 }
