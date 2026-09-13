@@ -1261,7 +1261,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                   padding: const EdgeInsets.symmetric(
                       horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Colors.indigo[900],
+                    color: const Color(0xFF002da2),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: const Text('FN',
@@ -1643,11 +1643,11 @@ extension CentralScreenFormularios on _CentralScreenState {
                                   vertical: 9, horizontal: 4),
                               decoration: BoxDecoration(
                                 color: modoAsignacion == 'radar'
-                                    ? Colors.indigo[900]
+                                    ? const Color(0xFF002da2)
                                     : Colors.grey[100],
                                 borderRadius: BorderRadius.circular(8),
                                 border: Border.all(
-                                    color: Colors.indigo[900]!, width: 1.5),
+                                    color: const Color(0xFF002da2), width: 1.5),
                               ),
                               child: Text(
                                 '📡  RADAR',
@@ -1657,7 +1657,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                                   fontWeight: FontWeight.bold,
                                   color: modoAsignacion == 'radar'
                                       ? Colors.white
-                                      : Colors.indigo[900],
+                                      : const Color(0xFF002da2),
                                 ),
                               ),
                             ),
@@ -2606,7 +2606,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                         }
                       },
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.indigo[900],
+                  backgroundColor: const Color(0xFF002da2),
                 ),
                 child: procesando
                     ? const SizedBox(

@@ -16,6 +16,10 @@ class _HistorialServiciosScreenState extends State<HistorialServiciosScreen> {
   _RangoFecha _rangoSeleccionado = _RangoFecha.hoy;
   String? _estadoFiltro;
   String _busqueda = '';
+  // Filtros adicionales
+  String? _filtroMovilId;   // id del móvil seleccionado
+  String? _filtroCreador;   // nombre del creador (local/cliente)
+  bool _soloConFoto = false; // solo servicios con foto de comanda
   List<Map<String, dynamic>> _servicios = [];
   List<Map<String, dynamic>> _movilesCache = [];
   bool _cargando = true;
@@ -125,15 +129,48 @@ class _HistorialServiciosScreenState extends State<HistorialServiciosScreen> {
   }
 
   List<Map<String, dynamic>> get _filtrados {
-    if (_busqueda.isEmpty) return _servicios;
-    final q = _busqueda.toLowerCase();
-    return _servicios.where((s) {
-      return (s['origen']?.toString().toLowerCase().contains(q) ?? false) ||
-          (s['destino']?.toString().toLowerCase().contains(q) ?? false) ||
-          (s['creador']?.toString().toLowerCase().contains(q) ?? false) ||
-          (s['id']?.toString().contains(q) ?? false) ||
-          _nombreMovil(s['movil_id']).toLowerCase().contains(q);
-    }).toList();
+    var lista = _servicios;
+    // Filtro por búsqueda de texto
+    if (_busqueda.isNotEmpty) {
+      final q = _busqueda.toLowerCase();
+      lista = lista.where((s) {
+        return (s['origen']?.toString().toLowerCase().contains(q) ?? false) ||
+            (s['destino']?.toString().toLowerCase().contains(q) ?? false) ||
+            (s['creador']?.toString().toLowerCase().contains(q) ?? false) ||
+            (s['id']?.toString().contains(q) ?? false) ||
+            _nombreMovil(s['movil_id']).toLowerCase().contains(q);
+      }).toList();
+    }
+    // Filtro por móvil
+    if (_filtroMovilId != null) {
+      lista = lista
+          .where((s) => s['movil_id']?.toString() == _filtroMovilId)
+          .toList();
+    }
+    // Filtro por creador (local/cliente)
+    if (_filtroCreador != null) {
+      lista = lista
+          .where((s) => s['creador']?.toString() == _filtroCreador)
+          .toList();
+    }
+    // Filtro solo con foto de comanda
+    if (_soloConFoto) {
+      lista = lista.where((s) {
+        final url = s['foto_comanda_url']?.toString() ?? '';
+        return url.isNotEmpty;
+      }).toList();
+    }
+    return lista;
+  }
+
+  /// Creadores únicos presentes en los servicios cargados (excluye 'Central' y nulos)
+  List<String> get _creadoresUnicos {
+    final set = <String>{};
+    for (final s in _servicios) {
+      final c = s['creador']?.toString();
+      if (c != null && c.isNotEmpty && c != 'Central') set.add(c);
+    }
+    return set.toList()..sort();
   }
 
   @override
@@ -146,11 +183,12 @@ class _HistorialServiciosScreenState extends State<HistorialServiciosScreen> {
         title: const Text('Historial de Servicios',
             style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(88),
+          preferredSize: const Size.fromHeight(132),
           child: Container(
             color: Colors.black,
             padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
             child: Column(children: [
+              // Fila 1: botones de rango
               Row(children: _RangoFecha.values.map((r) {
                 final sel = r == _rangoSeleccionado;
                 return Expanded(
@@ -173,6 +211,7 @@ class _HistorialServiciosScreenState extends State<HistorialServiciosScreen> {
                   ),
                 );
               }).toList()),
+              // Fila 2: búsqueda de texto
               SizedBox(
                 height: 36,
                 child: TextField(
@@ -190,6 +229,55 @@ class _HistorialServiciosScreenState extends State<HistorialServiciosScreen> {
                   ),
                 ),
               ),
+              const SizedBox(height: 6),
+              // Fila 3: filtros adicionales (móvil, local, foto)
+              Row(children: [
+                // Dropdown: filtro por móvil
+                Expanded(
+                  child: _dropdownFiltroOscuro(
+                    valor: _filtroMovilId,
+                    hint: '🍃 Móvil',
+                    items: _movilesCache.map((m) {
+                      final usr = m['usuario']?.toString() ?? '';
+                      final num = usr.replaceAll(RegExp(r'[^0-9]'), '');
+                      final label = num.isNotEmpty ? 'Móvil $num' : (m['nombre']?.toString() ?? '#${m["id"]}');
+                      return DropdownMenuItem<String>(
+                        value: m['id'].toString(),
+                        child: Text(label, style: const TextStyle(fontSize: 11)),
+                      );
+                    }).toList(),
+                    onChanged: (v) => setState(() => _filtroMovilId = v),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                // Dropdown: filtro por local/creador
+                Expanded(
+                  child: _dropdownFiltroOscuro(
+                    valor: _filtroCreador,
+                    hint: '🏢 Local',
+                    items: _creadoresUnicos.map((c) =>
+                      DropdownMenuItem<String>(value: c, child: Text(c, style: const TextStyle(fontSize: 11), overflow: TextOverflow.ellipsis))
+                    ).toList(),
+                    onChanged: (v) => setState(() => _filtroCreador = v),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                // Toggle: solo con foto
+                GestureDetector(
+                  onTap: () => setState(() => _soloConFoto = !_soloConFoto),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: _soloConFoto ? const Color(0xff3AF500) : Colors.white12,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text('📷',
+                        style: TextStyle(
+                            fontSize: 14,
+                            color: _soloConFoto ? Colors.black : Colors.white70)),
+                  ),
+                ),
+              ]),
             ]),
           ),
         ),
@@ -355,7 +443,63 @@ class _HistorialServiciosScreenState extends State<HistorialServiciosScreen> {
               Text('🔗 Multi-ruta · Orden #${s["multi_ruta_orden"] ?? "?"}',
                   style: const TextStyle(fontSize: 9, color: Colors.indigo)),
             ],
+            // Badge foto de comanda
+            if ((s['foto_comanda_url']?.toString() ?? '').isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Row(children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.brown[50],
+                    borderRadius: BorderRadius.circular(3),
+                    border: Border.all(color: Colors.brown[200]!),
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Text('📷', style: const TextStyle(fontSize: 9)),
+                    const SizedBox(width: 3),
+                    Text('foto comanda',
+                        style: TextStyle(fontSize: 9, color: Colors.brown[700], fontWeight: FontWeight.w600)),
+                  ]),
+                ),
+              ]),
+            ],
           ]),
+        ),
+      ),
+    );
+  }
+
+  /// Dropdown con estilo oscuro para los filtros del AppBar
+  Widget _dropdownFiltroOscuro({
+    required String? valor,
+    required String hint,
+    required List<DropdownMenuItem<String>> items,
+    required ValueChanged<String?> onChanged,
+  }) {
+    return Container(
+      height: 30,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        color: valor != null ? Colors.white.withValues(alpha: 0.15) : Colors.white12,
+        borderRadius: BorderRadius.circular(6),
+        border: valor != null
+            ? Border.all(color: const Color(0xff3AF500), width: 1)
+            : null,
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: valor,
+          hint: Text(hint, style: const TextStyle(color: Colors.white54, fontSize: 11)),
+          dropdownColor: const Color(0xFF1A1A1A),
+          iconEnabledColor: Colors.white38,
+          iconSize: 16,
+          isExpanded: true,
+          style: const TextStyle(color: Colors.white, fontSize: 11),
+          items: [
+            DropdownMenuItem<String>(value: null, child: Text('$hint — todos', style: const TextStyle(fontSize: 11, color: Colors.white54))),
+            ...items,
+          ],
+          onChanged: onChanged,
         ),
       ),
     );
@@ -469,6 +613,63 @@ class _HistorialServiciosScreenState extends State<HistorialServiciosScreen> {
                       _detalleRow('Alta demanda', '🔥 Sí'),
                     if (s['accepted_at'] != null)
                       _detalleRow('Aceptado', fmtFecha(s['accepted_at'])),
+                  ],
+                  // ── Foto de comanda ─────────────────────────────────
+                  if ((s['foto_comanda_url']?.toString() ?? '').isNotEmpty) ...[
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8),
+                      child: Divider(height: 1),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Text('FOTO DE COMANDA',
+                          style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.brown[700],
+                              letterSpacing: 0.8)),
+                    ),
+                    GestureDetector(
+                      onTap: () => showDialog(
+                        context: context,
+                        builder: (_) => Dialog(
+                          backgroundColor: Colors.black,
+                          insetPadding: const EdgeInsets.all(12),
+                          child: Stack(children: [
+                            InteractiveViewer(
+                              child: Image.network(
+                                s['foto_comanda_url'].toString(),
+                                fit: BoxFit.contain,
+                              ),
+                            ),
+                            Positioned(
+                              top: 8, right: 8,
+                              child: IconButton(
+                                icon: const Icon(Icons.close, color: Colors.white),
+                                onPressed: () => Navigator.pop(context),
+                              ),
+                            ),
+                          ]),
+                        ),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.network(
+                          s['foto_comanda_url'].toString(),
+                          height: 180,
+                          width: double.infinity,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) =>
+                              const Center(child: Icon(Icons.broken_image, color: Colors.grey)),
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text('Toca para ver en grande',
+                          style: TextStyle(fontSize: 10, color: Colors.grey[500]),
+                          textAlign: TextAlign.center),
+                    ),
                   ],
                   const SizedBox(height: 16),
                 ],

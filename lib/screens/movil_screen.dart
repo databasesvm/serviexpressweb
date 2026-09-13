@@ -1416,9 +1416,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
   // =========================================================================
   void _abrirChatCentral() {
     // 1. ¿Hay mensaje de cliente/local en chat del servicio?
-    final svcClienteMsg = _serviciosActivosData
-        .where((s) => s['chat_movil'] == true)
-        .firstOrNull;
+    final svcClienteMsg =
+        _serviciosActivosData.where((s) => s['chat_movil'] == true).firstOrNull;
     if (svcClienteMsg != null) {
       Supabase.instance.client
           .from('servicios')
@@ -1494,8 +1493,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     try {
       final data = await Supabase.instance.client
           .from('usuarios')
-          .select(
-              'id, nombre, en_linea, paradero_actual, ingreso_fila, '
+          .select('id, nombre, en_linea, paradero_actual, ingreso_fila, '
               'ticket_prioridad, rango_movil, numero_movil')
           .eq('rol', 'movil')
           .eq('en_linea', true);
@@ -1527,9 +1525,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     // Clave de deduplicación: "id:paradero" de cada usuario en fila.
     // Si es igual a lo anterior, no actualizar el notifier — evita rebuilds
     // por GPS updates que no cambian la composición ni el orden de la cola.
-    final nuevaClave = nuevaFila
-        .map((u) => '${u['id']}:${u['paradero_actual']}')
-        .join(',');
+    final nuevaClave =
+        nuevaFila.map((u) => '${u['id']}:${u['paradero_actual']}').join(',');
     final viejaClave = _filaNotifier.value
         .map((u) => '${u['id']}:${u['paradero_actual']}')
         .join(',');
@@ -1587,8 +1584,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     _subMiPerfil?.cancel();
     final crudoMiPerfil = Supabase.instance.client
         .from('usuarios')
-        .stream(primaryKey: ['id'])
-        .eq('id', widget.usuario['id']);
+        .stream(primaryKey: ['id']).eq('id', widget.usuario['id']);
     _subMiPerfil = crudoMiPerfil.listen(
       (data) {
         if (data.isNotEmpty) {
@@ -1665,10 +1661,14 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         if (!_ctrlServicios.isClosed) _ctrlServicios.add(data);
         _verificarTransferenciaEntrante(List<Map<String, dynamic>>.from(data));
         // Actualizar conteo de chats pendientes: central por servicio + cliente/local
-        _svcChatCount = data.where((s) =>
-            s['chat_central_movil'] == true || s['chat_movil'] == true).length;
+        _svcChatCount = data
+            .where((s) =>
+                s['chat_central_movil'] == true || s['chat_movil'] == true)
+            .length;
         _chatCentralTotal.value = _svcChatCount +
-            ((_cacheMiPerfil ?? widget.usuario)['chat_central'] == true ? 1 : 0);
+            ((_cacheMiPerfil ?? widget.usuario)['chat_central'] == true
+                ? 1
+                : 0);
       },
       onError: (e) {
         // #91: si hay caché, mantenerlo visible; no propagar el error al StreamBuilder.
@@ -1713,6 +1713,33 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                   if (!_ctrlServicios.isClosed)
                     _ctrlServicios.add(_cacheServicios!);
                   _verificarTransferenciaEntrante(_cacheServicios!);
+
+                  // ── AUTOASIGNACIÓN: sacar del paradero ──────────────────
+                  // Si pg_cron asignó este móvil a un servicio activo,
+                  // limpiamos el paradero igual que si hubiera aceptado
+                  // manualmente — evita que quede como "fantasma" en fila.
+                  if (_miParaderoCache != null) {
+                    final miId = widget.usuario['id'].toString();
+                    final fueAutoAsignado = _cacheServicios!.any((s) {
+                      final sMovilId = s['movil_id']?.toString() ?? '';
+                      final sEstado = s['estado']?.toString() ?? '';
+                      return sMovilId == miId &&
+                          (sEstado == 'en_ruta_origen' ||
+                              sEstado == 'en_origen' ||
+                              sEstado == 'en_ruta_destino');
+                    });
+                    if (fueAutoAsignado) {
+                      _miParaderoCache = null;
+                      Supabase.instance.client
+                          .from('usuarios')
+                          .update({
+                            'paradero_actual': null,
+                            'ingreso_fila': null,
+                          })
+                          .eq('id', miId)
+                          .catchError((_) {});
+                    }
+                  }
                 })
                 .catchError((_) {});
           },
@@ -2599,6 +2626,10 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
           'ingreso_fila': tieneTicket
               ? '2000-01-01T00:00:00Z'
               : DateTime.now().toUtc().toIso8601String(),
+          // Actualizar posición para que el radar de la central
+          // muestre al móvil en el paradero, no en su última posición.
+          'latitud': pos.latitude,
+          'longitud': pos.longitude,
         }).eq('id', widget.usuario['id']);
         _miParaderoCache = nuevoParadero; // sincroniza la caché de geocerca
 
@@ -4143,8 +4174,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       // OPT: solo mi propia fila — no se reconstruye por GPS de otros.
       stream: _streamMiPerfil,
       builder: (context, snap) {
-        final miPerfil =
-            snap.data ?? _cacheMiPerfil ?? widget.usuario;
+        final miPerfil = snap.data ?? _cacheMiPerfil ?? widget.usuario;
 
         final String rango =
             miPerfil['rango_movil']?.toString().toUpperCase() ?? 'NOVATO';
@@ -6907,7 +6937,6 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
   // OPT: recibe la lista ya filtrada y ordenada desde _filaNotifier
   // (solo usuarios en línea con paradero asignado — sin filtrar aquí).
   Widget _construirFilaVirtual(List<Map<String, dynamic>> enFila) {
-
     if (enFila.isEmpty) return const SizedBox.shrink();
 
     // Resumen para el encabezado colapsado: cuántos en total, y mi
@@ -7222,6 +7251,87 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
 
   bool _esMototaxi(dynamic tipo) =>
       tipo?.toString().toUpperCase() == 'MOTOTAXI';
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // FOTO DE COMANDA — selección + compresión + upload + guardado de URL
+  // ─────────────────────────────────────────────────────────────────────────
+  Future<void> _subirFotoComanda(Map<String, dynamic> servicio) async {
+    final ctx = context;
+    // 1) Elegir fuente (cámara o galería)
+    final fuente = await showModalBottomSheet<ImageSource>(
+      context: ctx,
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.camera_alt),
+              title: const Text('Tomar foto'),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library),
+              title: const Text('Elegir de galería'),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (fuente == null) return;
+
+    // 2) Capturar imagen con compresión al 65%
+    final picker = ImagePicker();
+    final XFile? foto = await picker.pickImage(
+      source: fuente,
+      imageQuality: 65,
+      maxWidth: 1200,
+    );
+    if (foto == null) return;
+
+    final servicioId = servicio['id'].toString();
+    final bytes = await foto.readAsBytes();
+
+    // 3) Subir a Supabase Storage: bucket "comandas"
+    try {
+      await Supabase.instance.client.storage.from('comandas').uploadBinary(
+            '$servicioId.jpg',
+            bytes,
+            fileOptions: const FileOptions(
+              contentType: 'image/jpeg',
+              upsert: true,
+            ),
+          );
+
+      final url = Supabase.instance.client.storage
+          .from('comandas')
+          .getPublicUrl('$servicioId.jpg');
+
+      // 4) Guardar URL en la fila del servicio
+      await Supabase.instance.client
+          .from('servicios')
+          .update({'foto_comanda_url': url}).eq('id', int.parse(servicioId));
+
+      // 5) Actualizar la cache local para reflejar en la tarjeta
+      if (mounted) {
+        setState(() {
+          final idx = _cacheServicios
+                  ?.indexWhere((s) => s['id'].toString() == servicioId) ??
+              -1;
+          if (idx != -1) _cacheServicios![idx]['foto_comanda_url'] = url;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('✅ Foto de comanda subida')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al subir foto: $e')),
+        );
+      }
+    }
+  }
 
   Widget _construirTarjetaActiva(
     Map<String, dynamic> servicio, {
@@ -7680,8 +7790,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text('⚠ ',
-                        style:
-                            TextStyle(fontSize: 11, color: Colors.orange)),
+                        style: TextStyle(fontSize: 11, color: Colors.orange)),
                     const Expanded(
                       child: Text(
                         'Las ubicaciones GPS no son exactas. Verifica bien el destino y pide la dirección exacta al cliente.',
@@ -8010,7 +8119,9 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                             servicioId: servicio['id'],
                                             alarmaLocal: 'chat_movil',
                                             alarmaDestino: 'chat_cliente',
-                                            destinatarioId: (servicio['cliente_id'] as num?)?.toInt(),
+                                            destinatarioId:
+                                                (servicio['cliente_id'] as num?)
+                                                    ?.toInt(),
                                             tipoFaq: TipoFaqChat.movil,
                                           ),
                                         ),
@@ -8057,6 +8168,80 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                     }
                   },
                 ),
+              ),
+            // ── FOTO DE COMANDA (solo en_origen, solo SE) ──────────────────────────
+            if (estado == 'en_origen' &&
+                !_esMototaxi(servicio['tipo_servicio']))
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Builder(builder: (_) {
+                  final fotoUrl = servicio['foto_comanda_url']?.toString();
+                  if (fotoUrl != null && fotoUrl.isNotEmpty) {
+                    // Ya tiene foto: mostrar miniatura con opción de reemplazar
+                    return GestureDetector(
+                      onTap: () => _subirFotoComanda(servicio),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.green[300]!),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(7),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Image.network(
+                                fotoUrl,
+                                height: 120,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => const SizedBox(
+                                    height: 60,
+                                    child: Center(
+                                        child: Icon(Icons.broken_image,
+                                            color: Colors.grey))),
+                              ),
+                              Container(
+                                color: Colors.green[50],
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 4),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.check_circle,
+                                        size: 14, color: Colors.green[700]),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                        'Foto de comanda cargada — toca para reemplazar',
+                                        style: TextStyle(
+                                            fontSize: 11,
+                                            color: Colors.green[800])),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  }
+                  // Sin foto: botón opcional
+                  return SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.brown[700],
+                        side: BorderSide(color: Colors.brown[300]!),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                      ),
+                      onPressed: () => _subirFotoComanda(servicio),
+                      icon: const Text('📷', style: TextStyle(fontSize: 16)),
+                      label: const Text(
+                        'Foto comanda (opcional)',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w600, fontSize: 13),
+                      ),
+                    ),
+                  );
+                }),
               ),
             // --------------------------------------------------------------------------
             AnimatedSwitcher(
@@ -8236,7 +8421,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: Colors.indigo[900],
+                  color: const Color(0xFF002da2),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: const Text('FN',
@@ -8329,8 +8514,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide:
-                          BorderSide(color: Colors.indigo[900]!, width: 1.5),
+                      borderSide: BorderSide(
+                          color: const Color(0xFF002da2), width: 1.5),
                     ),
                   ),
                   onChanged: (_) => setS(() {}),
@@ -8641,7 +8826,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                        color: Colors.indigo[900],
+                        color: const Color(0xFF002da2),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: const Text('FN',
@@ -8714,8 +8899,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide:
-                          BorderSide(color: Colors.indigo[900]!, width: 1.5),
+                      borderSide: BorderSide(
+                          color: const Color(0xFF002da2), width: 1.5),
                     ),
                   ),
                   onChanged: (_) => setSheet(() {}),
@@ -9004,7 +9189,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         'factura': "'$factura", // comilla preserva ceros a la izq. en Sheets
         'valor': tarifa.toString(),
         'direccion': destino,
-        'imagen': imagenBase64 ?? '', // siempre presente para evitar undefined en GAS
+        'imagen':
+            imagenBase64 ?? '', // siempre presente para evitar undefined en GAS
       };
       final payload = jsonEncode(payloadMap);
 
@@ -9119,7 +9305,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                     padding:
                         const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
-                      color: Colors.indigo[900],
+                      color: const Color(0xFF002da2),
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: const Text('FN',
@@ -9139,8 +9325,9 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 15,
-                            color:
-                                tieneProblema ? Colors.red : Colors.indigo[900],
+                            color: tieneProblema
+                                ? Colors.red
+                                : const Color(0xFF002da2),
                           ),
                         ),
                         Text(
@@ -9222,7 +9409,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     } else if (estado == 'en_ruta_origen') {
       botonAccion = ElevatedButton(
         style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.indigo[900],
+          backgroundColor: const Color(0xFF002da2),
           foregroundColor: Colors.white,
           elevation: 4,
         ),
@@ -9266,7 +9453,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
             )
           : BotonPresionSostenida(
               texto: '🏁 MANTÉN PRESIONADO PARA ENTREGAR',
-              colorBase: Colors.indigo[900]!,
+              colorBase: const Color(0xFF002da2),
               colorTexto: Colors.white,
               onInicio: () => _sonidos.reproducirSuave(Sonidos.movilFinalizar),
               onCompletado: () => _finalizarServicio(servicio, tieneProblema),
@@ -9297,7 +9484,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                   decoration: BoxDecoration(
-                    color: Colors.indigo[900],
+                    color: const Color(0xFF002da2),
                     borderRadius: BorderRadius.circular(5),
                   ),
                   child: const Text('FN',
@@ -9365,21 +9552,24 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // Zona + sector (una línea pequeña)
-                  if (servicio['zona_fn'] != null || servicio['fn_sector_sede'] != null)
+                  if (servicio['zona_fn'] != null ||
+                      servicio['fn_sector_sede'] != null)
                     Text(
                       () {
                         final z = servicio['zona_fn'] != null
                             ? _fnZonaLabel(servicio['zona_fn'] as String)
                             : '';
                         final s = servicio['fn_sector_sede'] as String? ?? '';
-                        return [if (z.isNotEmpty) z, if (s.isNotEmpty) s].join(' - ');
+                        return [if (z.isNotEmpty) z, if (s.isNotEmpty) s]
+                            .join(' - ');
                       }(),
                       style: TextStyle(
                           color: Colors.indigo[600],
                           fontWeight: FontWeight.w500,
                           fontSize: 11),
                     ),
-                  if (servicio['zona_fn'] != null || servicio['fn_sector_sede'] != null)
+                  if (servicio['zona_fn'] != null ||
+                      servicio['fn_sector_sede'] != null)
                     const SizedBox(height: 6),
 
                   // ── SOLICITANTE ───────────────────────────────────────
@@ -9868,16 +10058,15 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                       style: ElevatedButton.styleFrom(
                         backgroundColor: servicio['fn_factura_numero'] != null
                             ? Colors.blueGrey[700]
-                            : Colors.indigo[900],
+                            : const Color(0xFF002da2),
                         foregroundColor: Colors.white,
                         padding: EdgeInsets.zero,
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(7)),
                       ),
-                      onPressed: () =>
-                          servicio['tipo_fn'] == true
-                              ? _mostrarDialogoFacturaSede(servicio)
-                              : _mostrarFormularioFactura(servicio),
+                      onPressed: () => servicio['tipo_fn'] == true
+                          ? _mostrarDialogoFacturaSede(servicio)
+                          : _mostrarFormularioFactura(servicio),
                       icon: Icon(
                         servicio['fn_factura_numero'] != null
                             ? Icons.receipt_long
@@ -9894,7 +10083,6 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                     ),
                   ),
                 ),
-
 
                 // Chat con Central removido de la card FN:
                 // el FAB pulsante maneja todos los mensajes de la central.
@@ -10064,7 +10252,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                     Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: Colors.indigo[900]!.withValues(alpha: 0.1),
+                        color: const Color(0xFF002da2).withValues(alpha: 0.1),
                         shape: BoxShape.circle,
                       ),
                       child: Icon(Icons.local_pharmacy,
@@ -10080,7 +10268,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                 style: TextStyle(
                                     fontWeight: FontWeight.bold,
                                     fontSize: 14,
-                                    color: Colors.indigo[900])),
+                                    color: const Color(0xFF002da2))),
                             const SizedBox(width: 6),
                             if (consecutivo.isNotEmpty)
                               Container(
@@ -10144,7 +10332,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                     Expanded(
                       child: Text(servicio['origen']?.toString() ?? '—',
                           style: TextStyle(
-                              color: Colors.indigo[900],
+                              color: const Color(0xFF002da2),
                               fontSize: 12,
                               fontWeight: FontWeight.bold)),
                     ),
@@ -10294,7 +10482,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                   height: 42,
                   child: ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.indigo[900],
+                      backgroundColor: const Color(0xFF002da2),
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8)),
                     ),
@@ -10330,7 +10518,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.indigo[900]!.withValues(alpha: 0.1),
+                  color: const Color(0xFF002da2).withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
                 child: Icon(Icons.local_pharmacy,
@@ -10361,7 +10549,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                 height: 45,
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.indigo[900],
+                    backgroundColor: const Color(0xFF002da2),
                     padding: const EdgeInsets.symmetric(horizontal: 20),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8)),
@@ -10751,15 +10939,16 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     // ---------------------------------------------
 
     final String destinoActual = servicio['destino']?.toString().trim() ?? '';
-    final String tipoSvcAcep = servicio['tipo_servicio']?.toString().toUpperCase().trim() ?? '';
+    final String tipoSvcAcep =
+        servicio['tipo_servicio']?.toString().toUpperCase().trim() ?? '';
     final bool esRecogidaLocalAcep = tipoSvcAcep == 'RECOGIDA LOCAL';
 
     // Los servicios de RECOGIDA LOCAL no necesitan destino — el punto de entrega
     // es el propio local, así que saltamos el diálogo de destino en blanco.
     if (!esRecogidaLocalAcep &&
         (destinoActual.isEmpty ||
-        destinoActual.toLowerCase() == 'n/a' ||
-        destinoActual.length < 3)) {
+            destinoActual.toLowerCase() == 'n/a' ||
+            destinoActual.length < 3)) {
       final destinoCtrl = TextEditingController();
       showDialog(
         context: context,
@@ -13235,8 +13424,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                             widget.usuario['id'].toString(),
                                       );
 
-                                      if (miTurnoIndex == 0 ||
-                                          miFila.isEmpty) {
+                                      if (miTurnoIndex == 0 || miFila.isEmpty) {
                                         radarAbierto = true;
                                       } else if (miTurnoIndex > 0) {
                                         radarAbierto = false;
@@ -13249,985 +13437,964 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                       }
                                     }
 
-                                return Column(
-                                  children: [
-                                    Container(
-                                      margin: const EdgeInsets.fromLTRB(
-                                          12, 12, 12, 4),
-                                      decoration: BoxDecoration(
-                                        color: Colors.white,
-                                        borderRadius: BorderRadius.circular(14),
-                                        border: Border.all(
-                                            color: Colors.grey[200]!),
-                                      ),
-                                      child: Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 14, vertical: 12),
-                                        child: Row(
-                                          children: [
-                                            // Ícono de estado en círculo de color
-                                            Container(
-                                              width: 44,
-                                              height: 44,
-                                              decoration: BoxDecoration(
-                                                color: _statusColor.withValues(
-                                                    alpha: 0.12),
-                                                shape: BoxShape.circle,
-                                              ),
-                                              child: AnimatedSwitcher(
-                                                duration: Duration.zero,
-                                                child: Icon(
-                                                  key: ValueKey(_statusLabel),
-                                                  _estaEnLinea
-                                                      ? (paraderoActual != null
-                                                          ? Icons.location_on
-                                                          : Icons.gps_fixed)
-                                                      : Icons.gps_off,
-                                                  color: _statusColor,
-                                                  size: 22,
-                                                ),
-                                              ),
-                                            ),
-                                            const SizedBox(width: 12),
-                                            // Estado + paradero
-                                            Expanded(
-                                              child: AnimatedSwitcher(
-                                                duration: Duration.zero,
-                                                transitionBuilder:
-                                                    (child, anim) =>
-                                                        FadeTransition(
-                                                  opacity: anim,
-                                                  child: SlideTransition(
-                                                    position: Tween<Offset>(
-                                                            begin: const Offset(
-                                                                0, 0.3),
-                                                            end: Offset.zero)
-                                                        .animate(
-                                                            CurvedAnimation(
-                                                                parent: anim,
-                                                                curve: Curves
-                                                                    .easeOut)),
-                                                    child: child,
+                                    return Column(
+                                      children: [
+                                        Container(
+                                          margin: const EdgeInsets.fromLTRB(
+                                              12, 12, 12, 4),
+                                          decoration: BoxDecoration(
+                                            color: Colors.white,
+                                            borderRadius:
+                                                BorderRadius.circular(14),
+                                            border: Border.all(
+                                                color: Colors.grey[200]!),
+                                          ),
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 14, vertical: 12),
+                                            child: Row(
+                                              children: [
+                                                // Ícono de estado en círculo de color
+                                                Container(
+                                                  width: 44,
+                                                  height: 44,
+                                                  decoration: BoxDecoration(
+                                                    color:
+                                                        _statusColor.withValues(
+                                                            alpha: 0.12),
+                                                    shape: BoxShape.circle,
+                                                  ),
+                                                  child: AnimatedSwitcher(
+                                                    duration: Duration.zero,
+                                                    child: Icon(
+                                                      key: ValueKey(
+                                                          _statusLabel),
+                                                      _estaEnLinea
+                                                          ? (paraderoActual !=
+                                                                  null
+                                                              ? Icons
+                                                                  .location_on
+                                                              : Icons.gps_fixed)
+                                                          : Icons.gps_off,
+                                                      color: _statusColor,
+                                                      size: 22,
+                                                    ),
                                                   ),
                                                 ),
-                                                child: Column(
-                                                  key: ValueKey(
-                                                      '$_statusLabel::${paraderoActual ?? ''}'),
-                                                  crossAxisAlignment:
-                                                      CrossAxisAlignment.start,
-                                                  children: [
-                                                    Text(
-                                                      _statusLabel,
-                                                      style: const TextStyle(
-                                                        fontWeight:
-                                                            FontWeight.bold,
-                                                        fontSize: 13,
-                                                        color: Colors.black87,
+                                                const SizedBox(width: 12),
+                                                // Estado + paradero
+                                                Expanded(
+                                                  child: AnimatedSwitcher(
+                                                    duration: Duration.zero,
+                                                    transitionBuilder:
+                                                        (child, anim) =>
+                                                            FadeTransition(
+                                                      opacity: anim,
+                                                      child: SlideTransition(
+                                                        position: Tween<Offset>(
+                                                                begin:
+                                                                    const Offset(
+                                                                        0, 0.3),
+                                                                end: Offset
+                                                                    .zero)
+                                                            .animate(
+                                                                CurvedAnimation(
+                                                                    parent:
+                                                                        anim,
+                                                                    curve: Curves
+                                                                        .easeOut)),
+                                                        child: child,
                                                       ),
                                                     ),
-                                                    if (paraderoActual != null)
-                                                      Text(
-                                                        paraderoActual,
-                                                        style: TextStyle(
-                                                          fontSize: 11,
-                                                          color:
-                                                              Colors.grey[600],
-                                                          letterSpacing: 0.4,
+                                                    child: Column(
+                                                      key: ValueKey(
+                                                          '$_statusLabel::${paraderoActual ?? ''}'),
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
+                                                        Text(
+                                                          _statusLabel,
+                                                          style:
+                                                              const TextStyle(
+                                                            fontWeight:
+                                                                FontWeight.bold,
+                                                            fontSize: 13,
+                                                            color:
+                                                                Colors.black87,
+                                                          ),
                                                         ),
-                                                      ),
-                                                  ],
+                                                        if (paraderoActual !=
+                                                            null)
+                                                          Text(
+                                                            paraderoActual,
+                                                            style: TextStyle(
+                                                              fontSize: 11,
+                                                              color: Colors
+                                                                  .grey[600],
+                                                              letterSpacing:
+                                                                  0.4,
+                                                            ),
+                                                          ),
+                                                      ],
+                                                    ),
+                                                  ),
                                                 ),
-                                              ),
-                                            ),
-                                            // Botón conectar/desconectar
-                                            Container(
-                                              decoration: BoxDecoration(
-                                                color: _estaEnLinea
-                                                    ? Colors.red[800]
-                                                    : Colors.black,
-                                                borderRadius:
-                                                    BorderRadius.circular(8),
-                                              ),
-                                              child: ElevatedButton(
-                                                style: ElevatedButton.styleFrom(
-                                                  backgroundColor:
-                                                      Colors.transparent,
-                                                  shadowColor:
-                                                      Colors.transparent,
-                                                  padding: const EdgeInsets
-                                                      .symmetric(
-                                                      horizontal: 18,
-                                                      vertical: 10),
-                                                  shape: RoundedRectangleBorder(
+                                                // Botón conectar/desconectar
+                                                Container(
+                                                  decoration: BoxDecoration(
+                                                    color: _estaEnLinea
+                                                        ? Colors.red[800]
+                                                        : Colors.black,
                                                     borderRadius:
                                                         BorderRadius.circular(
                                                             8),
                                                   ),
-                                                ),
-                                                onPressed: _procesando
-                                                    ? null
-                                                    : _cambiarEstado,
-                                                child: AnimatedSwitcher(
-                                                  duration: Duration.zero,
-                                                  child: _procesando
-                                                      ? SizedBox(
-                                                          key: ValueKey(
-                                                              'loading'),
-                                                          width: 18,
-                                                          height: 18,
-                                                          child:
-                                                              CircularProgressIndicator(
-                                                            color: Colors.white,
-                                                            strokeWidth: 2,
-                                                          ),
-                                                        )
-                                                      : Text(
-                                                          key: ValueKey(
-                                                              _estaEnLinea),
-                                                          _estaEnLinea
-                                                              ? 'DESCONECTAR'
-                                                              : 'CONECTARSE',
-                                                          style: TextStyle(
-                                                            fontSize: 12,
-                                                            color: _estaEnLinea
-                                                                ? Colors.white
-                                                                : const Color(
-                                                                    0xff3AF500),
-                                                            fontWeight:
-                                                                FontWeight.bold,
-                                                          ),
-                                                        ),
-                                                ),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                    Expanded(
-                                      child: AnimatedSwitcher(
-                                        duration: Duration.zero,
-                                        switchInCurve: Curves.easeOut,
-                                        switchOutCurve: Curves.easeIn,
-                                        transitionBuilder: (child, anim) =>
-                                            FadeTransition(
-                                          opacity: anim,
-                                          child: child,
-                                        ),
-                                        child: !_estaEnLinea
-                                            ? const Center(
-                                                key: ValueKey('offline_area'),
-                                                child: Text(
-                                                  'ESTÁS FUERA DE LÍNEA\nConéctate para recibir servicios.',
-                                                  textAlign: TextAlign.center,
-                                                  style: TextStyle(
-                                                    color: Colors.grey,
-                                                    fontSize: 16,
-                                                    fontWeight: FontWeight.bold,
+                                                  child: ElevatedButton(
+                                                    style: ElevatedButton
+                                                        .styleFrom(
+                                                      backgroundColor:
+                                                          Colors.transparent,
+                                                      shadowColor:
+                                                          Colors.transparent,
+                                                      padding: const EdgeInsets
+                                                          .symmetric(
+                                                          horizontal: 18,
+                                                          vertical: 10),
+                                                      shape:
+                                                          RoundedRectangleBorder(
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .circular(8),
+                                                      ),
+                                                    ),
+                                                    onPressed: _procesando
+                                                        ? null
+                                                        : _cambiarEstado,
+                                                    child: AnimatedSwitcher(
+                                                      duration: Duration.zero,
+                                                      child: _procesando
+                                                          ? SizedBox(
+                                                              key: ValueKey(
+                                                                  'loading'),
+                                                              width: 18,
+                                                              height: 18,
+                                                              child:
+                                                                  CircularProgressIndicator(
+                                                                color: Colors
+                                                                    .white,
+                                                                strokeWidth: 2,
+                                                              ),
+                                                            )
+                                                          : Text(
+                                                              key: ValueKey(
+                                                                  _estaEnLinea),
+                                                              _estaEnLinea
+                                                                  ? 'DESCONECTAR'
+                                                                  : 'CONECTARSE',
+                                                              style: TextStyle(
+                                                                fontSize: 12,
+                                                                color: _estaEnLinea
+                                                                    ? Colors
+                                                                        .white
+                                                                    : const Color(
+                                                                        0xff3AF500),
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .bold,
+                                                              ),
+                                                            ),
+                                                    ),
                                                   ),
                                                 ),
-                                              )
-                                            : StreamBuilder<
-                                                List<Map<String, dynamic>>>(
-                                                key: const ValueKey(
-                                                    'online_area'),
-                                                stream: _streamServicios,
-                                                initialData:
-                                                    _cacheServicios, // evita spinner al conectarse
-                                                builder: (context, snapshot) {
-                                                  if (snapshot.hasError)
-                                                    return _pantallaErrorStream(
-                                                        'servicios',
-                                                        snapshot.error);
-                                                  if (!snapshot.hasData)
-                                                    return const Center(
-                                                      child:
-                                                          CircularProgressIndicator(
-                                                        color: Colors.black,
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                        Expanded(
+                                          child: AnimatedSwitcher(
+                                            duration: Duration.zero,
+                                            switchInCurve: Curves.easeOut,
+                                            switchOutCurve: Curves.easeIn,
+                                            transitionBuilder: (child, anim) =>
+                                                FadeTransition(
+                                              opacity: anim,
+                                              child: child,
+                                            ),
+                                            child: !_estaEnLinea
+                                                ? const Center(
+                                                    key: ValueKey(
+                                                        'offline_area'),
+                                                    child: Text(
+                                                      'ESTÁS FUERA DE LÍNEA\nConéctate para recibir servicios.',
+                                                      textAlign:
+                                                          TextAlign.center,
+                                                      style: TextStyle(
+                                                        color: Colors.grey,
+                                                        fontSize: 16,
+                                                        fontWeight:
+                                                            FontWeight.bold,
                                                       ),
-                                                    );
-                                                  final todos =
-                                                      snapshot.data ?? [];
+                                                    ),
+                                                  )
+                                                : StreamBuilder<
+                                                    List<Map<String, dynamic>>>(
+                                                    key: const ValueKey(
+                                                        'online_area'),
+                                                    stream: _streamServicios,
+                                                    initialData:
+                                                        _cacheServicios, // evita spinner al conectarse
+                                                    builder:
+                                                        (context, snapshot) {
+                                                      if (snapshot.hasError)
+                                                        return _pantallaErrorStream(
+                                                            'servicios',
+                                                            snapshot.error);
+                                                      if (!snapshot.hasData)
+                                                        return const Center(
+                                                          child:
+                                                              CircularProgressIndicator(
+                                                            color: Colors.black,
+                                                          ),
+                                                        );
+                                                      final todos =
+                                                          snapshot.data ?? [];
 
-                                                  _serviciosActivosData = todos
-                                                      .where(
-                                                        (s) =>
-                                                            s['movil_id'] ==
-                                                                widget.usuario[
-                                                                    'id'] &&
-                                                            [
-                                                              'en_ruta_origen',
-                                                              'en_origen',
-                                                              'en_ruta_destino',
-                                                              'problema',
-                                                            ].contains(
-                                                                s['estado']) &&
-                                                            !_serviciosOcultosLocales
-                                                                .contains(
-                                                                    s['id']),
-                                                      )
-                                                      .toList();
+                                                      _serviciosActivosData =
+                                                          todos
+                                                              .where(
+                                                                (s) =>
+                                                                    s['movil_id'] ==
+                                                                        widget.usuario[
+                                                                            'id'] &&
+                                                                    [
+                                                                      'en_ruta_origen',
+                                                                      'en_origen',
+                                                                      'en_ruta_destino',
+                                                                      'problema',
+                                                                    ].contains(s[
+                                                                        'estado']) &&
+                                                                    !_serviciosOcultosLocales
+                                                                        .contains(
+                                                                            s['id']),
+                                                              )
+                                                              .toList();
 
-                                                  // SAFETY NET: si el móvil reconecta con un servicio activo
-                                                  // pero paradero_actual quedó sucio de la sesión anterior,
-                                                  // lo expulsamos de la fila automáticamente.
-                                                  if (_miParaderoCache !=
-                                                          null &&
-                                                      _serviciosActivosData
-                                                          .isNotEmpty) {
-                                                    final paraderoQueDejo =
-                                                        _miParaderoCache;
-                                                    _miParaderoCache =
-                                                        null; // evita re-disparar en siguientes builds
-                                                    WidgetsBinding.instance
-                                                        .addPostFrameCallback(
-                                                            (_) async {
-                                                      if (!mounted) {
+                                                      // SAFETY NET: si el móvil reconecta con un servicio activo
+                                                      // pero paradero_actual quedó sucio de la sesión anterior,
+                                                      // lo expulsamos de la fila automáticamente.
+                                                      if (_miParaderoCache !=
+                                                              null &&
+                                                          _serviciosActivosData
+                                                              .isNotEmpty) {
+                                                        final paraderoQueDejo =
+                                                            _miParaderoCache;
                                                         _miParaderoCache =
-                                                            paraderoQueDejo;
-                                                        return;
+                                                            null; // evita re-disparar en siguientes builds
+                                                        WidgetsBinding.instance
+                                                            .addPostFrameCallback(
+                                                                (_) async {
+                                                          if (!mounted) {
+                                                            _miParaderoCache =
+                                                                paraderoQueDejo;
+                                                            return;
+                                                          }
+                                                          try {
+                                                            await Supabase
+                                                                .instance.client
+                                                                .from(
+                                                                    'usuarios')
+                                                                .update({
+                                                              'paradero_actual':
+                                                                  null,
+                                                              'ingreso_fila':
+                                                                  null,
+                                                            }).eq(
+                                                                    'id',
+                                                                    widget.usuario[
+                                                                        'id']);
+                                                            if (mounted) {
+                                                              ScaffoldMessenger
+                                                                      .of(context)
+                                                                  .showSnackBar(
+                                                                SnackBar(
+                                                                  content: Text(
+                                                                    '📍 Tienes un servicio activo — te sacamos de la fila $paraderoQueDejo.',
+                                                                  ),
+                                                                  backgroundColor:
+                                                                      Colors.orange[
+                                                                          800],
+                                                                  duration:
+                                                                      const Duration(
+                                                                          seconds:
+                                                                              4),
+                                                                ),
+                                                              );
+                                                            }
+                                                          } catch (_) {
+                                                            _miParaderoCache =
+                                                                paraderoQueDejo; // reintento en próximo tick
+                                                          }
+                                                        });
                                                       }
-                                                      try {
-                                                        await Supabase
-                                                            .instance.client
-                                                            .from('usuarios')
-                                                            .update({
-                                                          'paradero_actual':
-                                                              null,
-                                                          'ingreso_fila': null,
-                                                        }).eq(
-                                                                'id',
-                                                                widget.usuario[
-                                                                    'id']);
-                                                        if (mounted) {
-                                                          ScaffoldMessenger.of(
-                                                                  context)
-                                                              .showSnackBar(
-                                                            SnackBar(
-                                                              content: Text(
-                                                                '📍 Tienes un servicio activo — te sacamos de la fila $paraderoQueDejo.',
-                                                              ),
-                                                              backgroundColor:
-                                                                  Colors.orange[
-                                                                      800],
-                                                              duration:
-                                                                  const Duration(
-                                                                      seconds:
-                                                                          4),
+
+                                                      // Actualizar _tieneServicioActivo en el próximo frame
+                                                      // para que el AppBar lo refleje sin llamar setState dentro de build().
+                                                      final hayServicio =
+                                                          _serviciosActivosData
+                                                              .isNotEmpty;
+                                                      if (hayServicio !=
+                                                          _tieneServicioActivo) {
+                                                        WidgetsBinding.instance
+                                                            .addPostFrameCallback(
+                                                                (_) {
+                                                          if (mounted)
+                                                            setState(() =>
+                                                                _tieneServicioActivo =
+                                                                    hayServicio);
+                                                        });
+                                                      }
+
+                                                      // Límite de servicios simultáneos según rango
+                                                      final int limiteRango =
+                                                          _limitePorRango(
+                                                        miPerfilEnVivo[
+                                                                'rango_movil']
+                                                            ?.toString(),
+                                                      );
+                                                      final bool
+                                                          tieneCapacidad =
+                                                          _serviciosActivosData
+                                                                  .length <
+                                                              limiteRango;
+                                                      bool tienePermisoDeRadar =
+                                                          tieneCapacidad &&
+                                                              radarAbierto;
+
+                                                      // --- EMBUDO TÁCTICO DE TIEMPOS Y PARADEROS (JERARQUÍA MASTER) ---
+                                                      final ahoraUtc =
+                                                          DateTime.now()
+                                                              .toUtc();
+                                                      List<Map<String, dynamic>>
+                                                          pendientes = [];
+
+                                                      final bool esMaster =
+                                                          miPerfilEnVivo[
+                                                                      'rango_movil']
+                                                                  ?.toString()
+                                                                  .toUpperCase() ==
+                                                              'MASTER';
+                                                      final Distance
+                                                          medidorDistancia =
+                                                          const Distance();
+
+                                                      // Helper: tiempo canónico de un servicio (GREATEST fix)
+                                                      DateTime _canonTime(
+                                                          Map<String, dynamic>
+                                                              s) {
+                                                        final ca = s[
+                                                                    'created_at'] !=
+                                                                null
+                                                            ? DateTime.parse(s[
+                                                                    'created_at'])
+                                                                .toUtc()
+                                                            : ahoraUtc;
+                                                        final lib = s[
+                                                                    'liberacion_at'] !=
+                                                                null
+                                                            ? DateTime.parse(s[
+                                                                    'liberacion_at'])
+                                                                .toUtc()
+                                                            : null;
+                                                        return (lib != null &&
+                                                                lib.isAfter(ca))
+                                                            ? lib
+                                                            : ca;
+                                                      }
+
+                                                      for (var s in todos.where(
+                                                        (x) =>
+                                                            x['estado'] ==
+                                                            'pendiente',
+                                                      )) {
+                                                        if (_serviciosOcultosLocales
+                                                            .contains(
+                                                                s['id'])) {
+                                                          continue;
+                                                        }
+
+                                                        // 1. Leemos el reloj inteligente (GREATEST fix)
+                                                        final targetUtc =
+                                                            _canonTime(s);
+                                                        final int segundos =
+                                                            ahoraUtc
+                                                                .difference(
+                                                                    targetUtc)
+                                                                .inSeconds;
+
+                                                        // 2. FILTRO FANTASMA (Diferidos):
+                                                        if (segundos < 0 &&
+                                                            !esMaster) continue;
+
+                                                        bool puedeVer = false;
+
+                                                        // ═══ REGLA FN (FARMANORTE) — escalamiento 3 fases ═══
+                                                        // Sistema PROPIO de FN — completamente separado del
+                                                        // embudo de paraderos/zonas de Serviexpress normal.
+                                                        //
+                                                        // El timing se mide desde fn_radar_t0 (momento exacto
+                                                        // en que el servicio entró al radar). Si fn_radar_t0
+                                                        // no está seteado (servicios legacy), cae a created_at.
+                                                        //
+                                                        //  FASE 1 (0–30s)   → SOLO Masters (card con detalles + aceptar)
+                                                        //  FASE 2 (30–60s)  → Auto-asignación via pg_cron al más cercano
+                                                        //                     (fn_fase2_movil_id). Masters ven como fallback.
+                                                        //  FASE 3 (60–90s)  → No-masters en radio 2km (card + aceptar)
+                                                        //  FASE 4 (90s+)    → Todos los FN habilitados (card + aceptar)
+                                                        //
+                                                        // Para servicios FN el límite de capacidad NO aplica:
+                                                        // los móviles pueden recibir y ver todos los servicios
+                                                        // FN independientemente de sus servicios activos.
+                                                        if (s['tipo_fn'] ==
+                                                            true) {
+                                                          // ── ASIGNACIÓN DIRECTA (directo_presel) ─────────
+                                                          // Verificar PRIMERO si ya tiene movil_id asignado.
+                                                          // Si soy el asignado → mostrar sin importar rango ni fase.
+                                                          // Si es otro → invisible para mí (incluidos Masters).
+                                                          // Se evalúa antes de tienePermFN para que un Novato/Pro/Elite
+                                                          // directamente asignado siempre pueda ver y aceptar su servicio.
+                                                          final int?
+                                                              svcMovilId =
+                                                              s['movil_id']
+                                                                  as int?;
+                                                          if (svcMovilId !=
+                                                              null) {
+                                                            if (svcMovilId ==
+                                                                (widget.usuario[
+                                                                        'id']
+                                                                    as int)) {
+                                                              pendientes.add(
+                                                                  s); // soy el asignado directo
+                                                            }
+                                                            continue; // salta fases en todos los casos
+                                                          }
+
+                                                          // ── CASCADA ABIERTA ──────────────────────────────
+                                                          // Permiso base: ser MASTER o tener tiene_fn habilitado
+                                                          final bool
+                                                              tienePermFN =
+                                                              esMaster ||
+                                                                  miPerfilEnVivo[
+                                                                          'tiene_fn'] ==
+                                                                      true;
+
+                                                          // Sin permiso FN → invisible
+                                                          if (!tienePermFN) {
+                                                            continue; // salta embudo estándar
+                                                          }
+
+                                                          // Anchor de tiempo: fn_radar_t0 > created_at (fallback)
+                                                          final String t0Raw = s[
+                                                                      'fn_radar_t0']
+                                                                  ?.toString() ??
+                                                              s['created_at']
+                                                                  ?.toString() ??
+                                                              '';
+                                                          // Fallback 0 (no 9999): si no hay anchor de tiempo
+                                                          // tratamos el servicio como recién creado → Fase 1
+                                                          // (solo Masters). Evita el flash de Fase 4 cuando
+                                                          // fn_radar_t0 aún no propagó al realtime.
+                                                          final int segFn = t0Raw
+                                                                  .isNotEmpty
+                                                              ? ahoraUtc
+                                                                  .difference(DateTime
+                                                                          .parse(
+                                                                              t0Raw)
+                                                                      .toUtc())
+                                                                  .inSeconds
+                                                              : 0;
+
+                                                          if (segFn < 30) {
+                                                            // FASE 1 (0-30s): exclusivo de MASTER
+                                                            // Masters ven la card con detalles completos y
+                                                            // botón de aceptar. Nadie más puede ver el servicio.
+                                                            puedeVer = esMaster;
+                                                          } else if (segFn <
+                                                              60) {
+                                                            // FASE 2 (30-60s): el más cercano es auto-asignado
+                                                            // por pg_cron (fn-auto-asignar-fase2). Los Masters
+                                                            // siguen viéndolo como fallback mientras llega el cron.
+                                                            // El fn_fase2_movil_id NO ve la card — ya está siendo
+                                                            // asignado automáticamente sin necesidad de aceptar.
+                                                            puedeVer = esMaster;
+                                                          } else if (segFn <
+                                                              90) {
+                                                            // FASE 3 (60-90s): zona 2km alrededor de la sede.
+                                                            // Muestra card con botón ACEPTAR a los no-masters cercanos.
+                                                            if (esMaster) {
+                                                              puedeVer = true;
+                                                            } else {
+                                                              final svcLat =
+                                                                  (s['origen_lat']
+                                                                          as num?)
+                                                                      ?.toDouble();
+                                                              final svcLng =
+                                                                  (s['origen_lng']
+                                                                          as num?)
+                                                                      ?.toDouble();
+                                                              if (svcLat != null &&
+                                                                  svcLng !=
+                                                                      null &&
+                                                                  _ultimaPosicionConocida !=
+                                                                      null) {
+                                                                final distFn =
+                                                                    medidorDistancia
+                                                                        .as(
+                                                                  LengthUnit
+                                                                      .Meter,
+                                                                  LatLng(
+                                                                      _ultimaPosicionConocida!
+                                                                          .latitude,
+                                                                      _ultimaPosicionConocida!
+                                                                          .longitude),
+                                                                  LatLng(svcLat,
+                                                                      svcLng),
+                                                                );
+                                                                puedeVer =
+                                                                    distFn <=
+                                                                        2000;
+                                                              } else {
+                                                                puedeVer =
+                                                                    false;
+                                                              }
+                                                            }
+                                                          } else {
+                                                            // FASE 4 (90s+): SIN CUBRIR — todos ven la card y
+                                                            // pueden aceptar. Masters ven detalles completos
+                                                            // (igual que FASE 1). No-Masters ven card estándar.
+                                                            // El push ya llegó a todos — la card debe estar visible
+                                                            // para que no haya confusión "recibí push pero no veo nada".
+                                                            puedeVer = true;
+                                                          }
+
+                                                          if (puedeVer)
+                                                            pendientes.add(s);
+                                                          continue; // salta embudo estándar
+                                                        }
+
+                                                        // 3. CÁLCULO DE DISTANCIA OPERATIVA DESDE EL LOCAL
+                                                        double distMetros =
+                                                            999999;
+                                                        if (_ultimaPosicionConocida !=
+                                                                null &&
+                                                            s['origen_lat'] !=
+                                                                null &&
+                                                            s['origen_lng'] !=
+                                                                null) {
+                                                          distMetros =
+                                                              medidorDistancia
+                                                                  .as(
+                                                            LengthUnit.Meter,
+                                                            LatLng(
+                                                              _ultimaPosicionConocida!
+                                                                  .latitude,
+                                                              _ultimaPosicionConocida!
+                                                                  .longitude,
+                                                            ),
+                                                            LatLng(
+                                                              (s['origen_lat']
+                                                                      as num)
+                                                                  .toDouble(),
+                                                              (s['origen_lng']
+                                                                      as num)
+                                                                  .toDouble(),
                                                             ),
                                                           );
                                                         }
-                                                      } catch (_) {
-                                                        _miParaderoCache =
-                                                            paraderoQueDejo; // reintento en próximo tick
-                                                      }
-                                                    });
-                                                  }
 
-                                                  // Actualizar _tieneServicioActivo en el próximo frame
-                                                  // para que el AppBar lo refleje sin llamar setState dentro de build().
-                                                  final hayServicio =
-                                                      _serviciosActivosData
-                                                          .isNotEmpty;
-                                                  if (hayServicio !=
-                                                      _tieneServicioActivo) {
-                                                    WidgetsBinding.instance
-                                                        .addPostFrameCallback(
-                                                            (_) {
-                                                      if (mounted)
-                                                        setState(() =>
-                                                            _tieneServicioActivo =
-                                                                hayServicio);
-                                                    });
-                                                  }
-
-                                                  // Límite de servicios simultáneos según rango
-                                                  final int limiteRango =
-                                                      _limitePorRango(
-                                                    miPerfilEnVivo[
-                                                            'rango_movil']
-                                                        ?.toString(),
-                                                  );
-                                                  final bool tieneCapacidad =
-                                                      _serviciosActivosData
-                                                              .length <
-                                                          limiteRango;
-                                                  bool tienePermisoDeRadar =
-                                                      tieneCapacidad &&
-                                                          radarAbierto;
-
-                                                  // --- EMBUDO TÁCTICO DE TIEMPOS Y PARADEROS (JERARQUÍA MASTER) ---
-                                                  final ahoraUtc =
-                                                      DateTime.now().toUtc();
-                                                  List<Map<String, dynamic>>
-                                                      pendientes = [];
-
-                                                  final bool esMaster =
-                                                      miPerfilEnVivo[
-                                                                  'rango_movil']
-                                                              ?.toString()
-                                                              .toUpperCase() ==
-                                                          'MASTER';
-                                                  final Distance
-                                                      medidorDistancia =
-                                                      const Distance();
-
-                                                  // Helper: tiempo canónico de un servicio (GREATEST fix)
-                                                  DateTime _canonTime(
-                                                      Map<String, dynamic> s) {
-                                                    final ca = s[
-                                                                'created_at'] !=
-                                                            null
-                                                        ? DateTime.parse(
-                                                                s['created_at'])
-                                                            .toUtc()
-                                                        : ahoraUtc;
-                                                    final lib = s[
-                                                                'liberacion_at'] !=
-                                                            null
-                                                        ? DateTime.parse(s[
-                                                                'liberacion_at'])
-                                                            .toUtc()
-                                                        : null;
-                                                    return (lib != null &&
-                                                            lib.isAfter(ca))
-                                                        ? lib
-                                                        : ca;
-                                                  }
-
-                                                  for (var s in todos.where(
-                                                    (x) =>
-                                                        x['estado'] ==
-                                                        'pendiente',
-                                                  )) {
-                                                    if (_serviciosOcultosLocales
-                                                        .contains(s['id'])) {
-                                                      continue;
-                                                    }
-
-                                                    // 1. Leemos el reloj inteligente (GREATEST fix)
-                                                    final targetUtc =
-                                                        _canonTime(s);
-                                                    final int segundos =
-                                                        ahoraUtc
-                                                            .difference(
-                                                                targetUtc)
-                                                            .inSeconds;
-
-                                                    // 2. FILTRO FANTASMA (Diferidos):
-                                                    if (segundos < 0 &&
-                                                        !esMaster) continue;
-
-                                                    bool puedeVer = false;
-
-                                                    // ═══ REGLA FN (FARMANORTE) — escalamiento 3 fases ═══
-                                                    // Sistema PROPIO de FN — completamente separado del
-                                                    // embudo de paraderos/zonas de Serviexpress normal.
-                                                    //
-                                                    // El timing se mide desde fn_radar_t0 (momento exacto
-                                                    // en que el servicio entró al radar). Si fn_radar_t0
-                                                    // no está seteado (servicios legacy), cae a created_at.
-                                                    //
-                                                    //  FASE 1 (0–30s)   → SOLO Masters (card con detalles + aceptar)
-                                                    //  FASE 2 (30–60s)  → Auto-asignación via pg_cron al más cercano
-                                                    //                     (fn_fase2_movil_id). Masters ven como fallback.
-                                                    //  FASE 3 (60–90s)  → No-masters en radio 2km (card + aceptar)
-                                                    //  FASE 4 (90s+)    → Todos los FN habilitados (card + aceptar)
-                                                    //
-                                                    // Para servicios FN el límite de capacidad NO aplica:
-                                                    // los móviles pueden recibir y ver todos los servicios
-                                                    // FN independientemente de sus servicios activos.
-                                                    if (s['tipo_fn'] == true) {
-                                                      // ── ASIGNACIÓN DIRECTA (directo_presel) ─────────
-                                                      // Verificar PRIMERO si ya tiene movil_id asignado.
-                                                      // Si soy el asignado → mostrar sin importar rango ni fase.
-                                                      // Si es otro → invisible para mí (incluidos Masters).
-                                                      // Se evalúa antes de tienePermFN para que un Novato/Pro/Elite
-                                                      // directamente asignado siempre pueda ver y aceptar su servicio.
-                                                      final int? svcMovilId =
-                                                          s['movil_id'] as int?;
-                                                      if (svcMovilId != null) {
-                                                        if (svcMovilId ==
-                                                            (widget.usuario[
-                                                                'id'] as int)) {
-                                                          pendientes.add(
-                                                              s); // soy el asignado directo
-                                                        }
-                                                        continue; // salta fases en todos los casos
-                                                      }
-
-                                                      // ── CASCADA ABIERTA ──────────────────────────────
-                                                      // Permiso base: ser MASTER o tener tiene_fn habilitado
-                                                      final bool tienePermFN =
-                                                          esMaster ||
-                                                              miPerfilEnVivo[
-                                                                      'tiene_fn'] ==
-                                                                  true;
-
-                                                      // Sin permiso FN → invisible
-                                                      if (!tienePermFN) {
-                                                        continue; // salta embudo estándar
-                                                      }
-
-                                                      // Anchor de tiempo: fn_radar_t0 > created_at (fallback)
-                                                      final String t0Raw = s[
-                                                                  'fn_radar_t0']
-                                                              ?.toString() ??
-                                                          s['created_at']
-                                                              ?.toString() ??
-                                                          '';
-                                                      // Fallback 0 (no 9999): si no hay anchor de tiempo
-                                                      // tratamos el servicio como recién creado → Fase 1
-                                                      // (solo Masters). Evita el flash de Fase 4 cuando
-                                                      // fn_radar_t0 aún no propagó al realtime.
-                                                      final int segFn = t0Raw
-                                                              .isNotEmpty
-                                                          ? ahoraUtc
-                                                              .difference(
-                                                                  DateTime.parse(
-                                                                          t0Raw)
-                                                                      .toUtc())
-                                                              .inSeconds
-                                                          : 0;
-
-                                                      if (segFn < 30) {
-                                                        // FASE 1 (0-30s): exclusivo de MASTER
-                                                        // Masters ven la card con detalles completos y
-                                                        // botón de aceptar. Nadie más puede ver el servicio.
-                                                        puedeVer = esMaster;
-                                                      } else if (segFn < 60) {
-                                                        // FASE 2 (30-60s): el más cercano es auto-asignado
-                                                        // por pg_cron (fn-auto-asignar-fase2). Los Masters
-                                                        // siguen viéndolo como fallback mientras llega el cron.
-                                                        // El fn_fase2_movil_id NO ve la card — ya está siendo
-                                                        // asignado automáticamente sin necesidad de aceptar.
-                                                        puedeVer = esMaster;
-                                                      } else if (segFn < 90) {
-                                                        // FASE 3 (60-90s): zona 2km alrededor de la sede.
-                                                        // Muestra card con botón ACEPTAR a los no-masters cercanos.
+                                                        // 4. REGLA SUPREMA: MASTERS VEN todo (T=0)
                                                         if (esMaster) {
                                                           puedeVer = true;
-                                                        } else {
-                                                          final svcLat =
-                                                              (s['origen_lat']
-                                                                      as num?)
-                                                                  ?.toDouble();
-                                                          final svcLng =
-                                                              (s['origen_lng']
-                                                                      as num?)
-                                                                  ?.toDouble();
-                                                          if (svcLat != null &&
-                                                              svcLng != null &&
-                                                              _ultimaPosicionConocida !=
-                                                                  null) {
-                                                            final distFn =
-                                                                medidorDistancia
-                                                                    .as(
-                                                              LengthUnit.Meter,
-                                                              LatLng(
-                                                                  _ultimaPosicionConocida!
-                                                                      .latitude,
-                                                                  _ultimaPosicionConocida!
-                                                                      .longitude),
-                                                              LatLng(svcLat,
-                                                                  svcLng),
-                                                            );
-                                                            puedeVer =
-                                                                distFn <= 2000;
-                                                          } else {
+                                                        }
+                                                        // 5. EMBUDO DE TIEMPO — 4 FASES DE 30s (total 2 min)
+                                                        else {
+                                                          if (segundos < 30) {
+                                                            // FASE 1 (0–29s): exclusivo del Master.
+                                                            // Nadie más lo ve. Masters tienen 30s para aceptar.
                                                             puedeVer = false;
+                                                          } else if (segundos <
+                                                              60) {
+                                                            // FASE 2 (30–59s): pg_cron auto-asigna al #1 del
+                                                            // paradero (paradero_auto_movil_id). Los no-masters
+                                                            // no deben ver la card — el #1 será asignado sin
+                                                            // necesidad de aceptar. Masters siguen como fallback.
+                                                            puedeVer = false;
+                                                          } else if (segundos <
+                                                              90) {
+                                                            // FASE 3 (60–89s): Zona 2km desde el origen.
+                                                            // No-masters con capacidad dentro del radio ven la card.
+                                                            if (tieneCapacidad &&
+                                                                distMetros <=
+                                                                    2000) {
+                                                              puedeVer = true;
+                                                            }
+                                                          } else {
+                                                            // FASE 4 (90s+): Todos los disponibles con capacidad.
+                                                            if (tieneCapacidad) {
+                                                              puedeVer = true;
+                                                            }
                                                           }
                                                         }
-                                                      } else {
-                                                        // FASE 4 (90s+): SIN CUBRIR — todos ven la card y
-                                                        // pueden aceptar. Masters ven detalles completos
-                                                        // (igual que FASE 1). No-Masters ven card estándar.
-                                                        // El push ya llegó a todos — la card debe estar visible
-                                                        // para que no haya confusión "recibí push pero no veo nada".
-                                                        puedeVer = true;
+
+                                                        if (puedeVer) {
+                                                          pendientes.add(s);
+                                                        }
                                                       }
+                                                      // --- ORDENAMIENTO FIFO ABSOLUTO ---
+                                                      // El primero que pidió (o el que más tiempo lleva esperando) sale de primero.
+                                                      if (pendientes
+                                                          .isNotEmpty) {
+                                                        // _canonTime ya está definido arriba — reutilizamos
+                                                        pendientes.sort((a,
+                                                                b) =>
+                                                            _canonTime(a)
+                                                                .compareTo(
+                                                                    _canonTime(
+                                                                        b)));
+                                                      }
+                                                      // --------------------------------------------------------
 
-                                                      if (puedeVer)
-                                                        pendientes.add(s);
-                                                      continue; // salta embudo estándar
-                                                    }
-
-                                                    // 3. CÁLCULO DE DISTANCIA OPERATIVA DESDE EL LOCAL
-                                                    double distMetros = 999999;
-                                                    if (_ultimaPosicionConocida !=
-                                                            null &&
-                                                        s['origen_lat'] !=
-                                                            null &&
-                                                        s['origen_lng'] !=
-                                                            null) {
-                                                      distMetros =
-                                                          medidorDistancia.as(
-                                                        LengthUnit.Meter,
-                                                        LatLng(
-                                                          _ultimaPosicionConocida!
-                                                              .latitude,
-                                                          _ultimaPosicionConocida!
-                                                              .longitude,
-                                                        ),
-                                                        LatLng(
-                                                          (s['origen_lat']
-                                                                  as num)
-                                                              .toDouble(),
-                                                          (s['origen_lng']
-                                                                  as num)
-                                                              .toDouble(),
-                                                        ),
+                                                      // --- AUTO-EXPANSIÓN ACORDEÓN ---
+                                                      // Cuando llega un servicio nuevo (no visto aún),
+                                                      // colapsa todos los demás y expande solo el nuevo.
+                                                      // Los colapsados manualmente por el usuario no
+                                                      // se re-expanden (están en _serviciosVistos pero
+                                                      // no en _serviciosExpandidos).
+                                                      final nuevosIds =
+                                                          _serviciosActivosData
+                                                              .map((s) =>
+                                                                  s['id']
+                                                                      as int)
+                                                              .where((id) =>
+                                                                  !_serviciosVistos
+                                                                      .contains(
+                                                                          id))
+                                                              .toList();
+                                                      if (nuevosIds
+                                                          .isNotEmpty) {
+                                                        _serviciosExpandidos
+                                                            .clear();
+                                                        _serviciosExpandidos
+                                                            .add(
+                                                                nuevosIds.last);
+                                                        _serviciosVistos
+                                                            .addAll(nuevosIds);
+                                                      }
+                                                      // Limpiar IDs de servicios que ya no existen.
+                                                      _serviciosExpandidos
+                                                          .removeWhere(
+                                                        (id) =>
+                                                            !_serviciosActivosData
+                                                                .any((s) =>
+                                                                    s['id'] ==
+                                                                    id),
                                                       );
-                                                    }
+                                                      _serviciosVistos
+                                                          .removeWhere(
+                                                        (id) =>
+                                                            !_serviciosActivosData
+                                                                .any((s) =>
+                                                                    s['id'] ==
+                                                                    id),
+                                                      );
 
-                                                    // 4. REGLA SUPREMA: MASTERS VEN todo (T=0)
-                                                    if (esMaster) {
-                                                      puedeVer = true;
-                                                    }
-                                                    // 5. EMBUDO DE TIEMPO — 4 FASES DE 30s (total 2 min)
-                                                    else {
-                                                      if (segundos < 30) {
-                                                        // FASE 1 (0–29s): exclusivo del Master.
-                                                        // Nadie más lo ve. Masters tienen 30s para aceptar.
-                                                        puedeVer = false;
-                                                      } else if (segundos <
-                                                          60) {
-                                                        // FASE 2 (30–59s): pg_cron auto-asigna al #1 del
-                                                        // paradero (paradero_auto_movil_id). Los no-masters
-                                                        // no deben ver la card — el #1 será asignado sin
-                                                        // necesidad de aceptar. Masters siguen como fallback.
-                                                        puedeVer = false;
-                                                      } else if (segundos <
-                                                          90) {
-                                                        // FASE 3 (60–89s): Zona 2km desde el origen.
-                                                        // No-masters con capacidad dentro del radio ven la card.
-                                                        if (tieneCapacidad &&
-                                                            distMetros <=
-                                                                2000) {
-                                                          puedeVer = true;
+                                                      /// --- ALARMA DE NUEVO PEDIDO ---
+                                                      WidgetsBinding.instance
+                                                          .addPostFrameCallback(
+                                                              (
+                                                        _,
+                                                      ) async {
+                                                        if (mounted) {
+                                                          // INYECCIÓN TÁCTICA: Permite sonar si tienes permiso O SI un misil rompió el candado (pendientes.isNotEmpty)
+                                                          if ((tienePermisoDeRadar ||
+                                                                  pendientes
+                                                                      .isNotEmpty) &&
+                                                              pendientes
+                                                                      .length >
+                                                                  _cantidadPendientesAnterior) {
+                                                            if (!_reproduciendoAudio) {
+                                                              _reproduciendoAudio =
+                                                                  true;
+
+                                                              // 1. Disparo Auditivo — suprimido si venimos
+                                                              // de background (el push ya sonó via OS).
+                                                              if (!_vieneDeBackground) {
+                                                                _sonidos.reproducir(
+                                                                    Sonidos
+                                                                        .alerta);
+                                                              }
+                                                              _vieneDeBackground =
+                                                                  false;
+
+                                                              // 2. Disparo Visual (Notificación emergente tipo WhatsApp en el TECHO)
+                                                              ScaffoldMessenger
+                                                                      .of(context)
+                                                                  .showSnackBar(
+                                                                SnackBar(
+                                                                  content: Row(
+                                                                    children: [
+                                                                      Icon(
+                                                                        Icons
+                                                                            .radar,
+                                                                        color: Colors
+                                                                            .white,
+                                                                        size:
+                                                                            28,
+                                                                      ),
+                                                                      SizedBox(
+                                                                          width:
+                                                                              12),
+                                                                      Expanded(
+                                                                        child:
+                                                                            Column(
+                                                                          mainAxisSize:
+                                                                              MainAxisSize.min,
+                                                                          crossAxisAlignment:
+                                                                              CrossAxisAlignment.start,
+                                                                          children: [
+                                                                            Text(
+                                                                              '🚨 ¡NUEVO SERVICIO EN RADAR!',
+                                                                              style: TextStyle(
+                                                                                fontWeight: FontWeight.bold,
+                                                                                fontSize: 14,
+                                                                                color: Colors.white,
+                                                                              ),
+                                                                            ),
+                                                                            Text(
+                                                                              'Revisa el radar para ver el servicio.',
+                                                                              style: TextStyle(
+                                                                                fontSize: 12,
+                                                                                color: Colors.white70,
+                                                                              ),
+                                                                            ),
+                                                                          ],
+                                                                        ),
+                                                                      ),
+                                                                    ],
+                                                                  ),
+                                                                  backgroundColor:
+                                                                      Colors
+                                                                          .green,
+                                                                  duration:
+                                                                      const Duration(
+                                                                          seconds:
+                                                                              4),
+                                                                  behavior:
+                                                                      SnackBarBehavior
+                                                                          .floating,
+                                                                  // ---> MAGIA MATEMÁTICA: Lo empuja hasta el techo de la pantalla <---
+                                                                  margin:
+                                                                      EdgeInsets
+                                                                          .only(
+                                                                    bottom: MediaQuery.of(context)
+                                                                            .size
+                                                                            .height -
+                                                                        150,
+                                                                    left: 12,
+                                                                    right: 12,
+                                                                  ),
+                                                                  dismissDirection:
+                                                                      DismissDirection
+                                                                          .up,
+                                                                  shape:
+                                                                      RoundedRectangleBorder(
+                                                                    borderRadius:
+                                                                        BorderRadius.circular(
+                                                                            12),
+                                                                  ),
+                                                                  elevation: 10,
+                                                                ),
+                                                              );
+
+                                                              // Seguro táctico para que el audio no se superponga si caen 3 pedidos de golpe
+                                                              Future.delayed(
+                                                                const Duration(
+                                                                    seconds: 2),
+                                                                () {
+                                                                  if (mounted)
+                                                                    _reproduciendoAudio =
+                                                                        false;
+                                                                },
+                                                              );
+                                                            }
+                                                          }
+                                                          // Actualizamos la memoria del radar
+                                                          _cantidadPendientesAnterior =
+                                                              pendientes.length;
+                                                          // Limpiar el flag solo si la app está en primer
+                                                          // plano. En background el isolate Dart sigue vivo
+                                                          // y el StreamBuilder sigue disparando — si
+                                                          // reseteamos aquí, el flag llega vacío cuando el
+                                                          // moto abre la app y el OS ya había sonado.
+                                                          if (WidgetsBinding
+                                                                  .instance
+                                                                  .lifecycleState ==
+                                                              AppLifecycleState
+                                                                  .resumed) {
+                                                            _vieneDeBackground =
+                                                                false;
+                                                          }
                                                         }
-                                                      } else {
-                                                        // FASE 4 (90s+): Todos los disponibles con capacidad.
-                                                        if (tieneCapacidad) {
-                                                          puedeVer = true;
+                                                      });
+
+                                                      // ---> INYECCIÓN: CÁLCULO DE CAJA EN VIVO <---
+                                                      double producidoHoy = 0.0;
+                                                      final hoyLocal =
+                                                          DateTime.now()
+                                                              .toLocal();
+                                                      for (var s in todos) {
+                                                        if (s['estado'] ==
+                                                                'finalizado' &&
+                                                            s['movil_id'] ==
+                                                                widget.usuario[
+                                                                    'id'] &&
+                                                            s['created_at'] !=
+                                                                null) {
+                                                          final fechaSvc =
+                                                              DateTime.parse(
+                                                            s['created_at'],
+                                                          ).toLocal();
+                                                          if (fechaSvc.year ==
+                                                                  hoyLocal
+                                                                      .year &&
+                                                              fechaSvc.month ==
+                                                                  hoyLocal
+                                                                      .month &&
+                                                              fechaSvc.day ==
+                                                                  hoyLocal
+                                                                      .day) {
+                                                            producidoHoy += (s[
+                                                                            'tarifa']
+                                                                        as num?)
+                                                                    ?.toDouble() ??
+                                                                0.0;
+                                                          }
                                                         }
                                                       }
-                                                    }
+                                                      // --------------------------------------------
 
-                                                    if (puedeVer) {
-                                                      pendientes.add(s);
-                                                    }
-                                                  }
-                                                  // --- ORDENAMIENTO FIFO ABSOLUTO ---
-                                                  // El primero que pidió (o el que más tiempo lleva esperando) sale de primero.
-                                                  if (pendientes.isNotEmpty) {
-                                                    // _canonTime ya está definido arriba — reutilizamos
-                                                    pendientes.sort((a, b) =>
-                                                        _canonTime(a).compareTo(
-                                                            _canonTime(b)));
-                                                  }
-                                                  // --------------------------------------------------------
-
-                                                  // --- AUTO-EXPANSIÓN ACORDEÓN ---
-                                                  // Cuando llega un servicio nuevo (no visto aún),
-                                                  // colapsa todos los demás y expande solo el nuevo.
-                                                  // Los colapsados manualmente por el usuario no
-                                                  // se re-expanden (están en _serviciosVistos pero
-                                                  // no en _serviciosExpandidos).
-                                                  final nuevosIds =
-                                                      _serviciosActivosData
-                                                          .map((s) =>
-                                                              s['id'] as int)
-                                                          .where((id) =>
-                                                              !_serviciosVistos
-                                                                  .contains(id))
-                                                          .toList();
-                                                  if (nuevosIds.isNotEmpty) {
-                                                    _serviciosExpandidos
-                                                        .clear();
-                                                    _serviciosExpandidos
-                                                        .add(nuevosIds.last);
-                                                    _serviciosVistos
-                                                        .addAll(nuevosIds);
-                                                  }
-                                                  // Limpiar IDs de servicios que ya no existen.
-                                                  _serviciosExpandidos
-                                                      .removeWhere(
-                                                    (id) =>
-                                                        !_serviciosActivosData
-                                                            .any((s) =>
-                                                                s['id'] == id),
-                                                  );
-                                                  _serviciosVistos.removeWhere(
-                                                    (id) =>
-                                                        !_serviciosActivosData
-                                                            .any((s) =>
-                                                                s['id'] == id),
-                                                  );
-
-                                                  /// --- ALARMA DE NUEVO PEDIDO ---
-                                                  WidgetsBinding.instance
-                                                      .addPostFrameCallback((
-                                                    _,
-                                                  ) async {
-                                                    if (mounted) {
-                                                      // INYECCIÓN TÁCTICA: Permite sonar si tienes permiso O SI un misil rompió el candado (pendientes.isNotEmpty)
-                                                      if ((tienePermisoDeRadar ||
-                                                              pendientes
-                                                                  .isNotEmpty) &&
-                                                          pendientes.length >
-                                                              _cantidadPendientesAnterior) {
-                                                        if (!_reproduciendoAudio) {
-                                                          _reproduciendoAudio =
-                                                              true;
-
-                                                          // 1. Disparo Auditivo — suprimido si venimos
-                                                          // de background (el push ya sonó via OS).
-                                                          if (!_vieneDeBackground) {
-                                                            _sonidos.reproducir(
-                                                                Sonidos.alerta);
-                                                          }
-                                                          _vieneDeBackground =
-                                                              false;
-
-                                                          // 2. Disparo Visual (Notificación emergente tipo WhatsApp en el TECHO)
-                                                          ScaffoldMessenger.of(
-                                                                  context)
-                                                              .showSnackBar(
-                                                            SnackBar(
-                                                              content: Row(
-                                                                children: [
-                                                                  Icon(
-                                                                    Icons.radar,
-                                                                    color: Colors
-                                                                        .white,
-                                                                    size: 28,
-                                                                  ),
-                                                                  SizedBox(
-                                                                      width:
-                                                                          12),
-                                                                  Expanded(
-                                                                    child:
-                                                                        Column(
-                                                                      mainAxisSize:
-                                                                          MainAxisSize
-                                                                              .min,
-                                                                      crossAxisAlignment:
-                                                                          CrossAxisAlignment
-                                                                              .start,
-                                                                      children: [
-                                                                        Text(
-                                                                          '🚨 ¡NUEVO SERVICIO EN RADAR!',
-                                                                          style:
-                                                                              TextStyle(
-                                                                            fontWeight:
-                                                                                FontWeight.bold,
-                                                                            fontSize:
-                                                                                14,
-                                                                            color:
-                                                                                Colors.white,
-                                                                          ),
-                                                                        ),
-                                                                        Text(
-                                                                          'Revisa el radar para ver el servicio.',
-                                                                          style:
-                                                                              TextStyle(
-                                                                            fontSize:
-                                                                                12,
-                                                                            color:
-                                                                                Colors.white70,
-                                                                          ),
-                                                                        ),
-                                                                      ],
-                                                                    ),
-                                                                  ),
-                                                                ],
-                                                              ),
-                                                              backgroundColor:
-                                                                  Colors.green,
-                                                              duration:
-                                                                  const Duration(
-                                                                      seconds:
-                                                                          4),
-                                                              behavior:
-                                                                  SnackBarBehavior
-                                                                      .floating,
-                                                              // ---> MAGIA MATEMÁTICA: Lo empuja hasta el techo de la pantalla <---
-                                                              margin: EdgeInsets
-                                                                  .only(
-                                                                bottom: MediaQuery.of(
-                                                                            context)
-                                                                        .size
-                                                                        .height -
-                                                                    150,
-                                                                left: 12,
-                                                                right: 12,
-                                                              ),
-                                                              dismissDirection:
-                                                                  DismissDirection
-                                                                      .up,
-                                                              shape:
-                                                                  RoundedRectangleBorder(
+                                                      return ListView(
+                                                        padding:
+                                                            const EdgeInsets
+                                                                .fromLTRB(
+                                                                12, 4, 12, 12),
+                                                        children: [
+                                                          if (_estaEnLinea)
+                                                            Container(
+                                                              margin:
+                                                                  const EdgeInsets
+                                                                      .only(
+                                                                      bottom:
+                                                                          10),
+                                                              padding:
+                                                                  const EdgeInsets
+                                                                      .symmetric(
+                                                                      horizontal:
+                                                                          14,
+                                                                      vertical:
+                                                                          10),
+                                                              decoration:
+                                                                  BoxDecoration(
+                                                                color: Colors
+                                                                    .white,
                                                                 borderRadius:
                                                                     BorderRadius
                                                                         .circular(
                                                                             12),
-                                                              ),
-                                                              elevation: 10,
-                                                            ),
-                                                          );
-
-                                                          // Seguro táctico para que el audio no se superponga si caen 3 pedidos de golpe
-                                                          Future.delayed(
-                                                            const Duration(
-                                                                seconds: 2),
-                                                            () {
-                                                              if (mounted)
-                                                                _reproduciendoAudio =
-                                                                    false;
-                                                            },
-                                                          );
-                                                        }
-                                                      }
-                                                      // Actualizamos la memoria del radar
-                                                      _cantidadPendientesAnterior =
-                                                          pendientes.length;
-                                                      // Limpiar el flag solo si la app está en primer
-                                                      // plano. En background el isolate Dart sigue vivo
-                                                      // y el StreamBuilder sigue disparando — si
-                                                      // reseteamos aquí, el flag llega vacío cuando el
-                                                      // moto abre la app y el OS ya había sonado.
-                                                      if (WidgetsBinding
-                                                              .instance
-                                                              .lifecycleState ==
-                                                          AppLifecycleState
-                                                              .resumed) {
-                                                        _vieneDeBackground =
-                                                            false;
-                                                      }
-                                                    }
-                                                  });
-
-                                                  // ---> INYECCIÓN: CÁLCULO DE CAJA EN VIVO <---
-                                                  double producidoHoy = 0.0;
-                                                  final hoyLocal =
-                                                      DateTime.now().toLocal();
-                                                  for (var s in todos) {
-                                                    if (s['estado'] ==
-                                                            'finalizado' &&
-                                                        s['movil_id'] ==
-                                                            widget.usuario[
-                                                                'id'] &&
-                                                        s['created_at'] !=
-                                                            null) {
-                                                      final fechaSvc =
-                                                          DateTime.parse(
-                                                        s['created_at'],
-                                                      ).toLocal();
-                                                      if (fechaSvc.year ==
-                                                              hoyLocal.year &&
-                                                          fechaSvc.month ==
-                                                              hoyLocal.month &&
-                                                          fechaSvc.day ==
-                                                              hoyLocal.day) {
-                                                        producidoHoy += (s[
-                                                                        'tarifa']
-                                                                    as num?)
-                                                                ?.toDouble() ??
-                                                            0.0;
-                                                      }
-                                                    }
-                                                  }
-                                                  // --------------------------------------------
-
-                                                  return ListView(
-                                                    padding: const EdgeInsets
-                                                        .fromLTRB(
-                                                        12, 4, 12, 12),
-                                                    children: [
-                                                      if (_estaEnLinea)
-                                                        Container(
-                                                          margin:
-                                                              const EdgeInsets
-                                                                  .only(
-                                                                  bottom: 10),
-                                                          padding:
-                                                              const EdgeInsets
-                                                                  .symmetric(
-                                                                  horizontal:
-                                                                      14,
-                                                                  vertical: 10),
-                                                          decoration:
-                                                              BoxDecoration(
-                                                            color: Colors.white,
-                                                            borderRadius:
-                                                                BorderRadius
-                                                                    .circular(
-                                                                        12),
-                                                            border: Border.all(
-                                                                color:
-                                                                    Colors.grey[
-                                                                        200]!),
-                                                          ),
-                                                          child: Row(
-                                                            children: [
-                                                              Icon(
-                                                                  Icons
-                                                                      .bar_chart,
-                                                                  size: 14,
-                                                                  color: Colors
-                                                                      .black45),
-                                                              const SizedBox(
-                                                                  width: 6),
-                                                              const Text(
-                                                                'PRODUCIDO HOY',
-                                                                style:
-                                                                    TextStyle(
-                                                                  fontSize: 10,
-                                                                  fontWeight:
-                                                                      FontWeight
-                                                                          .bold,
-                                                                  color: Colors
-                                                                      .black45,
-                                                                  letterSpacing:
-                                                                      0.8,
-                                                                ),
-                                                              ),
-                                                              const Spacer(),
-                                                              Text(
-                                                                _formatearMoneda(
-                                                                    producidoHoy,
-                                                                    mostrarCero:
-                                                                        true),
-                                                                style:
-                                                                    TextStyle(
-                                                                  fontSize: 15,
-                                                                  fontWeight:
-                                                                      FontWeight
-                                                                          .bold,
-                                                                  color: Colors
-                                                                          .green[
-                                                                      700],
-                                                                ),
-                                                              ),
-                                                            ],
-                                                          ),
-                                                        ),
-                                                      // -------------------------------------------
-                                                      if (_serviciosActivosData
-                                                          .isEmpty) ...[
-                                                        Container(
-                                                          width:
-                                                              double.infinity,
-                                                          padding:
-                                                              const EdgeInsets
-                                                                  .all(14),
-                                                          margin:
-                                                              const EdgeInsets
-                                                                  .only(
-                                                                  bottom: 8),
-                                                          decoration:
-                                                              BoxDecoration(
-                                                            color: Colors.white,
-                                                            borderRadius:
-                                                                BorderRadius
-                                                                    .circular(
-                                                                        10),
-                                                            border: Border.all(
-                                                                color:
-                                                                    Colors.grey[
-                                                                        300]!),
-                                                          ),
-                                                          child: Column(
-                                                            children: [
-                                                              if (paraderoActual ==
-                                                                  null) ...[
-                                                                Text(
-                                                                  'No estás en la fila de ningún paradero',
-                                                                  style:
-                                                                      TextStyle(
-                                                                    fontWeight:
-                                                                        FontWeight
-                                                                            .w600,
-                                                                    fontSize:
-                                                                        13,
+                                                                border: Border.all(
                                                                     color: Colors
                                                                             .grey[
-                                                                        800],
-                                                                  ),
-                                                                ),
-                                                                const SizedBox(
-                                                                    height: 10),
-                                                                SizedBox(
-                                                                  width: double
-                                                                      .infinity,
-                                                                  child:
-                                                                      ElevatedButton
-                                                                          .icon(
-                                                                    style: ElevatedButton
-                                                                        .styleFrom(
-                                                                      backgroundColor:
-                                                                          Colors
-                                                                              .black,
-                                                                      padding: const EdgeInsets
-                                                                          .symmetric(
-                                                                          vertical:
-                                                                              12),
-                                                                    ),
-                                                                    onPressed:
-                                                                        _procesando
-                                                                            ? null
-                                                                            : _intentarRegistroParadero,
-                                                                    icon:
-                                                                        const Icon(
+                                                                        200]!),
+                                                              ),
+                                                              child: Row(
+                                                                children: [
+                                                                  Icon(
                                                                       Icons
-                                                                          .location_on,
-                                                                      color: Color(
-                                                                          0xff3AF500),
-                                                                      size: 18,
+                                                                          .bar_chart,
+                                                                      size: 14,
+                                                                      color: Colors
+                                                                          .black45),
+                                                                  const SizedBox(
+                                                                      width: 6),
+                                                                  const Text(
+                                                                    'PRODUCIDO HOY',
+                                                                    style:
+                                                                        TextStyle(
+                                                                      fontSize:
+                                                                          10,
+                                                                      fontWeight:
+                                                                          FontWeight
+                                                                              .bold,
+                                                                      color: Colors
+                                                                          .black45,
+                                                                      letterSpacing:
+                                                                          0.8,
                                                                     ),
-                                                                    label: _procesando
-                                                                        ? SizedBox(
-                                                                            width:
-                                                                                16,
-                                                                            height:
-                                                                                16,
-                                                                            child:
-                                                                                CircularProgressIndicator(
-                                                                              color: Colors.white,
-                                                                              strokeWidth: 2,
-                                                                            ),
-                                                                          )
-                                                                        : const Text(
-                                                                            'REGISTRARME EN PARADERO',
-                                                                            style:
-                                                                                TextStyle(
-                                                                              color: Color(0xff3AF500),
-                                                                              fontWeight: FontWeight.bold,
-                                                                              fontSize: 13,
-                                                                            ),
-                                                                          ),
                                                                   ),
-                                                                ),
-                                                              ] else ...[
-                                                                Row(
-                                                                  children: [
-                                                                    Container(
-                                                                      width: 8,
-                                                                      height: 8,
-                                                                      decoration:
-                                                                          const BoxDecoration(
-                                                                        color: Color(
-                                                                            0xff3AF500),
-                                                                        shape: BoxShape
-                                                                            .circle,
-                                                                      ),
+                                                                  const Spacer(),
+                                                                  Text(
+                                                                    _formatearMoneda(
+                                                                        producidoHoy,
+                                                                        mostrarCero:
+                                                                            true),
+                                                                    style:
+                                                                        TextStyle(
+                                                                      fontSize:
+                                                                          15,
+                                                                      fontWeight:
+                                                                          FontWeight
+                                                                              .bold,
+                                                                      color: Colors
+                                                                              .green[
+                                                                          700],
                                                                     ),
-                                                                    const SizedBox(
-                                                                        width:
-                                                                            8),
+                                                                  ),
+                                                                ],
+                                                              ),
+                                                            ),
+                                                          // -------------------------------------------
+                                                          if (_serviciosActivosData
+                                                              .isEmpty) ...[
+                                                            Container(
+                                                              width: double
+                                                                  .infinity,
+                                                              padding:
+                                                                  const EdgeInsets
+                                                                      .all(14),
+                                                              margin:
+                                                                  const EdgeInsets
+                                                                      .only(
+                                                                      bottom:
+                                                                          8),
+                                                              decoration:
+                                                                  BoxDecoration(
+                                                                color: Colors
+                                                                    .white,
+                                                                borderRadius:
+                                                                    BorderRadius
+                                                                        .circular(
+                                                                            10),
+                                                                border: Border.all(
+                                                                    color: Colors
+                                                                            .grey[
+                                                                        300]!),
+                                                              ),
+                                                              child: Column(
+                                                                children: [
+                                                                  if (paraderoActual ==
+                                                                      null) ...[
                                                                     Text(
-                                                                      'En fila: $paraderoActual',
+                                                                      'No estás en la fila de ningún paradero',
                                                                       style:
                                                                           TextStyle(
                                                                         fontWeight:
@@ -14238,323 +14405,408 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                                                             .grey[800],
                                                                       ),
                                                                     ),
-                                                                  ],
-                                                                ),
-                                                                const SizedBox(
-                                                                    height: 10),
-                                                                SizedBox(
-                                                                  width: double
-                                                                      .infinity,
-                                                                  child:
-                                                                      OutlinedButton
+                                                                    const SizedBox(
+                                                                        height:
+                                                                            10),
+                                                                    SizedBox(
+                                                                      width: double
+                                                                          .infinity,
+                                                                      child: ElevatedButton
                                                                           .icon(
-                                                                    style: OutlinedButton
-                                                                        .styleFrom(
-                                                                      foregroundColor:
-                                                                          Colors
-                                                                              .red,
-                                                                      side:
-                                                                          const BorderSide(
-                                                                        color: Colors
-                                                                            .red,
+                                                                        style: ElevatedButton
+                                                                            .styleFrom(
+                                                                          backgroundColor:
+                                                                              Colors.black,
+                                                                          padding: const EdgeInsets
+                                                                              .symmetric(
+                                                                              vertical: 12),
+                                                                        ),
+                                                                        onPressed: _procesando
+                                                                            ? null
+                                                                            : _intentarRegistroParadero,
+                                                                        icon:
+                                                                            const Icon(
+                                                                          Icons
+                                                                              .location_on,
+                                                                          color:
+                                                                              Color(0xff3AF500),
+                                                                          size:
+                                                                              18,
+                                                                        ),
+                                                                        label: _procesando
+                                                                            ? SizedBox(
+                                                                                width: 16,
+                                                                                height: 16,
+                                                                                child: CircularProgressIndicator(
+                                                                                  color: Colors.white,
+                                                                                  strokeWidth: 2,
+                                                                                ),
+                                                                              )
+                                                                            : const Text(
+                                                                                'REGISTRARME EN PARADERO',
+                                                                                style: TextStyle(
+                                                                                  color: Color(0xff3AF500),
+                                                                                  fontWeight: FontWeight.bold,
+                                                                                  fontSize: 13,
+                                                                                ),
+                                                                              ),
                                                                       ),
                                                                     ),
-                                                                    onPressed:
-                                                                        _procesando
+                                                                  ] else ...[
+                                                                    Row(
+                                                                      children: [
+                                                                        Container(
+                                                                          width:
+                                                                              8,
+                                                                          height:
+                                                                              8,
+                                                                          decoration:
+                                                                              const BoxDecoration(
+                                                                            color:
+                                                                                Color(0xff3AF500),
+                                                                            shape:
+                                                                                BoxShape.circle,
+                                                                          ),
+                                                                        ),
+                                                                        const SizedBox(
+                                                                            width:
+                                                                                8),
+                                                                        Text(
+                                                                          'En fila: $paraderoActual',
+                                                                          style:
+                                                                              TextStyle(
+                                                                            fontWeight:
+                                                                                FontWeight.w600,
+                                                                            fontSize:
+                                                                                13,
+                                                                            color:
+                                                                                Colors.grey[800],
+                                                                          ),
+                                                                        ),
+                                                                      ],
+                                                                    ),
+                                                                    const SizedBox(
+                                                                        height:
+                                                                            10),
+                                                                    SizedBox(
+                                                                      width: double
+                                                                          .infinity,
+                                                                      child: OutlinedButton
+                                                                          .icon(
+                                                                        style: OutlinedButton
+                                                                            .styleFrom(
+                                                                          foregroundColor:
+                                                                              Colors.red,
+                                                                          side:
+                                                                              const BorderSide(
+                                                                            color:
+                                                                                Colors.red,
+                                                                          ),
+                                                                        ),
+                                                                        onPressed: _procesando
                                                                             ? null
                                                                             : _salirDelParadero,
-                                                                    icon:
-                                                                        const Icon(
-                                                                      Icons
-                                                                          .exit_to_app,
-                                                                      size: 16,
-                                                                    ),
-                                                                    label:
-                                                                        const Text(
-                                                                      'SALIR DEL PARADERO',
-                                                                      style:
-                                                                          TextStyle(
-                                                                        fontWeight:
-                                                                            FontWeight.bold,
-                                                                        fontSize:
-                                                                            11,
+                                                                        icon:
+                                                                            const Icon(
+                                                                          Icons
+                                                                              .exit_to_app,
+                                                                          size:
+                                                                              16,
+                                                                        ),
+                                                                        label:
+                                                                            const Text(
+                                                                          'SALIR DEL PARADERO',
+                                                                          style:
+                                                                              TextStyle(
+                                                                            fontWeight:
+                                                                                FontWeight.bold,
+                                                                            fontSize:
+                                                                                11,
+                                                                          ),
+                                                                        ),
                                                                       ),
                                                                     ),
-                                                                  ),
-                                                                ),
-                                                              ],
-                                                            ],
-                                                          ),
-                                                        ),
-                                                        _construirFilaVirtual(
-                                                            enFila),
-                                                        const SizedBox(
-                                                            height: 10),
-                                                      ],
-
-                                                      // ---- TARJETA DOMICILIO ACTIVO ----
-                                                      if (_pedidoDomicilioActivo !=
-                                                          null)
-                                                        _buildTarjetaDomicilio(),
-
-                                                      if (_serviciosActivosData
-                                                          .isNotEmpty) ...[
-                                                        Padding(
-                                                          padding:
-                                                              const EdgeInsets
-                                                                  .only(
-                                                                  bottom: 6,
-                                                                  left: 2,
-                                                                  top: 4),
-                                                          child: Row(children: [
-                                                            Icon(
-                                                                Icons
-                                                                    .local_shipping_outlined,
-                                                                size: 13,
-                                                                color: Colors
-                                                                    .black38),
-                                                            const SizedBox(
-                                                                width: 5),
-                                                            const Text(
-                                                              'ÓRDENES EN CURSO',
-                                                              style: TextStyle(
-                                                                  fontSize: 10,
-                                                                  fontWeight:
-                                                                      FontWeight
-                                                                          .bold,
-                                                                  color: Colors
-                                                                      .black38,
-                                                                  letterSpacing:
-                                                                      0.8),
-                                                            ),
-                                                          ]),
-                                                        ),
-                                                        ..._serviciosActivosData
-                                                            .map(
-                                                          (servicio) =>
-                                                              KeyedSubtree(
-                                                            key: ValueKey(
-                                                                'activa_${servicio['id']}'),
-                                                            child:
-                                                                _construirTarjetaActiva(
-                                                              servicio,
-                                                              esMaster:
-                                                                  esMaster,
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      ],
-
-                                                      // ---> DESTRUCCIÓN DEL CANDADO VISUAL AQUÍ <---
-                                                      if (tienePermisoDeRadar ||
-                                                          pendientes
-                                                              .isNotEmpty) ...[
-                                                        Padding(
-                                                          padding:
-                                                              const EdgeInsets
-                                                                  .only(
-                                                                  bottom: 6,
-                                                                  left: 2,
-                                                                  top: 4),
-                                                          child: Row(children: [
-                                                            Icon(Icons.radar,
-                                                                size: 13,
-                                                                color: Colors
-                                                                    .black38),
-                                                            const SizedBox(
-                                                                width: 5),
-                                                            const Text(
-                                                              'RADAR DE DISPONIBLES',
-                                                              style: TextStyle(
-                                                                  fontSize: 10,
-                                                                  fontWeight:
-                                                                      FontWeight
-                                                                          .bold,
-                                                                  color: Colors
-                                                                      .black38,
-                                                                  letterSpacing:
-                                                                      0.8),
-                                                            ),
-                                                          ]),
-                                                        ),
-                                                        if (pendientes.isEmpty)
-                                                          const Padding(
-                                                            padding:
-                                                                EdgeInsets.only(
-                                                                    top: 20),
-                                                            child: Center(
-                                                              child: Text(
-                                                                'Radar limpio. Sin Servicios.',
-                                                                style:
-                                                                    TextStyle(
-                                                                  color: Colors
-                                                                      .grey,
-                                                                  fontWeight:
-                                                                      FontWeight
-                                                                          .bold,
-                                                                ),
-                                                              ),
-                                                            ),
-                                                          )
-                                                        else
-                                                          ...pendientes.map(
-                                                            (servicio) =>
-                                                                KeyedSubtree(
-                                                              key: ValueKey(
-                                                                  'pendiente_${servicio['id']}'),
-                                                              child:
-                                                                  _construirTarjetaPendiente(
-                                                                servicio,
-                                                                esMaster:
-                                                                    esMaster,
-                                                              ),
-                                                            ),
-                                                          ),
-                                                      ] else if (_serviciosActivosData
-                                                              .isEmpty &&
-                                                          !radarAbierto) ...[
-                                                        Padding(
-                                                          padding:
-                                                              const EdgeInsets
-                                                                  .only(
-                                                                  top: 10),
-                                                          child: Container(
-                                                            padding:
-                                                                const EdgeInsets
-                                                                    .all(16),
-                                                            decoration:
-                                                                BoxDecoration(
-                                                              color: Colors
-                                                                  .orange[50]!,
-                                                              borderRadius:
-                                                                  BorderRadius
-                                                                      .circular(
-                                                                          12),
-                                                              border: Border.all(
-                                                                  color: Colors
-                                                                          .orange[
-                                                                      200]!),
-                                                            ),
-                                                            child: Column(
-                                                              children: [
-                                                                Icon(
-                                                                  Icons
-                                                                      .lock_clock_outlined,
-                                                                  color: Colors
-                                                                          .orange[
-                                                                      700],
-                                                                  size: 32,
-                                                                ),
-                                                                const SizedBox(
-                                                                    height: 10),
-                                                                Text(
-                                                                  mensajeBloqueo
-                                                                          .isNotEmpty
-                                                                      ? mensajeBloqueo
-                                                                      : 'Regístrate en un paradero para recibir servicios.',
-                                                                  textAlign:
-                                                                      TextAlign
-                                                                          .center,
-                                                                  style:
-                                                                      TextStyle(
-                                                                    fontSize:
-                                                                        13,
-                                                                    color: Colors
-                                                                            .orange[
-                                                                        900],
-                                                                    fontWeight:
-                                                                        FontWeight
-                                                                            .w500,
-                                                                    height: 1.4,
-                                                                  ),
-                                                                ),
-                                                              ],
-                                                            ),
-                                                          ),
-                                                        ),
-                                                        if (esMaster ||
-                                                            miPerfilEnVivo[
-                                                                    'tiene_fn'] ==
-                                                                true)
-                                                          Padding(
-                                                            padding:
-                                                                const EdgeInsets
-                                                                    .only(
-                                                                    top: 10),
-                                                            child: Container(
-                                                              padding:
-                                                                  const EdgeInsets
-                                                                      .all(16),
-                                                              decoration:
-                                                                  BoxDecoration(
-                                                                color: Colors
-                                                                    .indigo[50]!,
-                                                                borderRadius:
-                                                                    BorderRadius
-                                                                        .circular(
-                                                                            12),
-                                                                border: Border.all(
-                                                                    color: Colors
-                                                                            .indigo[
-                                                                        200]!),
-                                                              ),
-                                                              child: Column(
-                                                                children: [
-                                                                  Icon(
-                                                                    Icons
-                                                                        .local_pharmacy_outlined,
-                                                                    color: Colors
-                                                                            .indigo[
-                                                                        700],
-                                                                    size: 32,
-                                                                  ),
-                                                                  const SizedBox(
-                                                                      height:
-                                                                          10),
-                                                                  Text(
-                                                                    'Radar disponible para Turnos de FN',
-                                                                    textAlign:
-                                                                        TextAlign
-                                                                            .center,
-                                                                    style: TextStyle(
-                                                                        fontSize:
-                                                                            14,
-                                                                        fontWeight:
-                                                                            FontWeight
-                                                                                .bold,
-                                                                        color: Colors
-                                                                                .indigo[
-                                                                            800]),
-                                                                  ),
-                                                                  const SizedBox(
-                                                                      height: 6),
-                                                                  Text(
-                                                                    'No hace falta registrarte en un paradero para recibir turnos de Farmanorte (FN).',
-                                                                    textAlign:
-                                                                        TextAlign
-                                                                            .center,
-                                                                    style: TextStyle(
-                                                                        fontSize:
-                                                                            12,
-                                                                        color: Colors
-                                                                                .indigo[
-                                                                            700],
-                                                                        height:
-                                                                            1.4),
-                                                                  ),
+                                                                  ],
                                                                 ],
                                                               ),
                                                             ),
-                                                          ),
-                                                      ],
-                                                    ],
-                                                  );
-                                                },
-                                              ),
-                                      ),
-                                    ),
-                                  ],
-                                ); // cierra Column (return del ValueListenableBuilder builder)
+                                                            _construirFilaVirtual(
+                                                                enFila),
+                                                            const SizedBox(
+                                                                height: 10),
+                                                          ],
+
+                                                          // ---- TARJETA DOMICILIO ACTIVO ----
+                                                          if (_pedidoDomicilioActivo !=
+                                                              null)
+                                                            _buildTarjetaDomicilio(),
+
+                                                          if (_serviciosActivosData
+                                                              .isNotEmpty) ...[
+                                                            Padding(
+                                                              padding:
+                                                                  const EdgeInsets
+                                                                      .only(
+                                                                      bottom: 6,
+                                                                      left: 2,
+                                                                      top: 4),
+                                                              child: Row(
+                                                                  children: [
+                                                                    Icon(
+                                                                        Icons
+                                                                            .local_shipping_outlined,
+                                                                        size:
+                                                                            13,
+                                                                        color: Colors
+                                                                            .black38),
+                                                                    const SizedBox(
+                                                                        width:
+                                                                            5),
+                                                                    const Text(
+                                                                      'ÓRDENES EN CURSO',
+                                                                      style: TextStyle(
+                                                                          fontSize:
+                                                                              10,
+                                                                          fontWeight: FontWeight
+                                                                              .bold,
+                                                                          color: Colors
+                                                                              .black38,
+                                                                          letterSpacing:
+                                                                              0.8),
+                                                                    ),
+                                                                  ]),
+                                                            ),
+                                                            ..._serviciosActivosData
+                                                                .map(
+                                                              (servicio) =>
+                                                                  KeyedSubtree(
+                                                                key: ValueKey(
+                                                                    'activa_${servicio['id']}'),
+                                                                child:
+                                                                    _construirTarjetaActiva(
+                                                                  servicio,
+                                                                  esMaster:
+                                                                      esMaster,
+                                                                ),
+                                                              ),
+                                                            ),
+                                                          ],
+
+                                                          // ---> DESTRUCCIÓN DEL CANDADO VISUAL AQUÍ <---
+                                                          if (tienePermisoDeRadar ||
+                                                              pendientes
+                                                                  .isNotEmpty) ...[
+                                                            Padding(
+                                                              padding:
+                                                                  const EdgeInsets
+                                                                      .only(
+                                                                      bottom: 6,
+                                                                      left: 2,
+                                                                      top: 4),
+                                                              child: Row(
+                                                                  children: [
+                                                                    Icon(
+                                                                        Icons
+                                                                            .radar,
+                                                                        size:
+                                                                            13,
+                                                                        color: Colors
+                                                                            .black38),
+                                                                    const SizedBox(
+                                                                        width:
+                                                                            5),
+                                                                    const Text(
+                                                                      'RADAR DE DISPONIBLES',
+                                                                      style: TextStyle(
+                                                                          fontSize:
+                                                                              10,
+                                                                          fontWeight: FontWeight
+                                                                              .bold,
+                                                                          color: Colors
+                                                                              .black38,
+                                                                          letterSpacing:
+                                                                              0.8),
+                                                                    ),
+                                                                  ]),
+                                                            ),
+                                                            if (pendientes
+                                                                .isEmpty)
+                                                              const Padding(
+                                                                padding: EdgeInsets
+                                                                    .only(
+                                                                        top:
+                                                                            20),
+                                                                child: Center(
+                                                                  child: Text(
+                                                                    'Radar limpio. Sin Servicios.',
+                                                                    style:
+                                                                        TextStyle(
+                                                                      color: Colors
+                                                                          .grey,
+                                                                      fontWeight:
+                                                                          FontWeight
+                                                                              .bold,
+                                                                    ),
+                                                                  ),
+                                                                ),
+                                                              )
+                                                            else
+                                                              ...pendientes.map(
+                                                                (servicio) =>
+                                                                    KeyedSubtree(
+                                                                  key: ValueKey(
+                                                                      'pendiente_${servicio['id']}'),
+                                                                  child:
+                                                                      _construirTarjetaPendiente(
+                                                                    servicio,
+                                                                    esMaster:
+                                                                        esMaster,
+                                                                  ),
+                                                                ),
+                                                              ),
+                                                          ] else if (_serviciosActivosData
+                                                                  .isEmpty &&
+                                                              !radarAbierto) ...[
+                                                            Padding(
+                                                              padding:
+                                                                  const EdgeInsets
+                                                                      .only(
+                                                                      top: 10),
+                                                              child: Container(
+                                                                padding:
+                                                                    const EdgeInsets
+                                                                        .all(
+                                                                        16),
+                                                                decoration:
+                                                                    BoxDecoration(
+                                                                  color: Colors
+                                                                          .orange[
+                                                                      50]!,
+                                                                  borderRadius:
+                                                                      BorderRadius
+                                                                          .circular(
+                                                                              12),
+                                                                  border: Border.all(
+                                                                      color: Colors
+                                                                              .orange[
+                                                                          200]!),
+                                                                ),
+                                                                child: Column(
+                                                                  children: [
+                                                                    Icon(
+                                                                      Icons
+                                                                          .lock_clock_outlined,
+                                                                      color: Colors
+                                                                              .orange[
+                                                                          700],
+                                                                      size: 32,
+                                                                    ),
+                                                                    const SizedBox(
+                                                                        height:
+                                                                            10),
+                                                                    Text(
+                                                                      mensajeBloqueo
+                                                                              .isNotEmpty
+                                                                          ? mensajeBloqueo
+                                                                          : 'Regístrate en un paradero para recibir servicios.',
+                                                                      textAlign:
+                                                                          TextAlign
+                                                                              .center,
+                                                                      style:
+                                                                          TextStyle(
+                                                                        fontSize:
+                                                                            13,
+                                                                        color: Colors
+                                                                            .orange[900],
+                                                                        fontWeight:
+                                                                            FontWeight.w500,
+                                                                        height:
+                                                                            1.4,
+                                                                      ),
+                                                                    ),
+                                                                  ],
+                                                                ),
+                                                              ),
+                                                            ),
+                                                            if (esMaster ||
+                                                                miPerfilEnVivo[
+                                                                        'tiene_fn'] ==
+                                                                    true)
+                                                              Padding(
+                                                                padding:
+                                                                    const EdgeInsets
+                                                                        .only(
+                                                                        top:
+                                                                            10),
+                                                                child:
+                                                                    Container(
+                                                                  padding:
+                                                                      const EdgeInsets
+                                                                          .all(
+                                                                          16),
+                                                                  decoration:
+                                                                      BoxDecoration(
+                                                                    color: Colors
+                                                                            .indigo[
+                                                                        50]!,
+                                                                    borderRadius:
+                                                                        BorderRadius.circular(
+                                                                            12),
+                                                                    border: Border.all(
+                                                                        color: Colors
+                                                                            .indigo[200]!),
+                                                                  ),
+                                                                  child: Column(
+                                                                    children: [
+                                                                      Icon(
+                                                                        Icons
+                                                                            .local_pharmacy_outlined,
+                                                                        color: Colors
+                                                                            .indigo[700],
+                                                                        size:
+                                                                            32,
+                                                                      ),
+                                                                      const SizedBox(
+                                                                          height:
+                                                                              10),
+                                                                      Text(
+                                                                        'Radar disponible para Turnos de FN',
+                                                                        textAlign:
+                                                                            TextAlign.center,
+                                                                        style: TextStyle(
+                                                                            fontSize:
+                                                                                14,
+                                                                            fontWeight:
+                                                                                FontWeight.bold,
+                                                                            color: Colors.indigo[800]),
+                                                                      ),
+                                                                      const SizedBox(
+                                                                          height:
+                                                                              6),
+                                                                      Text(
+                                                                        'No hace falta registrarte en un paradero para recibir turnos de Farmanorte (FN).',
+                                                                        textAlign:
+                                                                            TextAlign.center,
+                                                                        style: TextStyle(
+                                                                            fontSize:
+                                                                                12,
+                                                                            color:
+                                                                                Colors.indigo[700],
+                                                                            height: 1.4),
+                                                                      ),
+                                                                    ],
+                                                                  ),
+                                                                ),
+                                                              ),
+                                                          ],
+                                                        ],
+                                                      );
+                                                    },
+                                                  ),
+                                          ),
+                                        ),
+                                      ],
+                                    ); // cierra Column (return del ValueListenableBuilder builder)
                                   }, // cierra ValueListenableBuilder builder
                                 ); // cierra ValueListenableBuilder (return del snapMiPerfil builder)
                               }, // cierra StreamBuilder(_streamMiPerfil) builder

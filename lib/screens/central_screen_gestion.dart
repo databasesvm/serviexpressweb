@@ -954,46 +954,36 @@ extension CentralScreenGestion on _CentralScreenState {
     required String titulo,
     required String subtitulo,
     required VoidCallback onTap,
+    int badge = 0,
   }) {
-    return FutureBuilder<int>(
-      future: Supabase.instance.client
-          .from('usuarios')
-          .select('id')
-          .eq('rol', 'local')
-          .eq('estado_local', 'pendiente')
-          .then((r) => r.length),
-      builder: (ctx, snap) {
-        final count = snap.data ?? 0;
-        return Stack(
-          children: [
-            _tarjetaGestion(
-              icono: icono,
-              color: color,
-              titulo: titulo,
-              subtitulo: subtitulo,
-              onTap: onTap,
-            ),
-            if (count > 0)
-              Positioned(
-                top: 8, right: 8,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: Colors.red[600],
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    '$count',
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold),
-                  ),
-                ),
+    return Stack(
+      children: [
+        _tarjetaGestion(
+          icono: icono,
+          color: color,
+          titulo: titulo,
+          subtitulo: subtitulo,
+          onTap: onTap,
+        ),
+        if (badge > 0)
+          Positioned(
+            top: 8, right: 8,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: Colors.red[600],
+                borderRadius: BorderRadius.circular(12),
               ),
-          ],
-        );
-      },
+              child: Text(
+                '$badge',
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
+      ],
     );
   }
 
@@ -1023,17 +1013,30 @@ extension CentralScreenGestion on _CentralScreenState {
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
                 sliver: SliverList(
                   delegate: SliverChildListDelegate([
+
+                    // ── USUARIOS ────────────────────────────────────────────
+                    _seccionGestion('USUARIOS'),
                     _tarjetaGestionConBadge(
                       icono: Icons.manage_accounts_rounded,
                       color: Colors.blue[600]!,
                       titulo: 'Gestión de Usuarios',
                       subtitulo: 'Solicitudes, activaciones, ascensos y registros',
-                      // Si hay pendientes de activación → abrir directo en "Por Activar"
+                      badge: _usuariosPendientes,
                       onTap: () => _abrirGestionUsuarios(
                         context,
                         tabInicial: _usuariosPendientes > 0 ? 1 : 0,
                       ),
                     ),
+                    _tarjetaGestion(
+                      icono: Icons.emoji_events,
+                      color: Colors.amber[800]!,
+                      titulo: 'Ranking Semanal',
+                      subtitulo: 'Desempeño de la flota',
+                      onTap: () => _mostrarRankingSemanalDialog(context),
+                    ),
+
+                    // ── OPERACIONES ─────────────────────────────────────────
+                    _seccionGestion('OPERACIONES'),
                     _tarjetaGestion(
                       icono: Icons.storefront,
                       color: Colors.teal[700]!,
@@ -1042,11 +1045,48 @@ extension CentralScreenGestion on _CentralScreenState {
                       onTap: _abrirGestorParaderos,
                     ),
                     _tarjetaGestion(
-                      icono: Icons.emoji_events,
-                      color: Colors.amber[800]!,
-                      titulo: 'Ranking Semanal',
-                      subtitulo: 'Desempeño de la flota',
-                      onTap: () => _mostrarRankingSemanalDialog(context),
+                      icono: Icons.delivery_dining,
+                      color: const Color(0xff3AF500),
+                      titulo: 'Monitor Domicilios',
+                      subtitulo: 'Pedidos activos, estados y domicilios por local',
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => MonitorPedidosScreen(usuario: widget.usuario!),
+                        ),
+                      ),
+                    ),
+                    _tarjetaGestion(
+                      icono: Icons.history_rounded,
+                      color: Colors.blueGrey[600]!,
+                      titulo: 'Historial de Servicios',
+                      subtitulo: 'Búsqueda y consulta de servicios pasados',
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const HistorialServiciosScreen(),
+                        ),
+                      ),
+                    ),
+                    _tarjetaGestionConBadge(
+                      icono: Icons.flag_outlined,
+                      color: Colors.orange[700]!,
+                      titulo: 'Reportes y Quejas',
+                      subtitulo: _reportesSinLeer > 0
+                          ? '$_reportesSinLeer sin leer — quejas de clientes y sedes'
+                          : 'Quejas de clientes y sedes activas',
+                      badge: _reportesSinLeer,
+                      onTap: () => _abrirPanelReportes(context),
+                    ),
+
+                    // ── ADMINISTRACIÓN ──────────────────────────────────────
+                    _seccionGestion('ADMINISTRACIÓN'),
+                    _tarjetaGestion(
+                      icono: Icons.map_outlined,
+                      color: Colors.indigo[600]!,
+                      titulo: 'Red & Sectores',
+                      subtitulo: 'Direcciones, barrios y precios globales',
+                      onTap: () => _abrirGestorRedYSectores(context),
                     ),
                     _tarjetaGestion(
                       icono: Icons.bar_chart_rounded,
@@ -1061,28 +1101,8 @@ extension CentralScreenGestion on _CentralScreenState {
                       ),
                     ),
                     _tarjetaGestion(
-                      icono: Icons.map_outlined,
-                      color: Colors.indigo[600]!,
-                      titulo: 'Red & Sectores',
-                      subtitulo: 'Direcciones, barrios y precios globales',
-                      onTap: () => _abrirGestorRedYSectores(context),
-                    ),
-                    _tarjetaGestion(
-                      icono: Icons.delivery_dining,
-                      color: const Color(0xff3AF500),
-                      titulo: 'Monitor Domicilios',
-                      subtitulo:
-                          'Pedidos activos, estados y domicilios por local',
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => MonitorPedidosScreen(usuario: widget.usuario!),
-                        ),
-                      ),
-                    ),
-                    _tarjetaGestion(
                       icono: Icons.local_pharmacy,
-                      color: Colors.indigo[900]!,
+                      color: const Color(0xFF002da2),
                       titulo: 'Farmanorte FN',
                       subtitulo: 'Sedes, motos FN e ignorados del día',
                       onTap: () => Navigator.push(
@@ -1092,29 +1112,9 @@ extension CentralScreenGestion on _CentralScreenState {
                         ),
                       ),
                     ),
-                    _tarjetaGestion(
-                      icono: Icons.history_rounded,
-                      color: Colors.indigo[600]!,
-                      titulo: 'Historial de Servicios',
-                      subtitulo: 'Búsqueda y consulta de servicios pasados',
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const HistorialServiciosScreen(),
-                        ),
-                      ),
-                    ),
-                    _tarjetaGestion(
-                      icono: Icons.flag_outlined,
-                      color: Colors.orange[700]!,
-                      titulo: 'Reportes y Quejas',
-                      subtitulo: _reportesSinLeer > 0
-                          ? '$_reportesSinLeer sin leer — quejas de clientes y sedes'
-                          : 'Quejas de clientes y sedes activas',
-                      onTap: () => _abrirPanelReportes(context),
-                    ),
 
-                    // ── Toggle: bloqueo automático por inactividad ──────────
+                    // ── CONFIGURACIÓN ───────────────────────────────────────
+                    _seccionGestion('CONFIGURACIÓN'),
                     Container(
                       margin: const EdgeInsets.only(bottom: 12),
                       decoration: BoxDecoration(
@@ -1194,6 +1194,21 @@ extension CentralScreenGestion on _CentralScreenState {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _seccionGestion(String label) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 20, bottom: 8, left: 4),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: Colors.white38,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 1.4,
         ),
       ),
     );
@@ -1473,7 +1488,7 @@ extension CentralScreenGestion on _CentralScreenState {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// GESTOR DE PARADEROS — pantalla completa
+// GESTOR DE PARADEROS — pantalla completa (mobile-friendly)
 // ══════════════════════════════════════════════════════════════════════════════
 
 class _PanelGestorParaderos extends StatefulWidget {
@@ -1484,38 +1499,79 @@ class _PanelGestorParaderos extends StatefulWidget {
   State<_PanelGestorParaderos> createState() => _PanelGestorParaderosState();
 }
 
-class _PanelGestorParaderosState extends State<_PanelGestorParaderos> {
+class _PanelGestorParaderosState extends State<_PanelGestorParaderos>
+    with SingleTickerProviderStateMixin {
+  late TabController _tab;
   late Future<List<Map<String, dynamic>>> _future;
+
+  // Paraderos de día disponibles (valor → label, color, emoji)
+  static const _paraderosDia = [
+    ('LIBRE',    'Libre (por cercanía)', Color(0xFF2E7D32), '🟢'),
+    ('EXPUENTE', 'Expuente',             Color(0xFF1565C0), '🔵'),
+    ('BOCONO',   'Boconó',               Color(0xFF6A1B9A), '🟣'),
+    ('MEMOS',    'Memos',                Color(0xFF4E342E), '🟤'),
+  ];
 
   @override
   void initState() {
     super.initState();
+    _tab = TabController(length: 2, vsync: this);
     _future = _cargar();
+  }
+
+  @override
+  void dispose() {
+    _tab.dispose();
+    super.dispose();
   }
 
   Future<List<Map<String, dynamic>>> _cargar() =>
       Supabase.instance.client
           .from('usuarios')
-          .select('id, nombre, paradero_exclusivo, recargo_nocturno_especial, zona_lluvia')
+          .select('id, nombre, paradero_exclusivo, paradero_nocturno, recargo_nocturno_especial, zona_lluvia')
           .eq('rol', 'local')
           .order('nombre', ascending: true);
 
-  void _recargar() => setState(() { _future = _cargar(); });
+  void _recargar() => setState(() => _future = _cargar());
+
+  /// Cambia el paradero de día de un local
+  Future<void> _cambiarParadero(Map<String, dynamic> local, String? nuevo) async {
+    await Supabase.instance.client
+        .from('usuarios')
+        .update({'paradero_exclusivo': nuevo})
+        .eq('id', local['id']);
+    _recargar();
+  }
+
+  /// Activa/desactiva el paradero nocturno de un local
+  Future<void> _toggleNocturno(Map<String, dynamic> local, bool valor) async {
+    await Supabase.instance.client
+        .from('usuarios')
+        .update({'paradero_nocturno': valor})
+        .eq('id', local['id']);
+    _recargar();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black,
-        elevation: 1,
-        title: const Row(children: [
-          Icon(Icons.storefront, color: Colors.blue),
-          SizedBox(width: 8),
-          Expanded(child: Text('GESTOR DE LOCALES EXCLUSIVOS',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16))),
-        ]),
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        title: const Text('Gestor de Paraderos',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        bottom: TabBar(
+          controller: _tab,
+          labelColor: const Color(0xFF3AF500),
+          unselectedLabelColor: Colors.white60,
+          indicatorColor: const Color(0xFF3AF500),
+          tabs: const [
+            Tab(icon: Icon(Icons.wb_sunny_outlined, size: 18), text: 'DÍA'),
+            Tab(icon: Icon(Icons.nights_stay_outlined, size: 18), text: 'NOCTURNO'),
+          ],
+        ),
       ),
       body: FutureBuilder<List<Map<String, dynamic>>>(
         future: _future,
@@ -1525,90 +1581,311 @@ class _PanelGestorParaderosState extends State<_PanelGestorParaderos> {
           }
           final locales = snapshot.data ?? [];
           if (locales.isEmpty) {
-            return const Center(child: Text('No hay locales registrados en el sistema.',
-                style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black54)));
+            return const Center(
+              child: Text('No hay locales registrados.',
+                  style: TextStyle(color: Colors.black54, fontSize: 14)));
           }
-
-          final localesExpuente = locales.where((l) => l['paradero_exclusivo'] == 'EXPUENTE').toList();
-          final localesMemos    = locales.where((l) => l['paradero_exclusivo'] == 'MEMOS').toList();
-          final localesLibres   = locales.where((l) =>
-              l['paradero_exclusivo'] != 'EXPUENTE' && l['paradero_exclusivo'] != 'MEMOS').toList();
-
-          Widget construirLista(String titulo, List<Map<String, dynamic>> lista, Color color, String etiqueta) {
-            return ExpansionTile(
-              initiallyExpanded: true,
-              collapsedBackgroundColor: color.withValues(alpha: 0.1),
-              backgroundColor: color.withValues(alpha: 0.05),
-              title: Text('$titulo (${lista.length})',
-                  style: TextStyle(fontWeight: FontWeight.bold, color: color, fontSize: 14)),
-              children: lista.isEmpty
-                  ? [const Padding(padding: EdgeInsets.all(12),
-                      child: Text('Sin locales asignados',
-                          style: TextStyle(color: Colors.black45, fontSize: 12)))]
-                  : lista.map((local) => Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      child: Row(children: [
-                        Icon(Icons.business, color: color, size: 18),
-                        const SizedBox(width: 10),
-                        Expanded(child: Text(local['nombre'].toString().toUpperCase(),
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                            maxLines: 2, overflow: TextOverflow.ellipsis)),
-                        IconButton(
-                          icon: const Icon(Icons.tune, size: 18, color: Colors.orange),
-                          tooltip: 'Configurar recargos',
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                          onPressed: () => widget.onConfigRecargos(local),
-                        ),
-                        const SizedBox(width: 4),
-                        SizedBox(width: 120, child: DropdownButtonFormField<String>(
-                          initialValue: etiqueta,
-                          isDense: true, isExpanded: true,
-                          decoration: const InputDecoration(
-                            contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-                            border: OutlineInputBorder(), isDense: true,
-                          ),
-                          style: const TextStyle(fontSize: 10, color: Colors.black, fontWeight: FontWeight.bold),
-                          items: const [
-                            DropdownMenuItem(value: 'LIBRE',    child: Text('LIBRE 🟢',    style: TextStyle(fontSize: 11))),
-                            DropdownMenuItem(value: 'EXPUENTE', child: Text('EXPUENTE 🔵', style: TextStyle(fontSize: 11))),
-                            DropdownMenuItem(value: 'MEMOS',    child: Text('MEMOS 🟣',    style: TextStyle(fontSize: 11))),
-                          ],
-                          onChanged: (nuevo) async {
-                            if (nuevo == null || nuevo == etiqueta) return;
-                            final valor = nuevo == 'LIBRE' ? null : nuevo;
-                            await Supabase.instance.client.from('usuarios')
-                                .update({'paradero_exclusivo': valor}).eq('id', local['id']);
-                            if (mounted) {
-                              _recargar();
-                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                                content: Text('Local ${local['nombre']} reasignado a $nuevo'),
-                                backgroundColor: Colors.black,
-                              ));
-                            }
-                          },
-                        )),
-                      ]),
-                    )).toList(),
-            );
-          }
-
-          return ListView(
-            padding: const EdgeInsets.all(16),
+          return TabBarView(
+            controller: _tab,
             children: [
-              const Text(
-                'Asigna de qué paradero saldrán los móviles para cada local. Si lo dejas libre, el radar buscará al más cercano.',
-                style: TextStyle(fontSize: 12, color: Colors.black54),
-              ),
-              const SizedBox(height: 12),
-              construirLista('📍 EXCLUSIVOS EXPUENTE', localesExpuente, Colors.blue[800]!,   'EXPUENTE'),
-              const SizedBox(height: 8),
-              construirLista('📍 EXCLUSIVOS MEMOS',    localesMemos,    Colors.purple[800]!, 'MEMOS'),
-              const SizedBox(height: 8),
-              construirLista('🟢 LOCALES LIBRES (Por Cercanía)', localesLibres, Colors.green[800]!, 'LIBRE'),
+              _buildTabDia(locales),
+              _buildTabNocturno(locales),
             ],
           );
         },
+      ),
+    );
+  }
+
+  // ── TAB 1: PARADEROS DE DÍA ────────────────────────────────────────────────
+  Widget _buildTabDia(List<Map<String, dynamic>> locales) {
+    // Agrupar por paradero
+    final grupos = <String, List<Map<String, dynamic>>>{};
+    for (final l in locales) {
+      final p = l['paradero_exclusivo']?.toString() ?? 'LIBRE';
+      grupos.putIfAbsent(p, () => []).add(l);
+    }
+
+    return ListView(
+      padding: const EdgeInsets.all(12),
+      children: [
+        _bannerInfo(
+          '☀️ Asigna de qué paradero saldrán los móviles para cada local durante el día. '
+          'Memos cierra después de medianoche.',
+        ),
+        const SizedBox(height: 12),
+        for (final entry in _paraderosDia) ...[
+          _seccionParadero(
+            emoji: entry.$4,
+            titulo: entry.$2.toUpperCase(),
+            color: entry.$3,
+            locales: grupos[entry.$1] ?? [],
+            todos: locales,
+            valorSeccion: entry.$1,
+          ),
+          const SizedBox(height: 8),
+        ],
+      ],
+    );
+  }
+
+  // ── TAB 2: NOCTURNO ────────────────────────────────────────────────────────
+  Widget _buildTabNocturno(List<Map<String, dynamic>> locales) {
+    // Solo aplica a Expuente y Boconó (Memos cierra, Libre no tiene zona nocturna)
+    final aplicables = locales.where((l) {
+      final p = l['paradero_exclusivo']?.toString() ?? 'LIBRE';
+      return p == 'EXPUENTE' || p == 'BOCONO';
+    }).toList();
+
+    final nocturnos  = aplicables.where((l) => l['paradero_nocturno'] == true).toList();
+    final diurnos    = aplicables.where((l) => l['paradero_nocturno'] != true).toList();
+
+    return ListView(
+      padding: const EdgeInsets.all(12),
+      children: [
+        _bannerInfo(
+          '🌙 Los locales marcados como NOCTURNO seguirán siendo atendidos después de medianoche '
+          'desde el paradero NOCTURNO. Aplica solo a Expuente y Boconó.',
+        ),
+        const SizedBox(height: 12),
+        // Sección: con nocturno activo
+        _headerSeccion('🌙 TRABAJAN DE NOCHE (${nocturnos.length})', const Color(0xFF283593)),
+        if (nocturnos.isEmpty)
+          _emptyCard('Sin locales nocturnos aún')
+        else
+          ...nocturnos.map((l) => _cardLocalNocturno(l, true)),
+        const SizedBox(height: 12),
+        // Sección: sin nocturno
+        _headerSeccion('☀️ SOLO HORARIO DIURNO (${diurnos.length})', Colors.grey[700]!),
+        if (diurnos.isEmpty)
+          _emptyCard('Todos los locales trabajan de noche')
+        else
+          ...diurnos.map((l) => _cardLocalNocturno(l, false)),
+        const SizedBox(height: 12),
+        // Locales que no aplican
+        _headerSeccion('⚫ NO APLICAN (Memos / Libres)', Colors.grey[500]!),
+        _bannerInfo('Memos cierra después de medianoche. Los locales libres no tienen zona nocturna asignada.'),
+      ],
+    );
+  }
+
+  // ── WIDGETS COMPARTIDOS ────────────────────────────────────────────────────
+
+  Widget _bannerInfo(String texto) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+    decoration: BoxDecoration(
+      color: Colors.blue[50],
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: Colors.blue[100]!),
+    ),
+    child: Text(texto, style: TextStyle(fontSize: 12, color: Colors.blue[900])),
+  );
+
+  Widget _headerSeccion(String titulo, Color color) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Text(titulo,
+        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold,
+            color: color, letterSpacing: 0.6)),
+  );
+
+  Widget _emptyCard(String msg) => Card(
+    elevation: 0,
+    margin: const EdgeInsets.only(bottom: 8),
+    child: Padding(
+      padding: const EdgeInsets.all(14),
+      child: Text(msg, style: const TextStyle(color: Colors.black38, fontSize: 12)),
+    ),
+  );
+
+  Widget _seccionParadero({
+    required String emoji,
+    required String titulo,
+    required Color color,
+    required List<Map<String, dynamic>> locales,
+    required List<Map<String, dynamic>> todos,
+    required String valorSeccion,
+  }) {
+    return Card(
+      elevation: 1,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: color.withValues(alpha: 0.3)),
+      ),
+      child: ExpansionTile(
+        initiallyExpanded: true,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        collapsedShape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        title: Row(children: [
+          Text(emoji, style: const TextStyle(fontSize: 16)),
+          const SizedBox(width: 8),
+          Text(titulo,
+              style: TextStyle(fontWeight: FontWeight.bold, color: color, fontSize: 13)),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text('${locales.length}',
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: color)),
+          ),
+        ]),
+        children: [
+          if (locales.isEmpty)
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 0, 16, 14),
+              child: Text('Sin locales asignados',
+                  style: TextStyle(color: Colors.black38, fontSize: 12)),
+            )
+          else
+            ...locales.map((local) => _cardLocalDia(local, todos, valorSeccion, color)),
+        ],
+      ),
+    );
+  }
+
+  /// Tarjeta de local en la pestaña de DÍA
+  Widget _cardLocalDia(
+    Map<String, dynamic> local,
+    List<Map<String, dynamic>> todos,
+    String paraderoActual,
+    Color colorSeccion,
+  ) {
+    final esNocturno = local['paradero_nocturno'] == true;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: colorSeccion.withValues(alpha: 0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Nombre + badge nocturno
+          Row(children: [
+            const Icon(Icons.storefront, size: 16, color: Colors.black45),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(local['nombre'].toString(),
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  maxLines: 2, overflow: TextOverflow.ellipsis),
+            ),
+            if (esNocturno)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF283593).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Text('🌙 nocturno',
+                    style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold,
+                        color: Color(0xFF283593))),
+              ),
+          ]),
+          const SizedBox(height: 10),
+          // Dropdown paradero de día (ocupa todo el ancho — más fácil en celular)
+          DropdownButtonFormField<String>(
+            value: paraderoActual,
+            isExpanded: true,
+            isDense: true,
+            decoration: InputDecoration(
+              labelText: 'Paradero de día',
+              labelStyle: const TextStyle(fontSize: 11),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(color: colorSeccion.withValues(alpha: 0.4)),
+              ),
+            ),
+            style: const TextStyle(fontSize: 13, color: Colors.black, fontWeight: FontWeight.w600),
+            items: _paraderosDia.map((p) => DropdownMenuItem(
+              value: p.$1,
+              child: Text('${p.$4} ${p.$2}', style: const TextStyle(fontSize: 13)),
+            )).toList(),
+            onChanged: (nuevo) async {
+              if (nuevo == null || nuevo == paraderoActual) return;
+              final valor = nuevo == 'LIBRE' ? null : nuevo;
+              await _cambiarParadero(local, valor);
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: Text('${local['nombre']} → $nuevo'),
+                  backgroundColor: Colors.black,
+                  duration: const Duration(seconds: 2),
+                ));
+              }
+            },
+          ),
+          const SizedBox(height: 6),
+          // Botón de recargos
+          GestureDetector(
+            onTap: () => widget.onConfigRecargos(local),
+            child: Row(children: [
+              Icon(Icons.tune, size: 13, color: Colors.orange[700]),
+              const SizedBox(width: 4),
+              Text('Configurar recargos',
+                  style: TextStyle(fontSize: 11, color: Colors.orange[700],
+                      fontWeight: FontWeight.w600)),
+            ]),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Tarjeta de local en la pestaña NOCTURNO
+  Widget _cardLocalNocturno(Map<String, dynamic> local, bool esNocturno) {
+    final paradero = local['paradero_exclusivo']?.toString() ?? 'LIBRE';
+    final (_, labelP, colorP, emojiP) = _paraderosDia.firstWhere(
+      (p) => p.$1 == paradero, orElse: () => _paraderosDia[0]);
+
+    return Card(
+      elevation: 0,
+      margin: const EdgeInsets.only(bottom: 8),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: BorderSide(
+          color: esNocturno ? const Color(0xFF283593).withValues(alpha: 0.5) : Colors.grey[300]!,
+          width: esNocturno ? 1.5 : 1,
+        ),
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        leading: CircleAvatar(
+          radius: 20,
+          backgroundColor: esNocturno
+              ? const Color(0xFF283593).withValues(alpha: 0.12)
+              : Colors.grey[100],
+          child: Text(esNocturno ? '🌙' : '☀️', style: const TextStyle(fontSize: 16)),
+        ),
+        title: Text(local['nombre'].toString(),
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+        subtitle: Row(children: [
+          Text(emojiP, style: const TextStyle(fontSize: 11)),
+          const SizedBox(width: 4),
+          Text(labelP, style: TextStyle(fontSize: 11, color: colorP, fontWeight: FontWeight.w600)),
+          Text(' de día', style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+        ]),
+        trailing: Switch(
+          value: esNocturno,
+          activeTrackColor: const Color(0xFF283593).withValues(alpha: 0.3),
+          activeThumbColor: const Color(0xFF283593),
+          onChanged: (val) async {
+            await _toggleNocturno(local, val);
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(val
+                    ? '🌙 ${local['nombre']} — nocturno activado'
+                    : '☀️ ${local['nombre']} — solo diurno'),
+                backgroundColor: Colors.black,
+                duration: const Duration(seconds: 2),
+              ));
+            }
+          },
+        ),
       ),
     );
   }
@@ -2526,20 +2803,19 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
           ),
         ),
       ),
-      // #108 — chips filtro incompleto
-      if (_userSel != null)
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
-          child: Row(children: [
-            _chipFiltro('Todos', null, _secFiltroIncompleto,
-                (v) => setState(() => _secFiltroIncompleto = v)),
-            _chipFiltro('Sin precio', 'sinPrecio', _secFiltroIncompleto,
-                (v) => setState(() => _secFiltroIncompleto = v)),
-            _chipFiltro('Inactivos', 'inactivo', _secFiltroIncompleto,
-                (v) => setState(() => _secFiltroIncompleto = v)),
-          ]),
-        ),
+      // chips filtro incompleto — siempre visibles
+      SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
+        child: Row(children: [
+          _chipFiltro('Todos', null, _secFiltroIncompleto,
+              (v) => setState(() => _secFiltroIncompleto = v)),
+          _chipFiltro('Sin precio', 'sinPrecio', _secFiltroIncompleto,
+              (v) => setState(() => _secFiltroIncompleto = v)),
+          _chipFiltro('Inactivos', 'inactivo', _secFiltroIncompleto,
+              (v) => setState(() => _secFiltroIncompleto = v)),
+        ]),
+      ),
       Expanded(
         child: filtrados.isEmpty
             ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -2857,22 +3133,21 @@ class _PanelRedYSectoresState extends State<_PanelRedYSectores>
           ),
         ),
       ),
-      // #108 — chips filtro incompleto
-      if (_userSel != null)
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
-          child: Row(children: [
-            _chipFiltro('Todos', null, _dirFiltroIncompleto,
-                (v) => setState(() => _dirFiltroIncompleto = v)),
-            _chipFiltro('Sin precio', 'sinPrecio', _dirFiltroIncompleto,
-                (v) => setState(() => _dirFiltroIncompleto = v)),
-            _chipFiltro('Sin GPS', 'sinGps', _dirFiltroIncompleto,
-                (v) => setState(() => _dirFiltroIncompleto = v)),
-            _chipFiltro('Inactivas', 'inactivo', _dirFiltroIncompleto,
-                (v) => setState(() => _dirFiltroIncompleto = v)),
-          ]),
-        ),
+      // chips filtro incompleto — siempre visibles
+      SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
+        child: Row(children: [
+          _chipFiltro('Todos', null, _dirFiltroIncompleto,
+              (v) => setState(() => _dirFiltroIncompleto = v)),
+          _chipFiltro('Sin precio', 'sinPrecio', _dirFiltroIncompleto,
+              (v) => setState(() => _dirFiltroIncompleto = v)),
+          _chipFiltro('Sin GPS', 'sinGps', _dirFiltroIncompleto,
+              (v) => setState(() => _dirFiltroIncompleto = v)),
+          _chipFiltro('Inactivas', 'inactivo', _dirFiltroIncompleto,
+              (v) => setState(() => _dirFiltroIncompleto = v)),
+        ]),
+      ),
       Expanded(
         child: _dirs.isEmpty && _userSel == null
             ? _noUserPlaceholder('Selecciona un usuario para ver\nsus direcciones')

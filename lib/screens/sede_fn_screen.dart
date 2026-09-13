@@ -1745,7 +1745,7 @@ class _FormularioTabState extends State<_FormularioTab> {
                               horizontal: 12, vertical: 10),
                           decoration: BoxDecoration(
                             color: esSector
-                                ? Colors.indigo[900]!.withValues(alpha: 0.3)
+                                ? const Color(0xFF002da2).withValues(alpha: 0.3)
                                 : Colors.transparent,
                             border: const Border(
                                 bottom: BorderSide(color: Colors.white10)),
@@ -4032,7 +4032,7 @@ class _HistorialTabState extends State<_HistorialTab> {
                                             padding: const EdgeInsets.symmetric(
                                                 horizontal: 5, vertical: 2),
                                             decoration: BoxDecoration(
-                                              color: Colors.indigo[900],
+                                              color: const Color(0xFF002da2),
                                               borderRadius:
                                                   BorderRadius.circular(4),
                                             ),

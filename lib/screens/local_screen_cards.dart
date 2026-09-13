@@ -1028,6 +1028,71 @@ mixin _CardsMixin on State<LocalScreen> {
               ),
             ],
 
+            // ── Foto de comanda ────────────────────────────────────────
+            if ((servicio['foto_comanda_url']?.toString() ?? '').isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Builder(builder: (ctx) {
+                final fotoUrl = servicio['foto_comanda_url'].toString();
+                return GestureDetector(
+                  onTap: () => showDialog(
+                    context: ctx,
+                    builder: (_) => Dialog(
+                      backgroundColor: Colors.black,
+                      insetPadding: const EdgeInsets.all(12),
+                      child: Stack(children: [
+                        InteractiveViewer(
+                          child: Image.network(fotoUrl, fit: BoxFit.contain),
+                        ),
+                        Positioned(
+                          top: 8, right: 8,
+                          child: IconButton(
+                            icon: const Icon(Icons.close, color: Colors.white),
+                            onPressed: () => Navigator.pop(ctx),
+                          ),
+                        ),
+                      ]),
+                    ),
+                  ),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.brown[200]!),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        ClipRRect(
+                          borderRadius: const BorderRadius.vertical(top: Radius.circular(7)),
+                          child: Image.network(
+                            fotoUrl,
+                            height: 140,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => const SizedBox(
+                              height: 60,
+                              child: Center(child: Icon(Icons.broken_image, color: Colors.grey)),
+                            ),
+                          ),
+                        ),
+                        Container(
+                          decoration: BoxDecoration(
+                            color: Colors.brown[50],
+                            borderRadius: const BorderRadius.vertical(bottom: Radius.circular(7)),
+                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          child: Row(children: [
+                            const Text('📷', style: TextStyle(fontSize: 12)),
+                            const SizedBox(width: 6),
+                            Text('Foto de comanda · toca para ver grande',
+                                style: TextStyle(fontSize: 11, color: Colors.brown[700])),
+                          ]),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+            ],
+
             if (esHistorial && !esGlobal) ...[
               const SizedBox(height: 12),
               SizedBox(

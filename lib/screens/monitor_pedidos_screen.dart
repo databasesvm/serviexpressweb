@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart';
+import 'package:serviexpress_app/utils/deeplink_service.dart';
 import 'package:serviexpress_app/screens/pedidos_cliente_screen.dart';
 
 // ============================================================
@@ -284,11 +285,11 @@ class _MonitorPedidosScreenState extends State<MonitorPedidosScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0D0D0D),
+      backgroundColor: const Color(0xFFF2F3F5),
       appBar: AppBar(
         backgroundColor: Colors.black,
         iconTheme: const IconThemeData(color: Colors.white),
-        title: Text('Monitor Domicilios',
+        title: const Text('Monitor Domicilios',
             style: TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
@@ -359,13 +360,16 @@ class _MonitorPedidosScreenState extends State<MonitorPedidosScreen>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.check_circle_outline, size: 60, color: Colors.grey[300]),
+            Icon(Icons.receipt_long, size: 60, color: Colors.grey[300]),
             const SizedBox(height: 12),
-            Text('No hay pedidos activos',
+            Text('Sin pedidos activos ahora',
                 style: TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 15,
                     color: Colors.grey[600])),
+            const SizedBox(height: 6),
+            Text('Los nuevos pedidos aparecerán aquí automáticamente',
+                style: TextStyle(fontSize: 12, color: Colors.grey[400])),
           ],
         ),
       );
@@ -397,24 +401,27 @@ class _MonitorPedidosScreenState extends State<MonitorPedidosScreen>
   Widget _groupHeader(String estado, int count) {
     final color = _colorEstado(estado);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.only(bottom: 8, top: 4),
       child: Row(
         children: [
           Container(
-              width: 10,
-              height: 10,
-              decoration: BoxDecoration(
-                  color: color, shape: BoxShape.circle)),
-          const SizedBox(width: 8),
-          Text(_labelEstado(estado).toUpperCase(),
-              style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 11,
-                  color: color,
-                  letterSpacing: 0.8)),
-          const SizedBox(width: 6),
-          Text('($count)',
-              style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: color.withValues(alpha: 0.4)),
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Container(width: 8, height: 8,
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+              const SizedBox(width: 6),
+              Text(_labelEstado(estado).toUpperCase(),
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10, color: color, letterSpacing: 0.6)),
+              const SizedBox(width: 4),
+              Text('$count',
+                  style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.bold)),
+            ]),
+          ),
         ],
       ),
     );
@@ -425,108 +432,219 @@ class _MonitorPedidosScreenState extends State<MonitorPedidosScreen>
     final items = p['items_pedido'] as List? ?? [];
     final colorEst = _colorEstado(estado);
     final idxActual = _estadosFlujo.indexOf(estado);
-    final puedeAvanzar =
-        idxActual >= 0 && idxActual < _estadosFlujo.length - 1;
-    final siguienteEstado =
-        puedeAvanzar ? _estadosFlujo[idxActual + 1] : estado;
+    final puedeAvanzar = idxActual >= 0 && idxActual < _estadosFlujo.length - 1;
+    final siguienteEstado = puedeAvanzar ? _estadosFlujo[idxActual + 1] : estado;
+    final total = (p['total'] as num?)?.toInt() ?? 0;
+    final fecha = DateTime.tryParse(p['created_at']?.toString() ?? '')?.toLocal();
+    final horaStr = fecha != null
+        ? '${fecha.hour.toString().padLeft(2, '0')}:${fecha.minute.toString().padLeft(2, '0')}'
+        : '—';
+    // Minutos desde creación
+    final mins = fecha != null ? DateTime.now().difference(fecha).inMinutes : 0;
+    final urgente = mins >= 15;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: urgente
+            ? const BorderSide(color: Colors.red, width: 1.5)
+            : BorderSide.none,
+      ),
       elevation: 2,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header
+          // ── Header: nombre local + hora + tiempo transcurrido ──────────────
           Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
-              color: colorEst.withValues(alpha: 0.1),
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(12)),
+              color: colorEst.withValues(alpha: 0.10),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
             ),
             child: Row(
               children: [
                 Expanded(
-                  child: Text(
-                    _nombreLocal(p['local_id'] as int),
-                    style: const TextStyle(
-                        fontWeight: FontWeight.bold, fontSize: 14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _nombreLocal(p['local_id'] as int),
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                      ),
+                      const SizedBox(height: 2),
+                      Row(children: [
+                        Icon(Icons.access_time, size: 11, color: urgente ? Colors.red : Colors.grey[500]),
+                        const SizedBox(width: 3),
+                        Text(
+                          urgente ? '⚠ $mins min — Pendiente mucho tiempo' : '$horaStr · hace $mins min',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: urgente ? Colors.red : Colors.grey[500],
+                            fontWeight: urgente ? FontWeight.bold : FontWeight.normal,
+                          ),
+                        ),
+                      ]),
+                    ],
                   ),
                 ),
-                Text(
-                    '#${p['id'].toString().substring(0, 8).toUpperCase()}',
-                    style: TextStyle(
-                        fontSize: 10,
-                        color: Colors.grey[600],
-                        fontFamily: 'monospace')),
+                // Chip de estado
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: colorEst.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: colorEst.withValues(alpha: 0.6), width: 0.8),
+                  ),
+                  child: Text(
+                    _labelEstado(estado),
+                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: colorEst),
+                  ),
+                ),
               ],
             ),
           ),
+
+          // ── Barra de progreso del estado ───────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+            child: Row(
+              children: List.generate(_estadosFlujo.length - 1, (i) {
+                // Los últimos 2 (entregado/cancelado) no se muestran en la barra
+                if (i >= 4) return const SizedBox.shrink();
+                final activo = i <= idxActual;
+                return Expanded(
+                  child: Row(children: [
+                    Container(
+                      width: 10, height: 10,
+                      decoration: BoxDecoration(
+                        color: activo ? colorEst : Colors.grey[300],
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    if (i < 3)
+                      Expanded(child: Container(
+                        height: 2,
+                        color: i < idxActual ? colorEst : Colors.grey[300],
+                      )),
+                  ]),
+                );
+              }),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 2, 12, 0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                'Pendiente', 'Confirm.', 'Prep.', 'Listo',
+              ].map((l) => Text(l, style: const TextStyle(fontSize: 7, color: Colors.black38))).toList(),
+            ),
+          ),
+
+          const SizedBox(height: 8),
+          const Divider(height: 1),
+
           Padding(
             padding: const EdgeInsets.all(12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Items
+                // Items del pedido
                 ...items.map((i) => Padding(
-                      padding: const EdgeInsets.only(bottom: 2),
-                      child: Row(
-                        children: [
-                          Text('${i['cantidad']}x ',
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 12)),
-                          Expanded(
-                              child: Text(i['nombre_snapshot'],
-                                  style: const TextStyle(fontSize: 12))),
-                        ],
+                  padding: const EdgeInsets.only(bottom: 3),
+                  child: Row(children: [
+                    Container(
+                      width: 22, height: 22,
+                      decoration: BoxDecoration(
+                        color: Colors.grey[100],
+                        borderRadius: BorderRadius.circular(4),
                       ),
-                    )),
-                const Divider(height: 12),
+                      child: Center(
+                        child: Text('${i['cantidad']}',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text(i['nombre_snapshot'], style: const TextStyle(fontSize: 12))),
+                  ]),
+                )),
+                const SizedBox(height: 8),
 
-                // Info logística
-                _infoRow(Icons.location_on_outlined,
-                    p['direccion_entrega']?.toString() ?? '—'),
-                _infoRow(Icons.payments_outlined,
-                    '${p['metodo_pago'] == 'efectivo' ? 'Efectivo' : 'Transferencia'} — Total: ${_fmt((p['total'] as num).toInt())}'),
-                _infoRow(Icons.motorcycle,
-                    'Móvil: ${_nombreMovil(p['movil_id'] as int?)}'),
+                // Info logística en fila compacta
+                Row(children: [
+                  Icon(Icons.location_on_outlined, size: 13, color: Colors.grey[500]),
+                  const SizedBox(width: 4),
+                  Expanded(child: Text(
+                    p['direccion_entrega']?.toString() ?? '—',
+                    style: TextStyle(fontSize: 11, color: Colors.grey[700]),
+                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                  )),
+                ]),
+                const SizedBox(height: 3),
+                Row(children: [
+                  Icon(Icons.payments_outlined, size: 13, color: Colors.grey[500]),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${p['metodo_pago'] == 'efectivo' ? 'Efectivo' : 'Transferencia'}',
+                    style: TextStyle(fontSize: 11, color: Colors.grey[700]),
+                  ),
+                  const Spacer(),
+                  Text(
+                    _fmt(total),
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.black87),
+                  ),
+                ]),
+                if ((p['movil_id'] as int?) != null) ...[
+                  const SizedBox(height: 3),
+                  Row(children: [
+                    Icon(Icons.motorcycle, size: 13, color: Colors.grey[500]),
+                    const SizedBox(width: 4),
+                    Text(_nombreMovil(p['movil_id'] as int?),
+                        style: TextStyle(fontSize: 11, color: Colors.grey[700])),
+                  ]),
+                ],
 
-                const SizedBox(height: 10),
+                const SizedBox(height: 12),
 
                 // Acciones
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
+                Row(
                   children: [
-                    // Avanzar estado
-                    if (puedeAvanzar)
-                      _botonAccion(
-                        '→ ${_labelEstado(siguienteEstado)}',
-                        Colors.black,
-                        const Color(0xff3AF500),
-                        () => _cambiarEstado(
-                            p['id'].toString(), siguienteEstado, clienteId: p['cliente_id']?.toString()),
-                      ),
                     // Asignar móvil
                     if (p['movil_id'] == null && _moviles.isNotEmpty)
-                      _botonAccion(
-                        '🛵 Asignar móvil',
-                        Colors.indigo,
-                        Colors.white,
-                        () => _asignarMovil(p),
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: _botonAccion(
+                          '🛵 Asignar',
+                          Colors.indigo,
+                          Colors.white,
+                          () => _asignarMovil(p),
+                        ),
+                      ),
+                    // Avanzar estado
+                    if (puedeAvanzar)
+                      Expanded(
+                        child: _botonAccion(
+                          '✓ ${_labelEstado(siguienteEstado)}',
+                          Colors.black,
+                          const Color(0xff3AF500),
+                          () => _cambiarEstado(
+                            p['id'].toString(), siguienteEstado,
+                            clienteId: p['cliente_id']?.toString(),
+                          ),
+                        ),
                       ),
                     // Cancelar
-                    if (!['entregado', 'cancelado', 'en_camino']
-                        .contains(estado))
-                      _botonAccion(
-                        'Cancelar',
-                        Colors.red.shade50,
-                        Colors.red,
-                        () => _cancelar(p['id'].toString()),
-                        border: Colors.red,
+                    if (!['entregado', 'cancelado', 'en_camino'].contains(estado))
+                      Padding(
+                        padding: const EdgeInsets.only(left: 8),
+                        child: _botonAccion(
+                          '✕',
+                          Colors.red.shade50,
+                          Colors.red,
+                          () => _cancelar(p['id'].toString()),
+                          border: Colors.red,
+                        ),
                       ),
                   ],
                 ),
@@ -538,20 +656,6 @@ class _MonitorPedidosScreenState extends State<MonitorPedidosScreen>
     );
   }
 
-  Widget _infoRow(IconData icon, String text) => Padding(
-        padding: const EdgeInsets.only(bottom: 3),
-        child: Row(
-          children: [
-            Icon(icon, size: 14, color: Colors.grey),
-            const SizedBox(width: 6),
-            Expanded(
-                child: Text(text,
-                    style: TextStyle(fontSize: 12, color: Colors.grey[700]),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis)),
-          ],
-        ),
-      );
 
   Widget _botonAccion(String label, Color bg, Color fg, VoidCallback onTap,
       {Color? border}) =>
@@ -614,13 +718,13 @@ class _MonitorPedidosScreenState extends State<MonitorPedidosScreen>
   }
 
   Widget _sectionLabel(String txt) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.only(bottom: 8, top: 4),
         child: Text(txt,
-            style: const TextStyle(
+            style: TextStyle(
                 fontWeight: FontWeight.bold,
                 fontSize: 11,
                 letterSpacing: 0.8,
-                color: Colors.white54)),
+                color: Colors.grey[600])),
       );
 
   Widget _buildLocalTile(Map<String, dynamic> local) {
@@ -657,21 +761,73 @@ class _MonitorPedidosScreenState extends State<MonitorPedidosScreen>
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            IconButton(
-              icon: const Icon(Icons.history, color: Colors.black38, size: 20),
-              tooltip: 'Ver historial',
-              onPressed: () => _verHistorialLocal(local),
+            // Botón compartir link del local
+            GestureDetector(
+              onTap: () {
+                final texto = DeeplinkService.textoCompartible(
+                  local['nombre'].toString(),
+                  local['id'] as int,
+                );
+                Clipboard.setData(ClipboardData(text: texto));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Link de ${local['nombre']} copiado'),
+                    backgroundColor: Colors.black,
+                  ),
+                );
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                margin: const EdgeInsets.only(right: 6),
+                decoration: BoxDecoration(
+                  color: Colors.green[50],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.green[200]!),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.link, size: 15, color: Colors.green[700]),
+                  const SizedBox(width: 3),
+                  Text('Link', style: TextStyle(fontSize: 11, color: Colors.green[700], fontWeight: FontWeight.bold)),
+                ]),
+              ),
             ),
-            Text(activo ? 'ON' : 'OFF',
-                style: TextStyle(
-                    fontSize: 11,
+            // Botón historial
+            GestureDetector(
+              onTap: () => _verHistorialLocal(local),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                margin: const EdgeInsets.only(right: 6),
+                decoration: BoxDecoration(
+                  color: Colors.grey[100],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.grey[300]!),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: const [
+                  Icon(Icons.history, size: 15, color: Colors.black54),
+                  SizedBox(width: 3),
+                  Text('Historial', style: TextStyle(fontSize: 11, color: Colors.black54)),
+                ]),
+              ),
+            ),
+            // Toggle con etiqueta descriptiva
+            Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  activo ? 'Recibe pedidos' : 'Sin pedidos',
+                  style: TextStyle(
+                    fontSize: 9,
                     fontWeight: FontWeight.bold,
-                    color: activo ? const Color(0xff3AF500) : Colors.grey)),
-            const SizedBox(width: 6),
-            Switch(
-              value: activo,
-              activeThumbColor: const Color(0xff3AF500),
-              onChanged: (_) => _toggleDomicilios(local),
+                    color: activo ? const Color(0xff3AF500) : Colors.grey,
+                  ),
+                ),
+                Switch(
+                  value: activo,
+                  activeTrackColor: const Color(0xff3AF500).withValues(alpha: 0.3),
+                  activeThumbColor: const Color(0xff3AF500),
+                  onChanged: (_) => _toggleDomicilios(local),
+                ),
+              ],
             ),
           ],
         ),
@@ -684,31 +840,61 @@ class _MonitorPedidosScreenState extends State<MonitorPedidosScreen>
   Widget _buildTabPedir() {
     return Column(
       children: [
-        // Botón compartir link
+        // Banner explicativo
         Container(
           color: Colors.black,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Row(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(Icons.link, color: Colors.white60, size: 16),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Link: serviexpress://locales',
-                  style: TextStyle(color: Colors.grey[400], fontSize: 12),
-                ),
+              const Row(children: [
+                Icon(Icons.add_shopping_cart, color: Color(0xff3AF500), size: 14),
+                SizedBox(width: 6),
+                Text('Hacer pedido como cliente',
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+              ]),
+              const SizedBox(height: 2),
+              Text(
+                'Selecciona un local y crea un pedido desde su carta. Los locales aparecen cuando tienen el switch "Recibe pedidos" activado.',
+                style: TextStyle(color: Colors.grey[400], fontSize: 10),
               ),
-              IconButton(
-                icon: const Icon(Icons.copy, color: Color(0xff3AF500), size: 18),
-                onPressed: () {
-                  Clipboard.setData(const ClipboardData(text: 'https://serviexpress.app/locales'));
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Link copiado'), backgroundColor: Colors.black),
-                  );
-                },
-                tooltip: 'Copiar link',
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
+              const SizedBox(height: 8),
+              // Link web real
+              Row(children: [
+                Icon(Icons.language, color: Colors.grey[500], size: 13),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'databasesvm.github.io/serviexpressweb/form/',
+                    style: TextStyle(color: Colors.grey[400], fontSize: 10),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                GestureDetector(
+                  onTap: () {
+                    Clipboard.setData(const ClipboardData(text: 'https://databasesvm.github.io/serviexpressweb/form/'));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Link web copiado'), backgroundColor: Colors.black),
+                    );
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xff3AF500).withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(Icons.copy, size: 12, color: Color(0xff3AF500)),
+                      SizedBox(width: 4),
+                      Text('Copiar', style: TextStyle(fontSize: 10, color: Color(0xff3AF500), fontWeight: FontWeight.bold)),
+                    ]),
+                  ),
+                ),
+              ]),
+              const SizedBox(height: 4),
+              Text(
+                '💡 Para compartir el link de un local específico, usa el botón 🔗 en la pestaña LOCALES.',
+                style: TextStyle(color: Colors.grey[500], fontSize: 9, fontStyle: FontStyle.italic),
               ),
             ],
           ),
@@ -742,7 +928,7 @@ class _MonitorPedidosScreenState extends State<MonitorPedidosScreen>
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: const Color(0xFF0D0D0D),
+      backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       builder: (ctx) => DraggableScrollableSheet(

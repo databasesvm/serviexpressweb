@@ -501,11 +501,11 @@ Total entregados período: <strong>\$${_miles(totalDom)}</strong>
       final logoData = await rootBundle.load('assets/logo.png');
       final logoImg = pw.MemoryImage(logoData.buffer.asUint8List());
 
-      // Formato tirilla: 80 mm × 200 mm
+      // Hoja carta landscape — 4 tirillas por página (≈65 mm c/u)
       const pageFormat = PdfPageFormat(
-        226.77,  // 80 mm en puntos
-        566.93,  // 200 mm en puntos
-        marginAll: 8.50, // 3 mm
+        792.0,  // 279.4 mm en puntos (landscape ancho)
+        612.0,  // 215.9 mm en puntos (landscape alto)
+        marginAll: 14.17, // 5 mm
       );
 
       final pdfDoc = pw.Document(
@@ -515,142 +515,165 @@ Total entregados período: <strong>\$${_miles(totalDom)}</strong>
         ),
       );
 
-      const dasher = '- - - - - - - - - - - - - - -';
-      const cuerpo = 7.5;
-      const chico = 6.5;
-      const titulo = 9.5;
+      const dasher = '- - - - - - - - -';
+      const cuerpo = 7.0;
+      const chico  = 6.0;
+      const titulo = 8.5;
 
-      for (final s in servicios) {
-        final consecutivo = s['fn_consecutivo']?.toString() ?? '#${s['id']}';
-        final facturaNum = s['fn_factura_numero']?.toString() ?? '—';
-        final movil = _movilNumero(s);
-        final destino = s['destino']?.toString() ?? '—';
-        final tarifa = (s['tarifa'] as num?)?.toInt() ?? 0;
-        final metodo = _labelMetodo(s['metodo_pago']?.toString() ?? '');
+      // Helper: construye el contenido de una sola tirilla
+      pw.Widget buildTirilla(Map<String, dynamic>? s) {
+        if (s == null) return pw.SizedBox();
+        final consecutivo  = s['fn_consecutivo']?.toString() ?? '#${s['id']}';
+        final facturaNum   = s['fn_factura_numero']?.toString() ?? '—';
+        final movil        = _movilNumero(s);
+        final destino      = s['destino']?.toString() ?? '—';
+        final tarifa       = (s['tarifa'] as num?)?.toInt() ?? 0;
+        final metodo       = _labelMetodo(s['metodo_pago']?.toString() ?? '');
         final fechaTirilla = _fecha(s['created_at']?.toString(), corta: true);
+        final sedeCodigo   = _codigoSede(s['fn_sede_solicitante_id']);
 
-        final sedeCodigo = _codigoSede(s['fn_sede_solicitante_id']);
+        return pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.center,
+          children: [
+            // ─ Fecha
+            pw.Text(fechaTirilla,
+                style: pw.TextStyle(fontSize: chico, color: PdfColors.grey600)),
+            pw.SizedBox(height: 3),
+
+            // ─ Cabecera empresa
+            pw.Text('SERVIMOTO EXPRESS 24/7',
+                style: pw.TextStyle(fontSize: titulo, fontWeight: pw.FontWeight.bold),
+                textAlign: pw.TextAlign.center),
+            pw.Text('Logística de Última Milla y Mensajería Continua',
+                style: pw.TextStyle(fontSize: chico), textAlign: pw.TextAlign.center),
+            pw.Text('Cúcuta, Los Patios y V. del Rosario',
+                style: pw.TextStyle(fontSize: chico), textAlign: pw.TextAlign.center),
+            pw.Text('NIT / RUT: 700449117-3',
+                style: pw.TextStyle(fontSize: chico), textAlign: pw.TextAlign.center),
+            pw.Text('servimotoexpress247@gmail.com',
+                style: pw.TextStyle(fontSize: chico), textAlign: pw.TextAlign.center),
+            pw.Text('3025901085',
+                style: pw.TextStyle(fontSize: chico), textAlign: pw.TextAlign.center),
+            pw.SizedBox(height: 4),
+
+            pw.Text(dasher,
+                style: pw.TextStyle(fontSize: chico, color: PdfColors.grey500)),
+            pw.SizedBox(height: 4),
+
+            // ─ Consecutivo + Factura
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text(consecutivo,
+                    style: pw.TextStyle(fontSize: cuerpo, fontWeight: pw.FontWeight.bold)),
+                pw.Text('Fact #: $facturaNum',
+                    style: pw.TextStyle(fontSize: cuerpo, fontWeight: pw.FontWeight.bold)),
+              ],
+            ),
+            pw.SizedBox(height: 4),
+
+            pw.Text(dasher,
+                style: pw.TextStyle(fontSize: chico, color: PdfColors.grey500)),
+            pw.SizedBox(height: 4),
+
+            // ─ Móvil
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text('Móvil:',
+                    style: pw.TextStyle(fontSize: cuerpo, fontWeight: pw.FontWeight.bold)),
+                pw.Text(movil, style: pw.TextStyle(fontSize: cuerpo)),
+              ],
+            ),
+            pw.SizedBox(height: 4),
+
+            pw.Text(dasher,
+                style: pw.TextStyle(fontSize: chico, color: PdfColors.grey500)),
+            pw.SizedBox(height: 4),
+
+            // ─ Punto de recogida
+            pw.Text('Punto de Recogida:',
+                style: pw.TextStyle(fontSize: cuerpo, fontWeight: pw.FontWeight.bold),
+                textAlign: pw.TextAlign.center),
+            pw.Text(sedeCodigo,
+                style: pw.TextStyle(fontSize: cuerpo, fontWeight: pw.FontWeight.bold),
+                textAlign: pw.TextAlign.center),
+            if (metodo.isNotEmpty)
+              pw.Text(metodo,
+                  style: pw.TextStyle(fontSize: cuerpo),
+                  textAlign: pw.TextAlign.center),
+            pw.SizedBox(height: 4),
+
+            pw.Text(dasher,
+                style: pw.TextStyle(fontSize: chico, color: PdfColors.grey500)),
+            pw.SizedBox(height: 4),
+
+            // ─ Dirección de entrega
+            pw.Text('Dirección de Entrega:',
+                style: pw.TextStyle(fontSize: cuerpo, fontWeight: pw.FontWeight.bold),
+                textAlign: pw.TextAlign.center),
+            pw.Text(destino,
+                style: pw.TextStyle(fontSize: cuerpo),
+                textAlign: pw.TextAlign.center),
+            pw.SizedBox(height: 4),
+
+            pw.Text(dasher,
+                style: pw.TextStyle(fontSize: chico, color: PdfColors.grey500)),
+            pw.SizedBox(height: 4),
+
+            // ─ Total
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text('[FOTO]',
+                    style: pw.TextStyle(fontSize: cuerpo, color: PdfColors.blue800)),
+                pw.Text('Total: \$ ${_miles(tarifa)}',
+                    style: pw.TextStyle(
+                        fontSize: cuerpo + 1, fontWeight: pw.FontWeight.bold)),
+              ],
+            ),
+            pw.SizedBox(height: 4),
+
+            pw.Text(dasher,
+                style: pw.TextStyle(fontSize: chico, color: PdfColors.grey500)),
+            pw.SizedBox(height: 6),
+
+            // ─ Footer
+            pw.Text('SERVIMOTOEXPRESS',
+                style: pw.TextStyle(fontSize: cuerpo, fontWeight: pw.FontWeight.bold),
+                textAlign: pw.TextAlign.center),
+            pw.Text('DOMICILIOS 24/7',
+                style: pw.TextStyle(fontSize: cuerpo, fontWeight: pw.FontWeight.bold),
+                textAlign: pw.TextAlign.center),
+            pw.Text('Nit: 700449173-3',
+                style: pw.TextStyle(fontSize: chico, color: PdfColors.grey600),
+                textAlign: pw.TextAlign.center),
+            pw.SizedBox(height: 6),
+            pw.Image(logoImg, width: 45),
+          ],
+        );
+      }
+
+      // Agrupar en lotes de 4 y generar una página por lote
+      for (var i = 0; i < servicios.length; i += 4) {
+        final lote = servicios.sublist(i, (i + 4).clamp(0, servicios.length));
 
         pdfDoc.addPage(pw.Page(
           pageFormat: pageFormat,
-          build: (ctx) => pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.center,
+          build: (ctx) => pw.Row(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
-              // ─ Fecha
-              pw.Text(fechaTirilla,
-                  style: pw.TextStyle(fontSize: chico, color: PdfColors.grey600)),
-              pw.SizedBox(height: 3),
-
-              // ─ Cabecera empresa
-              pw.Text('SERVIMOTO EXPRESS 24/7',
-                  style: pw.TextStyle(fontSize: titulo, fontWeight: pw.FontWeight.bold),
-                  textAlign: pw.TextAlign.center),
-              pw.Text('Logística de Última Milla y Mensajería Continua',
-                  style: pw.TextStyle(fontSize: chico), textAlign: pw.TextAlign.center),
-              pw.Text('Cúcuta, Los Patios y V. del Rosario',
-                  style: pw.TextStyle(fontSize: chico), textAlign: pw.TextAlign.center),
-              pw.Text('NIT / RUT: 700449117-3',
-                  style: pw.TextStyle(fontSize: chico), textAlign: pw.TextAlign.center),
-              pw.Text('servimotoexpress247@gmail.com',
-                  style: pw.TextStyle(fontSize: chico), textAlign: pw.TextAlign.center),
-              pw.Text('3025901085',
-                  style: pw.TextStyle(fontSize: chico), textAlign: pw.TextAlign.center),
-              pw.SizedBox(height: 4),
-
-              pw.Text(dasher,
-                  style: pw.TextStyle(fontSize: chico, color: PdfColors.grey500)),
-              pw.SizedBox(height: 4),
-
-              // ─ Consecutivo + Factura
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text(consecutivo,
-                      style: pw.TextStyle(fontSize: cuerpo, fontWeight: pw.FontWeight.bold)),
-                  pw.Text('Factura #:  $facturaNum',
-                      style: pw.TextStyle(fontSize: cuerpo, fontWeight: pw.FontWeight.bold)),
-                ],
-              ),
-              pw.SizedBox(height: 4),
-
-              pw.Text(dasher,
-                  style: pw.TextStyle(fontSize: chico, color: PdfColors.grey500)),
-              pw.SizedBox(height: 4),
-
-              // ─ Móvil
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text('Móvil Asignado:',
-                      style: pw.TextStyle(fontSize: cuerpo, fontWeight: pw.FontWeight.bold)),
-                  pw.Text(movil, style: pw.TextStyle(fontSize: cuerpo)),
-                ],
-              ),
-              pw.SizedBox(height: 4),
-
-              pw.Text(dasher,
-                  style: pw.TextStyle(fontSize: chico, color: PdfColors.grey500)),
-              pw.SizedBox(height: 4),
-
-              // ─ Punto de recogida
-              pw.Text('Punto de Recogida:',
-                  style: pw.TextStyle(fontSize: cuerpo, fontWeight: pw.FontWeight.bold),
-                  textAlign: pw.TextAlign.center),
-              pw.Text(sedeCodigo,
-                  style: pw.TextStyle(fontSize: cuerpo, fontWeight: pw.FontWeight.bold),
-                  textAlign: pw.TextAlign.center),
-              if (metodo.isNotEmpty)
-                pw.Text(metodo,
-                    style: pw.TextStyle(fontSize: cuerpo),
-                    textAlign: pw.TextAlign.center),
-              pw.SizedBox(height: 4),
-
-              pw.Text(dasher,
-                  style: pw.TextStyle(fontSize: chico, color: PdfColors.grey500)),
-              pw.SizedBox(height: 4),
-
-              // ─ Dirección de entrega
-              pw.Text('Dirección de Entrega:',
-                  style: pw.TextStyle(fontSize: cuerpo, fontWeight: pw.FontWeight.bold),
-                  textAlign: pw.TextAlign.center),
-              pw.Text(destino,
-                  style: pw.TextStyle(fontSize: cuerpo),
-                  textAlign: pw.TextAlign.center),
-              pw.SizedBox(height: 4),
-
-              pw.Text(dasher,
-                  style: pw.TextStyle(fontSize: chico, color: PdfColors.grey500)),
-              pw.SizedBox(height: 4),
-
-              // ─ Total
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text('[FOTO]',
-                      style: pw.TextStyle(fontSize: cuerpo, color: PdfColors.blue800)),
-                  pw.Text('Total:  \$ ${_miles(tarifa)}',
-                      style: pw.TextStyle(
-                          fontSize: cuerpo + 1, fontWeight: pw.FontWeight.bold)),
-                ],
-              ),
-              pw.SizedBox(height: 4),
-
-              pw.Text(dasher,
-                  style: pw.TextStyle(fontSize: chico, color: PdfColors.grey500)),
-              pw.SizedBox(height: 6),
-
-              // ─ Footer
-              pw.Text('SERVIMOTOEXPRESS',
-                  style: pw.TextStyle(fontSize: cuerpo, fontWeight: pw.FontWeight.bold),
-                  textAlign: pw.TextAlign.center),
-              pw.Text('DOMICILIOS 24/7',
-                  style: pw.TextStyle(fontSize: cuerpo, fontWeight: pw.FontWeight.bold),
-                  textAlign: pw.TextAlign.center),
-              pw.Text('Nit: 700449173-3',
-                  style: pw.TextStyle(fontSize: chico, color: PdfColors.grey600),
-                  textAlign: pw.TextAlign.center),
-              pw.SizedBox(height: 6),
-              pw.Image(logoImg, width: 55),
+              for (var j = 0; j < 4; j++) ...[
+                pw.Expanded(
+                  child: buildTirilla(j < lote.length ? lote[j] : null),
+                ),
+                if (j < 3)
+                  pw.Container(
+                    width: 0.5,
+                    color: PdfColors.grey400,
+                    margin: const pw.EdgeInsets.symmetric(horizontal: 4),
+                  ),
+              ],
             ],
           ),
         ));
@@ -1109,7 +1132,7 @@ Total entregados período: <strong>\$${_miles(totalDom)}</strong>
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                     decoration: BoxDecoration(
-                      color: Colors.indigo[900],
+                      color: const Color(0xFF002da2),
                       borderRadius: BorderRadius.circular(3),
                     ),
                     child: Text(

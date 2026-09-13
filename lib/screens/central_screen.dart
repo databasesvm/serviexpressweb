@@ -918,7 +918,7 @@ class _CentralScreenState extends State<CentralScreen>
                 // Botón FN Farmanorte
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.indigo[900],
+                    backgroundColor: const Color(0xFF002da2),
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(
                         horizontal: 14, vertical: 0),
@@ -934,7 +934,7 @@ class _CentralScreenState extends State<CentralScreen>
                 ),
                 const SizedBox(width: 4),
                 IconButton(
-                  icon: const Icon(Icons.receipt_long, color: Colors.indigo, size: 22),
+                  icon: const Icon(Icons.receipt_long, color: Color(0xFF002da2), size: 22),
                   tooltip: 'Facturación FN',
                   onPressed: () => Navigator.push(
                     context,
@@ -944,7 +944,7 @@ class _CentralScreenState extends State<CentralScreen>
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.location_on, color: Colors.teal, size: 22),
+                  icon: const Icon(Icons.location_on, color: Color(0xFF002da2), size: 22),
                   tooltip: 'Red de direcciones FN',
                   onPressed: () => Navigator.push(
                     context,
@@ -1263,10 +1263,10 @@ class _CentralScreenState extends State<CentralScreen>
             // ── FN Farmanorte ──
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-              child: Text('FN FARMANORTE', style: TextStyle(color: Colors.indigo[300], fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
+              child: Text('FN FARMANORTE', style: TextStyle(color: Color(0xFF002da2), fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
             ),
-            _item(Icons.local_pharmacy_rounded, 'Crear servicio FN', Colors.indigo[200]!, () => _abrirFormularioFN(context)),
-            _item(Icons.receipt_long_rounded, 'Facturación FN', Colors.indigo[200]!, () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FnFacturacionScreen(titulo: 'Facturación FN — Central')))),
+            _item(Icons.local_pharmacy_rounded, 'Crear servicio FN', const Color(0xFF002da2), () => _abrirFormularioFN(context)),
+            _item(Icons.receipt_long_rounded, 'Facturación FN', const Color(0xFF002da2), () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FnFacturacionScreen(titulo: 'Facturación FN — Central')))),
             _item(Icons.location_on_rounded, 'Red de direcciones FN', const Color(0xFF002DA2), () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FnRedDireccionesScreen()))),
 
             const Divider(color: Colors.white10, height: 20),

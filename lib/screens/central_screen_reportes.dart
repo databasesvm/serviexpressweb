@@ -236,18 +236,20 @@ class _PanelReportesBottomSheetState
                 ('fn_sede', 'Sede FN'),
               ].map((e) => Padding(
                 padding: const EdgeInsets.only(right: 6),
-                child: FilterChip(
-                  label: Text(e.$2, style: TextStyle(
-                    fontSize: 11,
-                    color: _filtroOrigen == e.$1 ? Colors.black : Colors.white60,
-                  )),
-                  selected: _filtroOrigen == e.$1,
-                  selectedColor: Colors.orange,
-                  backgroundColor: Colors.white12,
-                  showCheckmark: false,
-                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                  onSelected: (_) => setState(() => _filtroOrigen = e.$1),
+                child: GestureDetector(
+                  onTap: () => setState(() => _filtroOrigen = e.$1),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: _filtroOrigen == e.$1 ? Colors.orange : Colors.white12,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(e.$2, style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: _filtroOrigen == e.$1 ? Colors.black : Colors.white60,
+                    )),
+                  ),
                 ),
               )),
               const Spacer(),

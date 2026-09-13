@@ -268,7 +268,7 @@ class _SedesTabState extends State<_SedesTab> {
       margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.indigo[900]!.withValues(alpha: 0.3),
+        color: const Color(0xFF002da2).withValues(alpha: 0.3),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: Colors.indigo[700]!.withValues(alpha: 0.5)),
       ),
@@ -1579,7 +1579,7 @@ class _MotosTabState extends State<_MotosTab> {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
-                  color: Colors.indigo[900],
+                  color: const Color(0xFF002da2),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
@@ -1686,7 +1686,7 @@ class _MotoFnCard extends StatelessWidget {
               height: 46,
               decoration: BoxDecoration(
                 color: tieneFn
-                    ? Colors.indigo[900]!.withValues(alpha: 0.6)
+                    ? const Color(0xFF002da2).withValues(alpha: 0.6)
                     : const Color(0xFF2A2A2A),
                 borderRadius: BorderRadius.circular(10),
               ),
@@ -2040,7 +2040,7 @@ class _CardServicioFN extends StatelessWidget {
                           horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
                         color:
-                            Colors.indigo[900]!.withValues(alpha: 0.45),
+                            const Color(0xFF002da2).withValues(alpha: 0.45),
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(_labelRecogida(r),

@@ -219,7 +219,7 @@ extension CentralScreenPanelControl on _CentralScreenState {
                               horizontal: 8,
                               vertical: 4,
                             ),
-                            color: Colors.indigo[900],
+                            color: const Color(0xFF002da2),
                             child: Row(
                               children: [
                                 const Icon(Icons.local_pharmacy,
@@ -283,7 +283,7 @@ extension CentralScreenPanelControl on _CentralScreenState {
                                       children: [
                                         CircleAvatar(
                                           radius: 12,
-                                          backgroundColor: Colors.indigo[900],
+                                          backgroundColor: const Color(0xFF002da2),
                                           child: Text(
                                             _extraerNumeroAvatar(m),
                                             style: const TextStyle(
@@ -300,7 +300,7 @@ extension CentralScreenPanelControl on _CentralScreenState {
                                             width: 12,
                                             height: 12,
                                             decoration: BoxDecoration(
-                                              color: Colors.indigo[700],
+                                              color: const Color(0xFF002da2),
                                               shape: BoxShape.circle,
                                               border: Border.all(
                                                   color: Colors.white, width: 1),
@@ -318,7 +318,7 @@ extension CentralScreenPanelControl on _CentralScreenState {
                                       style: TextStyle(
                                         fontWeight: FontWeight.bold,
                                         fontSize: 12,
-                                        color: Colors.indigo[900],
+                                        color: const Color(0xFF002da2),
                                       ),
                                     ),
                                     subtitle: Text(
@@ -854,6 +854,44 @@ extension CentralScreenPanelControl on _CentralScreenState {
                                                         '→ $destino',
                                                         style: const TextStyle(fontSize: 10, color: Colors.black87, fontWeight: FontWeight.w500),
                                                         overflow: TextOverflow.ellipsis,
+                                                      ),
+                                                    // Badge foto de comanda
+                                                    if ((s['foto_comanda_url']?.toString() ?? '').isNotEmpty)
+                                                      GestureDetector(
+                                                        onTap: () => showDialog(
+                                                          context: context,
+                                                          builder: (_) => Dialog(
+                                                            backgroundColor: Colors.black,
+                                                            insetPadding: const EdgeInsets.all(12),
+                                                            child: Stack(children: [
+                                                              InteractiveViewer(
+                                                                child: Image.network(
+                                                                  s['foto_comanda_url'].toString(),
+                                                                  fit: BoxFit.contain,
+                                                                ),
+                                                              ),
+                                                              Positioned(
+                                                                top: 4, right: 4,
+                                                                child: IconButton(
+                                                                  icon: const Icon(Icons.close, color: Colors.white),
+                                                                  onPressed: () => Navigator.pop(context),
+                                                                ),
+                                                              ),
+                                                            ]),
+                                                          ),
+                                                        ),
+                                                        child: Padding(
+                                                          padding: const EdgeInsets.only(top: 3),
+                                                          child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                                            const Text('📷', style: TextStyle(fontSize: 9)),
+                                                            const SizedBox(width: 2),
+                                                            Text('foto comanda',
+                                                                style: TextStyle(
+                                                                    fontSize: 8,
+                                                                    color: Colors.brown[600],
+                                                                    fontWeight: FontWeight.w600)),
+                                                          ]),
+                                                        ),
                                                       ),
                                                   ],
                                                 ),
