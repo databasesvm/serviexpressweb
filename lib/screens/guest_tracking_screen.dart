@@ -50,15 +50,12 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
     try {
       String notaAnterior = servicio['observacion'] ?? '';
 
-      await Supabase.instance.client
-          .from('servicios')
-          .update({
-            'estado': aprobada ? 'pendiente' : 'cancelado',
-            'observacion': aprobada
-                ? '$notaAnterior\n[ ✔️ APROBADA POR INVITADO ]'
-                : '$notaAnterior\n[ ❌ RECHAZADA POR INVITADO ]',
-          })
-          .eq('id', servicio['id']);
+      await Supabase.instance.client.from('servicios').update({
+        'estado': aprobada ? 'pendiente' : 'cancelado',
+        'observacion': aprobada
+            ? '$notaAnterior\n[ ✔️ APROBADA POR INVITADO ]'
+            : '$notaAnterior\n[ ❌ RECHAZADA POR INVITADO ]',
+      }).eq('id', servicio['id']);
 
       if (aprobada) {
         // --- CASCADA 4 FASES — igual que el resto de la app ---
@@ -102,26 +99,34 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
           if (id30s != null) {
             await Supabase.instance.client
                 .from('servicios')
-                .update({'onesignal_30s': id30s})
-                .eq('id', svcId);
+                .update({'onesignal_30s': id30s}).eq('id', svcId);
           }
         }
 
         // T=+60s y T=+90s — misiles server-side (pre-fetch al aprobar cotización)
         final movilesG = await Supabase.instance.client
-            .from('usuarios').select('id, latitud, longitud')
-            .eq('rol', 'movil').eq('en_linea', true).eq('tiene_se', true).neq('suspendido', true)
+            .from('usuarios')
+            .select('id, latitud, longitud')
+            .eq('rol', 'movil')
+            .eq('en_linea', true)
+            .eq('tiene_se', true)
+            .neq('suspendido', true)
             .or('rango_movil.is.null,rango_movil.neq.MASTER');
-        final idsZonaG = movilesG.where((u) {
-          final id = u['id'].toString();
-          if (masterIds.contains(id) || paraderoIds.contains(id)) return false;
-          if (origLat == null || origLng == null) return true;
-          final uLat = (u['latitud'] as num?)?.toDouble();
-          final uLng = (u['longitud'] as num?)?.toDouble();
-          if (uLat == null || uLng == null) return false;
-          return const Distance().as(
-                LengthUnit.Meter, LatLng(uLat, uLng), LatLng(origLat, origLng)) <= 1000;
-        }).map((u) => u['id'].toString()).toList();
+        final idsZonaG = movilesG
+            .where((u) {
+              final id = u['id'].toString();
+              if (masterIds.contains(id) || paraderoIds.contains(id))
+                return false;
+              if (origLat == null || origLng == null) return true;
+              final uLat = (u['latitud'] as num?)?.toDouble();
+              final uLng = (u['longitud'] as num?)?.toDouble();
+              if (uLat == null || uLng == null) return false;
+              return const Distance().as(LengthUnit.Meter, LatLng(uLat, uLng),
+                      LatLng(origLat, origLng)) <=
+                  1000;
+            })
+            .map((u) => u['id'].toString())
+            .toList();
         final idsTodosG = movilesG
             .map((u) => u['id'].toString())
             .where((id) => !masterIds.contains(id))
@@ -310,17 +315,16 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
                         await Supabase.instance.client
                             .from('calificaciones')
                             .upsert({
-                              'servicio_id': servicio['id'],
-                              if (movilId != null) 'movil_id': movilId.toString(),
-                              'calificador_tipo': 'invitado',
-                              'calificador_id': null,
-                              'calificador_nombre': nombreInvitado,
-                              'estrellas': estrellas,
-                              'comentario':
-                                  comentarioCtrl.text.trim().isEmpty
-                                  ? null
-                                  : comentarioCtrl.text.trim(),
-                            }, onConflict: 'servicio_id, calificador_tipo');
+                          'servicio_id': servicio['id'],
+                          if (movilId != null) 'movil_id': movilId.toString(),
+                          'calificador_tipo': 'invitado',
+                          'calificador_id': null,
+                          'calificador_nombre': nombreInvitado,
+                          'estrellas': estrellas,
+                          'comentario': comentarioCtrl.text.trim().isEmpty
+                              ? null
+                              : comentarioCtrl.text.trim(),
+                        }, onConflict: 'servicio_id, calificador_tipo');
 
                         // Actualizar puntuación del móvil (solo si está asignado)
                         if (movilId != null) {
@@ -515,8 +519,7 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
             nombreMovil = numStr.isNotEmpty ? 'Móvil $numStr' : 'Móvil';
           }
           final telefono = movil != null ? movil['telefono'] : null;
-          final bool tienePagos =
-              movil != null &&
+          final bool tienePagos = movil != null &&
               ((movil['pago_nequi']?.toString().trim().isNotEmpty ?? false) ||
                   (movil['pago_daviplata']?.toString().trim().isNotEmpty ??
                       false) ||
@@ -612,8 +615,8 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
                               foregroundColor: Colors.white,
                               elevation: 0,
                             ),
-                            onPressed: () =>
-                                _abrirWhatsApp(telefono.toString(), servicio['id']),
+                            onPressed: () => _abrirWhatsApp(
+                                telefono.toString(), servicio['id']),
                             icon: const Icon(
                               Icons.camera_alt_outlined,
                               size: 18,
@@ -643,7 +646,8 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: colorEstado.withValues(alpha: 0.3), width: 2),
+            border:
+                Border.all(color: colorEstado.withValues(alpha: 0.3), width: 2),
           ),
           child: Column(
             children: [
@@ -680,7 +684,8 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
   Widget build(BuildContext context) {
     if (_cargandoId) {
       return const Scaffold(
-        body: Center(child: CircularProgressIndicator(color: Color(0xff3AF500))),
+        body:
+            Center(child: CircularProgressIndicator(color: Color(0xff3AF500))),
       );
     }
 
@@ -763,10 +768,9 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
                             .eq('servicio_id', servicio['id'])
                             .eq('calificador_tipo', 'invitado'),
                         builder: (context, snap) {
-                          final yaCalifique = snap.hasData &&
-                              snap.data!.isNotEmpty;
-                          if (snap.connectionState ==
-                              ConnectionState.waiting) {
+                          final yaCalifique =
+                              snap.hasData && snap.data!.isNotEmpty;
+                          if (snap.connectionState == ConnectionState.waiting) {
                             return const SizedBox.shrink();
                           }
                           if (yaCalifique) {
@@ -794,13 +798,15 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
                                     ),
                                   ),
                                   Row(
-                                    children: List.generate(5, (i) => Icon(
-                                      i < estrellasDadas
-                                          ? Icons.star
-                                          : Icons.star_border,
-                                      color: Colors.amber,
-                                      size: 18,
-                                    )),
+                                    children: List.generate(
+                                        5,
+                                        (i) => Icon(
+                                              i < estrellasDadas
+                                                  ? Icons.star
+                                                  : Icons.star_border,
+                                              color: Colors.amber,
+                                              size: 18,
+                                            )),
                                   ),
                                 ],
                               ),

@@ -162,6 +162,27 @@
     }
   </script>
 
+  <!-- ═══ FORCE SERVICE WORKER UPDATE ════════════════════════════════════
+       Fuerza al navegador a activar el SW nuevo en cada visita.
+       Soluciona el render roto al desplegar una nueva versión en GitHub Pages.
+  ════════════════════════════════════════════════════════════════════════ -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(function(registrations) {
+        for (var r of registrations) {
+          r.update().then(function() {
+            if (r.waiting) {
+              r.waiting.postMessage({ type: 'SKIP_WAITING' });
+            }
+          });
+        }
+      });
+      navigator.serviceWorker.addEventListener('controllerchange', function() {
+        window.location.reload();
+      });
+    }
+  </script>
+
   <script src="flutter_bootstrap.js" async=""></script>
 
 
