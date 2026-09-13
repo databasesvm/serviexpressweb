@@ -823,6 +823,7 @@ class _FormularioTabState extends State<_FormularioTab> {
   }
 
   /// Filtra la red de direcciones y sectores por texto escrito.
+  /// Solo muestra resultados que tienen precio para el toggle activo.
   List<Map<String, dynamic>> _filtrarDirecciones(String texto) {
     if (texto.trim().isEmpty) return [];
     final palabras = texto.toLowerCase().trim().split(RegExp(r'\s+'));
@@ -833,7 +834,14 @@ class _FormularioTabState extends State<_FormularioTab> {
           final alias = dir['alias']?.toString() ?? '';
           final haystack =
               '${dir['nombre']} $alias ${dir['direccion']}'.toLowerCase();
-          return palabras.every((p) => haystack.contains(p));
+          if (!palabras.every((p) => haystack.contains(p))) return false;
+          // Solo mostrar si tiene precio para el toggle activo
+          if (_esConvenio) return _precioDeDir(dir) > 0;
+          if (_esParticular) {
+            final pc = _precioConvenioDeDir(dir);
+            return pc != null && pc > 0;
+          }
+          return false; // ningún toggle activo → no mostrar nada
         })
         .take(6)
         .toList();
@@ -843,10 +851,15 @@ class _FormularioTabState extends State<_FormularioTab> {
     for (final sect in _sectoresSede) {
       final sectorNombre = sect['nombre'].toString().toLowerCase();
       final sectorId = sect['id'] as int;
-      final precio = (sect['precio_efectivo'] as int?)?.toDouble(); // null = sin precio
+      final precio = (sect['precio_efectivo'] as int?)?.toDouble();
+      final precioConvSect = (sect['precio_convenio_efectivo'] as int?)?.toDouble();
+
+      // Solo incluir si tiene precio para el toggle activo
+      if (_esConvenio && (precio == null || precio <= 0)) continue;
+      if (_esParticular && (precioConvSect == null || precioConvSect <= 0)) continue;
+      if (!_esConvenio && !_esParticular) continue;
 
       // Coincidencia: alguna palabra del texto está contenida en el nombre del sector
-      // o el nombre del sector está contenido en alguna palabra del texto
       final sectorWords = sectorNombre.split(RegExp(r'\s+'));
       final coincide = palabras.any((p) =>
           p.length >= 3 &&
@@ -856,7 +869,6 @@ class _FormularioTabState extends State<_FormularioTab> {
       if (coincide) {
         final parentId = sect['parent_id'] as int?;
         final parentNombre = parentId != null ? _sectorNombresMap[parentId] : null;
-        final precioConvSect = (sect['precio_convenio_efectivo'] as int?)?.toDouble();
         sectorMatches.add({
           'tipo': 'sector',
           'id': sectorId,

@@ -3,7 +3,7 @@ part of 'central_screen.dart';
 
 extension CentralScreenFormularios on _CentralScreenState {
 
-  void _abrirFormularioDespacho(BuildContext context) {
+  Future<void> _abrirFormularioDespacho(BuildContext context) async {
     final origenController = TextEditingController();
     final destinoController = TextEditingController();
     final tarifaController = TextEditingController();
@@ -33,22 +33,25 @@ extension CentralScreenFormularios on _CentralScreenState {
     // Feature 2: asignación directa a un móvil específico
     String? movilDirectoServimotoId;
     String? movilDirectoServimotoNombre;
+    // Cargar antes de abrir el diálogo para que el dropdown ya tenga datos
     List<Map<String, dynamic>> movilesConectados = [];
-    Supabase.instance.client
-        .from('usuarios')
-        .select('id, nombre, usuario, rango_movil')
-        .eq('rol', 'movil')
-        .eq('en_linea', true)
-        .eq('tiene_se', true)
-        .order('usuario', ascending: true)
-        .then((data) {
+    try {
+      final data = await Supabase.instance.client
+          .from('usuarios')
+          .select('id, nombre, usuario, rango_movil')
+          .eq('rol', 'movil')
+          .eq('en_linea', true)
+          .eq('tiene_se', true)
+          .order('usuario', ascending: true);
       movilesConectados = List<Map<String, dynamic>>.from(data)
         ..sort((a, b) {
           final na = int.tryParse(RegExp(r'\d+').firstMatch(a['usuario']?.toString() ?? '')?.group(0) ?? '') ?? 9999;
           final nb = int.tryParse(RegExp(r'\d+').firstMatch(b['usuario']?.toString() ?? '')?.group(0) ?? '') ?? 9999;
           return na.compareTo(nb);
         });
-    });
+    } catch (_) {}
+
+    if (!context.mounted) return;
 
     showDialog(
       context: context,
