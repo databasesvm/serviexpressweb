@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'screens/login_screen.dart';
 import 'screens/guest_home_screen.dart';
@@ -111,6 +112,13 @@ class _ServiexpressExpressAppState extends State<ServiexpressExpressApp>
       title: 'Serviexpress Express',
       debugShowCheckedModeBanner: false,
       navigatorKey: navigatorKey,
+      locale: const Locale('es', 'CO'),
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [Locale('es', 'CO'), Locale('en', 'US')],
       theme: ThemeData(primaryColor: Colors.black),
       scrollBehavior: const _AppScrollBehavior(),
       // Web: si la URL contiene '/form' → GuestHomeScreen (invitados)

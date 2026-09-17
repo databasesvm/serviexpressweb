@@ -284,7 +284,8 @@ class _FnFacturacionScreenState extends State<FnFacturacionScreen> {
   }
 
   // ── Botón de exportación compacto ─────────────────────────────────────────
-  Widget _btnExport(String label, IconData icon, Color color, VoidCallback? onPressed) {
+  Widget _btnExport(String label, IconData icon, Color color, VoidCallback? onPressed,
+      {bool fullWidth = false}) {
     final disabled = onPressed == null;
     return Material(
       color: Colors.transparent,
@@ -314,7 +315,8 @@ class _FnFacturacionScreenState extends State<FnFacturacionScreen> {
           ),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           child: Row(
-            mainAxisSize: MainAxisSize.min,
+            mainAxisSize: fullWidth ? MainAxisSize.max : MainAxisSize.min,
+            mainAxisAlignment: fullWidth ? MainAxisAlignment.center : MainAxisAlignment.start,
             children: [
               Icon(icon, size: 17, color: disabled ? Colors.white24 : Colors.white),
               const SizedBox(width: 6),
@@ -332,77 +334,6 @@ class _FnFacturacionScreenState extends State<FnFacturacionScreen> {
         ),
       ),
     );
-  }
-
-  // ── Exportar CSV ───────────────────────────────────────────────────────────
-  Future<void> _exportarCSV() async {
-    setState(() => _exportando = true);
-    try {
-      final rows = <List<String>>[
-        [
-          'Fecha/Hora', 'Sede', 'Consecutivo', 'N° Factura',
-          'Valor domicilio', 'Valor producto', 'Recogidas',
-          'Móvil', 'Llegada a sede', 'Estado', 'Editado',
-        ],
-      ];
-
-      for (final s in _filtrados) {
-        final estado = s['estado']?.toString() ?? '';
-        final tarifa = (s['tarifa'] as num?)?.toInt() ?? 0;
-        final valProd = s['fn_factura_valor'] != null
-            ? (s['fn_factura_valor'] as num).toInt()
-            : 0;
-        final editado = _editados.contains(s['id']) ? 'Sí' : 'No';
-        rows.add([
-          _fecha(s['created_at']?.toString()),
-          _codigoSede(s['fn_sede_solicitante_id']),
-          s['fn_consecutivo']?.toString() ?? '#${s['id']}',
-          s['fn_factura_numero']?.toString() ?? '',
-          tarifa > 0 ? '\$${_miles(tarifa)}' : '',
-          valProd > 0 ? '\$${_miles(valProd)}' : '',
-          _recogidas(s),
-          _movilNumero(s),
-          _llegada(s),
-          _labelEstado(estado),
-          editado,
-        ]);
-      }
-
-      // Totales al final
-      final totalDom = _filtrados
-          .where((s) => s['estado'] == 'finalizado')
-          .fold<int>(0, (sum, s) => sum + ((s['tarifa'] as num?)?.toInt() ?? 0));
-      rows.add([]);
-      rows.add(['', '', '', 'TOTAL ENTREGADOS', '\$${_miles(totalDom)}', '', '', '', '', '', '']);
-
-      final csv = rows
-          .map((r) => r.map((c) => '"${c.replaceAll('"', '""')}"').join(';'))
-          .join('\n');
-
-      final fecha = _fecha(DateTime.now().toIso8601String(), corta: true)
-          .replaceAll('/', '-');
-      final csvBytes = utf8.encode('﻿$csv'); // BOM para Excel
-      final nombreArchivo = 'facturacion_fn_$fecha.csv';
-
-      if (kIsWeb) {
-        descargarArchivosWeb(csvBytes, nombreArchivo, 'text/csv');
-      } else {
-        final dir = await getTemporaryDirectory();
-        final file = File('${dir.path}/$nombreArchivo');
-        await file.writeAsBytes(csvBytes);
-        await Share.shareXFiles(
-          [XFile(file.path, mimeType: 'text/csv')],
-          subject: 'Facturación FN — $fecha',
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error exportando: $e')));
-      }
-    } finally {
-      if (mounted) setState(() => _exportando = false);
-    }
   }
 
   // ── Exportar Relación de cobro (HTML → imprimible como PDF) ───────────────
@@ -758,7 +689,7 @@ Total entregados período: <strong>\$${_miles(totalDom)}</strong>
 
     final body = Column(
       children: [
-        _buildFiltros(),
+        _buildFiltros(filtrados),
         _buildKpis(filtrados.length, entregados, cancelados, totalDom),
         Expanded(
           child: _cargando
@@ -783,36 +714,9 @@ Total entregados período: <strong>\$${_miles(totalDom)}</strong>
       ],
     );
 
-    // Barra de exportación — compartida por modo embebido y standalone
-    Widget barraExportacion = Container(
-      color: const Color(0xFF111827),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: _exportando
-            ? [const SizedBox(width: 22, height: 22,
-                child: CircularProgressIndicator(color: Colors.white54, strokeWidth: 2))]
-            : [
-                _btnExport('CSV', Icons.grid_on, const Color(0xFF374151),
-                    filtrados.isEmpty ? null : _exportarCSV),
-                const SizedBox(width: 10),
-                _btnExport('PDF', Icons.picture_as_pdf_rounded, const Color(0xFFDC2626),
-                    filtrados.isEmpty ? null : _exportarRelacion),
-                const SizedBox(width: 10),
-                _btnExport('Tirillas (${filtrados.length})', Icons.receipt_long_rounded, const Color(0xFF6D28D9),
-                    filtrados.isEmpty ? null : _exportarTirillas),
-              ],
-      ),
-    );
-
     // Modo embebido (tab): sin Scaffold propio
     if (widget.embedded) {
-      return Column(
-        children: [
-          barraExportacion,
-          Expanded(child: body),
-        ],
-      );
+      return body;
     }
 
     return Scaffold(
@@ -823,89 +727,169 @@ Total entregados período: <strong>\$${_miles(totalDom)}</strong>
         title: Text(widget.titulo,
             style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
       ),
-      body: Column(
-        children: [
-          barraExportacion,
-          Expanded(child: body),
-        ],
-      ),
+      body: body,
     );
   }
 
   // ── Filtros ────────────────────────────────────────────────────────────────
-  Widget _buildFiltros() {
+  Widget _buildFiltros(List<Map<String, dynamic>> filtrados) {
+    // Controles de icono compartidos entre layouts
+    final iconoFecha = IconButton(
+      icon: Icon(Icons.date_range,
+          color: _rango != null ? Colors.indigo[300] : Colors.white38, size: 20),
+      tooltip: 'Seleccionar rango de fechas',
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(),
+      onPressed: () async {
+        final r = await showDateRangePicker(
+          context: context,
+          firstDate: DateTime(2024),
+          lastDate: DateTime.now(),
+          initialDateRange: _rango,
+          locale: const Locale('es', 'CO'),
+          helpText: 'Seleccionar rango',
+          cancelText: 'Cancelar',
+          confirmText: 'Aceptar',
+          saveText: 'Guardar',
+          fieldStartLabelText: 'Fecha inicio',
+          fieldEndLabelText: 'Fecha fin',
+          fieldStartHintText: 'dd/mm/aaaa',
+          fieldEndHintText: 'dd/mm/aaaa',
+          errorFormatText: 'Formato inválido',
+          errorInvalidText: 'Fecha inválida',
+          errorInvalidRangeText: 'Rango inválido',
+        );
+        if (r != null) { setState(() => _rango = r); _cargar(); }
+      },
+    );
+
+    final iconoCerrarRango = _rango != null
+        ? GestureDetector(
+            onTap: () { setState(() => _rango = null); _cargar(); },
+            child: const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 4),
+              child: Icon(Icons.close, color: Colors.white38, size: 16),
+            ),
+          )
+        : const SizedBox.shrink();
+
+    final menuAgrupacion = PopupMenuButton<_Agrupacion>(
+      icon: Icon(Icons.group_work_outlined,
+          color: _agrupacion != _Agrupacion.ninguna
+              ? Colors.indigo[300]
+              : Colors.white54,
+          size: 20),
+      tooltip: 'Agrupación',
+      color: const Color(0xFF1A1A2E),
+      padding: EdgeInsets.zero,
+      onSelected: (v) => setState(() => _agrupacion = v),
+      itemBuilder: (_) => [
+        _menuItem(_Agrupacion.ninguna, 'Sin agrupar'),
+        _menuItem(_Agrupacion.dia, 'Agrupar por día'),
+        _menuItem(_Agrupacion.sede, 'Agrupar por sede'),
+      ],
+    );
+
+    final chipsEstado = SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          for (final (v, l) in [
+            ('todos', 'Todos'),
+            ('finalizado', 'Entregados'),
+            ('cancelado', 'Cancelados'),
+            ('fn_rechazado', 'Rechazados'),
+            ('caducado', 'Caducados'),
+          ])
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: ChoiceChip(
+                label: Text(l,
+                    style: TextStyle(
+                        fontSize: 10,
+                        color: _filtroEstado == v ? Colors.white : Colors.white54)),
+                selected: _filtroEstado == v,
+                onSelected: (_) { setState(() => _filtroEstado = v); _cargar(); },
+                selectedColor: Colors.indigo[800],
+                backgroundColor: const Color(0xFF1A1A1A),
+                side: BorderSide.none,
+              ),
+            ),
+        ],
+      ),
+    );
+
     return Container(
       color: const Color(0xFF0F0F0F),
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Fila 1: estado + fecha + agrupación
-          Row(
-            children: [
-              Expanded(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: [
-                      for (final (v, l) in [
-                        ('todos', 'Todos'),
-                        ('finalizado', 'Entregados'),
-                        ('cancelado', 'Cancelados'),
-                        ('fn_rechazado', 'Rechazados'),
-                        ('caducado', 'Caducados'),
-                      ])
-                        Padding(
-                          padding: const EdgeInsets.only(right: 4),
-                          child: ChoiceChip(
-                            label: Text(l,
-                                style: TextStyle(
-                                    fontSize: 10,
-                                    color: _filtroEstado == v ? Colors.white : Colors.white54)),
-                            selected: _filtroEstado == v,
-                            onSelected: (_) { setState(() => _filtroEstado = v); _cargar(); },
-                            selectedColor: Colors.indigo[800],
-                            backgroundColor: const Color(0xFF1A1A1A),
-                            side: BorderSide.none,
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-              // Fecha
-              IconButton(
-                icon: Icon(Icons.date_range,
-                    color: _rango != null ? Colors.indigo[300] : Colors.white38, size: 20),
-                onPressed: () async {
-                  final r = await showDateRangePicker(
-                    context: context,
-                    firstDate: DateTime(2024),
-                    lastDate: DateTime.now(),
-                    initialDateRange: _rango,
-                  );
-                  if (r != null) { setState(() => _rango = r); _cargar(); }
-                },
-              ),
-              if (_rango != null)
-                GestureDetector(
-                  onTap: () { setState(() => _rango = null); _cargar(); },
-                  child: const Icon(Icons.close, color: Colors.white38, size: 16),
-                ),
-              // Agrupación
-              PopupMenuButton<_Agrupacion>(
-                icon: const Icon(Icons.group_work_outlined, color: Colors.white54, size: 20),
-                tooltip: 'Agrupación',
-                color: const Color(0xFF1A1A2E),
-                onSelected: (v) => setState(() => _agrupacion = v),
-                itemBuilder: (_) => [
-                  _menuItem(_Agrupacion.ninguna, 'Sin agrupar'),
-                  _menuItem(_Agrupacion.dia, 'Agrupar por día'),
-                  _menuItem(_Agrupacion.sede, 'Agrupar por sede'),
+      child: LayoutBuilder(builder: (ctx, constraints) {
+        final narrow = constraints.maxWidth < 520;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Fila 1: chips de estado + iconos de control ─────────────
+            Row(
+              children: [
+                Expanded(child: chipsEstado),
+                const SizedBox(width: 4),
+                iconoFecha,
+                iconoCerrarRango,
+                menuAgrupacion,
+                // En pantalla ancha: botones inline a la derecha
+                if (!narrow) ...[
+                  const SizedBox(width: 6),
+                  if (_exportando)
+                    const SizedBox(
+                      width: 20, height: 20,
+                      child: CircularProgressIndicator(
+                          color: Colors.white54, strokeWidth: 2),
+                    )
+                  else ...[
+                    _btnExport('Listado PDF', Icons.picture_as_pdf_rounded,
+                        const Color(0xFFDC2626),
+                        filtrados.isEmpty ? null : _exportarRelacion),
+                    const SizedBox(width: 8),
+                    _btnExport('Tirillas (${filtrados.length})',
+                        Icons.receipt_long_rounded, const Color(0xFF6D28D9),
+                        filtrados.isEmpty ? null : _exportarTirillas),
+                  ],
                 ],
+              ],
+            ),
+            // En móvil: botones en fila propia, ocupan todo el ancho
+            if (narrow)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: _exportando
+                    ? const Center(
+                        child: SizedBox(
+                          width: 20, height: 20,
+                          child: CircularProgressIndicator(
+                              color: Colors.white54, strokeWidth: 2),
+                        ),
+                      )
+                    : Row(
+                        children: [
+                          Expanded(
+                            child: _btnExport(
+                              'Listado PDF', Icons.picture_as_pdf_rounded,
+                              const Color(0xFFDC2626),
+                              filtrados.isEmpty ? null : _exportarRelacion,
+                              fullWidth: true,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: _btnExport(
+                              'Tirillas (${filtrados.length})',
+                              Icons.receipt_long_rounded, const Color(0xFF6D28D9),
+                              filtrados.isEmpty ? null : _exportarTirillas,
+                              fullWidth: true,
+                            ),
+                          ),
+                        ],
+                      ),
               ),
-            ],
-          ),
 
           // Fila 2: filtro sede (solo si no tiene sedeId fijo)
           if (widget.sedeId == null && _sedes.isNotEmpty)
@@ -987,8 +971,9 @@ Total entregados período: <strong>\$${_miles(totalDom)}</strong>
             ),
           ),
         ],
-      ),
-    );
+      );          // Column
+      }),         // LayoutBuilder
+    );            // Container
   }
 
   PopupMenuItem<_Agrupacion> _menuItem(_Agrupacion v, String label) =>

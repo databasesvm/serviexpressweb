@@ -131,9 +131,8 @@ class _SupervisorFnScreenState extends State<SupervisorFnScreen>
           indicatorColor: Colors.indigo[200],
           labelColor: Colors.white,
           unselectedLabelColor: Colors.white54,
-          isScrollable: true,
           tabs: const [
-            Tab(icon: Icon(Icons.live_tv_outlined), text: 'En vivo'),
+            Tab(icon: Icon(Icons.two_wheeler), text: 'Activos'),
             Tab(icon: Icon(Icons.history_rounded), text: 'Historial'),
             Tab(icon: Icon(Icons.bar_chart_rounded), text: 'Resumen'),
           ],
@@ -833,20 +832,67 @@ class _TabDashboard extends StatelessWidget {
         .where((s) => s['estado'] == 'finalizado' && s['tarifa'] != null)
         .fold<int>(0, (sum, s) => sum + (s['tarifa'] as num).toInt());
 
-    // Agrupación por sede
-    final Map<String, int> porSede = {};
-    for (final s in deHoy) {
+    // ── Nombre de cada sede por fn_sede_solicitante_id ─────────────────────
+    // Escanea TODOS los servicios (no solo hoy) para mapear id → nombre
+    final Map<int, String> idANombre = {};
+    for (final s in todos) {
+      final rawId = s['fn_sede_solicitante_id'];
+      if (rawId == null) continue;
+      final id = rawId is int ? rawId : int.tryParse(rawId.toString()) ?? -1;
+      if (id < 0 || idANombre.containsKey(id)) continue;
       final recog = s['recogidas'];
-      String sedeKey = 'Sin sede';
-      if (recog is List && recog.isNotEmpty) {
-        final r = recog.first as Map<String, dynamic>;
-        final tipo = r['tipo']?.toString() ?? '';
-        final num = r['numero']?.toString() ?? '';
-        sedeKey = tipo == 'FN' && num.isNotEmpty ? 'FN$num' : (r['nombre'] ?? 'Sin sede');
+      if (recog is List) {
+        for (final r in recog) {
+          if (r is! Map || r['tipo']?.toString() != 'FN') continue;
+          final nombre = r['nombre']?.toString() ?? '';
+          final num = r['numero']?.toString() ?? '';
+          idANombre[id] = nombre.isNotEmpty
+              ? nombre
+              : (num.isNotEmpty ? 'FN$num' : 'Sede $id');
+          break;
+        }
       }
-      porSede[sedeKey] = (porSede[sedeKey] ?? 0) + 1;
+      if (!idANombre.containsKey(id)) idANombre[id] = 'Sede $id';
     }
-    final sedesSorted = porSede.entries.toList()
+
+    String _labelSede(dynamic rawId) {
+      if (rawId == null) return 'Sin sede';
+      final id = rawId is int ? rawId : int.tryParse(rawId.toString()) ?? -1;
+      return idANombre[id] ?? 'Sin sede';
+    }
+
+    // ── Servicios DIRECTOS por sede (hoy, agrupado por fn_sede_solicitante_id)
+    final Map<String, int> porSedeDirecto = {};
+    for (final s in deHoy) {
+      final label = _labelSede(s['fn_sede_solicitante_id']);
+      porSedeDirecto[label] = (porSedeDirecto[label] ?? 0) + 1;
+    }
+
+    // ── Recogidas adicionales: cuántas veces aparece cada sede FN
+    //    como parada extra en servicios de OTRAS sedes (hoy)
+    final Map<String, int> porSedeRecogida = {};
+    for (final s in deHoy) {
+      final mainLabel = _labelSede(s['fn_sede_solicitante_id']);
+      final recog = s['recogidas'];
+      if (recog is! List) continue;
+      bool primarySaltada = false;
+      for (final r in recog) {
+        if (r is! Map || r['tipo']?.toString() != 'FN') continue;
+        final nombre = r['nombre']?.toString() ?? '';
+        final num = r['numero']?.toString() ?? '';
+        final label = nombre.isNotEmpty
+            ? nombre
+            : (num.isNotEmpty ? 'FN$num' : '');
+        if (label.isEmpty) continue;
+        if (!primarySaltada && label == mainLabel) {
+          primarySaltada = true;
+          continue; // saltar la recogida principal de esa sede
+        }
+        porSedeRecogida[label] = (porSedeRecogida[label] ?? 0) + 1;
+      }
+    }
+
+    final sedesSorted = porSedeDirecto.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
 
     return SingleChildScrollView(
@@ -862,23 +908,26 @@ class _TabDashboard extends StatelessWidget {
                   fontWeight: FontWeight.bold,
                   letterSpacing: 1)),
           const SizedBox(height: 10),
-          GridView.count(
-            crossAxisCount: 2,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            mainAxisSpacing: 10,
-            crossAxisSpacing: 10,
-            childAspectRatio: 2.4,
-            children: [
-              _kpiCard('Servicios creados', '$totalHoy', Colors.indigo),
-              _kpiCard('En curso', '$enCurso', Colors.blue),
-              _kpiCard('Entregados', '$finalizadosHoy', Colors.green),
-              _kpiCard('Cancelados', '$canceladosHoy', Colors.red),
-            ],
-          ),
-          const SizedBox(height: 12),
-          _kpiCard('Recaudado hoy', '\$${_miles(recaudadoHoy)}', Colors.teal,
-              full: true),
+          LayoutBuilder(builder: (ctx, constraints) {
+            final wide = constraints.maxWidth > 500;
+            return GridView.count(
+              crossAxisCount: wide ? 4 : 2,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              mainAxisSpacing: 8,
+              crossAxisSpacing: 8,
+              childAspectRatio: wide ? 2.2 : 2.4,
+              children: [
+                _kpiCard('Creados', '$totalHoy', Colors.indigo),
+                _kpiCard('En curso', '$enCurso', Colors.blue),
+                _kpiCard('Entregados', '$finalizadosHoy', Colors.green),
+                _kpiCard('Cancelados', '$canceladosHoy', Colors.red),
+              ],
+            );
+          }),
+          const SizedBox(height: 10),
+          _kpiCard('Servicios Pagados Hoy', '\$${_miles(recaudadoHoy)}',
+              Colors.teal, full: true),
 
           // ── Por sede ─────────────────────────────────────────────────────
           if (sedesSorted.isNotEmpty) ...[
@@ -891,7 +940,9 @@ class _TabDashboard extends StatelessWidget {
                     letterSpacing: 1)),
             const SizedBox(height: 10),
             ...sedesSorted.map((e) {
-              final pct = totalHoy > 0 ? e.value / totalHoy : 0.0;
+              final pct =
+                  totalHoy > 0 ? e.value / totalHoy : 0.0;
+              final recogExtra = porSedeRecogida[e.key] ?? 0;
               return Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: Column(
@@ -909,6 +960,26 @@ class _TabDashboard extends StatelessWidget {
                                 color: Colors.white54,
                                 fontSize: 12,
                                 fontWeight: FontWeight.bold)),
+                        if (recogExtra > 0) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: Colors.orange.withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(
+                                  color: Colors.orange.withOpacity(0.3)),
+                            ),
+                            child: Text(
+                              '+$recogExtra recog.',
+                              style: const TextStyle(
+                                  color: Colors.orange,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                     const SizedBox(height: 3),
