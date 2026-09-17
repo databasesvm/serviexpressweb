@@ -3037,7 +3037,9 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
         : <Map<String, dynamic>>[];
 
     final color = _colorEstado(estado);
-    final label = _labelEstado(estado);
+    final label = (estado == 'pendiente' && s['movil_id'] != null)
+        ? 'MÓVIL NOTIFICADO'
+        : _labelEstado(estado);
 
     return Card(
       color: const Color(0xFF111111),
@@ -3226,13 +3228,11 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
               // ── Métodos de pago del móvil ─────────────────────────────
               Builder(builder: (ctx) {
                 final metodos = <Widget>[];
-                final textosCopia = <String>[];
 
                 void _addPago(String? valor, String label, Color color) {
                   if (valor == null || valor.trim().isEmpty) return;
-                  textosCopia.add('$label: $valor');
                   metodos.add(GestureDetector(
-                    onLongPress: () {
+                    onTap: () {
                       Clipboard.setData(ClipboardData(text: valor.trim()));
                       ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
                         content: Text('$label copiado'),
@@ -3265,32 +3265,6 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
                 _addPago(_pagoBancolombia, 'Bancolombia', Colors.amber[700]!);
                 _addPago(_pagoLlave, 'Llave', Colors.teal);
                 if (metodos.isEmpty) return const SizedBox.shrink();
-
-                // Botón copiar todo
-                metodos.add(GestureDetector(
-                  onTap: () {
-                    Clipboard.setData(
-                        ClipboardData(text: textosCopia.join(' | ')));
-                    ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
-                      content: Text('Métodos de pago copiados'),
-                      duration: Duration(seconds: 1),
-                      backgroundColor: Colors.green,
-                    ));
-                  },
-                  child: Container(
-                    margin: const EdgeInsets.only(right: 0, top: 4),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 7, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(5),
-                      border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.3)),
-                    ),
-                    child: const Icon(Icons.copy_rounded,
-                        size: 12, color: Colors.white70),
-                  ),
-                ));
 
                 return Padding(
                   padding: const EdgeInsets.only(top: 4),

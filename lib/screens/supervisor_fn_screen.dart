@@ -33,7 +33,7 @@ class _SupervisorFnScreenState extends State<SupervisorFnScreen>
   @override
   void initState() {
     super.initState();
-    _tab = TabController(length: 4, vsync: this);
+    _tab = TabController(length: 3, vsync: this);
     OneSignal.login(widget.usuario['id'].toString());
     OneSignal.User.addTagWithKey('rol', 'supervisor_fn');
     _construirStream();
@@ -93,8 +93,7 @@ class _SupervisorFnScreenState extends State<SupervisorFnScreen>
           tabs: const [
             Tab(icon: Icon(Icons.live_tv_outlined), text: 'En vivo'),
             Tab(icon: Icon(Icons.history_rounded), text: 'Historial'),
-            Tab(icon: Icon(Icons.bar_chart_rounded), text: 'Dashboard'),
-            Tab(icon: Icon(Icons.fact_check_outlined), text: 'Auditoría'),
+            Tab(icon: Icon(Icons.bar_chart_rounded), text: 'Resumen'),
           ],
         ),
       ),
@@ -109,7 +108,6 @@ class _SupervisorFnScreenState extends State<SupervisorFnScreen>
               _TabEnVivo(todos: todos),
               const FnFacturacionScreen(embedded: true),
               _TabDashboard(todos: todos, db: _db),
-              _TabAuditoria(db: _db),
             ],
           );
         },
@@ -173,29 +171,60 @@ class _CardEnVivo extends StatelessWidget {
         : <Map<String, dynamic>>[];
 
     final color = _color(estado);
+    final label = (estado == 'pendiente' && servicio['movil_id'] != null)
+        ? 'MÓVIL NOTIFICADO'
+        : _labelEstado(estado);
 
     return Card(
-      color: const Color(0xFF0F0F0F),
-      margin: const EdgeInsets.only(bottom: 8),
+      color: const Color(0xFF111111),
+      margin: const EdgeInsets.only(bottom: 10),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(10),
-        side: BorderSide(color: color.withValues(alpha: 0.4)),
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: color.withValues(alpha: 0.4), width: 1.2),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // ── Cabecera ──────────────────────────────────────────────
             Row(
               children: [
                 Text(consec,
                     style: const TextStyle(
-                        color: Colors.white38, fontSize: 11)),
+                        color: Colors.white38,
+                        fontSize: 11,
+                        letterSpacing: 0.5)),
                 const SizedBox(width: 8),
-                _chip(_labelEstado(estado), color),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.55),
+                    borderRadius: BorderRadius.circular(5),
+                    border: Border.all(color: color, width: 0.7),
+                  ),
+                  child: Text(label,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold)),
+                ),
                 if (servicio['fn_alta_demanda'] == true) ...[
                   const SizedBox(width: 6),
-                  _chip('ALTA DEMANDA', Colors.orange[700]!),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.orange[900],
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: const Text('ALTA DEMANDA',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold)),
+                  ),
                 ],
                 const Spacer(),
                 if (tarifa != null)
@@ -206,28 +235,99 @@ class _CardEnVivo extends StatelessWidget {
                           fontSize: 14)),
               ],
             ),
-            const SizedBox(height: 6),
+
+            const SizedBox(height: 10),
+
+            // ── Recogidas ─────────────────────────────────────────────
             ...recogidas.map((r) {
               final tipo = r['tipo']?.toString() ?? '';
               final num = r['numero']?.toString() ?? '';
               final nombre = r['nombre']?.toString() ?? '';
-              return Text(
-                '🏥 ${tipo == 'FN' && num.isNotEmpty ? 'FN$num — $nombre' : nombre}',
-                style: const TextStyle(color: Colors.white60, fontSize: 12),
+              final cobertura = r['cobertura']?.toString() ?? '';
+              final texto = tipo == 'FN' && num.isNotEmpty
+                  ? 'FN$num — $nombre'
+                  : nombre;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 3),
+                child: Row(
+                  children: [
+                    Icon(Icons.local_pharmacy,
+                        size: 13, color: Colors.indigo[300]),
+                    const SizedBox(width: 5),
+                    Expanded(
+                      child: Text(texto,
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 12),
+                          overflow: TextOverflow.ellipsis),
+                    ),
+                    if (cobertura == 'fuera' ||
+                        cobertura == 'por_evaluar')
+                      const Padding(
+                        padding: EdgeInsets.only(left: 4),
+                        child: Text('⚠', style: TextStyle(fontSize: 11)),
+                      ),
+                  ],
+                ),
               );
             }),
-            Text('🏁 $destino',
-                style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13)),
-            if (numMovil != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text('🏍 Móvil $numMovil',
-                    style: const TextStyle(
-                        color: Colors.white54, fontSize: 11)),
+
+            // ── Destino ───────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Row(
+                children: [
+                  const Icon(Icons.place, size: 13, color: Colors.white38),
+                  const SizedBox(width: 5),
+                  Expanded(
+                    child: Text(destino,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold),
+                        overflow: TextOverflow.ellipsis),
+                  ),
+                ],
               ),
+            ),
+
+            // ── Detalles factura ──────────────────────────────────────
+            if (servicio['fn_factura_numero'] != null ||
+                servicio['fn_pagar_producto'] == true) ...[
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 8,
+                children: [
+                  if (servicio['fn_factura_numero'] != null)
+                    _chip('Fac. ${servicio['fn_factura_numero']}',
+                        Colors.blueGrey),
+                  if (servicio['fn_factura_valor'] != null)
+                    _chip(
+                        '\$${_miles((servicio['fn_factura_valor'] as num).toInt())}',
+                        Colors.blueGrey),
+                  if (servicio['fn_pagar_producto'] == true)
+                    _chip('PAGAR PRODUCTO', Colors.red[800]!),
+                  if (servicio['metodo_pago'] == 'Datafono')
+                    _chip('DATÁFONO', Colors.blue[800]!),
+                ],
+              ),
+            ],
+
+            // ── Móvil asignado ────────────────────────────────────────
+            if (numMovil != null) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  const Icon(Icons.two_wheeler,
+                      size: 14, color: Colors.white54),
+                  const SizedBox(width: 5),
+                  Text('Móvil $numMovil',
+                      style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold)),
+                ],
+              ),
+            ],
           ],
         ),
       ),
@@ -282,7 +382,7 @@ class _CardEnVivo extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// TAB 2 — HISTORIAL CONSOLIDADO
+// TAB 2 — HISTORIAL CONSOLIDADO (FnFacturacionScreen embedded)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 class _TabHistorial extends StatefulWidget {
@@ -845,10 +945,10 @@ class _TabAuditoriaState extends State<_TabAuditoria> {
       var q = widget.db
           .from('fn_auditorias_factura')
           .select(
-              'id, servicio_id, fn_consecutivo, sede_id, movil_id, '
-              'fn_factura_numero, fn_factura_valor, fn_pagar_producto, '
-              'fn_factura_auto, accion, actor_tipo, actor_id, '
-              'notas, created_at');
+              'id, servicio_id, editor_id, editor_tipo, campo, '
+              'valor_anterior, valor_nuevo, created_at, '
+              'servicios(fn_consecutivo, fn_factura_numero, fn_factura_valor, '
+              'fn_pagar_producto, fn_factura_auto)');
 
       if (_rango != null) {
         q = q
@@ -956,20 +1056,17 @@ class _TabAuditoriaState extends State<_TabAuditoria> {
                         itemCount: _auditorias.length,
                         itemBuilder: (ctx, i) {
                           final a = _auditorias[i];
-                          final accion = a['accion']?.toString() ?? '—';
-                          final auto = a['fn_factura_auto'] == true;
-                          final factNum = a['fn_factura_numero']?.toString();
-                          final factVal = (a['fn_factura_valor'] as num?)?.toInt();
-                          final pagarProd = a['fn_pagar_producto'] == true;
-                          final notas = a['notas']?.toString() ?? '';
-
-                          Color accionColor = switch (accion) {
-                            'entregado' => Colors.green,
-                            'cancelado' => Colors.red,
-                            'factura_auto' => Colors.indigo,
-                            'problema' => Colors.orange,
-                            _ => Colors.grey,
-                          };
+                          final serv = a['servicios'] as Map<String, dynamic>? ?? {};
+                          final campo = a['campo']?.toString() ?? '—';
+                          final valorAnterior = a['valor_anterior']?.toString() ?? '—';
+                          final valorNuevo = a['valor_nuevo']?.toString() ?? '—';
+                          final editorTipo = a['editor_tipo']?.toString() ?? '—';
+                          final consecutivo = serv['fn_consecutivo']?.toString() ??
+                              '#${a['servicio_id']}';
+                          final factNum = serv['fn_factura_numero']?.toString();
+                          final factVal = (serv['fn_factura_valor'] as num?)?.toInt();
+                          final pagarProd = serv['fn_pagar_producto'] == true;
+                          final auto = serv['fn_factura_auto'] == true;
 
                           return Card(
                             color: const Color(0xFF111111),
@@ -977,18 +1074,18 @@ class _TabAuditoriaState extends State<_TabAuditoria> {
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8),
                               side: BorderSide(
-                                  color: accionColor.withValues(alpha: 0.3)),
+                                  color: Colors.indigo.withValues(alpha: 0.3)),
                             ),
                             child: Padding(
                               padding: const EdgeInsets.all(10),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
+                                  // ── Encabezado: consecutivo + campo + fecha ──
                                   Row(
                                     children: [
                                       Text(
-                                        a['fn_consecutivo']?.toString() ??
-                                            '#${a['servicio_id']}',
+                                        consecutivo,
                                         style: const TextStyle(
                                             color: Colors.white70,
                                             fontWeight: FontWeight.bold,
@@ -999,24 +1096,24 @@ class _TabAuditoriaState extends State<_TabAuditoria> {
                                         padding: const EdgeInsets.symmetric(
                                             horizontal: 6, vertical: 2),
                                         decoration: BoxDecoration(
-                                          color: accionColor.withValues(alpha: 0.15),
+                                          color: Colors.indigo.withValues(alpha: 0.15),
                                           borderRadius: BorderRadius.circular(3),
                                           border: Border.all(
-                                              color: accionColor, width: 0.6),
+                                              color: Colors.indigo, width: 0.6),
                                         ),
                                         child: Text(
-                                          accion.toUpperCase().replaceAll('_', ' '),
-                                          style: TextStyle(
-                                              color: accionColor,
+                                          campo.toUpperCase().replaceAll('_', ' '),
+                                          style: const TextStyle(
+                                              color: Colors.indigo,
                                               fontSize: 9,
                                               fontWeight: FontWeight.bold),
                                         ),
                                       ),
                                       if (auto) ...[
                                         const SizedBox(width: 5),
-                                        const Text('✓ AUTO',
+                                        const Text('AUTO',
                                             style: TextStyle(
-                                                color: Colors.indigo,
+                                                color: Colors.teal,
                                                 fontSize: 9,
                                                 fontWeight: FontWeight.bold)),
                                       ],
@@ -1027,6 +1124,34 @@ class _TabAuditoriaState extends State<_TabAuditoria> {
                                               fontSize: 10)),
                                     ],
                                   ),
+                                  // ── Cambio: anterior → nuevo ──────────────────
+                                  const SizedBox(height: 6),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          valorAnterior,
+                                          style: const TextStyle(
+                                              color: Colors.red, fontSize: 11),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                      const Padding(
+                                        padding: EdgeInsets.symmetric(horizontal: 6),
+                                        child: Icon(Icons.arrow_forward,
+                                            color: Colors.white38, size: 12),
+                                      ),
+                                      Expanded(
+                                        child: Text(
+                                          valorNuevo,
+                                          style: const TextStyle(
+                                              color: Colors.green, fontSize: 11),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  // ── Info factura del servicio ─────────────────
                                   if (factNum != null || factVal != null || pagarProd) ...[
                                     const SizedBox(height: 5),
                                     Wrap(
@@ -1046,20 +1171,19 @@ class _TabAuditoriaState extends State<_TabAuditoria> {
                                         if (pagarProd)
                                           const Text('PAGAR PRODUCTO',
                                               style: TextStyle(
-                                                  color: Colors.red,
+                                                  color: Colors.orange,
                                                   fontSize: 11,
                                                   fontWeight: FontWeight.bold)),
                                       ],
                                     ),
                                   ],
-                                  if (notas.isNotEmpty) ...[
-                                    const SizedBox(height: 4),
-                                    Text(notas,
-                                        style: const TextStyle(
-                                            color: Colors.white38,
-                                            fontSize: 11,
-                                            fontStyle: FontStyle.italic)),
-                                  ],
+                                  // ── Editor ───────────────────────────────────
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    editorTipo.toUpperCase().replaceAll('_', ' '),
+                                    style: const TextStyle(
+                                        color: Colors.white24, fontSize: 10),
+                                  ),
                                 ],
                               ),
                             ),
