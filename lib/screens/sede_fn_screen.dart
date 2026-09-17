@@ -2558,6 +2558,7 @@ class _ActivosTabState extends State<_ActivosTab> {
       'otro': 'Otro motivo',
     };
     final precioCtrl = TextEditingController();
+    final otroCtrl = TextEditingController();
     bool renegociar = false;
 
     await showDialog(
@@ -2581,6 +2582,20 @@ class _ActivosTabState extends State<_ActivosTab> {
                       // ignore: deprecated_member_use
                       onChanged: (v) => setS(() => motivoSel = v!),
                     )),
+                if (motivoSel == 'otro') ...[
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: otroCtrl,
+                    maxLines: 2,
+                    decoration: const InputDecoration(
+                      labelText: 'Describe el motivo',
+                      hintText: 'Ej: La farmacia está cerrada...',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                ],
                 const Divider(),
                 CheckboxListTile(
                   dense: true,
@@ -2663,9 +2678,13 @@ class _ActivosTabState extends State<_ActivosTab> {
                   if (renegociar && precioCtrl.text.isNotEmpty) {
                     final precio = double.tryParse(
                         precioCtrl.text.replaceAll('.', '').trim());
+                    final motivoFinal = motivoSel == 'otro' &&
+                            otroCtrl.text.trim().isNotEmpty
+                        ? 'otro: ${otroCtrl.text.trim()}'
+                        : motivoSel;
                     await _db.from('servicios').update({
                       'estado': 'fn_renegociando',
-                      'fn_rechazo_motivo': motivoSel,
+                      'fn_rechazo_motivo': motivoFinal,
                       'fn_precio_sugerido_sede': precio,
                     }).eq('id', s['id']);
                     await MotorNotificaciones.dispararACentral(
@@ -2677,9 +2696,13 @@ class _ActivosTabState extends State<_ActivosTab> {
                       canalAndroidId: MotorNotificaciones.canalFnCotizacionId,
                     );
                   } else {
+                    final motivoFinal = motivoSel == 'otro' &&
+                            otroCtrl.text.trim().isNotEmpty
+                        ? 'otro: ${otroCtrl.text.trim()}'
+                        : motivoSel;
                     await _db.from('servicios').update({
                       'estado': 'fn_rechazado',
-                      'fn_rechazo_motivo': motivoSel,
+                      'fn_rechazo_motivo': motivoFinal,
                     }).eq('id', s['id']);
                   }
                 } catch (e) {

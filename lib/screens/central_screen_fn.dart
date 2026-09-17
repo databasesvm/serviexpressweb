@@ -68,12 +68,16 @@ extension CentralScreenFn on _CentralScreenState {
     // Precio sugerido si viene de renegociación
     final precioSugerido = (servicio['fn_precio_sugerido_sede'] as num?)?.toInt();
 
-    // Pre-poblar tarifa: renegociación > recargo calculado > vacío
-    String tarifaInicial = servicio['tarifa']?.toString() ?? '';
-    if (tarifaInicial.isEmpty && precioSugerido != null) {
+    // Pre-poblar tarifa: precio sugerido sede > recargo calculado > cotización anterior > vacío
+    String tarifaInicial;
+    if (precioSugerido != null) {
+      // Renegociación: la sede propuso este monto — pre-llenar con él
       tarifaInicial = precioSugerido.toString();
-    } else if (tarifaInicial.isEmpty && recargoCalculado != null && recargoCalculado > 0) {
+    } else if (recargoCalculado != null && recargoCalculado > 0 &&
+        servicio['tarifa'] == null) {
       tarifaInicial = recargoCalculado.toString();
+    } else {
+      tarifaInicial = servicio['tarifa']?.toString() ?? '';
     }
     final tarifaCtrl = TextEditingController(text: tarifaInicial);
 
@@ -105,7 +109,7 @@ extension CentralScreenFn on _CentralScreenState {
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                'Cotización FN — $consec',
+                '${precioSugerido != null ? 'Renegociación' : 'Cotización'} FN — $consec',
                 style: const TextStyle(
                     fontWeight: FontWeight.bold, fontSize: 15),
               ),

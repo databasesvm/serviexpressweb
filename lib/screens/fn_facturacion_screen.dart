@@ -1194,6 +1194,26 @@ Total entregados período: <strong>\$${_miles(totalDom)}</strong>
                 ),
               ),
 
+            // Fila 4b: motivo rechazo
+            if (estado == 'fn_rechazado' && s['fn_rechazo_motivo'] != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 3),
+                child: Row(
+                  children: [
+                    const Icon(Icons.block, size: 11, color: Colors.redAccent),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        s['fn_rechazo_motivo'].toString(),
+                        style: const TextStyle(
+                            color: Colors.redAccent, fontSize: 11),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
             // Fila 5: valores + móvil + llegada
             Padding(
               padding: const EdgeInsets.only(top: 5),

@@ -3,7 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'fn_facturacion_screen.dart';
+import 'login_screen.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Panel supervisor FN — rol: supervisor_fn
@@ -84,6 +86,46 @@ class _SupervisorFnScreenState extends State<SupervisorFnScreen>
                     fontSize: 17)),
           ],
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout, color: Colors.white70),
+            tooltip: 'Cerrar sesión',
+            onPressed: () async {
+              final confirmar = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  backgroundColor: const Color(0xFF1A1A1A),
+                  title: const Text('¿Cerrar sesión?',
+                      style: TextStyle(color: Colors.white, fontSize: 16)),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      child: const Text('Cancelar',
+                          style: TextStyle(color: Colors.white54)),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, true),
+                      child: const Text('Cerrar sesión',
+                          style: TextStyle(color: Colors.redAccent)),
+                    ),
+                  ],
+                ),
+              );
+              if (confirmar == true && mounted) {
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.remove('sesion_usuario_json');
+                await prefs.setBool('auto_login', false);
+                if (mounted) {
+                  Navigator.pushAndRemoveUntil(
+                    context,
+                    MaterialPageRoute(builder: (_) => const LoginScreen()),
+                    (_) => false,
+                  );
+                }
+              }
+            },
+          ),
+        ],
         bottom: TabBar(
           controller: _tab,
           indicatorColor: Colors.indigo[200],
