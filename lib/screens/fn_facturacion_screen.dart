@@ -285,19 +285,52 @@ class _FnFacturacionScreenState extends State<FnFacturacionScreen> {
 
   // ── Botón de exportación compacto ─────────────────────────────────────────
   Widget _btnExport(String label, IconData icon, Color color, VoidCallback? onPressed) {
-    return ElevatedButton.icon(
-      style: ElevatedButton.styleFrom(
-        backgroundColor: onPressed == null ? Colors.grey[800] : color,
-        foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        minimumSize: Size.zero,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
-        textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+    final disabled = onPressed == null;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(9),
+        child: Ink(
+          decoration: BoxDecoration(
+            gradient: disabled
+                ? null
+                : LinearGradient(
+                    colors: [color, Color.lerp(color, Colors.white, 0.18)!],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+            color: disabled ? const Color(0xFF2D2D2D) : null,
+            borderRadius: BorderRadius.circular(9),
+            boxShadow: disabled
+                ? null
+                : [
+                    BoxShadow(
+                      color: color.withOpacity(0.55),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 17, color: disabled ? Colors.white24 : Colors.white),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  color: disabled ? Colors.white24 : Colors.white,
+                  letterSpacing: 0.3,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
-      icon: Icon(icon, size: 15),
-      label: Text(label),
-      onPressed: onPressed,
     );
   }
 
@@ -760,13 +793,13 @@ Total entregados período: <strong>\$${_miles(totalDom)}</strong>
             ? [const SizedBox(width: 22, height: 22,
                 child: CircularProgressIndicator(color: Colors.white54, strokeWidth: 2))]
             : [
-                _btnExport('CSV', Icons.grid_on, const Color(0xFF4B5563),
+                _btnExport('CSV', Icons.grid_on, const Color(0xFF374151),
                     filtrados.isEmpty ? null : _exportarCSV),
-                const SizedBox(width: 8),
-                _btnExport('Relación', Icons.picture_as_pdf_outlined, const Color(0xFFB91C1C),
+                const SizedBox(width: 10),
+                _btnExport('PDF', Icons.picture_as_pdf_rounded, const Color(0xFFDC2626),
                     filtrados.isEmpty ? null : _exportarRelacion),
-                const SizedBox(width: 8),
-                _btnExport('Tirillas (${filtrados.length})', Icons.receipt_long, const Color(0xFF7C3AED),
+                const SizedBox(width: 10),
+                _btnExport('Tirillas (${filtrados.length})', Icons.receipt_long_rounded, const Color(0xFF6D28D9),
                     filtrados.isEmpty ? null : _exportarTirillas),
               ],
       ),

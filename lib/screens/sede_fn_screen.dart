@@ -65,6 +65,10 @@ class _SedeFnScreenState extends State<SedeFnScreen>
     });
     OneSignal.login(widget.usuario['id'].toString());
     OneSignal.User.addTagWithKey('rol', 'sede_fn');
+    // Solicitar permiso de notificaciones (crítico para web/browser)
+    Future.microtask(() async {
+      await OneSignal.Notifications.requestPermission(true);
+    });
     _cargarSede();
     _cargarAltaDemanda();
     _preCargarActivos(); // ← REST inmediato solo con estados activos (mucho más rápido)
@@ -186,7 +190,7 @@ class _SedeFnScreenState extends State<SedeFnScreen>
     final sedeId = widget.usuario['fn_sede_id'];
     if (sedeId == null) return;
 
-    // Escucha cambios de estado en sus servicios → sonido si central cotizó
+    // Escucha cambios de estado en sus servicios → sonido y push en eventos clave
     _canalEstados = _db
         .channel('sede_fn_estados_${widget.usuario['id']}')
         .onPostgresChanges(
@@ -197,17 +201,60 @@ class _SedeFnScreenState extends State<SedeFnScreen>
             final nuevo = payload.newRecord;
             final viejo = payload.oldRecord;
             if (!mounted) return;
-            final estadoNuevo = nuevo['estado']?.toString() ?? '';
-            final estadoViejo = viejo['estado']?.toString() ?? '';
             if (nuevo['fn_sede_solicitante_id']?.toString() !=
                 sedeId.toString()) return;
+
+            final estadoNuevo = nuevo['estado']?.toString() ?? '';
+            final estadoViejo = viejo['estado']?.toString() ?? '';
+            final consec = nuevo['fn_consecutivo']?.toString() ??
+                '#${nuevo['id']}';
+            final myId = widget.usuario['id'].toString();
+
+            // ── Móvil asignado (movil_id va de null a valor) ──────────
+            final movilAntes = viejo['movil_id'];
+            final movilAhora = nuevo['movil_id'];
+            if (movilAntes == null && movilAhora != null) {
+              _sonidos.reproducirSuave(Sonidos.localEstado);
+              final numMovil = nuevo['numero_movil']?.toString() ?? '';
+              MotorNotificaciones.dispararMisil(
+                idDestino: myId,
+                titulo: '🏍 Móvil asignado — $consec',
+                mensaje: numMovil.isNotEmpty
+                    ? 'Móvil $numMovil en camino a tu sede'
+                    : 'Un móvil fue asignado a tu servicio',
+                urgente: false,
+                sonido: Sonidos.fnCotizacion,
+                canalAndroidId: MotorNotificaciones.canalFnCotizacionId,
+              );
+              return;
+            }
+
             if (estadoNuevo == estadoViejo) return;
-            // Central respondió cotización → sonido especial FN
+
+            // ── Cotización lista ───────────────────────────────────────
             if (estadoViejo == 'cotizacion' && estadoNuevo == 'cotizada') {
               _sonidos.reproducir(Sonidos.fnCotizacion);
-            } else if (estadoNuevo == 'fn_rechazado') {
+              // El push ya lo manda la central desde _enviarCotizacionFn
+            }
+            // ── Finalizado ────────────────────────────────────────────
+            else if (estadoNuevo == 'finalizado') {
               _sonidos.reproducirSuave(Sonidos.localEstado);
-            } else {
+              MotorNotificaciones.dispararMisil(
+                idDestino: myId,
+                titulo: '✅ Servicio entregado — $consec',
+                mensaje: 'El móvil completó la entrega',
+                urgente: false,
+                sonido: Sonidos.fnCotizacion,
+                canalAndroidId: MotorNotificaciones.canalFnCotizacionId,
+              );
+            }
+            // ── Rechazado ─────────────────────────────────────────────
+            else if (estadoNuevo == 'fn_rechazado') {
+              _sonidos.reproducirSuave(Sonidos.localEstado);
+              // El push de rechazo de renegociación ya lo manda la central
+            }
+            // ── Otros cambios ─────────────────────────────────────────
+            else {
               _sonidos.reproducirSuave(Sonidos.localEstado);
             }
           },
@@ -3851,37 +3898,63 @@ class _HistorialTabState extends State<_HistorialTab> {
                 ),
               // ── Acceso a Facturación FN ──────────────────────────────────
               Padding(
-                padding: const EdgeInsets.only(right: 6),
-                child: ElevatedButton.icon(
-                  icon: const Icon(Icons.receipt_long, size: 16),
-                  label: const Text('Facturación',
-                      style:
-                          TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.indigo[700],
-                    foregroundColor: Colors.white,
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8)),
-                  ),
-                  onPressed: () {
-                    final sedeId = widget.sede?['id'] is int
-                        ? widget.sede!['id'] as int
-                        : int.tryParse(widget.sede?['id']?.toString() ?? '');
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => FnFacturacionScreen(
-                          sedeId: sedeId,
-                          titulo:
-                              'Facturación — ${widget.sede?['nombre'] ?? 'Mi sede'}',
+                padding: const EdgeInsets.only(right: 8),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(10),
+                    onTap: () {
+                      final sedeId = widget.sede?['id'] is int
+                          ? widget.sede!['id'] as int
+                          : int.tryParse(widget.sede?['id']?.toString() ?? '');
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => FnFacturacionScreen(
+                            sedeId: sedeId,
+                            titulo:
+                                'Facturación — ${widget.sede?['nombre'] ?? 'Mi sede'}',
+                          ),
                         ),
+                      );
+                    },
+                    child: Ink(
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF1A237E), Color(0xFF3949AB)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        borderRadius: BorderRadius.circular(10),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF3949AB).withOpacity(0.6),
+                            blurRadius: 10,
+                            offset: const Offset(0, 3),
+                          ),
+                        ],
                       ),
-                    );
-                  },
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 9),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.receipt_long_rounded,
+                              size: 18, color: Colors.white),
+                          SizedBox(width: 7),
+                          Text(
+                            'Facturación',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 0.4,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ],

@@ -67,17 +67,19 @@ extension CentralScreenFn on _CentralScreenState {
 
     // Precio sugerido si viene de renegociación
     final precioSugerido = (servicio['fn_precio_sugerido_sede'] as num?)?.toInt();
+    final tarifaOriginal = (servicio['tarifa'] as num?)?.toInt();
 
-    // Pre-poblar tarifa: precio sugerido sede > recargo calculado > cotización anterior > vacío
+    // Pre-poblar tarifa con formato #.###: precio sugerido sede > recargo calculado > cotización anterior > vacío
     String tarifaInicial;
     if (precioSugerido != null) {
-      // Renegociación: la sede propuso este monto — pre-llenar con él
-      tarifaInicial = precioSugerido.toString();
+      tarifaInicial = _milesStr(precioSugerido);
     } else if (recargoCalculado != null && recargoCalculado > 0 &&
-        servicio['tarifa'] == null) {
-      tarifaInicial = recargoCalculado.toString();
+        tarifaOriginal == null) {
+      tarifaInicial = _milesStr(recargoCalculado);
+    } else if (tarifaOriginal != null) {
+      tarifaInicial = _milesStr(tarifaOriginal);
     } else {
-      tarifaInicial = servicio['tarifa']?.toString() ?? '';
+      tarifaInicial = '';
     }
     final tarifaCtrl = TextEditingController(text: tarifaInicial);
 
@@ -279,11 +281,62 @@ extension CentralScreenFn on _CentralScreenState {
                     ),
                   ),
 
+                // Banner: precio sugerido por la sede
+                if (precioSugerido != null) ...[
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.deepPurple.withValues(alpha: 0.07),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(
+                          color: Colors.deepPurple[300]!
+                              .withValues(alpha: 0.5)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.storefront_outlined,
+                            size: 14, color: Colors.deepPurple),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: RichText(
+                            text: TextSpan(
+                              style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.deepPurple),
+                              children: [
+                                const TextSpan(text: '💬 La sede propone '),
+                                TextSpan(
+                                  text:
+                                      '\$${_milesStr(precioSugerido)}',
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13),
+                                ),
+                                if (tarifaOriginal != null &&
+                                    tarifaOriginal != precioSugerido)
+                                  TextSpan(
+                                    text:
+                                        '  (cotización anterior: \$${_milesStr(tarifaOriginal)})',
+                                    style: TextStyle(
+                                        color: Colors.deepPurple[200],
+                                        fontSize: 11),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+
                 // Campo tarifa
                 TextField(
                   controller: tarifaCtrl,
                   keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  inputFormatters: [_MilesInputFormatter()],
                   decoration: const InputDecoration(
                     labelText: 'Tarifa a cobrar (\$)',
                     border: OutlineInputBorder(),
@@ -352,7 +405,12 @@ extension CentralScreenFn on _CentralScreenState {
           TextButton(
             onPressed: () async {
               Navigator.pop(ctx);
-              await _rechazarCotizacionFn(serviceId);
+              await _rechazarCotizacionFn(
+                serviceId,
+                consec: consec,
+                esRenegociacion: precioSugerido != null,
+                sedeId: servicio['fn_sede_solicitante_id'],
+              );
             },
             child: const Text('Rechazar', style: TextStyle(color: Colors.red)),
           ),
@@ -365,10 +423,13 @@ extension CentralScreenFn on _CentralScreenState {
             icon: const Icon(Icons.send_rounded, size: 16),
             label: const Text('Cotizar'),
             onPressed: () async {
-              final tarifa = int.tryParse(tarifaCtrl.text.trim());
+              final tarifa = int.tryParse(
+                  tarifaCtrl.text.replaceAll('.', '').trim());
               if (tarifa == null || tarifa <= 0) return;
               Navigator.pop(ctx);
-              await _enviarCotizacionFn(serviceId, tarifa, movilPreselId: movilPreselId);
+              await _enviarCotizacionFn(serviceId, tarifa,
+                  movilPreselId: movilPreselId,
+                  esRenegociacion: precioSugerido != null);
 
               // Guardar en red de direcciones si el toggle está activo
               if (guardarEnRed) {
@@ -429,7 +490,7 @@ extension CentralScreenFn on _CentralScreenState {
 
   // ── Enviar cotización a la sede ─────────────────────────────────────────
   Future<void> _enviarCotizacionFn(int serviceId, int tarifa,
-      {String? movilPreselId}) async {
+      {String? movilPreselId, bool esRenegociacion = false}) async {
     try {
       await Supabase.instance.client.from('servicios').update({
         'estado': 'cotizada',
@@ -458,10 +519,16 @@ extension CentralScreenFn on _CentralScreenState {
               .maybeSingle();
 
           if (userSede != null) {
+            final titulo = esRenegociacion
+                ? '✅ Renegociación aceptada — $consec'
+                : '✅ Cotización lista — $consec';
+            final mensaje = esRenegociacion
+                ? 'La central aceptó tu precio: \$${_milesStr(tarifa)}'
+                : 'La central cotizó tu servicio en \$${_milesStr(tarifa)}';
             await MotorNotificaciones.dispararMisil(
               idDestino: userSede['id'].toString(),
-              titulo: '✅ Cotización lista — $consec',
-              mensaje: 'La central cotizó tu servicio en \$${_milesStr(tarifa)}',
+              titulo: titulo,
+              mensaje: mensaje,
               urgente: false,
               sonido: Sonidos.fnCotizacion,
               canalAndroidId: MotorNotificaciones.canalFnCotizacionId,
@@ -475,12 +542,48 @@ extension CentralScreenFn on _CentralScreenState {
   }
 
   // ── Rechazar solicitud (vuelve a estado 'fn_rechazado') ─────────────────
-  Future<void> _rechazarCotizacionFn(int serviceId) async {
+  Future<void> _rechazarCotizacionFn(
+    int serviceId, {
+    String? consec,
+    bool esRenegociacion = false,
+    dynamic sedeId,
+  }) async {
     try {
       await Supabase.instance.client.from('servicios').update({
         'estado': 'fn_rechazado',
-        'observacion': 'CENTRAL: Solicitud rechazada.',
+        'observacion': esRenegociacion
+            ? 'CENTRAL: Renegociación rechazada.'
+            : 'CENTRAL: Solicitud rechazada.',
+        if (esRenegociacion)
+          'fn_rechazo_motivo': 'central: renegociación rechazada',
       }).eq('id', serviceId);
+
+      // Si es una renegociación, notificar a la sede de inmediato
+      if (esRenegociacion && sedeId != null) {
+        final sid = sedeId is int ? sedeId : int.tryParse(sedeId.toString());
+        if (sid != null) {
+          try {
+            final userSede = await Supabase.instance.client
+                .from('usuarios')
+                .select('id')
+                .eq('fn_sede_id', sid)
+                .eq('en_linea', true)
+                .limit(1)
+                .maybeSingle();
+            if (userSede != null) {
+              await MotorNotificaciones.dispararMisil(
+                idDestino: userSede['id'].toString(),
+                titulo:
+                    '❌ Renegociación no aceptada — ${consec ?? '#$serviceId'}',
+                mensaje: 'La central no aceptó el precio propuesto.',
+                urgente: false,
+                sonido: Sonidos.localEstado,
+                canalAndroidId: MotorNotificaciones.canalFnCotizacionId,
+              );
+            }
+          } catch (_) {}
+        }
+      }
     } catch (e) {
       debugPrint('Error rechazando FN: $e');
     }
@@ -520,4 +623,27 @@ extension CentralScreenFn on _CentralScreenState {
                 fontWeight: FontWeight.bold)),
       );
 
+}
+
+// ── Formateador #.### para campos de tarifa ──────────────────────────────────
+class _MilesInputFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+      TextEditingValue oldValue, TextEditingValue newValue) {
+    final digits = newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.isEmpty) return newValue.copyWith(text: '');
+    final n = int.tryParse(digits);
+    if (n == null) return oldValue;
+    final s = n.toString();
+    final buf = StringBuffer();
+    for (int i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) buf.write('.');
+      buf.write(s[i]);
+    }
+    final formatted = buf.toString();
+    return newValue.copyWith(
+      text: formatted,
+      selection: TextSelection.collapsed(offset: formatted.length),
+    );
+  }
 }
