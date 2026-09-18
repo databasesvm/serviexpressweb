@@ -150,6 +150,20 @@ class _LoginScreenState extends State<LoginScreen>
           return;
         }
 
+        // --- Restaurar sesión Supabase Auth en auto-login ---
+        // Si el SDK ya restauró una sesión válida desde localStorage, todo OK.
+        // Si no (primera vez con nuevo build o sesión expirada), intentamos
+        // signIn con el auth_id guardado. Sin la contraseña en texto claro no
+        // podemos hacer signInWithPassword, pero la sesión del SDK (access
+        // token + refresh token guardados en localStorage) es suficiente en
+        // la mayoría de casos — el SDK la renueva automáticamente.
+        if (Supabase.instance.client.auth.currentSession == null) {
+          // No hay sesión activa en el SDK (usuario nunca migró o localStorage
+          // fue borrado). Dejamos pasar — el usuario verá 401 en writes hasta
+          // que haga un login manual que ejecute PASO 5.
+          debugPrint('[AUTO-LOGIN] Sin sesión Supabase Auth — escribe operaciones bloqueadas hasta login manual.');
+        }
+
         if (mounted) _navegarSegunRol(usuario);
         return;
       } catch (_) {
@@ -326,9 +340,11 @@ class _LoginScreenState extends State<LoginScreen>
                 password: claveTexto,
               );
               if (signUpRes.user != null) {
-                // Guardar auth_id en la tabla usuarios
+                // Guardar auth_id en la tabla usuarios y sincronizar
+                // el objeto local para que SharedPreferences quede actualizado.
                 await Supabase.instance.client.from('usuarios').update(
                     {'auth_id': signUpRes.user!.id}).eq('id', usuario['id']);
+                usuario['auth_id'] = signUpRes.user!.id;
               }
             } on AuthException catch (authEx) {
               // El email ya existe en auth.users (migración anterior incompleta):
@@ -337,10 +353,17 @@ class _LoginScreenState extends State<LoginScreen>
               if (msg.contains('already registered') ||
                   msg.contains('already exists') ||
                   (authEx.statusCode != null && authEx.statusCode == '422')) {
-                await Supabase.instance.client.auth.signInWithPassword(
+                final signInRes =
+                    await Supabase.instance.client.auth.signInWithPassword(
                   email: authEmail,
                   password: claveTexto,
                 );
+                if (signInRes.user != null) {
+                  // Sincronizar auth_id local si aún no estaba guardado
+                  await Supabase.instance.client.from('usuarios').update(
+                      {'auth_id': signInRes.user!.id}).eq('id', usuario['id']);
+                  usuario['auth_id'] = signInRes.user!.id;
+                }
               }
             }
           } else {
