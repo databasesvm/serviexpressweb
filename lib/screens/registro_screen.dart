@@ -34,10 +34,11 @@ import 'package:serviexpress_app/utils/sonido_manager.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart';
 import 'package:image_picker/image_picker.dart';
 
-// Página temporal de Términos y Política de Privacidad.
-const String _kUrlTerminos = 'https://serviexpressapp.netlify.app/#terminos';
+// URLs de Términos y Política de Privacidad (alojadas en GitHub Pages).
+const String _kUrlTerminos =
+    'https://databasesvm.github.io/serviexpressweb/terminos.html';
 const String _kUrlPrivacidad =
-    'https://serviexpressapp.netlify.app/#privacidad';
+    'https://databasesvm.github.io/serviexpressweb/privacidad.html';
 
 class RegistroScreen extends StatefulWidget {
   const RegistroScreen({super.key});
