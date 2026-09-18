@@ -1,5 +1,4 @@
-/// Exportación condicional — en Android usa la implementación real (dart:io),
-/// en Web/iOS usa el stub vacío que no hace nada.
+/// OTA via APK deshabilitado para cumplir con las políticas de Google Play.
+/// Siempre exporta el stub no-op independientemente de la plataforma.
 library;
-export 'ota_updater_stub.dart'
-    if (dart.library.io) 'ota_updater_io.dart';
+export 'ota_updater_stub.dart';

@@ -11,7 +11,8 @@
     <uses-permission android:name="android.permission.VIBRATE"/>
 
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
-    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
+    <!-- USE_EXACT_ALARM eliminado: solo permitido para apps de alarma/calendario.
+         SCHEDULE_EXACT_ALARM (que sí permite pedir permiso al usuario) es suficiente. -->
 
     <!-- NUEVO: necesario para poder PEDIR la exención de optimización de
          batería. Sin este permiso, la app no puede ni mostrar el diálogo
@@ -20,18 +21,17 @@
          con la app minimizada, sobre todo en Xiaomi/Huawei/Oppo. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
 
-    <!-- NUEVO: necesario para poder mostrar la app por encima de otras
-         (superposición) — relevante para alertas críticas que deben
-         interrumpir sin importar qué esté usando el moto en ese momento. -->
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+    <!-- SYSTEM_ALERT_WINDOW eliminado: Google Play lo restringe a apps de
+         burbujas de chat/accesibilidad. Las notificaciones heads-up con
+         canal de importancia HIGH cubren el mismo caso de uso. -->
 
-    <!-- USE_FULL_SCREEN_INTENT: permite que la notificación aparezca en la
-         pantalla de bloqueo como pop-up (Android 12+). Sin esto, en
-         segundo plano el heads-up se suprime en muchos fabricantes. -->
-    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <!-- USE_FULL_SCREEN_INTENT eliminado: restringido en Android 14+ para
+         apps que no son alarmas o llamadas. Notificaciones HIGH channel
+         son suficientes para las alertas de ServiExpress. -->
 
-    <!-- OTA: necesario para instalar APKs descargados internamente -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+    <!-- REQUEST_INSTALL_PACKAGES eliminado: política de Google Play prohíbe
+         que apps distribuidas en la tienda instalen sus propios APKs. -->
+    <!-- Las actualizaciones se manejan vía Google Play in-app updates. -->
 
     <application
         android:label="ServiExpress"
@@ -73,17 +73,6 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
-
-        <!-- OTA: FileProvider para compartir la APK descargada con el instalador del sistema -->
-        <provider
-            android:name="androidx.core.content.FileProvider"
-            android:authorities="com.serviexpress.provider"
-            android:exported="false"
-            android:grantUriPermissions="true">
-            <meta-data
-                android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/provider_paths"/>
-        </provider>
 
     </application>
     <queries>
