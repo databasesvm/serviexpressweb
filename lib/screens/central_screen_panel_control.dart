@@ -1688,6 +1688,11 @@ extension CentralScreenPanelControl on _CentralScreenState {
                 final finalizados = _asc(todos.where((s) => s['estado'] == 'finalizado'));
                 final cancelados = _asc(todos.where((s) => s['estado'] == 'cancelado'));
                 final caducados = _asc(todos.where((s) => s['estado'] == 'caducado'));
+                // Contadores para chips toggle
+                final kpiFinalizados = finalizados.length +
+                    finalizadosProblema.length +
+                    finalizadosDemora.length;
+                final kpiCancelados = cancelados.length + caducados.length;
 
                 // Sonidos de estado manejados por radar_central_bg channel
 
@@ -1755,6 +1760,28 @@ extension CentralScreenPanelControl on _CentralScreenState {
                               ],
                               _kpiChip('HOY', kpiHoy, Colors.blueGrey[600]!,
                                   onTap: () => _mostrarResumenDia(context, todosHoy)),
+                              const SizedBox(width: 5),
+                              // Toggles de finalizados/cancelados recientes
+                              if (kpiFinalizados > 0)
+                                _kpiChip(
+                                  'FIN', kpiFinalizados, Colors.grey[600]!,
+                                  active: _mostrarFinalizados,
+                                  onTap: () {
+                                    _mostrarFinalizados = !_mostrarFinalizados;
+                                    _filtroVersion.value++;
+                                  },
+                                ),
+                              if (kpiFinalizados > 0 && kpiCancelados > 0)
+                                const SizedBox(width: 5),
+                              if (kpiCancelados > 0)
+                                _kpiChip(
+                                  'CANC', kpiCancelados, Colors.black54,
+                                  active: _mostrarCancelados,
+                                  onTap: () {
+                                    _mostrarCancelados = !_mostrarCancelados;
+                                    _filtroVersion.value++;
+                                  },
+                                ),
                               const Spacer(),
                               if (kpiFact > 0)
                                 Text(
@@ -1830,22 +1857,24 @@ extension CentralScreenPanelControl on _CentralScreenState {
                                 Icons.schedule,
                                 visible: !_seccionesOcultasMonitor.contains('programados'),
                               ),
-                              _construirBloqueServicios(
-                                context,
-                                '♻️ SERVICIOS CADUCADOS',
-                                _filtrar(caducados),
-                                Colors.purple[800]!,
-                                Icons.hourglass_disabled,
-                                visible: !_seccionesOcultasMonitor.contains('caducados'),
-                              ),
-                              _construirBloqueServicios(
-                                context,
-                                '⏱️ SERVICIOS VENCIDOS / DEMORADOS',
-                                _filtrar(finalizadosDemora),
-                                Colors.deepPurple[700]!,
-                                Icons.timer_off,
-                                visible: !_seccionesOcultasMonitor.contains('demorados'),
-                              ),
+                              if (_mostrarCancelados)
+                                _construirBloqueServicios(
+                                  context,
+                                  '♻️ SERVICIOS CADUCADOS',
+                                  _filtrar(caducados),
+                                  Colors.purple[800]!,
+                                  Icons.hourglass_disabled,
+                                  visible: !_seccionesOcultasMonitor.contains('caducados'),
+                                ),
+                              if (_mostrarFinalizados)
+                                _construirBloqueServicios(
+                                  context,
+                                  '⏱️ SERVICIOS VENCIDOS / DEMORADOS',
+                                  _filtrar(finalizadosDemora),
+                                  Colors.deepPurple[700]!,
+                                  Icons.timer_off,
+                                  visible: !_seccionesOcultasMonitor.contains('demorados'),
+                                ),
                               _construirBloqueServicios(
                                 context,
                                 '🎯 FN DIRECTO · ESPERANDO ACEPTACIÓN',
@@ -1870,30 +1899,33 @@ extension CentralScreenPanelControl on _CentralScreenState {
                                 Icons.motorcycle,
                                 visible: !_seccionesOcultasMonitor.contains('en_curso'),
                               ),
-                              _construirBloqueServicios(
-                                context,
-                                '🔴 SERVICIOS FINALIZADOS CON PROBLEMA',
-                                _filtrar(finalizadosProblema),
-                                Colors.red[900]!,
-                                Icons.report_off,
-                                visible: !_seccionesOcultasMonitor.contains('finalizados_problema'),
-                              ),
-                              _construirBloqueServicios(
-                                context,
-                                '⚪ SERVICIOS FINALIZADOS',
-                                _filtrar(finalizados),
-                                Colors.grey[500]!,
-                                Icons.check_circle_outline,
-                                visible: !_seccionesOcultasMonitor.contains('finalizados'),
-                              ),
-                              _construirBloqueServicios(
-                                context,
-                                '⚫ SERVICIOS CANCELADOS',
-                                _filtrar(cancelados),
-                                Colors.black54,
-                                Icons.block,
-                                visible: !_seccionesOcultasMonitor.contains('cancelados'),
-                              ),
+                              if (_mostrarFinalizados) ...[
+                                _construirBloqueServicios(
+                                  context,
+                                  '🔴 SERVICIOS FINALIZADOS CON PROBLEMA',
+                                  _filtrar(finalizadosProblema),
+                                  Colors.red[900]!,
+                                  Icons.report_off,
+                                  visible: !_seccionesOcultasMonitor.contains('finalizados_problema'),
+                                ),
+                                _construirBloqueServicios(
+                                  context,
+                                  '⚪ SERVICIOS FINALIZADOS',
+                                  _filtrar(finalizados),
+                                  Colors.grey[500]!,
+                                  Icons.check_circle_outline,
+                                  visible: !_seccionesOcultasMonitor.contains('finalizados'),
+                                ),
+                              ],
+                              if (_mostrarCancelados)
+                                _construirBloqueServicios(
+                                  context,
+                                  '⚫ SERVICIOS CANCELADOS',
+                                  _filtrar(cancelados),
+                                  Colors.black54,
+                                  Icons.block,
+                                  visible: !_seccionesOcultasMonitor.contains('cancelados'),
+                                ),
                             ],
                           ),
                         ),

@@ -90,6 +90,10 @@ class _CentralScreenState extends State<CentralScreen>
 
   int _panelActivoMobile = 1;
   bool _radarActivo = false;
+
+  // Toggles del monitor — muestran finalizados/cancelados al presionar el chip
+  bool _mostrarFinalizados = false;
+  bool _mostrarCancelados  = false;
   final _scaffoldKey = GlobalKey<ScaffoldState>();
 
   // REPORTES DE SERVICIO — badge de no leídos
@@ -253,29 +257,76 @@ class _CentralScreenState extends State<CentralScreen>
                   estadoNuevo == 'programado') {
                 _sonidos.reproducir(Sonidos.centralRadar);
               }
-            }
-            // UPDATE: cambio de estado
-            else if (payload.eventType == PostgresChangeEvent.update &&
-                estadoNuevo != estadoAnterior) {
-              switch (estadoNuevo) {
-                case 'pendiente':
-                  _sonidos.reproducir(Sonidos.centralRadar);
-                  break;
-                case 'cotizacion':
-                case 'fn_renegociando':
-                  _sonidos.reproducir(Sonidos.centralCotizacion);
-                  break;
-                case 'cancelado':
-                  _sonidos.reproducirSuave(Sonidos.centralCancelado);
-                  break;
-                case 'caducado':
-                  _sonidos.reproducir(Sonidos.centralCaducado);
-                  break;
-                case 'finalizado_con_problema':
-                case 'finalizado_por_demora':
-                  _sonidos.reproducir(Sonidos.centralProblema);
-                  break;
+              // Agregar al cache — los inserts nunca llegan con archivado=true
+              if (!_ctrlServiciosMonitor.isClosed) {
+                _cacheSvcMonitor = [payload.newRecord, ..._cacheSvcMonitor];
+                _chatServicioTotal.value = _cacheSvcMonitor
+                    .where((s) =>
+                        s['chat_movil_central'] == true ||
+                        s['chat_cliente_central'] == true)
+                    .length;
+                _ctrlServiciosMonitor.add(List.from(_cacheSvcMonitor));
               }
+            }
+            // UPDATE: cambio de estado o de cualquier campo
+            else if (payload.eventType == PostgresChangeEvent.update) {
+              // Sonidos solo cuando cambia el estado
+              if (estadoNuevo != estadoAnterior) {
+                switch (estadoNuevo) {
+                  case 'pendiente':
+                    _sonidos.reproducir(Sonidos.centralRadar);
+                    break;
+                  case 'cotizacion':
+                  case 'fn_renegociando':
+                    _sonidos.reproducir(Sonidos.centralCotizacion);
+                    break;
+                  case 'cancelado':
+                    _sonidos.reproducirSuave(Sonidos.centralCancelado);
+                    break;
+                  case 'caducado':
+                    _sonidos.reproducir(Sonidos.centralCaducado);
+                    break;
+                  case 'finalizado_con_problema':
+                  case 'finalizado_por_demora':
+                    _sonidos.reproducir(Sonidos.centralProblema);
+                    break;
+                }
+              }
+
+              // ACTUALIZACIÓN DEL CACHE EN TIEMPO REAL
+              // Resuelve el problema de cards que no actualizaban sin refrescar
+              // (por ejemplo cotizacion → cotizada). El canal Postgres recibe
+              // TODO sin excepción. El flag archivado=true es la única razón
+              // para sacar un servicio del cache (pg_cron lo pone a las 4h).
+              if (!mounted || _ctrlServiciosMonitor.isClosed) return;
+              final isArchivado = payload.newRecord['archivado'] == true;
+              final updId = payload.newRecord['id'];
+              final idx = _cacheSvcMonitor.indexWhere((s) => s['id'] == updId);
+              if (isArchivado) {
+                // pg_cron archivó este servicio — sacarlo del cache
+                if (idx >= 0) {
+                  final nuevo = List<Map<String, dynamic>>.from(_cacheSvcMonitor);
+                  nuevo.removeAt(idx);
+                  _cacheSvcMonitor = nuevo;
+                }
+              } else {
+                // Actualizar o insertar en cache
+                if (idx >= 0) {
+                  final updated = Map<String, dynamic>.from(_cacheSvcMonitor[idx])
+                    ..addAll(payload.newRecord);
+                  final nuevo = List<Map<String, dynamic>>.from(_cacheSvcMonitor);
+                  nuevo[idx] = updated;
+                  _cacheSvcMonitor = nuevo;
+                } else {
+                  _cacheSvcMonitor = [payload.newRecord, ..._cacheSvcMonitor];
+                }
+              }
+              _chatServicioTotal.value = _cacheSvcMonitor
+                  .where((s) =>
+                      s['chat_movil_central'] == true ||
+                      s['chat_cliente_central'] == true)
+                  .length;
+              _ctrlServiciosMonitor.add(List.from(_cacheSvcMonitor));
             }
           },
         )
@@ -622,16 +673,14 @@ class _CentralScreenState extends State<CentralScreen>
         .stream(primaryKey: ['id'])
         .eq('rol', 'movil');
 
-    // Solo estados activos — excluye finalizados/cancelados para reducir egress.
-    // La central no necesita ver servicios terminados en el monitor en tiempo real.
+    // Servicios no archivados — incluye finalizados/cancelados recientes
+    // (< 4h, aún no archivados por pg_cron). El canal _canalRadarCentral
+    // complementa este stream con actualizaciones inmediatas de cualquier
+    // campo (estado, tarifa, etc.) sin esperar el WebSocket del .stream().
     final crudoServicios = Supabase.instance.client
         .from('servicios')
         .stream(primaryKey: ['id'])
-        .inFilter('estado', const [
-          'cotizacion', 'cotizada', 'pendiente',
-          'en_ruta_origen', 'en_origen', 'en_ruta_destino',
-          'problema', 'caducado', 'fn_renegociando',
-        ])
+        .eq('archivado', false)
         .order('id', ascending: false)
         .limit(500);
 

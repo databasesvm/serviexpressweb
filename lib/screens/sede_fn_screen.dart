@@ -29,6 +29,11 @@ class SedeFnScreen extends StatefulWidget {
 
 class _SedeFnScreenState extends State<SedeFnScreen>
     with SingleTickerProviderStateMixin {
+  static const _kEstadosActivos = [
+    'cotizacion', 'cotizada', 'pendiente',
+    'en_ruta_origen', 'en_origen', 'en_ruta_destino', 'fn_renegociando',
+  ];
+
   final _db = Supabase.instance.client;
   final _sonidos = SonidoManager();
   late final TabController _tab;
@@ -162,11 +167,6 @@ class _SedeFnScreenState extends State<SedeFnScreen>
     // query independiente en _HistorialTab.
     // Solo estados activos — el historial tiene su propia query independiente.
     // Así Supabase nunca envía servicios terminados/cancelados a este stream.
-    const estadosActivos = [
-      'cotizacion', 'cotizada', 'pendiente',
-      'en_ruta_origen', 'en_origen', 'en_ruta_destino', 'fn_renegociando',
-    ];
-
     final crudo = _db
         .from('servicios')
         .stream(primaryKey: ['id'])
@@ -178,13 +178,36 @@ class _SedeFnScreenState extends State<SedeFnScreen>
         _ultimaEmisionStream = DateTime.now(); // Timestamp para reconexión condicional
         // inFilter no existe en SupabaseStreamBuilder — filtrar client-side
         final filtrado = data
-            .where((s) => estadosActivos.contains(s['estado']))
+            .where((s) => _kEstadosActivos.contains(s['estado']))
             .toList();
         _cacheServicios = List<Map<String, dynamic>>.from(filtrado);
         if (!_ctrlServicios.isClosed) _ctrlServicios.add(_cacheServicios!);
       },
       onError: (_) {},
     );
+  }
+
+  /// Actualiza el cache local inmediatamente al recibir un evento Postgres,
+  /// sin esperar al próximo tick del .stream(). Elimina la demora visible
+  /// cuando un servicio cambia de estado (p.ej. cotizacion → cotizada,
+  /// pendiente → finalizado).
+  void _fusionarEnCache(Map<String, dynamic> registro) {
+    if (_cacheServicios == null) return;
+    final id = registro['id'];
+    if (_kEstadosActivos.contains(registro['estado']?.toString())) {
+      final idx = _cacheServicios!.indexWhere((s) => s['id'] == id);
+      if (idx >= 0) {
+        _cacheServicios![idx] = Map<String, dynamic>.from(registro);
+      } else {
+        _cacheServicios!.insert(0, Map<String, dynamic>.from(registro));
+      }
+    } else {
+      // Pasó a estado inactivo (finalizado, cancelado, etc.) — quitar del listado
+      _cacheServicios!.removeWhere((s) => s['id'] == id);
+    }
+    if (!_ctrlServicios.isClosed) {
+      _ctrlServicios.add(List<Map<String, dynamic>>.from(_cacheServicios!));
+    }
   }
 
   void _iniciarCanalRealtime() {
@@ -227,6 +250,7 @@ class _SedeFnScreenState extends State<SedeFnScreen>
                 sonido: Sonidos.fnCotizacion,
                 canalAndroidId: MotorNotificaciones.canalFnCotizacionId,
               );
+              _fusionarEnCache(nuevo); // refleja movil_id en el card sin esperar stream
               return;
             }
 
@@ -258,6 +282,9 @@ class _SedeFnScreenState extends State<SedeFnScreen>
             else {
               _sonidos.reproducirSuave(Sonidos.localEstado);
             }
+
+            // Actualiza el card inmediatamente sin esperar el próximo tick del stream
+            _fusionarEnCache(nuevo);
           },
         )
         .subscribe();

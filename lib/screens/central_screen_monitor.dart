@@ -1714,13 +1714,17 @@ extension CentralScreenMonitor on _CentralScreenState {
   // ── HELPERS MONITOR ────────────────────────────────────────────────────────
 
   Widget _kpiChip(String label, int count, Color color,
-      {VoidCallback? onTap}) {
+      {VoidCallback? onTap, bool active = false}) {
     final chip = Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
+        // Cuando está activo, fondo sólido; si no, solo tinte suave
+        color: active ? color : color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: color.withValues(alpha: 0.4)),
+        border: Border.all(
+          color: active ? color : color.withValues(alpha: 0.4),
+          width: active ? 1.5 : 1,
+        ),
       ),
       child: RichText(
         text: TextSpan(children: [
@@ -1729,12 +1733,15 @@ extension CentralScreenMonitor on _CentralScreenState {
             style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.bold,
-                color: color,
+                color: active ? Colors.white : color,
                 height: 1),
           ),
           TextSpan(
             text: label,
-            style: TextStyle(fontSize: 8, color: color, height: 1),
+            style: TextStyle(
+                fontSize: 8,
+                color: active ? Colors.white : color,
+                height: 1),
           ),
         ]),
       ),
