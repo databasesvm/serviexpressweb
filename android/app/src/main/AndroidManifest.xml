@@ -77,7 +77,7 @@
         <!-- OTA: FileProvider para compartir la APK descargada con el instalador del sistema -->
         <provider
             android:name="androidx.core.content.FileProvider"
-            android:authorities="com.example.serviexpress_app.provider"
+            android:authorities="com.serviexpress.provider"
             android:exported="false"
             android:grantUriPermissions="true">
             <meta-data

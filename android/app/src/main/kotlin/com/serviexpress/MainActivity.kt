@@ -1,4 +1,4 @@
-package com.example.serviexpress_app
+package com.serviexpress
 
 import android.content.Intent
 import android.os.Build
