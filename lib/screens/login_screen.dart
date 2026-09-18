@@ -152,16 +152,23 @@ class _LoginScreenState extends State<LoginScreen>
 
         // --- Restaurar sesión Supabase Auth en auto-login ---
         // Si el SDK ya restauró una sesión válida desde localStorage, todo OK.
-        // Si no (primera vez con nuevo build o sesión expirada), intentamos
-        // signIn con el auth_id guardado. Sin la contraseña en texto claro no
-        // podemos hacer signInWithPassword, pero la sesión del SDK (access
-        // token + refresh token guardados en localStorage) es suficiente en
-        // la mayoría de casos — el SDK la renueva automáticamente.
-        if (Supabase.instance.client.auth.currentSession == null) {
-          // No hay sesión activa en el SDK (usuario nunca migró o localStorage
-          // fue borrado). Dejamos pasar — el usuario verá 401 en writes hasta
-          // que haga un login manual que ejecute PASO 5.
-          debugPrint('[AUTO-LOGIN] Sin sesión Supabase Auth — escribe operaciones bloqueadas hasta login manual.');
+        // Si auth_id es null, el usuario nunca completó PASO 5 — forzamos
+        // login manual para que PASO 5 corra y cree la sesión Supabase Auth.
+        // Sin sesión, los INSERT/UPDATE/DELETE fallan por RLS (authenticated-only).
+        final storedAuthId = usuario['auth_id']?.toString();
+        if (storedAuthId == null || storedAuthId.isEmpty) {
+          if (Supabase.instance.client.auth.currentSession == null) {
+            // Primera vez con RLS activo — el usuario debe hacer login manual
+            // para ejecutar PASO 5 y obtener sesión Supabase Auth.
+            debugPrint('[AUTO-LOGIN] auth_id null y sin sesión Supabase — forzando login manual (PASO 5).');
+            await prefs.remove('sesion_usuario_json');
+            // Rellenamos el campo usuario para que no tenga que escribirlo
+            if (mounted) {
+              final id = usuario['usuario']?.toString() ?? usuario['telefono']?.toString() ?? '';
+              setState(() => _telefonoController.text = id);
+            }
+            return; // Queda en LoginScreen, usuario debe ingresar contraseña
+          }
         }
 
         if (mounted) _navegarSegunRol(usuario);
