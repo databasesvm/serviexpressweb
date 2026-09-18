@@ -271,9 +271,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (_) => const PermisosCriticosScreen(
-              permisosOpcionales: kPermisosOpcionalesMovil,
-            ),
+            builder: (_) => const PermisosCriticosScreen(),
             fullscreenDialog: true,
           ),
         );
@@ -13308,9 +13306,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                         await Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (_) => const PermisosCriticosScreen(
-                              permisosOpcionales: kPermisosOpcionalesMovil,
-                            ),
+                            builder: (_) => const PermisosCriticosScreen(),
                             fullscreenDialog: true,
                           ),
                         );
