@@ -1306,7 +1306,7 @@ class _LoginScreenState extends State<LoginScreen>
                               ),
                               const SizedBox(height: 4),
                               const Text(
-                                'Ingresa tu usuario o numero de celular',
+                                'Ingresa tu usuario o numero de celular.',
                                 style: TextStyle(
                                   color: Colors.black45,
                                   fontSize: 12,
