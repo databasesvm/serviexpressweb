@@ -622,11 +622,18 @@ class _CentralScreenState extends State<CentralScreen>
         .stream(primaryKey: ['id'])
         .eq('rol', 'movil');
 
+    // Solo estados activos — excluye finalizados/cancelados para reducir egress.
+    // La central no necesita ver servicios terminados en el monitor en tiempo real.
     final crudoServicios = Supabase.instance.client
         .from('servicios')
         .stream(primaryKey: ['id'])
-        .eq('archivado', false)
-        .order('id', ascending: false);
+        .inFilter('estado', const [
+          'cotizacion', 'cotizada', 'pendiente',
+          'en_ruta_origen', 'en_origen', 'en_ruta_destino',
+          'problema', 'caducado', 'fn_renegociando',
+        ])
+        .order('id', ascending: false)
+        .limit(500);
 
     _subUsuariosMoviles = crudoUsuarios.listen(
       (data) {
@@ -654,13 +661,15 @@ class _CentralScreenState extends State<CentralScreen>
     );
   }
 
-  // Reconstruye los streams cada 30s. No usa setState() — la
-  // reconexión es invisible para el árbol de widgets.
+  // Reconstruye los streams SOLO si llevan más de 35s sin emitir datos.
+  // Evita reconexiones innecesarias que causan egress masivo en Supabase.
   void _iniciarVigilanteDeConexion() {
     _reconexionTimer?.cancel();
     _reconexionTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (!mounted) return;
-      _construirStreams();
+      final sinDatos =
+          DateTime.now().difference(_ultimaActualizacion).inSeconds > 35;
+      if (sinDatos) _construirStreams();
     });
   }
 

@@ -44,6 +44,7 @@ class _ClienteScreenState extends State<ClienteScreen>
   StreamSubscription<List<Map<String, dynamic>>>? _subServiciosActivos;
   StreamSubscription<List<Map<String, dynamic>>>? _subMiPerfil;
   Timer? _reconexionTimer;
+  DateTime? _ultimaEmisionServicios; // Para reconexión condicional (anti-egress)
 
   List<Map<String, dynamic>>? _cacheServiciosActivos;
   final ValueNotifier<int> _chatClienteCount = ValueNotifier(0);
@@ -84,6 +85,7 @@ class _ClienteScreenState extends State<ClienteScreen>
 
     _subServiciosActivos = crudoServicios.listen(
       (data) {
+        _ultimaEmisionServicios = DateTime.now(); // Timestamp para reconexión condicional
         _cacheServiciosActivos = List<Map<String, dynamic>>.from(data);
         _chatClienteCount.value = _cacheServiciosActivos!.where((s) => s['chat_cliente'] == true).length;
         if (!_ctrlServiciosActivos.isClosed) _ctrlServiciosActivos.add(data);
@@ -102,13 +104,15 @@ class _ClienteScreenState extends State<ClienteScreen>
     );
   }
 
-  // Reconstruye cada 30s. No usa setState() — la reconexión es
-  // invisible para el árbol de widgets.
+  // Reconstruye los streams SOLO si llevan más de 35s sin emitir datos.
+  // Evita reconexiones innecesarias que causan egress masivo en Supabase.
   void _iniciarVigilanteDeConexion() {
     _reconexionTimer?.cancel();
     _reconexionTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (!mounted) return;
-      _construirStreams();
+      final sinDatos = _ultimaEmisionServicios == null ||
+          DateTime.now().difference(_ultimaEmisionServicios!).inSeconds > 35;
+      if (sinDatos) _construirStreams();
     });
   }
 

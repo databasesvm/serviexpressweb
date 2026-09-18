@@ -306,7 +306,60 @@ class _LoginScreenState extends State<LoginScreen>
         }
       }
 
-      // --- PASO 5: Persistir SESIÓN ---
+      // --- PASO 5: Supabase Auth — migración on-the-fly ---
+      // El email interno siempre usa el identificador canónico del registro
+      // (teléfono si existe, si no el campo usuario). Así una misma cuenta
+      // siempre tiene un solo email en auth.users sin importar si el usuario
+      // inicia sesión con su número o con su nombre de usuario.
+      {
+        final String authTel = usuario['telefono']?.toString().trim() ?? '';
+        final String authUsr = usuario['usuario']?.toString().trim() ?? '';
+        final String authIdentifier = authTel.isNotEmpty ? authTel : authUsr;
+        final String authEmail = '$authIdentifier@servimoto.app';
+        final String? authId = usuario['auth_id']?.toString();
+
+        try {
+          if (authId == null || authId.isEmpty) {
+            // Primera vez: crear cuenta en auth.users
+            try {
+              final signUpRes = await Supabase.instance.client.auth.signUp(
+                email: authEmail,
+                password: claveTexto,
+              );
+              if (signUpRes.user != null) {
+                // Guardar auth_id en la tabla usuarios
+                await Supabase.instance.client
+                    .from('usuarios')
+                    .update({'auth_id': signUpRes.user!.id})
+                    .eq('id', usuario['id']);
+              }
+            } on AuthException catch (authEx) {
+              // El email ya existe en auth.users (migración anterior incompleta):
+              // intentar signIn con la misma contraseña.
+              final msg = authEx.message.toLowerCase();
+              if (msg.contains('already registered') ||
+                  msg.contains('already exists') ||
+                  (authEx.statusCode != null && authEx.statusCode == '422')) {
+                await Supabase.instance.client.auth.signInWithPassword(
+                  email: authEmail,
+                  password: claveTexto,
+                );
+              }
+            }
+          } else {
+            // Ya migrado: iniciar sesión directamente en Supabase Auth
+            await Supabase.instance.client.auth.signInWithPassword(
+              email: authEmail,
+              password: claveTexto,
+            );
+          }
+        } catch (_) {
+          // Si Supabase Auth falla por cualquier razón, no bloqueamos el acceso.
+          // El usuario navega igual con la sesión de SharedPreferences.
+        }
+      }
+
+      // --- PASO 7: Persistir SESIÓN ---
       // Siempre guardamos sesion_usuario_json para que el auto-login funcione
       // aunque se minimice la app y el SO la mate por presión de memoria.
       // 'auto_login' solo controla si la sesión SOBREVIVE el cierre total

@@ -50,6 +50,7 @@ class _SedeFnScreenState extends State<SedeFnScreen>
   RealtimeChannel? _canalEstados;
   RealtimeChannel? _canalConfig;
   Timer? _reconTimer;
+  DateTime? _ultimaEmisionStream; // Para reconexión condicional (anti-egress)
 
   List<Map<String, dynamic>>? _cacheServicios;
 
@@ -159,28 +160,28 @@ class _SedeFnScreenState extends State<SedeFnScreen>
     // Filtro de 30 días para reducir drásticamente el volumen del stream.
     // Los servicios activos siempre son recientes; el historial tiene su propia
     // query independiente en _HistorialTab.
+    // Solo estados activos — el historial tiene su propia query independiente.
+    // Así Supabase nunca envía servicios terminados/cancelados a este stream.
+    const estadosActivos = [
+      'cotizacion', 'cotizada', 'pendiente',
+      'en_ruta_origen', 'en_origen', 'en_ruta_destino', 'fn_renegociando',
+    ];
+
     final crudo = _db
         .from('servicios')
         .stream(primaryKey: ['id'])
         .eq('fn_sede_solicitante_id', sedeId)
         .order('id', ascending: false);
 
-    const estadosActivos = [
-      'cotizacion', 'cotizada', 'pendiente',
-      'en_ruta_origen', 'en_origen', 'en_ruta_destino', 'fn_renegociando',
-    ];
-
     _subServicios = crudo.listen(
       (data) {
-        final limite = DateTime.now().subtract(const Duration(days: 30));
-        final filtrado = data.where((s) {
-          final c = s['created_at']?.toString();
-          if (c == null) return true;
-          final enFecha = (DateTime.tryParse(c) ?? limite).isAfter(limite);
-          return enFecha && estadosActivos.contains(s['estado']);
-        }).toList();
-        _cacheServicios = filtrado;
-        if (!_ctrlServicios.isClosed) _ctrlServicios.add(filtrado);
+        _ultimaEmisionStream = DateTime.now(); // Timestamp para reconexión condicional
+        // inFilter no existe en SupabaseStreamBuilder — filtrar client-side
+        final filtrado = data
+            .where((s) => estadosActivos.contains(s['estado']))
+            .toList();
+        _cacheServicios = List<Map<String, dynamic>>.from(filtrado);
+        if (!_ctrlServicios.isClosed) _ctrlServicios.add(_cacheServicios!);
       },
       onError: (_) {},
     );
@@ -278,8 +279,12 @@ class _SedeFnScreenState extends State<SedeFnScreen>
   }
 
   void _iniciarReconexion() {
+    // Solo reconecta si el stream lleva >35s sin emitir datos (anti-egress)
     _reconTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      _construirStream();
+      if (!mounted) return;
+      final sinDatos = _ultimaEmisionStream == null ||
+          DateTime.now().difference(_ultimaEmisionStream!).inSeconds > 35;
+      if (sinDatos) _construirStream();
     });
   }
 

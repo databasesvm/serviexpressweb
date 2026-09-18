@@ -31,6 +31,7 @@ class _SupervisorFnScreenState extends State<SupervisorFnScreen>
   StreamSubscription? _sub;
   List<Map<String, dynamic>>? _cache;
   Timer? _reconTimer;
+  DateTime? _ultimaEmision; // Para reconexión condicional (anti-egress)
 
   @override
   void initState() {
@@ -39,7 +40,12 @@ class _SupervisorFnScreenState extends State<SupervisorFnScreen>
     OneSignal.login(widget.usuario['id'].toString());
     OneSignal.User.addTagWithKey('rol', 'supervisor_fn');
     _construirStream();
-    _reconTimer = Timer.periodic(const Duration(seconds: 30), (_) => _construirStream());
+    // Solo reconecta si el stream lleva >35s sin emitir datos (anti-egress)
+    _reconTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      final sinDatos = _ultimaEmision == null ||
+          DateTime.now().difference(_ultimaEmision!).inSeconds > 35;
+      if (sinDatos) _construirStream();
+    });
   }
 
   @override
@@ -53,6 +59,14 @@ class _SupervisorFnScreenState extends State<SupervisorFnScreen>
 
   void _construirStream() {
     _sub?.cancel();
+
+    // Solo servicios de hoy — el historial y el rango de fechas tienen
+    // sus propias queries independientes. Así no se descargan meses de
+    // historial cada vez que se reconecta el stream.
+    final hoy = DateTime.now();
+    final medianoche =
+        DateTime(hoy.year, hoy.month, hoy.day).toIso8601String();
+
     final crudo = _db
         .from('servicios')
         .stream(primaryKey: ['id'])
@@ -61,8 +75,14 @@ class _SupervisorFnScreenState extends State<SupervisorFnScreen>
 
     _sub = crudo.listen(
       (data) {
-        _cache = data;
-        if (!_ctrl.isClosed) _ctrl.add(data);
+        _ultimaEmision = DateTime.now(); // Timestamp para reconexión condicional
+        // gte no existe en SupabaseStreamBuilder — filtrar por fecha client-side
+        final filtrado = data.where((s) {
+          final raw = s['created_at'];
+          if (raw == null) return false;
+          return DateTime.parse(raw).isAfter(DateTime.parse(medianoche));
+        }).toList();
+        if (!_ctrl.isClosed) _ctrl.add(filtrado);
       },
       onError: (_) {},
     );
