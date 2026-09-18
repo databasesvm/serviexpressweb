@@ -42,7 +42,11 @@ Future<void> main() async {
 
     await Supabase.initialize(
       url: 'https://oukiofdtargjrclualgm.supabase.co',
-      publishableKey: 'sb_publishable_rWZ5Ti_oNMnkrwZL8Wp1Sw_YGoSPK0D',
+      // Se usa la clave anon JWT (legacy) en lugar de publishableKey porque
+      // publishableKey requiere "Anonymous sign-ins" habilitado en Supabase para
+      // funcionar correctamente con PostgREST HTTP. Sin eso, el SDK no puede
+      // obtener un JWT válido y todos los INSERTs/UPDATEs retornan 401.
+      anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im91a2lvZmR0YXJnanJjbHVhbGdtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk0OTY0NzcsImV4cCI6MjA5NTA3MjQ3N30.LpX4HqQjlm1wfOGq0hdP4tFuVO6MzUV0bQVfGftf5Hk',
     );
 
     // Deep links + share intent solo en Android/iOS
