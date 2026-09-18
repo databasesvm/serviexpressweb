@@ -10,8 +10,8 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
 
-    private val CHANNEL = "com.servimoto.app/panico"
-    private val SHARE_CHANNEL = "com.servimoto.app/shareintent"
+    private val CHANNEL = "com.serviexpress.app/panico"
+    private val SHARE_CHANNEL = "com.serviexpress.app/shareintent"
     private var wakeLock: PowerManager.WakeLock? = null
     private var shareChannel: MethodChannel? = null
     private var pendingSharedText: String? = null

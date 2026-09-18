@@ -299,8 +299,7 @@ class _LoginScreenState extends State<LoginScreen>
         try {
           await Supabase.instance.client
               .from('usuarios')
-              .update({'contrasena': claveHash})
-              .eq('id', usuario['id']);
+              .update({'contrasena': claveHash}).eq('id', usuario['id']);
         } catch (_) {
           // Si falla la migración, no bloqueamos el acceso. Se intentará en el próximo login.
         }
@@ -328,10 +327,8 @@ class _LoginScreenState extends State<LoginScreen>
               );
               if (signUpRes.user != null) {
                 // Guardar auth_id en la tabla usuarios
-                await Supabase.instance.client
-                    .from('usuarios')
-                    .update({'auth_id': signUpRes.user!.id})
-                    .eq('id', usuario['id']);
+                await Supabase.instance.client.from('usuarios').update(
+                    {'auth_id': signUpRes.user!.id}).eq('id', usuario['id']);
               }
             } on AuthException catch (authEx) {
               // El email ya existe en auth.users (migración anterior incompleta):
@@ -387,7 +384,8 @@ class _LoginScreenState extends State<LoginScreen>
       } else if (eStr.contains('SocketException') ||
           eStr.contains('NetworkException') ||
           eStr.contains('Failed host lookup')) {
-        mensaje = 'Sin conexión a internet. Verifica tu red e intenta de nuevo.';
+        mensaje =
+            'Sin conexión a internet. Verifica tu red e intenta de nuevo.';
       } else if (eStr.contains('HandshakeException') ||
           eStr.contains('CERTIFICATE_VERIFY_FAILED') ||
           eStr.contains('TlsException')) {
@@ -519,8 +517,7 @@ class _LoginScreenState extends State<LoginScreen>
               context,
               usuario,
               localId,
-              items:
-                  (pendingLink['items'] as List?)
+              items: (pendingLink['items'] as List?)
                       ?.cast<Map<String, dynamic>>() ??
                   [],
             );
@@ -579,9 +576,8 @@ class _LoginScreenState extends State<LoginScreen>
       // Intentar pre-cargar items si el link los incluye
       List<CartItem> carritoInicial = [];
       if (items.isNotEmpty) {
-        final nombresProductos = items
-            .map((i) => i['nombre'].toString())
-            .toList();
+        final nombresProductos =
+            items.map((i) => i['nombre'].toString()).toList();
         final prods = await db
             .from('productos')
             .select()
@@ -664,8 +660,8 @@ class _LoginScreenState extends State<LoginScreen>
                 style: TextStyle(color: Colors.black45, fontSize: 13),
               ),
               const SizedBox(height: 20),
-              _opcionRolGoogle(ctx, 'movil', '🏍️', 'Móvil',
-                  'Conductor o domiciliario'),
+              _opcionRolGoogle(
+                  ctx, 'movil', '🏍️', 'Móvil', 'Conductor o domiciliario'),
               const SizedBox(height: 10),
               _opcionRolGoogle(ctx, 'local', '🏪', 'Local',
                   'Negocio, sede o punto de venta'),
@@ -768,7 +764,8 @@ class _LoginScreenState extends State<LoginScreen>
 
         if (tipo == 'movil') {
           // Redirigir al registro normal donde elige su número
-          Navigator.push(context, MaterialPageRoute(builder: (_) => const RegistroScreen()));
+          Navigator.push(context,
+              MaterialPageRoute(builder: (_) => const RegistroScreen()));
           return;
         }
 
@@ -788,7 +785,7 @@ class _LoginScreenState extends State<LoginScreen>
         // tipo == 'cliente' → crear cuenta nueva
         final usuarioGen =
             nombre.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '') +
-            DateTime.now().millisecondsSinceEpoch.toString().substring(8);
+                DateTime.now().millisecondsSinceEpoch.toString().substring(8);
         final filaInsert = await db
             .from('usuarios')
             .insert({
@@ -811,7 +808,8 @@ class _LoginScreenState extends State<LoginScreen>
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Tu cuenta está desactivada. Contacta a la Central.'),
+              content:
+                  Text('Tu cuenta está desactivada. Contacta a la Central.'),
               backgroundColor: Colors.red,
             ),
           );
@@ -850,11 +848,15 @@ class _LoginScreenState extends State<LoginScreen>
         backgroundColor: const Color(0xFF1A1A1A),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         title: const Text('🔒 Recuperar contraseña',
-            style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+            style: TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.bold)),
         content: const Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.construction_rounded, color: Color(0xFFF59E0B), size: 48),
+            Icon(Icons.construction_rounded,
+                color: Color(0xFFF59E0B), size: 48),
             SizedBox(height: 14),
             Text(
               'Esta función estará disponible próximamente.',
@@ -872,7 +874,9 @@ class _LoginScreenState extends State<LoginScreen>
         actions: [
           TextButton(
             onPressed: Navigator.of(ctx).pop,
-            child: const Text('ENTENDIDO', style: TextStyle(color: Color(0xff3AF500), fontWeight: FontWeight.bold)),
+            child: const Text('ENTENDIDO',
+                style: TextStyle(
+                    color: Color(0xff3AF500), fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -1171,14 +1175,11 @@ class _LoginScreenState extends State<LoginScreen>
 
       // Cambiar contraseña y limpiar token
       final nuevoHash = hashContrasena(nuevaClave);
-      await db
-          .from('usuarios')
-          .update({
-            'contrasena': nuevoHash,
-            'reset_token': null,
-            'reset_token_exp': null,
-          })
-          .eq('id', res['id']);
+      await db.from('usuarios').update({
+        'contrasena': nuevoHash,
+        'reset_token': null,
+        'reset_token_exp': null,
+      }).eq('id', res['id']);
 
       return true;
     } catch (_) {
@@ -1230,18 +1231,18 @@ class _LoginScreenState extends State<LoginScreen>
                             fit: BoxFit.cover,
                             errorBuilder: (context, error, stackTrace) =>
                                 Container(
-                                  height: 36,
-                                  width: 36,
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xff3AF500),
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  child: const Icon(
-                                    Icons.motorcycle,
-                                    color: Colors.black,
-                                    size: 20,
-                                  ),
-                                ),
+                              height: 36,
+                              width: 36,
+                              decoration: BoxDecoration(
+                                color: const Color(0xff3AF500),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: const Icon(
+                                Icons.motorcycle,
+                                color: Colors.black,
+                                size: 20,
+                              ),
+                            ),
                           ),
                         ),
                         const SizedBox(width: 10),
@@ -1305,7 +1306,7 @@ class _LoginScreenState extends State<LoginScreen>
                               ),
                               const SizedBox(height: 4),
                               const Text(
-                                'Ingresa tu número de celular o tu usuario',
+                                'Ingresa tu usuario o numero de celular',
                                 style: TextStyle(
                                   color: Colors.black45,
                                   fontSize: 12,
@@ -1318,8 +1319,10 @@ class _LoginScreenState extends State<LoginScreen>
                                 decoration: InputDecoration(
                                   labelText: 'Celular o usuario',
                                   hintText: '3001234567  ó  sedefn01',
-                                  helperText: 'Móviles y clientes: usa tu número de celular',
-                                  helperStyle: const TextStyle(fontSize: 11, color: Colors.black45),
+                                  helperText:
+                                      'Móviles usar: Movil+Numero como Usuario ej: Movil05',
+                                  helperStyle: const TextStyle(
+                                      fontSize: 11, color: Colors.black45),
                                   filled: true,
                                   fillColor: Colors.grey[50],
                                   border: OutlineInputBorder(
@@ -1339,11 +1342,13 @@ class _LoginScreenState extends State<LoginScreen>
                                   ),
                                   prefixIcon: IntrinsicWidth(
                                     child: Padding(
-                                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 12),
                                       child: Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          const Text('🇨🇴', style: TextStyle(fontSize: 17)),
+                                          const Text('🇨🇴',
+                                              style: TextStyle(fontSize: 17)),
                                           const SizedBox(width: 6),
                                           const Text(
                                             '+57',
@@ -1374,8 +1379,10 @@ class _LoginScreenState extends State<LoginScreen>
                                   context,
                                 ).requestFocus(_passwordFocus),
                                 inputFormatters: [
-                                  FilteringTextInputFormatter.deny(RegExp(r'[^\x00-\x7F]')),
-                                  FilteringTextInputFormatter.deny(RegExp(r'\s')),
+                                  FilteringTextInputFormatter.deny(
+                                      RegExp(r'[^\x00-\x7F]')),
+                                  FilteringTextInputFormatter.deny(
+                                      RegExp(r'\s')),
                                 ],
                               ),
                               const SizedBox(height: 14),
