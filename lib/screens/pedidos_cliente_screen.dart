@@ -54,8 +54,38 @@ class CartItem {
   final Map<String, dynamic> producto;
   int cantidad;
   String notas;
-  CartItem({required this.producto, this.cantidad = 1, this.notas = ''});
-  int get subtotal => (producto['precio'] as int) * cantidad;
+  final List<Map<String, dynamic>> modificadores;
+  final int precioExtra;
+
+  CartItem({
+    required this.producto,
+    this.cantidad = 1,
+    this.notas = '',
+    this.modificadores = const [],
+    this.precioExtra = 0,
+  });
+
+  int get precioUnitario => (producto['precio'] as int) + precioExtra;
+  int get subtotal => precioUnitario * cantidad;
+
+  String get clave {
+    final modsStr = modificadores
+        .map((m) =>
+            '${m["grupo"]}:${(m["selecciones"] as List?)?.map((s) => s["nombre"]).join(",") ?? ""}')
+        .join('|');
+    return '${producto["id"]}::$modsStr';
+  }
+}
+
+class _ResultadoPersonalizacion {
+  final List<Map<String, dynamic>> modificadores;
+  final String notas;
+  final int precioExtra;
+  const _ResultadoPersonalizacion({
+    required this.modificadores,
+    required this.notas,
+    this.precioExtra = 0,
+  });
 }
 
 // ============================================================
@@ -148,7 +178,7 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
 
       final pedidos = await _db
           .from('pedidos')
-          .select('*, items_pedido(nombre_snapshot, cantidad, precio_snapshot)')
+          .select('*, items_pedido(nombre_snapshot, cantidad, precio_snapshot, modificadores_json, notas_snapshot)')
           .eq('cliente_id', widget.usuario['id'])
           .neq('estado', 'entregado')
           .neq('estado', 'cancelado')
@@ -157,7 +187,7 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
       final entregados = await _db
           .from('pedidos')
           .select(
-              'id, estado, total, metodo_pago, created_at, movil_id, local_id, items_pedido(nombre_snapshot, cantidad, producto_id, precio_snapshot)')
+              'id, estado, total, metodo_pago, created_at, movil_id, local_id, items_pedido(nombre_snapshot, cantidad, producto_id, precio_snapshot, modificadores_json, notas_snapshot)')
           .eq('cliente_id', widget.usuario['id'])
           .eq('estado', 'entregado')
           .gte(
@@ -495,16 +525,43 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
               ],
             ),
             const SizedBox(height: 6),
-            Text(
-              items
-                  .map((i) =>
-                      '${i['cantidad']}x ${i['nombre_snapshot']}')
-                  .join(' · '),
-              style:
-                  TextStyle(fontSize: 12, color: Colors.grey[600]),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
+            ...items.take(3).map((i) {
+              final mods = i['modificadores_json'];
+              final modsList = mods is List
+                  ? List<Map<String, dynamic>>.from(
+                      mods.map((e) => Map<String, dynamic>.from(e as Map)))
+                  : <Map<String, dynamic>>[];
+              final lineas = <String>[];
+              for (final g in modsList) {
+                for (final s in (g['selecciones'] as List? ?? [])) {
+                  final n = s['nombre']?.toString() ?? '';
+                  if (n.isNotEmpty) lineas.add(n);
+                }
+              }
+              final nota = i['notas_snapshot']?.toString() ?? '';
+              if (nota.isNotEmpty) lineas.add('Nota: $nota');
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 1),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${i['cantidad']}x ${i['nombre_snapshot']}',
+                      style: TextStyle(fontSize: 12, color: Colors.grey[700],
+                          fontWeight: FontWeight.w500),
+                    ),
+                    for (int j = 0; j < lineas.length; j++)
+                      Text(
+                        '  ${j < lineas.length - 1 ? "├─" : "└─"} ${lineas[j]}',
+                        style: TextStyle(fontSize: 10, color: Colors.grey[500]),
+                      ),
+                  ],
+                ),
+              );
+            }),
+            if (items.length > 3)
+              Text('+${items.length - 3} producto(s) más',
+                  style: TextStyle(fontSize: 10, color: Colors.grey[500])),
             const SizedBox(height: 4),
             Text('Total: ${_fmt((p['total'] as num).toInt())}',
                 style: const TextStyle(
@@ -744,12 +801,6 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
 
   Widget _buildHistorialCard(Map<String, dynamic> p) {
     final items = p['items_pedido'] as List? ?? [];
-    final resumen = items
-        .take(2)
-        .map((i) => '${i["cantidad"]}x ${i["nombre_snapshot"]}')
-        .join(', ');
-    final extra =
-        items.length > 2 ? ' +${items.length - 2} más' : '';
     final fecha =
         DateTime.tryParse(p['created_at']?.toString() ?? '');
     final fechaStr = fecha != null
@@ -770,6 +821,7 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Container(
                   width: 32,
@@ -786,18 +838,49 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                          resumen.isEmpty
-                              ? 'Pedido entregado'
-                              : '$resumen$extra',
-                          style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis),
-                      Text(
                           '$fechaStr  ·  ${_fmt(p['total'] as int? ?? 0)}',
                           style: const TextStyle(
                               fontSize: 11, color: Colors.grey)),
+                      const SizedBox(height: 4),
+                      // Items con modificadores (máx 2 productos)
+                      ...items.take(2).map((i) {
+                        final mods = i['modificadores_json'];
+                        final modsList = mods is List
+                            ? List<Map<String, dynamic>>.from(
+                                mods.map((e) => Map<String, dynamic>.from(e as Map)))
+                            : <Map<String, dynamic>>[];
+                        final lineas = <String>[];
+                        for (final g in modsList) {
+                          for (final s in (g['selecciones'] as List? ?? [])) {
+                            final n = s['nombre']?.toString() ?? '';
+                            if (n.isNotEmpty) lineas.add(n);
+                          }
+                        }
+                        final nota = i['notas_snapshot']?.toString() ?? '';
+                        if (nota.isNotEmpty) lineas.add('Nota: $nota');
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '${i["cantidad"]}x ${i["nombre_snapshot"]}',
+                              style: const TextStyle(
+                                  fontSize: 12, fontWeight: FontWeight.bold),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            for (int j = 0; j < lineas.length; j++)
+                              Text(
+                                '${j < lineas.length - 1 ? "├─" : "└─"} ${lineas[j]}',
+                                style: TextStyle(
+                                    fontSize: 10, color: Colors.grey[500]),
+                              ),
+                          ],
+                        );
+                      }),
+                      if (items.length > 2)
+                        Text('+${items.length - 2} más',
+                            style: TextStyle(
+                                fontSize: 10, color: Colors.grey[500])),
                     ],
                   ),
                 ),
@@ -894,9 +977,25 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
           orElse: () => <String, dynamic>{},
         );
         if (prod.isNotEmpty) {
+          // Restaurar modificadores y nota del snapshot
+          final mods = item['modificadores_json'];
+          final modsList = mods is List
+              ? List<Map<String, dynamic>>.from(
+                  mods.map((e) => Map<String, dynamic>.from(e as Map)))
+              : <Map<String, dynamic>>[];
+          int precioExtra = 0;
+          for (final g in modsList) {
+            for (final s in (g['selecciones'] as List? ?? [])) {
+              precioExtra += (s['precio_extra'] as num?)?.toInt() ?? 0;
+            }
+          }
           carritoInicial.add(CartItem(
-              producto: prod,
-              cantidad: (item['cantidad'] as num).toInt()));
+            producto: prod,
+            cantidad: (item['cantidad'] as num).toInt(),
+            modificadores: modsList,
+            precioExtra: precioExtra,
+            notas: item['notas_snapshot']?.toString() ?? '',
+          ));
         }
       }
 
@@ -1120,60 +1219,144 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
 }
 
 // ============================================================
-// BOTTOM SHEET — PERSONALIZAR ÍTEM
+// BOTTOM SHEET — PERSONALIZAR ÍTEM (dinámico desde DB)
 // ============================================================
 class _PersonalizarItemSheet extends StatefulWidget {
+  final int productoId;
   final String nombreProducto;
-  const _PersonalizarItemSheet({required this.nombreProducto});
+  final int precioBase;
+
+  const _PersonalizarItemSheet({
+    required this.productoId,
+    required this.nombreProducto,
+    required this.precioBase,
+  });
+
   @override
-  State<_PersonalizarItemSheet> createState() => _PersonalizarItemSheetState();
+  State<_PersonalizarItemSheet> createState() =>
+      _PersonalizarItemSheetState();
 }
 
-class _PersonalizarItemSheetState extends State<_PersonalizarItemSheet> {
-  final _ctrl = TextEditingController();
-  final _selectedChips = <String>{};
+class _PersonalizarItemSheetState
+    extends State<_PersonalizarItemSheet> {
+  final _db = Supabase.instance.client;
+  final _notasCtrl = TextEditingController();
 
-  static const _chips = [
-    // Ingredientes
-    'Sin cebolla', 'Sin ajo', 'Sin cilantro', 'Sin pimentón',
-    'Sin vegetales', 'Sin tomate', 'Sin lechuga', 'Sin pepino',
-    // Salsas
-    'Sin salsas', 'Sin salsa rosada', 'Sin mostaza', 'Sin mayonesa',
-    'Sin picante', 'Sin limón', 'Sin sal',
-    // Extras
-    'Extra queso', 'Extra salsa', 'Extra porción',
-    // Cocción
-    'Bien cocido', 'Término medio', 'Poco cocido',
-    // Empaque
-    'Empaque separado', 'Sin bolsa plástica',
-  ];
+  List<Map<String, dynamic>> _grupos = [];
+  bool _cargando = true;
+
+  // grupo_id → Set de opcion_id seleccionadas
+  final Map<int, Set<int>> _selecciones = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _cargarGrupos();
+  }
 
   @override
   void dispose() {
-    _ctrl.dispose();
+    _notasCtrl.dispose();
     super.dispose();
   }
 
-  String _buildNotas() {
-    final chips = _selectedChips.join(', ');
-    final libre = _ctrl.text.trim();
-    if (chips.isEmpty && libre.isEmpty) return '';
-    if (chips.isEmpty) return libre;
-    if (libre.isEmpty) return chips;
-    return '$chips. $libre';
+  Future<void> _cargarGrupos() async {
+    try {
+      final res = await _db
+          .from('grupos_opciones')
+          .select('*, opciones(*)')
+          .eq('producto_id', widget.productoId)
+          .order('orden')
+          .order('orden', referencedTable: 'opciones');
+      if (mounted) {
+        setState(() {
+          _grupos = List<Map<String, dynamic>>.from(res);
+          _cargando = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _cargando = false);
+    }
+  }
+
+  int get _precioExtra {
+    int extra = 0;
+    for (final grupo in _grupos) {
+      final grupoId = grupo['id'] as int;
+      final opciones =
+          List<Map<String, dynamic>>.from(grupo['opciones'] ?? []);
+      final selIds = _selecciones[grupoId] ?? {};
+      for (final op in opciones) {
+        if (selIds.contains(op['id'] as int)) {
+          extra += (op['precio_extra'] as num?)?.toInt() ?? 0;
+        }
+      }
+    }
+    return extra;
+  }
+
+  bool get _puedeAgregar {
+    for (final grupo in _grupos) {
+      final obligatorio = grupo['obligatorio'] as bool? ?? false;
+      if (!obligatorio) continue;
+      final grupoId = grupo['id'] as int;
+      if ((_selecciones[grupoId] ?? {}).isEmpty) return false;
+    }
+    return true;
+  }
+
+  List<Map<String, dynamic>> _buildModificadores() {
+    final result = <Map<String, dynamic>>[];
+    for (final grupo in _grupos) {
+      final grupoId = grupo['id'] as int;
+      final opciones =
+          List<Map<String, dynamic>>.from(grupo['opciones'] ?? []);
+      final selIds = _selecciones[grupoId] ?? {};
+      final sels = opciones
+          .where((op) => selIds.contains(op['id'] as int))
+          .map((op) => {
+                'nombre': op['nombre'],
+                'precio_extra': op['precio_extra'] ?? 0,
+              })
+          .toList();
+      if (sels.isNotEmpty) {
+        result.add({
+          'grupo': grupo['nombre'],
+          'tipo': grupo['tipo'],
+          'selecciones': sels,
+        });
+      }
+    }
+    return result;
+  }
+
+  String _fmt(int precio) {
+    final s = precio.toString();
+    final buf = StringBuffer();
+    for (int i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) buf.write('.');
+      buf.write(s[i]);
+    }
+    return '\$ ${buf.toString()}';
   }
 
   @override
   Widget build(BuildContext context) {
+    final totalPrecio = widget.precioBase + _precioExtra;
+
     return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Handle
           const SizedBox(height: 8),
-          Container(width: 36, height: 4,
-              decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
+          Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2))),
           const SizedBox(height: 12),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -1183,86 +1366,114 @@ class _PersonalizarItemSheetState extends State<_PersonalizarItemSheet> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Personalizar: ${widget.nombreProducto}',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                    widget.nombreProducto,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 15),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 12),
-          // Quick chips
-          SizedBox(
-            height: 120,
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: _chips.map((chip) {
-                  final sel = _selectedChips.contains(chip);
-                  return FilterChip(
-                    label: Text(chip, style: TextStyle(
-                        fontSize: 11,
-                        color: sel ? Colors.white : Colors.black87,
-                        fontWeight: sel ? FontWeight.bold : FontWeight.normal)),
-                    selected: sel,
-                    onSelected: (v) => setState(() => v ? _selectedChips.add(chip) : _selectedChips.remove(chip)),
-                    selectedColor: Colors.black,
-                    backgroundColor: Colors.grey.shade200,
-                    checkmarkColor: const Color(0xff3AF500),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
-                    visualDensity: VisualDensity.compact,
-                  );
-                }).toList(),
+          const SizedBox(height: 8),
+          if (_cargando)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          else
+            Flexible(
+              child: SingleChildScrollView(
+                padding:
+                    const EdgeInsets.fromLTRB(16, 0, 16, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ..._grupos.map((g) => _buildGrupo(g)),
+                    const SizedBox(height: 10),
+                    const Text('Notas adicionales',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13)),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: _notasCtrl,
+                      maxLines: 2,
+                      textCapitalization:
+                          TextCapitalization.sentences,
+                      decoration: InputDecoration(
+                        hintText:
+                            'Algo específico... (opcional)',
+                        isDense: true,
+                        border: OutlineInputBorder(
+                            borderRadius:
+                                BorderRadius.circular(10)),
+                        contentPadding:
+                            const EdgeInsets.all(10),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: 10),
-          // Text field
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: TextField(
-              controller: _ctrl,
-              maxLines: 2,
-              textCapitalization: TextCapitalization.sentences,
-              decoration: InputDecoration(
-                hintText: 'Algo más específico... (opcional)',
-                isDense: true,
-                filled: true,
-                fillColor: Colors.white.withValues(alpha: 0.08),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.grey[300]!)),
-                contentPadding: const EdgeInsets.all(10),
-              ),
-              onChanged: (_) => setState(() {}),
-            ),
-          ),
-          const SizedBox(height: 12),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
             child: Row(
               children: [
                 Expanded(
                   child: OutlinedButton(
-                    onPressed: () => Navigator.pop(context, ''),
+                    onPressed: () =>
+                        Navigator.pop(context, null),
                     style: OutlinedButton.styleFrom(
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-                    child: const Text('Sin cambios'),
+                        shape: RoundedRectangleBorder(
+                            borderRadius:
+                                BorderRadius.circular(10))),
+                    child: const Text('Cancelar'),
                   ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.black,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      backgroundColor: _puedeAgregar
+                          ? Colors.black
+                          : Colors.grey[400],
+                      shape: RoundedRectangleBorder(
+                          borderRadius:
+                              BorderRadius.circular(10)),
+                      padding: const EdgeInsets.symmetric(
+                          vertical: 10),
                     ),
-                    icon: const Icon(Icons.add_shopping_cart, color: Color(0xff3AF500), size: 18),
-                    label: Text('Agregar al carrito', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                    onPressed: () => Navigator.pop(context, _buildNotas()),
+                    icon: const Icon(Icons.add_shopping_cart,
+                        color: Color(0xff3AF500), size: 18),
+                    label: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text('Agregar',
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12)),
+                        Text(_fmt(totalPrecio),
+                            style: const TextStyle(
+                                color: Color(0xff3AF500),
+                                fontSize: 11)),
+                      ],
+                    ),
+                    onPressed: _puedeAgregar
+                        ? () => Navigator.pop(
+                              context,
+                              _ResultadoPersonalizacion(
+                                modificadores:
+                                    _buildModificadores(),
+                                notas: _notasCtrl.text
+                                    .trim(),
+                                precioExtra: _precioExtra,
+                              ),
+                            )
+                        : null,
                   ),
                 ),
               ],
@@ -1270,6 +1481,146 @@ class _PersonalizarItemSheetState extends State<_PersonalizarItemSheet> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildGrupo(Map<String, dynamic> grupo) {
+    final grupoId = grupo['id'] as int;
+    final opciones =
+        List<Map<String, dynamic>>.from(grupo['opciones'] ?? [])
+          ..sort((a, b) => ((a['orden'] as num?) ?? 0)
+              .compareTo((b['orden'] as num?) ?? 0));
+    final disponibles = opciones
+        .where((op) => op['disponible'] as bool? ?? true)
+        .toList();
+    final esUnica = grupo['tipo'] == 'unica';
+    final obligatorio = grupo['obligatorio'] as bool? ?? false;
+    final maxSel =
+        (grupo['max_selecciones'] as num?)?.toInt() ?? 99;
+    final selIds = _selecciones[grupoId] ?? {};
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 14),
+        Row(
+          children: [
+            Expanded(
+              child: Text(grupo['nombre'],
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14)),
+            ),
+            if (obligatorio)
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.red[50],
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: Colors.red[300]!),
+                ),
+                child: Text('Obligatorio',
+                    style: TextStyle(
+                        fontSize: 9,
+                        color: Colors.red[700],
+                        fontWeight: FontWeight.bold)),
+              ),
+          ],
+        ),
+        Text(
+          esUnica
+              ? 'Elige una opción'
+              : 'Puedes elegir hasta $maxSel',
+          style:
+              TextStyle(fontSize: 11, color: Colors.grey[600]),
+        ),
+        const SizedBox(height: 4),
+        ...disponibles.map((op) {
+          final opId = op['id'] as int;
+          final seleccionada = selIds.contains(opId);
+          final precioExtra =
+              (op['precio_extra'] as num?)?.toInt() ?? 0;
+          return InkWell(
+            onTap: () => setState(() {
+              final set = _selecciones.putIfAbsent(
+                  grupoId, () => {});
+              if (esUnica) {
+                set
+                  ..clear()
+                  ..add(opId);
+              } else {
+                if (seleccionada) {
+                  set.remove(opId);
+                } else if (set.length < maxSel) {
+                  set.add(opId);
+                }
+              }
+            }),
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                children: [
+                  if (esUnica)
+                    Radio<int>(
+                      value: opId,
+                      groupValue: selIds.isNotEmpty
+                          ? selIds.first
+                          : null,
+                      onChanged: (v) => setState(() {
+                        final set = _selecciones
+                            .putIfAbsent(grupoId, () => {});
+                        set
+                          ..clear()
+                          ..add(opId);
+                      }),
+                      activeColor: Colors.black,
+                      materialTapTargetSize:
+                          MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                    )
+                  else
+                    Checkbox(
+                      value: seleccionada,
+                      onChanged: (v) => setState(() {
+                        final set = _selecciones
+                            .putIfAbsent(grupoId, () => {});
+                        if (v == true &&
+                            set.length < maxSel) {
+                          set.add(opId);
+                        } else {
+                          set.remove(opId);
+                        }
+                      }),
+                      activeColor: Colors.black,
+                      materialTapTargetSize:
+                          MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(op['nombre'],
+                        style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: seleccionada
+                                ? FontWeight.w600
+                                : FontWeight.normal)),
+                  ),
+                  if (precioExtra > 0)
+                    Text('+${_fmt(precioExtra)}',
+                        style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.green,
+                            fontWeight: FontWeight.w500)),
+                ],
+              ),
+            ),
+          );
+        }),
+        const Divider(height: 8),
+      ],
     );
   }
 }
@@ -1282,12 +1633,14 @@ class MenuLocalScreen extends StatefulWidget {
   final Map<String, dynamic> local;
   final Map<String, dynamic> usuario;
   final List<CartItem> carritoInicial;
+  final bool modoCentral;
 
   const MenuLocalScreen({
     super.key,
     required this.local,
     required this.usuario,
     this.carritoInicial = const [],
+    this.modoCentral = false,
   });
 
   @override
@@ -1352,44 +1705,63 @@ class _MenuLocalScreenState extends State<MenuLocalScreen> {
       _carrito.fold(0, (s, i) => s + i.subtotal);
 
   Future<void> _agregar(Map<String, dynamic> p) async {
-    final idx = _carrito.indexWhere((c) => c.producto['id'] == p['id']);
-    if (idx >= 0) {
-      setState(() => _carrito[idx].cantidad++);
-      _sonidos.reproducirSuave(Sonidos.movilConfirmar);
-      return;
-    }
-    final result = await showModalBottomSheet<String>(
+    final result =
+        await showModalBottomSheet<_ResultadoPersonalizacion>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (ctx) => _PersonalizarItemSheet(nombreProducto: p['nombre']),
+          borderRadius:
+              BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => _PersonalizarItemSheet(
+        productoId: p['id'] as int,
+        nombreProducto: p['nombre'],
+        precioBase: p['precio'] as int,
+      ),
     );
-    if (!mounted) return;
+    if (!mounted || result == null) return;
+    // Buscar item con misma clave (producto + modificadores idénticos)
+    final nuevoItem = CartItem(
+      producto: p,
+      notas: result.notas,
+      modificadores: result.modificadores,
+      precioExtra: result.precioExtra,
+    );
+    final idx =
+        _carrito.indexWhere((c) => c.clave == nuevoItem.clave);
     setState(() {
-      _carrito.add(CartItem(producto: p, notas: result ?? ''));
+      if (idx >= 0) {
+        _carrito[idx].cantidad++;
+      } else {
+        _carrito.add(nuevoItem);
+      }
     });
     _sonidos.reproducirSuave(Sonidos.movilConfirmar);
   }
 
   void _quitar(Map<String, dynamic> p) {
     setState(() {
-      final idx =
-          _carrito.indexWhere((c) => c.producto['id'] == p['id']);
-      if (idx < 0) return;
-      if (_carrito[idx].cantidad <= 1) {
-        _carrito.removeAt(idx);
+      // Encuentra el último item de este producto para quitarle uno
+      int lastIdx = -1;
+      for (int i = _carrito.length - 1; i >= 0; i--) {
+        if (_carrito[i].producto['id'] == p['id']) {
+          lastIdx = i;
+          break;
+        }
+      }
+      if (lastIdx < 0) return;
+      if (_carrito[lastIdx].cantidad <= 1) {
+        _carrito.removeAt(lastIdx);
       } else {
-        _carrito[idx].cantidad--;
+        _carrito[lastIdx].cantidad--;
       }
     });
   }
 
   int _cantidadEn(Map<String, dynamic> p) {
-    final idx =
-        _carrito.indexWhere((c) => c.producto['id'] == p['id']);
-    return idx >= 0 ? _carrito[idx].cantidad : 0;
+    return _carrito
+        .where((c) => c.producto['id'] == p['id'])
+        .fold(0, (sum, c) => sum + c.cantidad);
   }
 
   String _fmt(int precio) {
@@ -1414,6 +1786,7 @@ class _MenuLocalScreenState extends State<MenuLocalScreen> {
         carrito: _carrito,
         local: widget.local,
         usuario: widget.usuario,
+        modoCentral: widget.modoCentral,
         onCambiarCantidad: (item, delta) {
           setState(() {
             item.cantidad += delta;
@@ -1846,6 +2219,7 @@ class _CarritoSheet extends StatefulWidget {
   final Map<String, dynamic> usuario;
   final void Function(CartItem, int) onCambiarCantidad;
   final VoidCallback onPedidoOk;
+  final bool modoCentral;
 
   const _CarritoSheet({
     required this.carrito,
@@ -1853,6 +2227,7 @@ class _CarritoSheet extends StatefulWidget {
     required this.usuario,
     required this.onCambiarCantidad,
     required this.onPedidoOk,
+    this.modoCentral = false,
   });
 
   @override
@@ -1864,6 +2239,8 @@ class _CarritoSheetState extends State<_CarritoSheet> {
   final _sonidos = SonidoManager();
   final _dirCtrl = TextEditingController();
   final _notasCtrl = TextEditingController();
+  final _nombreClienteCtrl = TextEditingController();
+  final _telClienteCtrl = TextEditingController();
   String _metodoPago = 'efectivo';
   bool _enviando = false;
   bool _enCheckout = false;
@@ -1871,11 +2248,62 @@ class _CarritoSheetState extends State<_CarritoSheet> {
   Uint8List? _comprobanteBytes;
   bool _guardarDireccion = false;
   List<String> _direccionesGuardadas = [];
+  // Modo central: red de direcciones del local
+  List<Map<String, dynamic>> _redDirLocal = [];
+  List<Map<String, dynamic>> _sugerenciasDir = [];
+  int _tarifaDomicilio = 2000;
 
   @override
   void initState() {
     super.initState();
-    _cargarDirecciones();
+    if (widget.modoCentral) {
+      _cargarRedDirLocal();
+    } else {
+      _cargarDirecciones();
+      _cargarRedDirCliente();
+    }
+  }
+
+  Future<void> _cargarRedDirLocal() async {
+    try {
+      final data = await _db
+          .from('red_dir_se')
+          .select('id, nombre, municipio, precio')
+          .eq('usuario_id', widget.local['id'])
+          .eq('activo', true)
+          .order('nombre');
+      if (mounted) setState(() => _redDirLocal = List<Map<String, dynamic>>.from(data));
+    } catch (_) {}
+  }
+
+  Future<void> _cargarRedDirCliente() async {
+    final uid = widget.usuario['id'];
+    if (uid == null) return;
+    try {
+      final data = await _db
+          .from('red_dir_se')
+          .select('id, nombre, municipio, precio')
+          .eq('usuario_id', uid)
+          .eq('activo', true)
+          .order('nombre');
+      if (mounted) setState(() => _redDirLocal = List<Map<String, dynamic>>.from(data));
+    } catch (_) {}
+  }
+
+  void _onDirChanged(String texto) {
+    if (texto.length < 2) {
+      if (_sugerenciasDir.isNotEmpty) setState(() => _sugerenciasDir = []);
+      return;
+    }
+    final t = texto.toLowerCase();
+    final enc = <Map<String, dynamic>>[];
+    for (final d in _redDirLocal) {
+      final n = (d['nombre'] ?? '').toString().toLowerCase();
+      if (!n.contains(t)) continue;
+      enc.add(d);
+      if (enc.length >= 5) break;
+    }
+    setState(() => _sugerenciasDir = enc);
   }
 
   void _cargarDirecciones() {
@@ -1905,12 +2333,13 @@ class _CarritoSheetState extends State<_CarritoSheet> {
   void dispose() {
     _dirCtrl.dispose();
     _notasCtrl.dispose();
+    _nombreClienteCtrl.dispose();
+    _telClienteCtrl.dispose();
     super.dispose();
   }
 
   int get _subtotal =>
       widget.carrito.fold(0, (s, i) => s + i.subtotal);
-  int get _tarifaDomicilio => 2000;
   int get _total => _subtotal + _tarifaDomicilio;
 
   String _fmt(int precio) {
@@ -1924,9 +2353,15 @@ class _CarritoSheetState extends State<_CarritoSheet> {
   }
 
   Future<void> _confirmar() async {
+    if (widget.modoCentral && _nombreClienteCtrl.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Ingresa el nombre del cliente'),
+          backgroundColor: Colors.red));
+      return;
+    }
     if (_dirCtrl.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Ingresa tu dirección de entrega'),
+          content: Text('Ingresa la dirección de entrega'),
           backgroundColor: Colors.red));
       return;
     }
@@ -1941,8 +2376,20 @@ class _CarritoSheetState extends State<_CarritoSheet> {
     try {
       final catLocal = widget.local['categoria_local']?.toString() ?? '';
       final tipoSvcPedido = tipoServicioDesdeCategoria(catLocal);
+      // Construir notas según origen del pedido
+      final String? notasFinal;
+      if (widget.modoCentral) {
+        final nombre = _nombreClienteCtrl.text.trim();
+        final tel = _telClienteCtrl.text.trim();
+        final extra = _notasCtrl.text.trim();
+        notasFinal = '📞 CENTRAL | $nombre'
+            '${tel.isNotEmpty ? " | Tel: $tel" : ""}'
+            '${extra.isNotEmpty ? "\n$extra" : ""}';
+      } else {
+        notasFinal = _notasCtrl.text.trim().isEmpty ? null : _notasCtrl.text.trim();
+      }
       final pedido = await _db.from('pedidos').insert({
-        'cliente_id': widget.usuario['id'],
+        'cliente_id': widget.modoCentral ? null : widget.usuario['id'],
         'local_id': widget.local['id'],
         'estado': 'pendiente_confirmacion',
         'tipo_servicio': tipoSvcPedido,
@@ -1951,9 +2398,7 @@ class _CarritoSheetState extends State<_CarritoSheet> {
         'tarifa_domicilio': _tarifaDomicilio,
         'total': _total,
         'metodo_pago': _metodoPago,
-        'notas': _notasCtrl.text.trim().isEmpty
-            ? null
-            : _notasCtrl.text.trim(),
+        'notas': notasFinal,
       }).select().single();
 
       final pedidoId = pedido['id'];
@@ -1986,16 +2431,17 @@ class _CarritoSheetState extends State<_CarritoSheet> {
                 'pedido_id': pedidoId,
                 'producto_id': c.producto['id'],
                 'nombre_snapshot': c.producto['nombre'],
-                'precio_snapshot': c.producto['precio'],
+                'precio_snapshot': c.precioUnitario, // precio base + extras
                 'cantidad': c.cantidad,
                 'subtotal': c.subtotal,
+                'modificadores_json': c.modificadores,
                 if (c.notas.isNotEmpty) 'notas_snapshot': c.notas,
               })
           .toList();
       await _db.from('items_pedido').insert(items);
 
-      // Guardar dirección si el usuario lo solicitó
-      if (_guardarDireccion) {
+      // Guardar dirección si el usuario lo solicitó (solo modo cliente)
+      if (!widget.modoCentral && _guardarDireccion) {
         final dir = _dirCtrl.text.trim();
         final nuevas = [
           dir,
@@ -2052,40 +2498,62 @@ class _CarritoSheetState extends State<_CarritoSheet> {
 
             if (!_enCheckout) ...[
               // ---- ITEMS ----
-              ...widget.carrito.map((item) => Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: Row(
-                      children: [
-                        _btnCtrl(
-                            Icons.remove,
-                            Colors.red,
-                            () => setState(() =>
-                                widget.onCambiarCantidad(item, -1))),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 10),
-                          child: Text('${item.cantidad}',
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 15)),
-                        ),
-                        _btnCtrl(
-                            Icons.add,
-                            Colors.black,
-                            () => setState(() =>
-                                widget.onCambiarCantidad(item, 1))),
-                        const SizedBox(width: 10),
-                        Expanded(
-                            child: Text(item.producto['nombre'],
-                                style: const TextStyle(
-                                    fontSize: 13))),
-                        Text(_fmt(item.subtotal),
+              ...widget.carrito.map((item) {
+                final lineasMod = <String>[];
+                for (final grupo in item.modificadores) {
+                  for (final s in (grupo['selecciones'] as List? ?? [])) {
+                    final n = s['nombre']?.toString() ?? '';
+                    if (n.isNotEmpty) lineasMod.add(n);
+                  }
+                }
+                if (item.notas.isNotEmpty) lineasMod.add('Nota: ${item.notas}');
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _btnCtrl(
+                          Icons.remove,
+                          Colors.red,
+                          () => setState(() =>
+                              widget.onCambiarCantidad(item, -1))),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10),
+                        child: Text('${item.cantidad}',
                             style: const TextStyle(
                                 fontWeight: FontWeight.bold,
-                                fontSize: 13)),
-                      ],
-                    ),
-                  )),
+                                fontSize: 15)),
+                      ),
+                      _btnCtrl(
+                          Icons.add,
+                          Colors.black,
+                          () => setState(() =>
+                              widget.onCambiarCantidad(item, 1))),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(item.producto['nombre'],
+                                style: const TextStyle(
+                                    fontSize: 13, fontWeight: FontWeight.w600)),
+                            for (int i = 0; i < lineasMod.length; i++)
+                              Text(
+                                '${i < lineasMod.length - 1 ? "├─" : "└─"} ${lineasMod[i]}',
+                                style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+                              ),
+                          ],
+                        ),
+                      ),
+                      Text(_fmt(item.subtotal),
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13)),
+                    ],
+                  ),
+                );
+              }),
               const Divider(),
               _filaTotal('Subtotal', _subtotal),
               _filaTotal('Tarifa domicilio', _tarifaDomicilio),
@@ -2112,79 +2580,104 @@ class _CarritoSheetState extends State<_CarritoSheet> {
             ] else ...[
               // ---- CHECKOUT ----
 
-              // Tarjeta de identificación del cliente
-              Container(
-                margin: const EdgeInsets.only(bottom: 14),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                decoration: BoxDecoration(
-                  color: Colors.grey[100],
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.grey.shade300),
+              // Identificación: cliente registrado o datos manuales (modo central)
+              if (widget.modoCentral) ...[
+                TextField(
+                  controller: _nombreClienteCtrl,
+                  textCapitalization: TextCapitalization.words,
+                  decoration: const InputDecoration(
+                    labelText: 'Nombre del cliente *',
+                    prefixIcon: Icon(Icons.person_outline),
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
                 ),
-                child: Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 20,
-                      backgroundColor: Colors.black,
-                      child: Text(
-                        (widget.usuario['nombre']?.toString() ?? '?')
-                            .trim()
-                            .split(' ')
-                            .map((p) => p.isNotEmpty ? p[0] : '')
-                            .take(2)
-                            .join(),
-                        style: const TextStyle(
-                            color: Color(0xff3AF500),
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _telClienteCtrl,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(
+                    labelText: 'Teléfono del cliente',
+                    prefixIcon: Icon(Icons.phone_outlined),
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                ),
+                const SizedBox(height: 14),
+              ] else ...[
+                Container(
+                  margin: const EdgeInsets.only(bottom: 14),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[100],
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  child: Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 20,
+                        backgroundColor: Colors.black,
+                        child: Text(
+                          (widget.usuario['nombre']?.toString() ?? '?')
+                              .trim()
+                              .split(' ')
+                              .map((p) => p.isNotEmpty ? p[0] : '')
+                              .take(2)
+                              .join(),
+                          style: const TextStyle(
+                              color: Color(0xff3AF500),
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13),
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            widget.usuario['nombre']?.toString() ?? '—',
-                            style: const TextStyle(
-                                fontWeight: FontWeight.bold, fontSize: 13),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          const SizedBox(height: 2),
-                          Row(
-                            children: [
-                              Icon(Icons.phone_outlined,
-                                  size: 12, color: Colors.grey[500]),
-                              const SizedBox(width: 4),
-                              Text(
-                                widget.usuario['telefono']?.toString() ?? '—',
-                                style: TextStyle(
-                                    fontSize: 11, color: Colors.grey[600]),
-                              ),
-                              if (widget.usuario['cedula'] != null &&
-                                  widget.usuario['cedula'].toString().isNotEmpty) ...[
-                                const SizedBox(width: 10),
-                                Icon(Icons.badge_outlined,
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              widget.usuario['nombre']?.toString() ?? '—',
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold, fontSize: 13),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 2),
+                            Row(
+                              children: [
+                                Icon(Icons.phone_outlined,
                                     size: 12, color: Colors.grey[500]),
                                 const SizedBox(width: 4),
                                 Text(
-                                  widget.usuario['cedula'].toString(),
+                                  widget.usuario['telefono']?.toString() ?? '—',
                                   style: TextStyle(
                                       fontSize: 11, color: Colors.grey[600]),
                                 ),
+                                if (widget.usuario['cedula'] != null &&
+                                    widget.usuario['cedula'].toString().isNotEmpty) ...[
+                                  const SizedBox(width: 10),
+                                  Icon(Icons.badge_outlined,
+                                      size: 12, color: Colors.grey[500]),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    widget.usuario['cedula'].toString(),
+                                    style: TextStyle(
+                                        fontSize: 11, color: Colors.grey[600]),
+                                  ),
+                                ],
                               ],
-                            ],
-                          ),
-                        ],
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
+              ],
 
-              // Direcciones guardadas
-              if (_direccionesGuardadas.isNotEmpty) ...[
+              // Direcciones: modo cliente = guardadas; modo central = red_dir_se del local
+              if (!widget.modoCentral && _direccionesGuardadas.isNotEmpty) ...[
                 const Text('Direcciones guardadas:',
                     style: TextStyle(
                         fontSize: 12,
@@ -2235,9 +2728,58 @@ class _CarritoSheetState extends State<_CarritoSheet> {
                 const SizedBox(height: 10),
               ],
 
+              // Sugerencias red_dir_se (barrios con tarifa — cliente o central)
+              if (_sugerenciasDir.isNotEmpty) ...[
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: _sugerenciasDir.map((d) {
+                    final nombre = (d['nombre'] ?? '').toString();
+                    final int? precio = d['precio'] as int?;
+                    return InkWell(
+                      onTap: () {
+                        setState(() {
+                          _dirCtrl.text = nombre;
+                          if (precio != null) _tarifaDomicilio = precio;
+                          _sugerenciasDir = [];
+                        });
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: precio != null ? Colors.blue[50] : Colors.grey[100],
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                              color: precio != null ? Colors.blue[200]! : Colors.grey[300]!),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.location_city,
+                                size: 13,
+                                color: precio != null ? Colors.blue[700] : Colors.grey[600]),
+                            const SizedBox(width: 4),
+                            Text(
+                              precio != null ? '$nombre (\$${precio.toString().replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+(?!\d))'), (m) => '${m[1]}.')})' : nombre,
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: precio != null ? Colors.blue[900] : Colors.grey[800],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 8),
+              ],
+
               TextField(
                 controller: _dirCtrl,
                 textCapitalization: TextCapitalization.sentences,
+                onChanged: _onDirChanged,
                 decoration: const InputDecoration(
                   labelText: 'Dirección de entrega *',
                   prefixIcon: Icon(Icons.location_on_outlined),
@@ -2245,18 +2787,20 @@ class _CarritoSheetState extends State<_CarritoSheet> {
                   isDense: true,
                 ),
               ),
-              Row(
-                children: [
-                  Checkbox(
-                    value: _guardarDireccion,
-                    onChanged: (v) => setState(
-                        () => _guardarDireccion = v ?? false),
-                    visualDensity: VisualDensity.compact,
-                  ),
-                  const Text('Guardar esta dirección',
-                      style: TextStyle(fontSize: 12)),
-                ],
-              ),
+              if (!widget.modoCentral) ...[
+                Row(
+                  children: [
+                    Checkbox(
+                      value: _guardarDireccion,
+                      onChanged: (v) => setState(
+                          () => _guardarDireccion = v ?? false),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    const Text('Guardar esta dirección',
+                        style: TextStyle(fontSize: 12)),
+                  ],
+                ),
+              ],
               const SizedBox(height: 4),
 
               const Text('Método de pago:',

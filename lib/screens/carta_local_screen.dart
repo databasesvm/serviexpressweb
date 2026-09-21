@@ -84,7 +84,7 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
           .order('orden');
       final peds = await _db
           .from('pedidos')
-          .select('*, comprobante_url, items_pedido(nombre_snapshot, cantidad, precio_snapshot)')
+          .select('*, comprobante_url, items_pedido(nombre_snapshot, cantidad, precio_snapshot, modificadores_json, notas_snapshot)')
           .eq('local_id', widget.localId)
           .neq('estado', 'entregado')
           .neq('estado', 'cancelado')
@@ -380,6 +380,17 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
                           ),
                         ),
                         const SizedBox(height: 20),
+
+                        // ---- PERSONALIZACIONES (solo en edición) ----
+                        if (esEdicion) ...[
+                          const Divider(color: Colors.white12, height: 28),
+                          _GruposEditorWidget(
+                            productoId: producto['id'] as int,
+                            db: _db,
+                            formatPrecio: _formatPrecio,
+                          ),
+                          const SizedBox(height: 8),
+                        ],
 
                         // ---- GUARDAR ----
                         SizedBox(
@@ -1376,43 +1387,87 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 0, 14, 0),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                ...items.map((item) => Padding(
-                      padding: const EdgeInsets.only(bottom: 5),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 26,
-                            height: 26,
-                            decoration: BoxDecoration(
-                              color: Colors.black,
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Center(
-                              child: Text(
-                                '${item['cantidad']}',
-                                style: const TextStyle(
-                                    color: Color(0xff3AF500),
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold),
+                ...items.map((item) {
+                  final mods = item['modificadores_json'];
+                  final List<Map<String, dynamic>> modsList = mods is List
+                      ? List<Map<String, dynamic>>.from(
+                          mods.map((e) => Map<String, dynamic>.from(e as Map)))
+                      : [];
+                  // Aplanar selecciones para mostrar como líneas de comanda
+                  final lineasMod = <String>[];
+                  for (final grupo in modsList) {
+                    final sels = grupo['selecciones'] as List? ?? [];
+                    for (final s in sels) {
+                      lineasMod.add(s['nombre']?.toString() ?? '');
+                    }
+                  }
+                  final notas = item['notas_snapshot']?.toString() ?? '';
+                  if (notas.isNotEmpty) lineasMod.add('Nota: $notas');
+
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              width: 26,
+                              height: 26,
+                              decoration: BoxDecoration(
+                                color: Colors.black,
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  '${item['cantidad']}',
+                                  style: const TextStyle(
+                                      color: Color(0xff3AF500),
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold),
+                                ),
                               ),
                             ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                                child: Text(
+                                    item['nombre_snapshot'] ?? '',
+                                    style: const TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600))),
+                            Text(
+                              _formatPrecio(
+                                  (item['precio_snapshot'] as num).toInt() *
+                                      (item['cantidad'] as num).toInt()),
+                              style: const TextStyle(
+                                  fontSize: 12, color: Colors.black54),
+                            ),
+                          ],
+                        ),
+                        // Líneas de modificadores en formato comanda
+                        if (lineasMod.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 34, top: 2),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                for (int i = 0; i < lineasMod.length; i++)
+                                  Text(
+                                    '${i < lineasMod.length - 1 ? "├─" : "└─"} ${lineasMod[i]}',
+                                    style: TextStyle(
+                                        fontSize: 11,
+                                        color: Colors.grey[600],
+                                        height: 1.5),
+                                  ),
+                              ],
+                            ),
                           ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                              child: Text(
-                                  item['nombre_snapshot'] ?? '',
-                                  style: const TextStyle(fontSize: 13))),
-                          Text(
-                            _formatPrecio(
-                                (item['precio_snapshot'] as num).toInt() *
-                                    (item['cantidad'] as num).toInt()),
-                            style: const TextStyle(
-                                fontSize: 12, color: Colors.black54),
-                          ),
-                        ],
-                      ),
-                    )),
+                      ],
+                    ),
+                  );
+                }),
               ],
             ),
           ),
@@ -1637,6 +1692,554 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
             ),
         ],
       ),
+    );
+  }
+}
+
+// ============================================================
+// EDITOR DE GRUPOS DE OPCIONES (Personalizaciones del producto)
+// ============================================================
+
+class _GruposEditorWidget extends StatefulWidget {
+  final int productoId;
+  final SupabaseClient db;
+  final String Function(int) formatPrecio;
+
+  const _GruposEditorWidget({
+    required this.productoId,
+    required this.db,
+    required this.formatPrecio,
+  });
+
+  @override
+  State<_GruposEditorWidget> createState() => _GruposEditorWidgetState();
+}
+
+class _GruposEditorWidgetState extends State<_GruposEditorWidget> {
+  List<Map<String, dynamic>> _grupos = [];
+  bool _cargando = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargar();
+  }
+
+  Future<void> _cargar() async {
+    if (!mounted) return;
+    setState(() => _cargando = true);
+    try {
+      final res = await widget.db
+          .from('grupos_opciones')
+          .select('*, opciones(*)')
+          .eq('producto_id', widget.productoId)
+          .order('orden')
+          .order('orden', referencedTable: 'opciones');
+      if (mounted) {
+        setState(() {
+          _grupos = List<Map<String, dynamic>>.from(res);
+          _cargando = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _cargando = false);
+    }
+  }
+
+  Future<void> _agregarGrupo() async {
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (_) => const _DialogNuevoGrupo(),
+    );
+    if (result == null) return;
+    try {
+      await widget.db.from('grupos_opciones').insert({
+        'producto_id': widget.productoId,
+        'nombre': result['nombre'],
+        'tipo': result['tipo'],
+        'obligatorio': result['obligatorio'],
+        'min_selecciones': result['min'],
+        'max_selecciones': result['max'],
+        'orden': _grupos.length,
+      });
+      await _cargar();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<void> _eliminarGrupo(int grupoId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('¿Eliminar grupo?'),
+        content: const Text('Se eliminarán también todas sus opciones.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('CANCELAR')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('ELIMINAR',
+                  style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    try {
+      await widget.db.from('grupos_opciones').delete().eq('id', grupoId);
+      await _cargar();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<void> _agregarOpcion(int grupoId) async {
+    final nombreCtrl = TextEditingController();
+    final precioCtrl = TextEditingController(text: '0');
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Nueva opción'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nombreCtrl,
+              autofocus: true,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                  labelText: 'Nombre',
+                  hintText: 'Ej: Sin cebolla, Extra queso...'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: precioCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                  labelText: 'Precio extra',
+                  hintText: '0 = sin costo adicional'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('CANCELAR')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('AGREGAR')),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    final nombre = nombreCtrl.text.trim();
+    if (nombre.isEmpty) return;
+    final precioExtra = int.tryParse(precioCtrl.text.trim()) ?? 0;
+    final opcionesActuales = (_grupos.firstWhere(
+          (g) => g['id'] == grupoId,
+          orElse: () => {'opciones': []},
+        )['opciones'] as List?) ??
+        [];
+    try {
+      await widget.db.from('opciones').insert({
+        'grupo_id': grupoId,
+        'nombre': nombre,
+        'precio_extra': precioExtra,
+        'disponible': true,
+        'orden': opcionesActuales.length,
+      });
+      await _cargar();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<void> _eliminarOpcion(int opcionId) async {
+    try {
+      await widget.db.from('opciones').delete().eq('id', opcionId);
+      await _cargar();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<void> _toggleOpcion(Map<String, dynamic> op) async {
+    try {
+      await widget.db
+          .from('opciones')
+          .update({'disponible': !(op['disponible'] as bool)})
+          .eq('id', op['id']);
+      await _cargar();
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.tune, color: Colors.white54, size: 18),
+            const SizedBox(width: 8),
+            const Text(
+              'Personalizaciones',
+              style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15),
+            ),
+            const Spacer(),
+            TextButton.icon(
+              onPressed: _agregarGrupo,
+              icon: const Icon(Icons.add, size: 15, color: Color(0xff3AF500)),
+              label: const Text('Añadir grupo',
+                  style: TextStyle(color: Color(0xff3AF500), fontSize: 12)),
+              style: TextButton.styleFrom(padding: EdgeInsets.zero),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        if (_cargando)
+          const Center(
+              child: Padding(
+                  padding: EdgeInsets.symmetric(vertical: 12),
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Color(0xff3AF500))))
+        else if (_grupos.isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.white12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Text(
+              'Sin grupos de opciones aún.\nEj: "Proteína", "Salsas", "Tamaño"',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  color: Colors.white38, fontSize: 12, height: 1.5),
+            ),
+          )
+        else
+          for (final grupo in _grupos) _buildGrupoTile(grupo),
+      ],
+    );
+  }
+
+  Widget _buildGrupoTile(Map<String, dynamic> grupo) {
+    final opciones =
+        List<Map<String, dynamic>>.from(grupo['opciones'] ?? []);
+    opciones.sort((a, b) =>
+        ((a['orden'] as num?) ?? 0).compareTo((b['orden'] as num?) ?? 0));
+    final esUnica = grupo['tipo'] == 'unica';
+    final obligatorio = grupo['obligatorio'] as bool? ?? false;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: ExpansionTile(
+        tilePadding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+        iconColor: Colors.white54,
+        collapsedIconColor: Colors.white38,
+        initiallyExpanded: true,
+        title: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    grupo['nombre'],
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14),
+                  ),
+                  const SizedBox(height: 4),
+                  Wrap(
+                    spacing: 5,
+                    children: [
+                      _chip(esUnica ? 'Única' : 'Múltiple',
+                          esUnica ? Colors.blue : Colors.purple),
+                      if (obligatorio)
+                        _chip('Obligatorio', Colors.orange),
+                      _chip('${opciones.length} opciones', Colors.white24),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.delete_outline,
+                  size: 18, color: Colors.red),
+              onPressed: () => _eliminarGrupo(grupo['id'] as int),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+            ),
+          ],
+        ),
+        children: [
+          ...opciones.map((op) => _buildOpcionRow(op)),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () => _agregarOpcion(grupo['id'] as int),
+              icon: const Icon(Icons.add, size: 14, color: Colors.white38),
+              label: const Text('Añadir opción',
+                  style: TextStyle(color: Colors.white38, fontSize: 12)),
+              style: TextButton.styleFrom(padding: EdgeInsets.zero),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOpcionRow(Map<String, dynamic> op) {
+    final disponible = op['disponible'] as bool? ?? true;
+    final precioExtra = (op['precio_extra'] as num?)?.toInt() ?? 0;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        children: [
+          Icon(
+            disponible
+                ? Icons.check_circle_outline
+                : Icons.circle_outlined,
+            size: 15,
+            color: disponible ? const Color(0xff3AF500) : Colors.white24,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              op['nombre'],
+              style: TextStyle(
+                color: disponible ? Colors.white : Colors.white38,
+                fontSize: 13,
+                decoration:
+                    disponible ? null : TextDecoration.lineThrough,
+              ),
+            ),
+          ),
+          if (precioExtra > 0)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: Text(
+                '+${widget.formatPrecio(precioExtra)}',
+                style: const TextStyle(
+                    color: Color(0xff3AF500), fontSize: 11),
+              ),
+            ),
+          GestureDetector(
+            onTap: () => _toggleOpcion(op),
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: disponible
+                    ? Colors.green.withValues(alpha: 0.15)
+                    : Colors.orange.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                disponible ? 'ON' : 'OFF',
+                style: TextStyle(
+                    color: disponible ? Colors.green : Colors.orange,
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          GestureDetector(
+            onTap: () => _eliminarOpcion(op['id'] as int),
+            child: const Icon(Icons.close, size: 15, color: Colors.red),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _chip(String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(label,
+          style: TextStyle(
+              color: color,
+              fontSize: 9,
+              fontWeight: FontWeight.bold)),
+    );
+  }
+}
+
+// ============================================================
+// DIÁLOGO NUEVO GRUPO DE OPCIONES
+// ============================================================
+
+class _DialogNuevoGrupo extends StatefulWidget {
+  const _DialogNuevoGrupo();
+
+  @override
+  State<_DialogNuevoGrupo> createState() => _DialogNuevoGrupoState();
+}
+
+class _DialogNuevoGrupoState extends State<_DialogNuevoGrupo> {
+  final _nombreCtrl = TextEditingController();
+  final _minCtrl = TextEditingController(text: '0');
+  final _maxCtrl = TextEditingController(text: '1');
+  String _tipo = 'unica';
+  bool _obligatorio = false;
+
+  @override
+  void dispose() {
+    _nombreCtrl.dispose();
+    _minCtrl.dispose();
+    _maxCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Nuevo grupo de opciones'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: _nombreCtrl,
+              autofocus: true,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                  labelText: 'Nombre del grupo',
+                  hintText: 'Ej: Proteína, Tamaño, Salsas...'),
+            ),
+            const SizedBox(height: 16),
+            const Text('Tipo de selección',
+                style:
+                    TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      backgroundColor:
+                          _tipo == 'unica' ? Colors.blue.shade50 : null,
+                      side: BorderSide(
+                          color: _tipo == 'unica'
+                              ? Colors.blue
+                              : Colors.grey),
+                    ),
+                    onPressed: () => setState(() => _tipo = 'unica'),
+                    child: const Text('Única'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      backgroundColor: _tipo == 'multiple'
+                          ? Colors.purple.shade50
+                          : null,
+                      side: BorderSide(
+                          color: _tipo == 'multiple'
+                              ? Colors.purple
+                              : Colors.grey),
+                    ),
+                    onPressed: () =>
+                        setState(() => _tipo = 'multiple'),
+                    child: const Text('Múltiple'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Obligatorio',
+                  style: TextStyle(fontSize: 13)),
+              subtitle: const Text('El cliente debe elegir sí o sí',
+                  style: TextStyle(fontSize: 11)),
+              value: _obligatorio,
+              onChanged: (v) => setState(() => _obligatorio = v),
+            ),
+            if (_tipo == 'multiple') ...[
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _minCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration:
+                          const InputDecoration(labelText: 'Mín.'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextField(
+                      controller: _maxCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration:
+                          const InputDecoration(labelText: 'Máx.'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, null),
+          child: const Text('CANCELAR'),
+        ),
+        ElevatedButton(
+          onPressed: () {
+            final nombre = _nombreCtrl.text.trim();
+            if (nombre.isEmpty) return;
+            Navigator.pop(context, {
+              'nombre': nombre,
+              'tipo': _tipo,
+              'obligatorio': _obligatorio,
+              'min': int.tryParse(_minCtrl.text) ?? 0,
+              'max': int.tryParse(_maxCtrl.text) ?? 1,
+            });
+          },
+          child: const Text('CREAR'),
+        ),
+      ],
     );
   }
 }

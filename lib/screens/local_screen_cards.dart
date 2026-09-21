@@ -10,6 +10,8 @@ mixin _CardsMixin on State<LocalScreen> {
   final Set<int> _tarjetasExpandidasLocal = {};
   final ValueNotifier<int> _expansionTick = ValueNotifier(0);
   final Set<int> _liberandoEnProceso = {};
+  /// IDs de servicios que acaban de pasar a 'cotizada' (highlight animado)
+  final Set<int> _cotizadasRecientes = {};
 
   @override
   void dispose() {
@@ -25,6 +27,22 @@ mixin _CardsMixin on State<LocalScreen> {
       final h = dt.hour.toString().padLeft(2, '0');
       final m = dt.minute.toString().padLeft(2, '0');
       return ' · $h:$m';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  // ── Helper: tiempo transcurrido "hace Xm" / "hace Xh Ym" ────────────────
+  String _fmtElapsed(dynamic iso) {
+    if (iso == null) return '';
+    try {
+      final dt = DateTime.parse(iso.toString()).toLocal();
+      final diff = DateTime.now().difference(dt);
+      if (diff.inMinutes < 1) return ' · ahora';
+      if (diff.inMinutes < 60) return ' · hace ${diff.inMinutes}m';
+      final h = diff.inHours;
+      final m = diff.inMinutes.remainder(60);
+      return m > 0 ? ' · hace ${h}h ${m}m' : ' · hace ${h}h';
     } catch (_) {
       return '';
     }
@@ -523,24 +541,26 @@ mixin _CardsMixin on State<LocalScreen> {
     }
 
     // ── Timestamps por estado ──────────────────────────────────────────────
+    // Activos: muestra tiempo transcurrido ("hace 5m"). Historial: hora fija.
+    String ts(dynamic iso) => esHistorial ? _fmtHora(iso) : _fmtElapsed(iso);
     if (estado == 'programado') {
       // ya muestra hora de liberación en el textoEstado
     } else if (estado == 'cotizacion') {
-      textoEstado += _fmtHora(servicio['created_at']);
+      textoEstado += ts(servicio['created_at']);
     } else if (estado == 'cotizada') {
-      textoEstado += _fmtHora(servicio['updated_at']);
+      textoEstado += ts(servicio['updated_at']);
     } else if (estado == 'cotizacion_aprobada') {
-      textoEstado += _fmtHora(servicio['updated_at']);
+      textoEstado += ts(servicio['updated_at']);
     } else if (estado == 'pendiente') {
-      textoEstado += _fmtHora(servicio['created_at']);
+      textoEstado += ts(servicio['created_at']);
     } else if (estado == 'en_ruta_origen') {
-      textoEstado += _fmtHora(servicio['accepted_at']);
+      textoEstado += ts(servicio['accepted_at']);
     } else if (estado == 'en_origen') {
-      textoEstado += _fmtHora(servicio['updated_at']);
+      textoEstado += ts(servicio['updated_at']);
     } else if (estado == 'en_ruta_destino') {
-      textoEstado += _fmtHora(servicio['picked_up_at']);
+      textoEstado += ts(servicio['picked_up_at']);
     } else if (estado == 'finalizado') {
-      textoEstado += _fmtHora(servicio['updated_at']);
+      textoEstado += _fmtHora(servicio['updated_at']); // historial: siempre hora exacta
     } else if (estado == 'caducado' || estado == 'finalizado_por_demora' ||
         estado == 'finalizado_con_problema' || estado == 'cancelado') {
       textoEstado += _fmtHora(servicio['updated_at']);
@@ -556,13 +576,31 @@ mixin _CardsMixin on State<LocalScreen> {
       return '';
     }();
 
-    return Card(
+    final bool _esDestacada = !esHistorial && _cotizadasRecientes.contains(svcId);
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 600),
+      margin: _esDestacada
+          ? const EdgeInsets.only(bottom: 12)
+          : EdgeInsets.zero,
+      decoration: _esDestacada
+          ? BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.blue.withOpacity(0.55),
+                  blurRadius: 22,
+                  spreadRadius: 4,
+                ),
+              ],
+            )
+          : const BoxDecoration(),
+      child: Card(
       elevation: esHistorial ? 1 : 3,
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: _esDestacada ? EdgeInsets.zero : const EdgeInsets.only(bottom: 12),
       color: fondoColor,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(8),
-        side: BorderSide(color: bordeColor, width: esHistorial ? 1.0 : 1.5),
+        side: BorderSide(color: bordeColor, width: _esDestacada ? 2.5 : (esHistorial ? 1.0 : 1.5)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1359,7 +1397,8 @@ mixin _CardsMixin on State<LocalScreen> {
       ),                // if (estaExpandida) Padding
       ],                // outer Card.Column.children
     ),                  // outer Card.Column
-  );                    // Card + return
+    ),                  // Card
+  );                    // AnimatedContainer + return
   }
 
   // -----------------------------------------------------------------------

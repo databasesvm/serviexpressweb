@@ -52,6 +52,8 @@ class _LocalScreenState extends State<LocalScreen>
   final SonidoManager _sonidos = SonidoManager();
   RealtimeChannel? _canalEstados;
   RealtimeChannel? _canalChat;
+  /// Contador de servicios activos para el badge en la pestaña ACTIVOS
+  final ValueNotifier<int> _activosCount = ValueNotifier(0);
 
   // ARQUITECTURA ANTI-PARPADEO — mismo patrón que movil_screen.dart y
   // central_screen.dart. ANTES, los dos streams de esta pantalla se
@@ -131,17 +133,37 @@ class _LocalScreenState extends State<LocalScreen>
           schema: 'public',
           table: 'servicios',
           callback: (payload) {
-            final String estadoNuevo =
-                payload.newRecord['estado']?.toString() ?? '';
-            final String estadoAnterior =
-                payload.oldRecord['estado']?.toString() ?? '';
-            if (estadoNuevo == estadoAnterior || !mounted) return;
+            if (!mounted) return;
+            final nuevo = payload.newRecord;
+            final viejo = payload.oldRecord;
+            final String estadoNuevo = nuevo['estado']?.toString() ?? '';
+            final String estadoAnterior = viejo['estado']?.toString() ?? '';
 
-            // Central respondió la cotización → alerta fuerte
+            // Móvil asignado directamente (movil_id: null → valor) sin cambio de estado
+            // p.ej. asignación manual desde central que no cambia el estado aún
+            final movilAntes = viejo['movil_id'];
+            final movilAhora = nuevo['movil_id'];
+            if (movilAntes == null && movilAhora != null) {
+              _sonidos.reproducirSuave(Sonidos.localEstado);
+              return;
+            }
+
+            if (estadoNuevo == estadoAnterior) return;
+
+            // Central respondió la cotización → alerta fuerte + glow en card
             if (estadoAnterior == 'cotizacion' && estadoNuevo == 'cotizada') {
               _sonidos.reproducir(Sonidos.localRespuesta);
+              final int svcId = nuevo['id'] as int;
+              _cotizadasRecientes.add(svcId);
+              setState(() {});
+              Future.delayed(const Duration(seconds: 4), () {
+                if (!mounted) return;
+                _cotizadasRecientes.remove(svcId);
+                setState(() {});
+              });
             } else {
-              // Cualquier otro cambio de estado → suave
+              // Todos los demás cambios de estado → mismo sonido suave
+              // (en_ruta_origen, en_origen, en_ruta_destino, finalizado, etc.)
               _sonidos.reproducirSuave(Sonidos.localEstado);
             }
           },
@@ -200,6 +222,12 @@ class _LocalScreenState extends State<LocalScreen>
       (data) {
         _cacheServiciosLocal = data;
         _chatLocalCount.value = data.where((s) => s['chat_cliente'] == true).length;
+        _activosCount.value = data.where((s) =>
+          s['oculto_local'] != true &&
+          ['programado','pendiente','en_curso','en_ruta_origen','en_origen',
+           'en_ruta_destino','problema','cotizacion','cotizada','cotizacion_aprobada']
+              .contains(s['estado']?.toString())
+        ).length;
         if (!_ctrlServiciosLocal.isClosed) _ctrlServiciosLocal.add(data);
       },
       onError: (e) {
@@ -262,6 +290,7 @@ class _LocalScreenState extends State<LocalScreen>
     _telLocalController.dispose();
     _instruccionesController.dispose();
     _chatLocalCount.dispose();
+    _activosCount.dispose();
     // _expansionTick se dispone en _CardsMixin.dispose() via super chain
     _sonidos.silenciar();
     super.dispose();
@@ -467,17 +496,35 @@ class _LocalScreenState extends State<LocalScreen>
               ),
               backgroundColor: Colors.black,
               iconTheme: IconThemeData(color: Colors.white),
-              bottom: const TabBar(
+              bottom: TabBar(
                 labelColor: Color(0xff3AF500),
                 unselectedLabelColor: Colors.white70,
                 indicatorColor: Color(0xff3AF500),
                 tabs: [
-                  Tab(icon: Icon(Icons.motorcycle), text: 'ACTIVOS'),
-                  Tab(icon: Icon(Icons.history), text: 'HISTORIAL'),
-                  Tab(
+                  ValueListenableBuilder<int>(
+                    valueListenable: _activosCount,
+                    builder: (_, count, __) => Tab(
+                      icon: Badge(
+                        isLabelVisible: count > 0,
+                        label: Text(
+                          '$count',
+                          style: const TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        backgroundColor: Color(0xff3AF500),
+                        textColor: Colors.black,
+                        child: const Icon(Icons.motorcycle),
+                      ),
+                      text: 'ACTIVOS',
+                    ),
+                  ),
+                  const Tab(icon: Icon(Icons.history), text: 'HISTORIAL'),
+                  const Tab(
                     icon: Icon(Icons.storefront),
                     text: 'MI LOCAL',
-                  ), // <--- Nueva pestaña de control
+                  ),
                 ],
               ),
               // Borramos las "actions" de aquí porque ahora viven en "MI LOCAL"

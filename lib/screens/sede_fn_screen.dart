@@ -39,6 +39,8 @@ class _SedeFnScreenState extends State<SedeFnScreen>
   late final TabController _tab;
   // Notifica a _HistorialTab que cargue solo cuando el usuario toca esa pestaña
   final _historialActivo = ValueNotifier<bool>(false);
+  /// Contador de servicios activos para el badge en la pestaña Activos
+  final _activosCount = ValueNotifier<int>(0);
 
   // Datos de la sede vinculada a este usuario
   Map<String, dynamic>? _sede;
@@ -116,6 +118,7 @@ class _SedeFnScreenState extends State<SedeFnScreen>
   void dispose() {
     _tab.dispose();
     _historialActivo.dispose();
+    _activosCount.dispose();
     _subServicios?.cancel();
     _canalEstados?.unsubscribe();
     _canalConfig?.unsubscribe();
@@ -181,6 +184,7 @@ class _SedeFnScreenState extends State<SedeFnScreen>
             .where((s) => _kEstadosActivos.contains(s['estado']))
             .toList();
         _cacheServicios = List<Map<String, dynamic>>.from(filtrado);
+        _activosCount.value = _cacheServicios!.length;
         if (!_ctrlServicios.isClosed) _ctrlServicios.add(_cacheServicios!);
       },
       onError: (_) {},
@@ -389,10 +393,26 @@ class _SedeFnScreenState extends State<SedeFnScreen>
           indicatorColor: Colors.indigo[200],
           labelColor: Colors.white,
           unselectedLabelColor: Colors.white54,
-          tabs: const [
-            Tab(icon: Icon(Icons.add_box), text: 'Nuevo'),
-            Tab(icon: Icon(Icons.two_wheeler), text: 'Activos'),
-            Tab(icon: Icon(Icons.history), text: 'Historial'),
+          tabs: [
+            const Tab(icon: Icon(Icons.add_box), text: 'Nuevo'),
+            ValueListenableBuilder<int>(
+              valueListenable: _activosCount,
+              builder: (_, count, __) => Tab(
+                icon: Badge(
+                  isLabelVisible: count > 0,
+                  label: Text(
+                    '$count',
+                    style: const TextStyle(
+                        fontSize: 10, fontWeight: FontWeight.bold),
+                  ),
+                  backgroundColor: Colors.indigo[200],
+                  textColor: Colors.black,
+                  child: const Icon(Icons.two_wheeler),
+                ),
+                text: 'Activos',
+              ),
+            ),
+            const Tab(icon: Icon(Icons.history), text: 'Historial'),
           ],
         ),
       ),
@@ -3071,6 +3091,7 @@ class _CardServicioActivo extends StatefulWidget {
 class _CardServicioActivoState extends State<_CardServicioActivo> {
   final _db = Supabase.instance.client;
   String? _movilTelefono;
+  bool _recienCotizada = false;
   String? _movilNumero; // número real: extraído de usuarios.usuario
   String? _movilIdCargado;
   // Métodos de pago del móvil
@@ -3090,6 +3111,31 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
     super.didUpdateWidget(old);
     final nuevoId = widget.servicio['movil_id']?.toString();
     if (nuevoId != _movilIdCargado) _cargarDatosMovil();
+    // Detectar cotizacion → cotizada para el glow animado
+    final estadoAnterior = old.servicio['estado']?.toString() ?? '';
+    final estadoNuevo = widget.servicio['estado']?.toString() ?? '';
+    if (estadoAnterior == 'cotizacion' && estadoNuevo == 'cotizada') {
+      setState(() => _recienCotizada = true);
+      Future.delayed(const Duration(seconds: 4), () {
+        if (!mounted) return;
+        setState(() => _recienCotizada = false);
+      });
+    }
+  }
+
+  String _fmtElapsed(dynamic iso) {
+    if (iso == null) return '';
+    try {
+      final dt = DateTime.parse(iso.toString()).toLocal();
+      final diff = DateTime.now().difference(dt);
+      if (diff.inMinutes < 1) return 'ahora';
+      if (diff.inMinutes < 60) return 'hace ${diff.inMinutes}m';
+      final h = diff.inHours;
+      final m = diff.inMinutes.remainder(60);
+      return m > 0 ? 'hace ${h}h ${m}m' : 'hace ${h}h';
+    } catch (_) {
+      return '';
+    }
   }
 
   Future<void> _cargarDatosMovil() async {
@@ -3143,12 +3189,29 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
         ? 'MÓVIL NOTIFICADO'
         : _labelEstado(estado);
 
-    return Card(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 600),
+      decoration: _recienCotizada
+          ? BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.green.withOpacity(0.55),
+                  blurRadius: 22,
+                  spreadRadius: 4,
+                ),
+              ],
+            )
+          : const BoxDecoration(),
+      child: Card(
       color: const Color(0xFF111111),
       margin: const EdgeInsets.only(bottom: 10),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: color.withValues(alpha: 0.4), width: 1.2),
+        side: BorderSide(
+          color: _recienCotizada ? Colors.green : color.withValues(alpha: 0.4),
+          width: _recienCotizada ? 2.0 : 1.2,
+        ),
       ),
       child: Padding(
         padding: const EdgeInsets.all(14),
@@ -3194,6 +3257,11 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
                             fontWeight: FontWeight.bold)),
                   ),
                 ],
+                const SizedBox(width: 6),
+                Text(
+                  _fmtElapsed(s['created_at']),
+                  style: const TextStyle(color: Colors.white38, fontSize: 10),
+                ),
                 const Spacer(),
                 if (tarifa != null)
                   Text('\$${_miles(tarifa)}',
@@ -3617,7 +3685,8 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
           ],
         ),
       ),
-    );
+      ), // Card
+    ); // AnimatedContainer
   }
 
   String _labelRecogida(Map<String, dynamic> r) {

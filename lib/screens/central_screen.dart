@@ -24,6 +24,7 @@ import 'package:serviexpress_app/screens/fn_facturacion_screen.dart'; // Factura
 import 'package:serviexpress_app/screens/fn_red_direcciones_screen.dart'; // Red de direcciones FN
 import 'package:serviexpress_app/utils/auth_helper.dart'; // hashContrasena
 import 'package:serviexpress_app/screens/historial_servicios_screen.dart'; // Historial de servicios
+import 'package:serviexpress_app/screens/central_pedido_domicilio_screen.dart'; // Pedido domicilio desde central
 part 'central_panel_precios.dart';
 part 'central_corte_financiero.dart';
 part 'central_gestion_usuarios.dart';
@@ -1025,6 +1026,20 @@ class _CentralScreenState extends State<CentralScreen>
                   ),
                 ),
                 const SizedBox(width: 6),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.deepOrange,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: () => Navigator.push(context,
+                      MaterialPageRoute(builder: (_) => const CentralPedidoDomicilioScreen())),
+                  icon: const Icon(Icons.delivery_dining_rounded),
+                  label: const Text(
+                    'PEDIDO DOMICILIO',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+                const SizedBox(width: 6),
                 IconButton(
                   icon: const Icon(Icons.share_rounded, color: Color(0xff25D366)),
                   tooltip: 'Enviar link de pedido al cliente',
@@ -1111,6 +1126,13 @@ class _CentralScreenState extends State<CentralScreen>
                   icon: const Icon(Icons.add_box_rounded, color: Color(0xff3AF500)),
                   tooltip: 'Nuevo servicio',
                   onPressed: () => _abrirFormularioDespacho(context),
+                ),
+                // Acceso rápido: Pedido domicilio central
+                IconButton(
+                  icon: const Icon(Icons.delivery_dining_rounded, color: Colors.deepOrange),
+                  tooltip: 'Pedido domicilio',
+                  onPressed: () => Navigator.push(context,
+                      MaterialPageRoute(builder: (_) => const CentralPedidoDomicilioScreen())),
                 ),
                 // Badge de gestión + menú lateral
                 Stack(
@@ -1335,6 +1357,10 @@ class _CentralScreenState extends State<CentralScreen>
               child: Text('OPERACIONES', style: TextStyle(color: Colors.white38, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
             ),
             _item(Icons.add_box_rounded, 'Nuevo servicio', const Color(0xff3AF500), () => _abrirFormularioDespacho(context)),
+            _item(Icons.delivery_dining_rounded, 'Pedido domicilio', Colors.deepOrange, () {
+              Navigator.pop(context);
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const CentralPedidoDomicilioScreen()));
+            }),
             _item(Icons.share_rounded, 'Enviar link al cliente', const Color(0xff25D366), () => _enviarLinkInvitado(context)),
 
             const Divider(color: Colors.white10, height: 20),
