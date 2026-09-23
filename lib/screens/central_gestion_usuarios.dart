@@ -1262,7 +1262,8 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
         final rol = u['rol']?.toString() ?? '';
         final color = _colorRol(rol);
         final numMovilInt = u['numero_movil'] as int?;
-        final numMovilStr = numMovilInt?.toString() ?? '';
+        // numero_movil = 0 → "00" (cuenta dual Master)
+        final numMovilStr = numMovilInt == null ? '' : (numMovilInt == 0 ? '00' : numMovilInt.toString());
         // Etiqueta de rango de plan según número
         String? planLabel;
         if (numMovilInt != null) {
@@ -2014,7 +2015,7 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                 children: [
                   if (semanales.isNotEmpty) ...[
                     _encabezadoSeccion(
-                        '🔒 CONSIGNACIONES SEMANALES (${semanales.length})',
+                        '🔒 SOPORTES DE PAGO (${semanales.length})',
                         Colors.orange[400]!),
                     ...semanales.map((s) =>
                         _cardSolicitudRecarga(s as Map<String, dynamic>)),

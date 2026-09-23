@@ -45,7 +45,11 @@ String fmtPeso(dynamic monto, {bool mostrarCero = false}) {
 // Prioridad: numero_movil (int) → usuario field regex → fallback
 String movilLabel(Map<String, dynamic> u, {String fallback = '—'}) {
   final num = u['numero_movil'];
-  if (num != null) return 'Móvil $num';
+  if (num != null) {
+    // numero_movil = 0 → "Móvil 00" (cuenta dual Master)
+    final tag = (num as int) == 0 ? '00' : num.toString();
+    return 'Móvil $tag';
+  }
   final uStr = u['usuario']?.toString() ?? '';
   final match = RegExp(r'\d+').firstMatch(uStr)?.group(0);
   if (match != null) return 'Móvil $match';

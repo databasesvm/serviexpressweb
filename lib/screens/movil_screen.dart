@@ -1141,7 +1141,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                           letterSpacing: 1.5)),
                   const SizedBox(height: 12),
                   const Text(
-                    'Tu billetera semanal ha sido bloqueada por falta de pago.\nPara reactivarla, realiza tu consignación y envía el comprobante.',
+                    'Tu billetera semanal ha sido bloqueada por falta de pago.\nPara reactivarla, envía el soporte de pago y espera la aprobación de la central.',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                         color: Colors.white60, fontSize: 13, height: 1.6),
@@ -5136,7 +5136,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                 const Icon(Icons.account_balance_wallet_rounded,
                                     color: Colors.white54, size: 16),
                                 const SizedBox(width: 8),
-                                Text('MI WALLET · $planLabel',
+                                Text('MI BILLETERA · $planLabel',
                                     style: const TextStyle(
                                         color: Colors.white54,
                                         fontSize: 10,
@@ -12874,7 +12874,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
             const SizedBox(width: 8),
             Text(
                 tipoSolicitud == 'pago_semanal'
-                    ? 'Enviar Consignación Semanal'
+                    ? 'Enviar Soporte de Pago'
                     : tipoPlan == 'prediario'
                         ? 'Recargar Saldo'
                         : 'Pagar Deuda',
@@ -12937,7 +12937,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                   ),
                   Text(
                     tipoSolicitud == 'pago_semanal'
-                        ? 'Adjunta el comprobante de tu consignación semanal. La central lo revisará y desbloqueará tu billetera.'
+                        ? 'Adjunta el soporte de pago. La central lo revisará y desbloqueará tu billetera.'
                         : 'Ingresa el monto y adjunta el comprobante de transferencia. Tu saldo se actualizará automáticamente.',
                     style: const TextStyle(
                         color: Colors.white54, fontSize: 11, height: 1.4),
@@ -12949,7 +12949,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                     style: const TextStyle(color: Colors.white, fontSize: 14),
                     decoration: InputDecoration(
                       labelText: tipoSolicitud == 'pago_semanal'
-                          ? 'Monto del pago semanal (\$)'
+                          ? 'Monto del soporte de pago (\$)'
                           : 'Monto a recargar (\$)',
                       labelStyle:
                           const TextStyle(color: Colors.white54, fontSize: 12),
@@ -13049,12 +13049,12 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                           final nombreArch =
                               'recarga_${movilId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
                           await Supabase.instance.client.storage
-                              .from('documentos')
+                              .from('comprobantes')
                               .uploadBinary(nombreArch, _imgBytes!,
                                   fileOptions: const FileOptions(
                                       contentType: 'image/jpeg', upsert: true));
                           urlComprobante = Supabase.instance.client.storage
-                              .from('documentos')
+                              .from('comprobantes')
                               .getPublicUrl(nombreArch);
                         }
                         await Supabase.instance.client
@@ -13159,7 +13159,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                   color: Colors.white24,
                   borderRadius: BorderRadius.circular(2))),
           const SizedBox(height: 14),
-          const Text('HISTORIAL DE WALLET',
+          const Text('HISTORIAL DE BILLETERA',
               style: TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,

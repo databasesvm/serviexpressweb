@@ -386,7 +386,7 @@ class _CentralScreenState extends State<CentralScreen>
               Supabase.instance.client
                   .from('usuarios')
                   .select()
-                  .eq('rol', 'movil')
+                  .or('rol.eq.movil,es_dual.eq.true')
                   .then((data) {
                     _movilesCache = List.from(data);
                     if (!_ctrlUsuariosMoviles.isClosed) {
@@ -692,7 +692,7 @@ class _CentralScreenState extends State<CentralScreen>
       final moviles = await Supabase.instance.client
           .from('usuarios')
           .select()
-          .eq('rol', 'movil');
+          .or('rol.eq.movil,es_dual.eq.true');
       if (!_ctrlUsuariosMoviles.isClosed) {
         _ctrlUsuariosMoviles.add(List<Map<String, dynamic>>.from(moviles));
       }
@@ -715,8 +715,7 @@ class _CentralScreenState extends State<CentralScreen>
 
     final crudoUsuarios = Supabase.instance.client
         .from('usuarios')
-        .stream(primaryKey: ['id'])
-        .eq('rol', 'movil');
+        .stream(primaryKey: ['id']);
 
     // Servicios no archivados — incluye finalizados/cancelados recientes
     // (< 4h, aún no archivados por pg_cron). El canal _canalRadarCentral
@@ -731,8 +730,11 @@ class _CentralScreenState extends State<CentralScreen>
 
     _subUsuariosMoviles = crudoUsuarios.listen(
       (data) {
-        _movilesCache = List.from(data); // Cache para resolver movil_id → #numero
-        if (!_ctrlUsuariosMoviles.isClosed) _ctrlUsuariosMoviles.add(data);
+        // Filtrar: móviles normales + cuenta dual (es_dual=true)
+        final filtrado = data.where((u) =>
+            u['rol'] == 'movil' || u['es_dual'] == true).toList();
+        _movilesCache = List.from(filtrado); // Cache para resolver movil_id → #numero
+        if (!_ctrlUsuariosMoviles.isClosed) _ctrlUsuariosMoviles.add(filtrado);
       },
       onError: (e) {
         if (!_ctrlUsuariosMoviles.isClosed) _ctrlUsuariosMoviles.addError(e);

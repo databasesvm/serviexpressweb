@@ -26,6 +26,7 @@ import 'package:serviexpress_app/utils/auth_helper.dart'; // <-- SEGURIDAD: hash
 import 'package:flutter/services.dart';
 import 'central_screen.dart';
 import 'movil_screen.dart';
+import 'dual_mode_screen.dart';
 import 'package:serviexpress_app/screens/local_screen.dart';
 import 'package:serviexpress_app/screens/cliente_screen.dart';
 import 'package:serviexpress_app/screens/registro_screen.dart';
@@ -483,6 +484,25 @@ class _LoginScreenState extends State<LoginScreen>
     if (!mounted) return;
 
     if (rol == 'master' || rol == 'central') {
+      // Cuenta dual: selector de modo antes de navegar
+      if (usuario['es_dual'] == true && mounted) {
+        final modo = await showDialog<String>(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => const _DialogoModoInicial(),
+        );
+        if (!mounted) return;
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => DualModeScreen(
+              usuario: usuario,
+              modoInicial: modo ?? 'central',
+            ),
+          ),
+        );
+        return;
+      }
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
@@ -1706,6 +1726,80 @@ class _LoginScreenState extends State<LoginScreen>
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================
+// DIÁLOGO SELECTOR DE MODO — cuentas es_dual
+// ============================================================
+class _DialogoModoInicial extends StatelessWidget {
+  const _DialogoModoInicial();
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: const Color(0xFF141414),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              '¿Cómo quieres entrar?',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Puedes cambiar de modo en cualquier momento desde la app.',
+              style: TextStyle(color: Colors.white54, fontSize: 12),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            // Botón Central
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.dashboard_rounded, color: Colors.white),
+                label: const Text(
+                  'Entrar como Central',
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF7C3AED),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: () => Navigator.pop(context, 'central'),
+              ),
+            ),
+            const SizedBox(height: 12),
+            // Botón Móvil
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.motorcycle_rounded, color: Colors.black),
+                label: const Text(
+                  'Entrar como Móvil 00',
+                  style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF3AF500),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: () => Navigator.pop(context, 'movil'),
+              ),
+            ),
+          ],
         ),
       ),
     );
