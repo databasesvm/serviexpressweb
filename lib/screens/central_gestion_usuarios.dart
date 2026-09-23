@@ -145,7 +145,8 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
 
   // Botón de acción con etiqueta — para la fila 2 de la tarjeta de móvil
   Widget _botonAccion(IconData icono, Color color, String label, VoidCallback onTap) =>
-    Expanded(
+    SizedBox(
+      width: 80,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(8),
@@ -1303,12 +1304,13 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
               ]),
               const SizedBox(height: 8),
               // Fila 2: botones de acción
-              Row(children: [
+              Row(mainAxisSize: MainAxisSize.min, children: [
                 _botonAccion(Icons.person_search_rounded, Colors.lightBlueAccent, 'Registro', () => _verRegistroDialog(u)),
                 _botonAccion(Icons.lock_reset_rounded, Colors.amber, 'Contraseña', () => _cambiarContrasenaDialog(u)),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: SizedBox(
+                    width: 100,
                     child: ElevatedButton(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.green[700],
@@ -1483,7 +1485,7 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
               ]),
               const SizedBox(height: 6),
               // Fila 2: botones de acción con espacio táctil amplio
-              Row(children: [
+              Row(mainAxisSize: MainAxisSize.min, children: [
                 _botonAccion(Icons.military_tech_rounded, Colors.amber, 'Facción', () => _cambiarFaccionDialog(u)),
                 _botonAccion(Icons.credit_card_rounded, Colors.lightBlueAccent, 'Plan', () => _cambiarPlanDialog(u)),
                 _botonAccion(Icons.lock_reset_rounded, Colors.white54, 'Clave', () => _cambiarContrasenaDialog(u)),

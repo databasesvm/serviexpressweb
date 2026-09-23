@@ -183,7 +183,15 @@ class _CentralScreenState extends State<CentralScreen>
   // automáticamente al próximo initState (reinicio de sesión).
   List<Map<String, dynamic>> _paraderosPanel = [];
   List<Map<String, dynamic>> _sedesFN = [];
+  List<Map<String, dynamic>> _puntosFN = [];
   List<Map<String, dynamic>> _localesUbicacion = [];
+
+  // Filtros del mapa
+  bool _mapaParaderos = true;
+  bool _mapaSedesFN   = true;
+  bool _mapaPuntosFN  = true;
+  bool _mapaLocales   = true;
+  bool _mapaMoviles   = true;
 
   @override
   void initState() {
@@ -1063,20 +1071,6 @@ class _CentralScreenState extends State<CentralScreen>
                   ),
                 ),
                 const SizedBox(width: 6),
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.deepOrange,
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: () => Navigator.push(context,
-                      MaterialPageRoute(builder: (_) => const CentralPedidoDomicilioScreen())),
-                  icon: const Icon(Icons.delivery_dining_rounded),
-                  label: const Text(
-                    'PEDIDO DOMICILIO',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ),
-                const SizedBox(width: 6),
                 IconButton(
                   icon: const Icon(Icons.share_rounded, color: Color(0xff25D366)),
                   tooltip: 'Enviar link de pedido al cliente',
@@ -1387,10 +1381,6 @@ class _CentralScreenState extends State<CentralScreen>
               child: Text('OPERACIONES', style: TextStyle(color: Colors.white38, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
             ),
             _item(Icons.add_box_rounded, 'Nuevo servicio', const Color(0xff3AF500), () => _abrirFormularioDespacho(context)),
-            _item(Icons.delivery_dining_rounded, 'Pedido a local', Colors.deepOrange, () {
-              Navigator.pop(context);
-              Navigator.push(context, MaterialPageRoute(builder: (_) => const CentralPedidoDomicilioScreen()));
-            }),
             _item(Icons.share_rounded, 'Enviar link al cliente', const Color(0xff25D366), () => _enviarLinkInvitado(context)),
 
             const Divider(color: Colors.white10, height: 20),

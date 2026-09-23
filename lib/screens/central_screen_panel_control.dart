@@ -1176,100 +1176,138 @@ extension CentralScreenPanelControl on _CentralScreenState {
                     stream: _streamUsuariosMoviles,
                     builder: (context, snapMoviles) {
                       List<Marker> marcadores = [];
-                      // ── Pins de paraderos — dinámicos desde BD ─────────
-                      for (final p in _paraderosPanel) {
-                        final lat = (p['latitud'] as num?)?.toDouble();
-                        final lng = (p['longitud'] as num?)?.toDouble();
-                        if (lat == null || lng == null) continue;
-                        final pinColor = _hexToColorPanel(
-                            p['color_hex'] as String? ?? '#1565C0');
-                        final pinLabel = p['nombre'].toString();
-                        final pinEmoji = p['emoji'] as String? ?? '📍';
-                        marcadores.add(Marker(
-                          point: LatLng(lat, lng),
-                          width: 72,
-                          height: 56,
-                          child: Column(mainAxisSize: MainAxisSize.min, children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: pinColor,
-                                borderRadius: BorderRadius.circular(4),
+
+                      // ── Pins de paraderos ──────────────────────────────
+                      if (_mapaParaderos) {
+                        for (final p in _paraderosPanel) {
+                          final lat = (p['latitud'] as num?)?.toDouble();
+                          final lng = (p['longitud'] as num?)?.toDouble();
+                          if (lat == null || lng == null) continue;
+                          final pinColor = _hexToColorPanel(
+                              p['color_hex'] as String? ?? '#1565C0');
+                          final pinLabel = p['nombre'].toString();
+                          final pinEmoji = p['emoji'] as String? ?? '📍';
+                          marcadores.add(Marker(
+                            point: LatLng(lat, lng),
+                            width: 72,
+                            height: 56,
+                            child: Column(mainAxisSize: MainAxisSize.min, children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: pinColor,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  '$pinEmoji $pinLabel',
+                                  style: const TextStyle(color: Colors.white,
+                                      fontSize: 8, fontWeight: FontWeight.bold),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
-                              child: Text(
-                                '$pinEmoji $pinLabel',
-                                style: const TextStyle(color: Colors.white,
-                                    fontSize: 8, fontWeight: FontWeight.bold),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            Icon(Icons.location_on, color: pinColor, size: 28),
-                          ]),
-                        ));
+                              Icon(Icons.location_on, color: pinColor, size: 28),
+                            ]),
+                          ));
+                        }
                       }
 
-                      // ── Pins de sedes FN ───────────────────────────────
-                      for (final s in _sedesFN) {
-                        final lat = (s['lat'] as num?)?.toDouble();
-                        final lng = (s['lng'] as num?)?.toDouble();
-                        if (lat == null || lng == null) continue;
-                        final numero = s['numero']?.toString() ?? '';
-                        final label = numero.isNotEmpty ? 'FN$numero' : 'FN';
-                        marcadores.add(Marker(
-                          point: LatLng(lat, lng),
-                          width: 64,
-                          height: 52,
-                          child: Column(mainAxisSize: MainAxisSize.min, children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF002DA2),
-                                borderRadius: BorderRadius.circular(4),
+                      // ── Pins de sedes FN (con número) ─────────────────
+                      if (_mapaSedesFN) {
+                        for (final s in _sedesFN) {
+                          final lat = (s['lat'] as num?)?.toDouble();
+                          final lng = (s['lng'] as num?)?.toDouble();
+                          if (lat == null || lng == null) continue;
+                          final label = 'FN${s['numero']}';
+                          marcadores.add(Marker(
+                            point: LatLng(lat, lng),
+                            width: 64,
+                            height: 52,
+                            child: Column(mainAxisSize: MainAxisSize.min, children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF002DA2),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  label,
+                                  style: const TextStyle(color: Colors.white,
+                                      fontSize: 8, fontWeight: FontWeight.bold),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
-                              child: Text(
-                                label,
-                                style: const TextStyle(color: Colors.white,
-                                    fontSize: 8, fontWeight: FontWeight.bold),
-                                overflow: TextOverflow.ellipsis,
+                              const Icon(Icons.store_rounded, color: Color(0xFF002DA2), size: 26),
+                            ]),
+                          ));
+                        }
+                      }
+
+                      // ── Pins de puntos FN (droguerías, bodega, etc.) ───
+                      if (_mapaPuntosFN) {
+                        for (final s in _puntosFN) {
+                          final lat = (s['lat'] as num?)?.toDouble();
+                          final lng = (s['lng'] as num?)?.toDouble();
+                          if (lat == null || lng == null) continue;
+                          final label = (s['nombre']?.toString() ?? '').toUpperCase();
+                          marcadores.add(Marker(
+                            point: LatLng(lat, lng),
+                            width: 80,
+                            height: 52,
+                            child: Column(mainAxisSize: MainAxisSize.min, children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF546E7A),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  label,
+                                  style: const TextStyle(color: Colors.white,
+                                      fontSize: 8, fontWeight: FontWeight.bold),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
-                            ),
-                            const Icon(Icons.store_rounded, color: Color(0xFF002DA2), size: 26),
-                          ]),
-                        ));
+                              const Icon(Icons.place_rounded, color: Color(0xFF546E7A), size: 26),
+                            ]),
+                          ));
+                        }
                       }
 
                       // ── Pins de locales con coordenadas ────────────────
-                      for (final l in _localesUbicacion) {
-                        final lat = (l['lat_fija'] as num?)?.toDouble();
-                        final lng = (l['lng_fija'] as num?)?.toDouble();
-                        if (lat == null || lng == null) continue;
-                        final label = (l['nombre']?.toString() ?? 'LOCAL').toUpperCase();
-                        marcadores.add(Marker(
-                          point: LatLng(lat, lng),
-                          width: 80,
-                          height: 52,
-                          child: Column(mainAxisSize: MainAxisSize.min, children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFC62828),
-                                borderRadius: BorderRadius.circular(4),
+                      if (_mapaLocales) {
+                        for (final l in _localesUbicacion) {
+                          final lat = (l['lat_fija'] as num?)?.toDouble();
+                          final lng = (l['lng_fija'] as num?)?.toDouble();
+                          if (lat == null || lng == null) continue;
+                          final label = (l['nombre']?.toString() ?? 'LOCAL').toUpperCase();
+                          marcadores.add(Marker(
+                            point: LatLng(lat, lng),
+                            width: 80,
+                            height: 52,
+                            child: Column(mainAxisSize: MainAxisSize.min, children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFC62828),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  label,
+                                  style: const TextStyle(color: Colors.white,
+                                      fontSize: 8, fontWeight: FontWeight.bold),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
-                              child: Text(
-                                label,
-                                style: const TextStyle(color: Colors.white,
-                                    fontSize: 8, fontWeight: FontWeight.bold),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            const Icon(Icons.storefront_rounded, color: Color(0xFFC62828), size: 26),
-                          ]),
-                        ));
+                              const Icon(Icons.storefront_rounded, color: Color(0xFFC62828), size: 26),
+                            ]),
+                          ));
+                        }
                       }
 
                       if (snapMoviles.hasData) {
                         for (var m in snapMoviles.data!) {
-                          if (m['en_linea'] == true &&
+                          if (_mapaMoviles &&
+                              m['en_linea'] == true &&
                               m['latitud'] != null &&
                               m['longitud'] != null &&
                               m['suspendido'] != true) {
@@ -1308,25 +1346,54 @@ extension CentralScreenPanelControl on _CentralScreenState {
                           }
                         }
                       }
-                      return ClipRRect(
-                        borderRadius: const BorderRadius.vertical(
-                          bottom: Radius.circular(8),
-                        ),
-                        child: FlutterMap(
-                          options: const MapOptions(
-                            initialCenter: LatLng(7.8634, -72.4757),
-                            initialZoom: 15.5,
+                      return Column(children: [
+                        // ── Barra de filtros ───────────────────────────
+                        Container(
+                          color: Colors.black87,
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          child: SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: Row(children: [
+                              _filtroChip('Paraderos', _mapaParaderos, const Color(0xFF1565C0),
+                                  () => setState(() => _mapaParaderos = !_mapaParaderos)),
+                              const SizedBox(width: 6),
+                              _filtroChip('Sedes FN', _mapaSedesFN, const Color(0xFF002DA2),
+                                  () => setState(() => _mapaSedesFN = !_mapaSedesFN)),
+                              const SizedBox(width: 6),
+                              _filtroChip('Puntos FN', _mapaPuntosFN, const Color(0xFF546E7A),
+                                  () => setState(() => _mapaPuntosFN = !_mapaPuntosFN)),
+                              const SizedBox(width: 6),
+                              _filtroChip('Locales', _mapaLocales, const Color(0xFFC62828),
+                                  () => setState(() => _mapaLocales = !_mapaLocales)),
+                              const SizedBox(width: 6),
+                              _filtroChip('Móviles', _mapaMoviles, Colors.green,
+                                  () => setState(() => _mapaMoviles = !_mapaMoviles)),
+                            ]),
                           ),
-                          children: [
-                            TileLayer(
-                              urlTemplate:
-                                  'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                              userAgentPackageName: 'com.serviexpress.express',
-                            ),
-                            MarkerLayer(markers: marcadores),
-                          ],
                         ),
-                      );
+                        // ── Mapa ───────────────────────────────────────
+                        Expanded(
+                          child: ClipRRect(
+                            borderRadius: const BorderRadius.vertical(
+                              bottom: Radius.circular(8),
+                            ),
+                            child: FlutterMap(
+                              options: const MapOptions(
+                                initialCenter: LatLng(7.8634, -72.4757),
+                                initialZoom: 15.5,
+                              ),
+                              children: [
+                                TileLayer(
+                                  urlTemplate:
+                                      'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                  userAgentPackageName: 'com.serviexpress.express',
+                                ),
+                                MarkerLayer(markers: marcadores),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ]);
                     },
                   ),
           ),
@@ -1794,6 +1861,29 @@ extension CentralScreenPanelControl on _CentralScreenState {
   // =========================================================================
 
   // ── PARADEROS-C: carga dinámica desde BD ──────────────────────────────────
+  Widget _filtroChip(String label, bool activo, Color color, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: activo ? color : Colors.transparent,
+          border: Border.all(color: color, width: 1.2),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: activo ? Colors.white : color,
+            fontSize: 10,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _cargarParaderosPanel() async {
     if (!mounted) return;
     try {
@@ -1809,16 +1899,20 @@ extension CentralScreenPanelControl on _CentralScreenState {
       // Si falla, el panel muestra los fallbacks hardcoded
     }
 
-    // Sedes FN con coordenadas
+    // Sedes FN y puntos FN (droguerías, bodega, etc.)
     try {
-      final sedes = await Supabase.instance.client
+      final todasFN = await Supabase.instance.client
           .from('fn_sedes')
           .select('id, numero, nombre, lat, lng')
           .eq('activo', true)
           .not('lat', 'is', null)
           .not('lng', 'is', null);
       if (mounted) {
-        setState(() => _sedesFN = List<Map<String, dynamic>>.from(sedes));
+        final lista = List<Map<String, dynamic>>.from(todasFN);
+        setState(() {
+          _sedesFN  = lista.where((s) => s['numero'] != null).toList();
+          _puntosFN = lista.where((s) => s['numero'] == null).toList();
+        });
       }
     } catch (_) {}
 
