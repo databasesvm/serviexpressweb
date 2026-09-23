@@ -24,7 +24,6 @@ import 'package:serviexpress_app/screens/fn_facturacion_screen.dart'; // Factura
 import 'package:serviexpress_app/screens/fn_red_direcciones_screen.dart'; // Red de direcciones FN
 import 'package:serviexpress_app/utils/auth_helper.dart'; // hashContrasena
 import 'package:serviexpress_app/screens/historial_servicios_screen.dart'; // Historial de servicios
-import 'package:serviexpress_app/screens/central_pedido_domicilio_screen.dart'; // Pedido domicilio desde central
 part 'central_panel_precios.dart';
 part 'central_corte_financiero.dart';
 part 'central_gestion_usuarios.dart';

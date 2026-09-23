@@ -1057,18 +1057,6 @@ extension CentralScreenGestion on _CentralScreenState {
                       ),
                     ),
                     _tarjetaGestion(
-                      icono: Icons.storefront_rounded,
-                      color: Colors.deepOrange,
-                      titulo: 'Pedido a local',
-                      subtitulo: 'Crear pedido de domicilio desde central',
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const CentralPedidoDomicilioScreen(),
-                        ),
-                      ),
-                    ),
-                    _tarjetaGestion(
                       icono: Icons.history_rounded,
                       color: Colors.blueGrey[600]!,
                       titulo: 'Historial de Servicios',
