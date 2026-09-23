@@ -105,12 +105,13 @@ mixin _DispatchMixin on State<LocalScreen> {
         );
       }
       if (leyendaIds.isNotEmpty) {
-        // Misil server-side T+30s para Leyenda VIP — sobrevive en segundo plano
+        // Misil server-side T+F2 para Leyenda VIP — sobrevive en segundo plano
+        final cascada = await CascadaConfig.cargar(); // CONFIG-CASCADA-EXT
         final id30sVipV = await _programarMisilRetardado(
           externalIds: leyendaIds,
           titulo: '👑 SERVICIO VIP',
           mensaje: msg,
-          segundosRetardo: 30,
+          segundosRetardo: cascada.seF2Seg,
         );
         if (id30sVipV != null) {
           await Supabase.instance.client
@@ -243,7 +244,8 @@ mixin _DispatchMixin on State<LocalScreen> {
                 );
               }
 
-              // T=+30s: paradero — misil server-side
+              // T=+F2: paradero — misil server-side
+              final cascadaStd = await CascadaConfig.cargar(); // CONFIG-CASCADA-EXT
               if (pilotosParadero.isNotEmpty) {
                 final List<String> targetStd = pilotosParadero
                     .where((id) => !masterStdIds.contains(id))
@@ -253,7 +255,7 @@ mixin _DispatchMixin on State<LocalScreen> {
                     externalIds: targetStd,
                     titulo: 'TU TURNO DE PARADERO',
                     mensaje: msgStd,
-                    segundosRetardo: 30,
+                    segundosRetardo: cascadaStd.seF2Seg,
                   );
                   if (id30sStd != null) {
                     await Supabase.instance.client
@@ -293,14 +295,14 @@ mixin _DispatchMixin on State<LocalScreen> {
                     externalIds: idsZonaStd,
                     titulo: '📡 SERVICIO CERCA (1km)',
                     mensaje: msgStd,
-                    segundosRetardo: 60,
+                    segundosRetardo: cascadaStd.seF3Seg, // CONFIG-CASCADA-EXT
                   );
                 if (idsTodosStd.isNotEmpty)
                   id90sStd = await _programarMisilRetardado(
                     externalIds: idsTodosStd,
                     titulo: '🚨 SERVICIO SIN TOMAR',
                     mensaje: msgStd,
-                    segundosRetardo: 90,
+                    segundosRetardo: cascadaStd.seF4Seg, // CONFIG-CASCADA-EXT
                   );
                 if (id60sStd != null || id90sStd != null) {
                   await Supabase.instance.client.from('servicios').update({
@@ -547,6 +549,7 @@ mixin _DispatchMixin on State<LocalScreen> {
           .where((id) => !excluidos.contains(id))
           .toList();
 
+      final cascadaDir = await CascadaConfig.cargar(); // CONFIG-CASCADA-EXT
       String? id60s;
       String? id90s;
       if (ids2km.isNotEmpty) {
@@ -554,7 +557,7 @@ mixin _DispatchMixin on State<LocalScreen> {
           externalIds: ids2km,
           titulo: '📡 RECOGIDA CERCA (2km)',
           mensaje: msg,
-          segundosRetardo: 60,
+          segundosRetardo: cascadaDir.seF3Seg,
         );
       }
       if (idsTodos.isNotEmpty) {
@@ -562,7 +565,7 @@ mixin _DispatchMixin on State<LocalScreen> {
           externalIds: idsTodos,
           titulo: '🚨 RECOGIDA SIN TOMAR',
           mensaje: msg,
-          segundosRetardo: 90,
+          segundosRetardo: cascadaDir.seF4Seg,
         );
       }
       if (id60s != null || id90s != null) {
@@ -1174,6 +1177,7 @@ mixin _DispatchMixin on State<LocalScreen> {
               .map((u) => u['id'].toString())
               .where((id) => !_mSnap3.contains(id))
               .toList();
+          final cascadaRed = await CascadaConfig.cargar(); // CONFIG-CASCADA-EXT
           String? id60s3;
           String? id90s3;
           if (idsZona3.isNotEmpty)
@@ -1181,14 +1185,14 @@ mixin _DispatchMixin on State<LocalScreen> {
               externalIds: idsZona3,
               titulo: '📡 SERVICIO CERCA (1km)',
               mensaje: _msg3,
-              segundosRetardo: 60,
+              segundosRetardo: cascadaRed.seF3Seg,
             );
           if (idsTodos3.isNotEmpty)
             id90s3 = await _programarMisilRetardado(
               externalIds: idsTodos3,
               titulo: '🚨 SERVICIO SIN TOMAR',
               mensaje: _msg3,
-              segundosRetardo: 90,
+              segundosRetardo: cascadaRed.seF4Seg,
             );
           if (id60s3 != null || id90s3 != null) {
             await Supabase.instance.client.from('servicios').update({

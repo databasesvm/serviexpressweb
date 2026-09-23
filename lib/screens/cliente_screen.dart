@@ -15,6 +15,7 @@ import 'package:serviexpress_app/screens/chat_screen.dart';
 import 'package:serviexpress_app/screens/pedidos_cliente_screen.dart';
 import 'package:serviexpress_app/screens/cliente_perfil_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:serviexpress_app/utils/cascada_config.dart';
 
 class ClienteScreen extends StatefulWidget {
   final Map<String, dynamic> usuario;
@@ -349,6 +350,8 @@ class _ClienteScreenState extends State<ClienteScreen>
 
       if (!aprobada) return;
 
+      final cascada = await CascadaConfig.cargar();
+
       // CASCADA A MÓVILES — misma lógica que local/central/invitado
       final String destino = servicio['destino']?.toString() ?? 'destino';
       final String msgAlerta = '🛵 Servicio cliente — $destino';
@@ -383,7 +386,7 @@ class _ClienteScreenState extends State<ClienteScreen>
           externalIds: paraderoIds,
           titulo: 'TU TURNO DE PARADERO',
           mensaje: msgAlerta,
-          segundosRetardo: 30,
+          segundosRetardo: cascada.seF2Seg,
         );
         if (id30s != null) {
           await Supabase.instance.client
@@ -421,7 +424,7 @@ class _ClienteScreenState extends State<ClienteScreen>
           externalIds: idsZonaK,
           titulo: '📡 SERVICIO CERCA (1km)',
           mensaje: msgAlerta,
-          segundosRetardo: 60,
+          segundosRetardo: cascada.seF3Seg,
         );
       }
       if (idsTodosK.isNotEmpty) {
@@ -429,7 +432,7 @@ class _ClienteScreenState extends State<ClienteScreen>
           externalIds: idsTodosK,
           titulo: '🚨 SERVICIO SIN TOMAR',
           mensaje: msgAlerta,
-          segundosRetardo: 90,
+          segundosRetardo: cascada.seF4Seg,
         );
       }
       if (id60sK != null || id90sK != null) {

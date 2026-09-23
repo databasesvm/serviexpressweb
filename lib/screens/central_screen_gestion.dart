@@ -1189,6 +1189,17 @@ extension CentralScreenGestion on _CentralScreenState {
                       ),
                     ),
 
+                    // ── CONFIG-CASCADA-D: tiempos de cascada ────────────────
+                    _tarjetaGestion(
+                      icono: Icons.timer_outlined,
+                      color: const Color(0xFF1565C0),
+                      titulo: '⏱️ Cascada de Notificaciones',
+                      subtitulo:
+                          'SE: F2 ${_cascadaSeF2Seg}s · F3 ${_cascadaSeF3Seg}s · F4 ${_cascadaSeF4Seg}s'
+                          '  |  FN: F2 ${_cascadaFnF2Seg}s (⏰${_cascadaFnF2TimeoutSeg}s) · F3 ${_cascadaFnF3Seg}s · F4 ${_cascadaFnF4Seg}s',
+                      onTap: () => _abrirDialogoCascada(context),
+                    ),
+
                   ]),
                 ),
               ),
@@ -1484,6 +1495,216 @@ extension CentralScreenGestion on _CentralScreenState {
     );
   }
 
+  // ── Utilidad de color compartida en _CentralScreenState ─────────────────
+  Color _hexColor(String hex) {
+    try {
+      final h = hex.replaceAll('#', '');
+      return Color(int.parse('FF$h', radix: 16));
+    } catch (_) { return Colors.blue; }
+  }
+
+  // ── CONFIG-CASCADA-D: Dialog de tiempos de cascada ──────────────────────
+
+  Future<void> _abrirDialogoCascada(BuildContext ctx) async {
+    final seF2c  = TextEditingController(text: _cascadaSeF2Seg.toString());
+    final seF3c  = TextEditingController(text: _cascadaSeF3Seg.toString());
+    final seF4c  = TextEditingController(text: _cascadaSeF4Seg.toString());
+    final fnF2c  = TextEditingController(text: _cascadaFnF2Seg.toString());
+    final fnToc  = TextEditingController(text: _cascadaFnF2TimeoutSeg.toString());
+    final fnF3c  = TextEditingController(text: _cascadaFnF3Seg.toString());
+    final fnF4c  = TextEditingController(text: _cascadaFnF4Seg.toString());
+
+    bool guardando = false;
+    String? errorGuardando;
+
+    await showDialog<void>(
+      context: ctx,
+      builder: (dlgCtx) => StatefulBuilder(
+        builder: (_, setDlg) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A1A),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          title: const Row(children: [
+            Icon(Icons.timer_outlined, color: Color(0xFF42A5F5), size: 20),
+            SizedBox(width: 8),
+            Text('Cascada de Notificaciones',
+                style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
+          ]),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Todos los valores son segundos desde T=0 (creación del servicio).',
+                  style: TextStyle(color: Colors.white38, fontSize: 11, height: 1.4),
+                ),
+                const SizedBox(height: 16),
+
+                // ── SERVIEXPRESS ─────────────────────────────────────────
+                _cascadaSeccionLabel('🟢 ServiExpress'),
+                _cascadaCampo(
+                  label: 'Fase 2 — Auto-asigna #1 del paradero',
+                  hint: 'aplica de inmediato a servicios en vuelo',
+                  ctrl: seF2c,
+                ),
+                _cascadaCampo(
+                  label: 'Fase 3 — Push radio 1km del punto de recogida',
+                  hint: 'aplica a servicios creados después de guardar',
+                  ctrl: seF3c,
+                ),
+                _cascadaCampo(
+                  label: 'Fase 4 — Push todos los disponibles',
+                  hint: 'aplica a servicios creados después de guardar',
+                  ctrl: seF4c,
+                ),
+
+                const SizedBox(height: 16),
+
+                // ── FN LA CASCADA ─────────────────────────────────────────
+                _cascadaSeccionLabel('🔵 FN La Cascada'),
+                _cascadaCampo(
+                  label: 'Fase 2 — Ofrece al móvil más cercano a la sede',
+                  hint: 'aplica de inmediato a servicios en vuelo',
+                  ctrl: fnF2c,
+                ),
+                _cascadaCampo(
+                  label: '⏰ Tiempo para aceptar antes de liberar a F3',
+                  hint: 'aplica de inmediato a servicios en vuelo',
+                  ctrl: fnToc,
+                  accentColor: Colors.orange,
+                ),
+                _cascadaCampo(
+                  label: 'Fase 3 — Push no-Masters dentro de 2km de la sede',
+                  hint: 'aplica a servicios creados después de guardar',
+                  ctrl: fnF3c,
+                ),
+                _cascadaCampo(
+                  label: 'Fase 4 — Push global a todos los disponibles',
+                  hint: 'aplica a servicios creados después de guardar',
+                  ctrl: fnF4c,
+                ),
+
+                if (errorGuardando != null) ...[
+                  const SizedBox(height: 10),
+                  Text(errorGuardando!, style: const TextStyle(color: Colors.redAccent, fontSize: 11)),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: guardando ? null : () => Navigator.pop(dlgCtx),
+              child: const Text('CANCELAR', style: TextStyle(color: Colors.white38)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1565C0),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              onPressed: guardando ? null : () async {
+                setDlg(() { guardando = true; errorGuardando = null; });
+                try {
+                  await Supabase.instance.client
+                      .from('config_sistema')
+                      .update({
+                        'cascada_se_f2_seg':         int.tryParse(seF2c.text) ?? 30,
+                        'cascada_se_f3_seg':         int.tryParse(seF3c.text) ?? 60,
+                        'cascada_se_f4_seg':         int.tryParse(seF4c.text) ?? 90,
+                        'cascada_fn_f2_seg':         int.tryParse(fnF2c.text) ?? 30,
+                        'cascada_fn_f2_timeout_seg': int.tryParse(fnToc.text) ?? 30,
+                        'cascada_fn_f3_seg':         int.tryParse(fnF3c.text) ?? 60,
+                        'cascada_fn_f4_seg':         int.tryParse(fnF4c.text) ?? 90,
+                      })
+                      .eq('id', 1);
+                  await _cargarBloqueoInactividad(); // recarga todos los campos de config
+                  if (dlgCtx.mounted) Navigator.pop(dlgCtx);
+                } catch (e) {
+                  setDlg(() { guardando = false; errorGuardando = 'Error al guardar: $e'; });
+                }
+              },
+              child: guardando
+                  ? const SizedBox(width: 16, height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Text('GUARDAR', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    seF2c.dispose(); seF3c.dispose(); seF4c.dispose();
+    fnF2c.dispose(); fnToc.dispose(); fnF3c.dispose(); fnF4c.dispose();
+  }
+
+  Widget _cascadaSeccionLabel(String label) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Text(
+      label,
+      style: const TextStyle(
+        color: Colors.white70,
+        fontSize: 12,
+        fontWeight: FontWeight.bold,
+        letterSpacing: 0.5,
+      ),
+    ),
+  );
+
+  Widget _cascadaCampo({
+    required String label,
+    required String hint,
+    required TextEditingController ctrl,
+    Color accentColor = const Color(0xFF42A5F5),
+  }) =>
+      Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label,
+                      style: const TextStyle(color: Colors.white, fontSize: 11, height: 1.3)),
+                  Text(hint,
+                      style: const TextStyle(color: Colors.white38, fontSize: 10, height: 1.3)),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            SizedBox(
+              width: 58,
+              height: 36,
+              child: TextField(
+                controller: ctrl,
+                keyboardType: TextInputType.number,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: accentColor,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
+                decoration: InputDecoration(
+                  contentPadding: const EdgeInsets.symmetric(vertical: 6),
+                  suffix: Text('s',
+                      style: TextStyle(color: accentColor.withValues(alpha: 0.7), fontSize: 11)),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: accentColor.withValues(alpha: 0.3)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: accentColor),
+                  ),
+                  filled: true,
+                  fillColor: accentColor.withValues(alpha: 0.08),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
 
 }
 
@@ -1505,18 +1726,37 @@ class _PanelGestorParaderosState extends State<_PanelGestorParaderos>
   late Future<List<Map<String, dynamic>>> _future;
 
   // Paraderos de día disponibles (valor → label, color, emoji)
+  // PARADEROS-C ✅ (panel_control): Panel usa BD dinámicamente.
+  // PENDIENTE PARADEROS-D: reemplazar esta lista por carga dinámica en formularios.
   static const _paraderosDia = [
     ('LIBRE',    'Libre (por cercanía)', Color(0xFF2E7D32), '🟢'),
-    ('EXPUENTE', 'Expuente',             Color(0xFF1565C0), '🔵'),
-    ('BOCONO',   'Boconó',               Color(0xFF6A1B9A), '🟣'),
-    ('MEMOS',    'Memos',                Color(0xFF4E342E), '🟤'),
+    ('EXPUENTE', 'Expuente',             Color(0xFF2E7D32), '🟢'),
+    ('BOCONO',   'Boconó',               Color(0xFF4E342E), '🟤'),
+    ('MEMOS',    'Memos',                Color(0xFFC62828), '🔴'),
+  ];
+
+  // ── Tab 3: lista de paraderos de BD ─────────────────────────────────────────
+  List<Map<String, dynamic>> _paraderosBD = [];
+  bool _cargandoParaderosBD = false;
+
+  // Colores predefinidos para el selector de color
+  static const _coloresPreset = [
+    ('#1565C0', '🔵 Azul'),
+    ('#6A1B9A', '🟣 Morado'),
+    ('#4E342E', '🟤 Café'),
+    ('#1A237E', '🌙 Azul noche'),
+    ('#1B5E20', '🟢 Verde'),
+    ('#E65100', '🟠 Naranja'),
+    ('#B71C1C', '🔴 Rojo'),
+    ('#37474F', '⚫ Gris oscuro'),
   ];
 
   @override
   void initState() {
     super.initState();
-    _tab = TabController(length: 2, vsync: this);
+    _tab = TabController(length: 3, vsync: this);
     _future = _cargar();
+    _cargarParaderosBD();
   }
 
   @override
@@ -1570,6 +1810,7 @@ class _PanelGestorParaderosState extends State<_PanelGestorParaderos>
           tabs: const [
             Tab(icon: Icon(Icons.wb_sunny_outlined, size: 18), text: 'DÍA'),
             Tab(icon: Icon(Icons.nights_stay_outlined, size: 18), text: 'NOCTURNO'),
+            Tab(icon: Icon(Icons.place_rounded, size: 18), text: 'PARADEROS'),
           ],
         ),
       ),
@@ -1590,6 +1831,7 @@ class _PanelGestorParaderosState extends State<_PanelGestorParaderos>
             children: [
               _buildTabDia(locales),
               _buildTabNocturno(locales),
+              _buildTabParaderos(),
             ],
           );
         },
@@ -1835,6 +2077,327 @@ class _PanelGestorParaderosState extends State<_PanelGestorParaderos>
       ),
     );
   }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // TAB 3: GESTIÓN DE PARADEROS (CRUD sobre tabla paraderos)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  Future<void> _cargarParaderosBD() async {
+    if (!mounted) return;
+    setState(() => _cargandoParaderosBD = true);
+    final data = await Supabase.instance.client
+        .from('paraderos')
+        .select('id, nombre, latitud, longitud, activo, es_nocturno, color_hex, emoji, orden, radio_metros')
+        .order('orden', ascending: true);
+    if (!mounted) return;
+    setState(() { _paraderosBD = List<Map<String, dynamic>>.from(data); _cargandoParaderosBD = false; });
+  }
+
+  Widget _buildTabParaderos() {
+    if (_cargandoParaderosBD) {
+      return const Center(child: CircularProgressIndicator(color: Colors.black));
+    }
+    return Stack(children: [
+      ListView(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 80),
+        children: [
+          _bannerInfo('📍 Gestiona los paraderos de la flota. Los cambios se reflejan en toda la app al próximo reinicio de sesión.'),
+          const SizedBox(height: 12),
+          if (_paraderosBD.isEmpty)
+            _emptyCard('Sin paraderos registrados')
+          else
+            ..._paraderosBD.map((p) => _cardParadero(p)),
+        ],
+      ),
+      // FAB crear nuevo paradero
+      Positioned(
+        bottom: 16, right: 16,
+        child: FloatingActionButton.extended(
+          heroTag: 'fab_paradero',
+          backgroundColor: Colors.black,
+          foregroundColor: Colors.white,
+          icon: const Icon(Icons.add_location_alt_rounded),
+          label: const Text('Nuevo paradero', style: TextStyle(fontWeight: FontWeight.bold)),
+          onPressed: () => _dialogParadero(null),
+        ),
+      ),
+    ]);
+  }
+
+  Widget _cardParadero(Map<String, dynamic> p) {
+    final color = _hexColor(p['color_hex'] ?? '#1565C0');
+    final activo = p['activo'] == true;
+    final esNocturno = p['es_nocturno'] == true;
+
+    return Card(
+      elevation: activo ? 1 : 0,
+      margin: const EdgeInsets.only(bottom: 10),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: activo ? color.withValues(alpha: 0.35) : Colors.grey[300]!),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(children: [
+          // Emoji + color swatch
+          Container(
+            width: 42, height: 42,
+            decoration: BoxDecoration(
+              color: activo ? color.withValues(alpha: 0.12) : Colors.grey[100],
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: activo ? color.withValues(alpha: 0.4) : Colors.grey[300]!),
+            ),
+            child: Center(child: Text(p['emoji'] ?? '📍', style: const TextStyle(fontSize: 20))),
+          ),
+          const SizedBox(width: 12),
+          // Info
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Text(p['nombre'] ?? '', style: TextStyle(
+                fontWeight: FontWeight.bold, fontSize: 14,
+                color: activo ? Colors.black87 : Colors.black38,
+              )),
+              const SizedBox(width: 6),
+              if (esNocturno)
+                _badgeChip('🌙 nocturno', const Color(0xFF1A237E)),
+              if (!activo)
+                _badgeChip('INACTIVO', Colors.grey),
+            ]),
+            const SizedBox(height: 3),
+            Text(
+              'Orden ${p['orden'] ?? '—'} · ${p['color_hex'] ?? ''} · radio ${p['radio_metros'] ?? 150}m',
+              style: const TextStyle(fontSize: 10, color: Colors.black38),
+            ),
+            if (p['latitud'] != null)
+              Text(
+                '${(p['latitud'] as double).toStringAsFixed(5)}, ${(p['longitud'] as double).toStringAsFixed(5)}',
+                style: const TextStyle(fontSize: 10, color: Colors.black38),
+              ),
+          ])),
+          // Acciones
+          Column(mainAxisSize: MainAxisSize.min, children: [
+            IconButton(
+              icon: const Icon(Icons.edit_rounded, size: 18),
+              color: Colors.black54,
+              tooltip: 'Editar',
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+              onPressed: () => _dialogParadero(p),
+            ),
+            IconButton(
+              icon: Icon(activo ? Icons.toggle_on_rounded : Icons.toggle_off_rounded,
+                  size: 22, color: activo ? Colors.green[700] : Colors.grey),
+              tooltip: activo ? 'Desactivar' : 'Activar',
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+              onPressed: () => _toggleActivoParadero(p),
+            ),
+          ]),
+        ]),
+      ),
+    );
+  }
+
+  Widget _badgeChip(String label, Color color) => Container(
+    margin: const EdgeInsets.only(left: 4),
+    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(6),
+      border: Border.all(color: color.withValues(alpha: 0.4)),
+    ),
+    child: Text(label, style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: color)),
+  );
+
+  Color _hexColor(String hex) {
+    try {
+      final h = hex.replaceAll('#', '');
+      return Color(int.parse('FF$h', radix: 16));
+    } catch (_) { return Colors.blue; }
+  }
+
+  Future<void> _toggleActivoParadero(Map<String, dynamic> p) async {
+    final nuevo = !(p['activo'] == true);
+    await Supabase.instance.client
+        .from('paraderos')
+        .update({'activo': nuevo})
+        .eq('id', p['id']);
+    await _cargarParaderosBD();
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(nuevo ? '✅ ${p['nombre']} activado' : '⏸ ${p['nombre']} desactivado'),
+      backgroundColor: Colors.black87,
+      duration: const Duration(seconds: 2),
+    ));
+  }
+
+  Future<void> _dialogParadero(Map<String, dynamic>? existing) async {
+    final isEdit = existing != null;
+    final nombreCtrl  = TextEditingController(text: existing?['nombre'] ?? '');
+    final emojiCtrl   = TextEditingController(text: existing?['emoji']  ?? '📍');
+    final colorCtrl   = TextEditingController(text: existing?['color_hex'] ?? '#1565C0');
+    final ordenCtrl   = TextEditingController(text: (existing?['orden'] ?? '').toString());
+    final latCtrl     = TextEditingController(text: (existing?['latitud']  ?? '').toString());
+    final lngCtrl     = TextEditingController(text: (existing?['longitud'] ?? '').toString());
+    final radioCtrl   = TextEditingController(text: (existing?['radio_metros'] ?? 150).toString());
+    bool esNocturno   = existing?['es_nocturno'] == true;
+    String colorSel   = existing?['color_hex'] ?? '#1565C0';
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSt) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A1A),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(children: [
+            Icon(isEdit ? Icons.edit_location_rounded : Icons.add_location_alt_rounded,
+                color: Colors.white70, size: 20),
+            const SizedBox(width: 8),
+            Text(isEdit ? 'Editar paradero' : 'Nuevo paradero',
+                style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+          ]),
+          content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+            // Nombre
+            _inputField(nombreCtrl, 'Nombre (ej: EXPUENTE)', TextInputType.text),
+            const SizedBox(height: 10),
+            // Emoji + Orden en fila
+            Row(children: [
+              Expanded(child: _inputField(emojiCtrl, 'Emoji', TextInputType.text)),
+              const SizedBox(width: 8),
+              Expanded(child: _inputField(ordenCtrl, 'Orden (#)', TextInputType.number)),
+            ]),
+            const SizedBox(height: 10),
+            // Color hex + preview
+            Row(children: [
+              Expanded(child: _inputField(colorCtrl, 'Color hex (#1565C0)',
+                TextInputType.text, onChange: (v) => setSt(() => colorSel = v))),
+              const SizedBox(width: 8),
+              Container(
+                width: 40, height: 40,
+                decoration: BoxDecoration(
+                  color: _hexColor(colorSel),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+            ]),
+            const SizedBox(height: 8),
+            // Colores preset
+            Wrap(spacing: 6, runSpacing: 6, children: _coloresPreset.map((c) {
+              final sel = colorSel == c.$1;
+              return GestureDetector(
+                onTap: () => setSt(() { colorSel = c.$1; colorCtrl.text = c.$1; }),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: sel ? _hexColor(c.$1).withValues(alpha: 0.2) : Colors.white10,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: sel ? _hexColor(c.$1) : Colors.white24, width: sel ? 1.5 : 1),
+                  ),
+                  child: Text(c.$2, style: TextStyle(fontSize: 10,
+                      color: sel ? Colors.white : Colors.white54,
+                      fontWeight: sel ? FontWeight.bold : FontWeight.normal)),
+                ),
+              );
+            }).toList()),
+            const SizedBox(height: 10),
+            // Coordenadas
+            Row(children: [
+              Expanded(child: _inputField(latCtrl, 'Latitud', const TextInputType.numberWithOptions(decimal: true, signed: true))),
+              const SizedBox(width: 8),
+              Expanded(child: _inputField(lngCtrl, 'Longitud', const TextInputType.numberWithOptions(decimal: true, signed: true))),
+            ]),
+            const SizedBox(height: 10),
+            // Radio geocerca
+            _inputField(radioCtrl, 'Radio geocerca (metros)', TextInputType.number),
+            const SizedBox(height: 4),
+            const Text('Distancia máxima para permanecer en la fila (+ 50m de margen automático).',
+                style: TextStyle(fontSize: 10, color: Colors.white38)),
+            const SizedBox(height: 10),
+            // Es nocturno
+            Row(children: [
+              const Icon(Icons.nights_stay_outlined, color: Colors.white54, size: 18),
+              const SizedBox(width: 8),
+              const Expanded(child: Text('Paradero nocturno',
+                  style: TextStyle(color: Colors.white70, fontSize: 12))),
+              Switch(
+                value: esNocturno,
+                onChanged: (v) => setSt(() => esNocturno = v),
+                activeColor: const Color(0xFF1A237E),
+              ),
+            ]),
+          ])),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('CANCELAR', style: TextStyle(color: Colors.white38)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF3AF500), foregroundColor: Colors.black),
+              onPressed: () async {
+                final nombre = nombreCtrl.text.trim().toUpperCase();
+                if (nombre.isEmpty) return;
+                final payload = {
+                  'nombre':       nombre,
+                  'emoji':        emojiCtrl.text.trim().isEmpty ? '📍' : emojiCtrl.text.trim(),
+                  'color_hex':    colorCtrl.text.trim().isEmpty ? '#1565C0' : colorCtrl.text.trim(),
+                  'es_nocturno':  esNocturno,
+                  'orden':        int.tryParse(ordenCtrl.text.trim()) ?? 99,
+                  'latitud':      double.tryParse(latCtrl.text.trim()),
+                  'longitud':     double.tryParse(lngCtrl.text.trim()),
+                  'radio_metros': int.tryParse(radioCtrl.text.trim()) ?? 150,
+                  'activo':       true,
+                };
+                if (isEdit) {
+                  await Supabase.instance.client
+                      .from('paraderos').update(payload).eq('id', existing['id']);
+                } else {
+                  await Supabase.instance.client.from('paraderos').insert(payload);
+                }
+                if (ctx.mounted) Navigator.pop(ctx);
+                await _cargarParaderosBD();
+                if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: Text(isEdit ? '✅ Paradero actualizado' : '✅ Paradero creado'),
+                  backgroundColor: Colors.black87,
+                  duration: const Duration(seconds: 2),
+                ));
+              },
+              child: const Text('GUARDAR', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ),
+    );
+    nombreCtrl.dispose(); emojiCtrl.dispose(); colorCtrl.dispose();
+    ordenCtrl.dispose(); latCtrl.dispose(); lngCtrl.dispose(); radioCtrl.dispose();
+  }
+
+  Widget _inputField(TextEditingController ctrl, String hint, TextInputType tipo,
+      {void Function(String)? onChange}) =>
+    TextField(
+      controller: ctrl,
+      keyboardType: tipo,
+      onChanged: onChange,
+      style: const TextStyle(color: Colors.white, fontSize: 13),
+      decoration: InputDecoration(
+        hintText: hint,
+        hintStyle: const TextStyle(color: Colors.white30, fontSize: 11),
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+        filled: true,
+        fillColor: Colors.white10,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: Colors.white24)),
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: Colors.white24)),
+        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: Color(0xFF3AF500))),
+      ),
+    );
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // FIN TAB 3
+  // ══════════════════════════════════════════════════════════════════════════
 
   /// Tarjeta de local en la pestaña NOCTURNO
   Widget _cardLocalNocturno(Map<String, dynamic> local, bool esNocturno) {

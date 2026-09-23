@@ -99,49 +99,16 @@ extension CentralScreenPanelControl on _CentralScreenState {
                       return ((a['id'] as num?) ?? 0).compareTo((b['id'] as num?) ?? 0);
                     }
 
-                    final filaExpuente = moviles
-                        .where(
-                          (m) =>
-                              m['en_linea'] == true &&
-                              m['paradero_actual'] == 'EXPUENTE' &&
-                              m['ingreso_fila'] != null &&
-                              m['suspendido'] != true,
-                        )
-                        .toList();
-                    filaExpuente.sort(ordenarPorPrioridadYHora);
-
-                    final filaMemos = moviles
-                        .where(
-                          (m) =>
-                              m['en_linea'] == true &&
-                              m['paradero_actual'] == 'MEMOS' &&
-                              m['ingreso_fila'] != null &&
-                              m['suspendido'] != true,
-                        )
-                        .toList();
-                    filaMemos.sort(ordenarPorPrioridadYHora);
-
-                    final filaNocturno = moviles
-                        .where(
-                          (m) =>
-                              m['en_linea'] == true &&
-                              m['paradero_actual'] == 'NOCTURNO' &&
-                              m['ingreso_fila'] != null &&
-                              m['suspendido'] != true,
-                        )
-                        .toList();
-                    filaNocturno.sort(ordenarPorPrioridadYHora);
-
-                    final filaBocono = moviles
-                        .where(
-                          (m) =>
-                              m['en_linea'] == true &&
-                              m['paradero_actual'] == 'BOCONO' &&
-                              m['ingreso_fila'] != null &&
-                              m['suspendido'] != true,
-                        )
-                        .toList();
-                    filaBocono.sort(ordenarPorPrioridadYHora);
+                    // ── PARADEROS-C: filas dinámicas desde BD ──────────────
+                    List<Map<String, dynamic>> _filaParadero(String nombre) {
+                      final fila = moviles.where((m) =>
+                        m['en_linea'] == true &&
+                        m['paradero_actual'] == nombre &&
+                        m['ingreso_fila'] != null &&
+                        m['suspendido'] != true,
+                      ).toList()..sort(ordenarPorPrioridadYHora);
+                      return fila;
+                    }
 
                     final sinFila = moviles
                         .where(
@@ -337,356 +304,132 @@ extension CentralScreenPanelControl on _CentralScreenState {
                         const Divider(height: 4, color: Colors.transparent),
                         // ── FIN SECCIÓN FN ──────────────────────────────────
 
-                        GestureDetector(
-                          onTap: () => setState(() {
-                            if (_seccionesOcultasFlota.contains('expuente')) {
-                              _seccionesOcultasFlota.remove('expuente');
-                            } else {
-                              _seccionesOcultasFlota.add('expuente');
-                            }
-                          }),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            color: Colors.blue[50],
-                            child: Row(
-                              children: [
-                                const Expanded(
-                                  child: Text(
-                                    '📍 PARADERO 1 (Expuente)',
-                                    style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue, fontSize: 11),
-                                  ),
-                                ),
-                                AnimatedSwitcher(
-                                  duration: const Duration(milliseconds: 220),
-                                  child: Container(
-                                    key: ValueKey('exp_cnt_${filaExpuente.length}'),
-                                    margin: const EdgeInsets.only(right: 6),
-                                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: filaExpuente.isNotEmpty ? Colors.blue[800] : Colors.blue[200],
-                                      borderRadius: BorderRadius.circular(10),
+                        // ── PARADEROS-C: secciones dinámicas desde BD ────────
+                        // Si aún no cargó, muestra fallback silencioso.
+                        // Una vez que _paraderosPanel tiene datos, genera una
+                        // sección colapsable por cada paradero activo.
+                        if (_paraderosPanel.isEmpty)
+                          const SizedBox.shrink()
+                        else
+                          for (final paradero in _paraderosPanel) ...[
+                            Builder(builder: (ctx) {
+                              final nombre  = paradero['nombre'].toString();
+                              final emoji   = paradero['emoji'] as String? ?? '📍';
+                              final hexStr  = paradero['color_hex'] as String? ?? '#1565C0';
+                              final esNoc   = paradero['es_nocturno'] == true;
+                              final color   = _hexToColorPanel(hexStr);
+                              final key     = nombre.toLowerCase();
+                              final fila    = _filaParadero(nombre);
+
+                              final bgColor  = esNoc ? color : color.withValues(alpha: 0.10);
+                              final txtColor = esNoc ? Colors.white : color;
+                              final badgeOn  = esNoc ? Colors.white24 : color;
+                              final badgeOff = esNoc ? Colors.white10 : color.withValues(alpha: 0.30);
+                              final chevronColor = esNoc ? Colors.white54 : color.withValues(alpha: 0.70);
+
+                              return Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  GestureDetector(
+                                    onTap: () => setState(() {
+                                      if (_seccionesOcultasFlota.contains(key)) {
+                                        _seccionesOcultasFlota.remove(key);
+                                      } else {
+                                        _seccionesOcultasFlota.add(key);
+                                      }
+                                    }),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                      color: bgColor,
+                                      child: Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              '$emoji $nombre',
+                                              style: TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                color: txtColor,
+                                                fontSize: 11,
+                                              ),
+                                            ),
+                                          ),
+                                          AnimatedSwitcher(
+                                            duration: const Duration(milliseconds: 220),
+                                            child: Container(
+                                              key: ValueKey('${key}_cnt_${fila.length}'),
+                                              margin: const EdgeInsets.only(right: 6),
+                                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: fila.isNotEmpty ? badgeOn : badgeOff,
+                                                borderRadius: BorderRadius.circular(10),
+                                              ),
+                                              child: Text(
+                                                '${fila.length}',
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 10,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                          if (fila.isNotEmpty)
+                                            TextButton.icon(
+                                              onPressed: () => _vaciarParadero(nombre, fila),
+                                              icon: const Icon(Icons.delete_sweep, size: 14, color: Colors.red),
+                                              label: const Text('Vaciar', style: TextStyle(fontSize: 10, color: Colors.red)),
+                                              style: TextButton.styleFrom(
+                                                padding: EdgeInsets.zero,
+                                                minimumSize: Size.zero,
+                                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                              ),
+                                            ),
+                                          Icon(
+                                            _seccionesOcultasFlota.contains(key)
+                                                ? Icons.expand_more
+                                                : Icons.expand_less,
+                                            size: 16,
+                                            color: chevronColor,
+                                          ),
+                                        ],
+                                      ),
                                     ),
-                                    child: Text('${filaExpuente.length}',
-                                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
                                   ),
-                                ),
-                                if (filaExpuente.isNotEmpty)
-                                  TextButton.icon(
-                                    onPressed: () => _vaciarParadero('Expuente', filaExpuente),
-                                    icon: const Icon(Icons.delete_sweep, size: 14, color: Colors.red),
-                                    label: const Text('Vaciar', style: TextStyle(fontSize: 10, color: Colors.red)),
-                                    style: TextButton.styleFrom(
-                                      padding: EdgeInsets.zero,
-                                      minimumSize: Size.zero,
-                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                    ),
-                                  ),
-                                Icon(
-                                  _seccionesOcultasFlota.contains('expuente') ? Icons.expand_more : Icons.expand_less,
-                                  size: 16,
-                                  color: Colors.blue[400],
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        if (!_seccionesOcultasFlota.contains('expuente')) ...[
-                          if (filaExpuente.isEmpty)
-                            const Padding(
-                              padding: EdgeInsets.all(8),
-                              child: Text(
-                                'Sin móviles en cola',
-                                style: TextStyle(
-                                  color: Colors.grey,
-                                  fontSize: 11,
-                                ),
-                              ),
-                            )
-                          else
-                            ...filaExpuente.asMap().entries.map((e) {
-                              int idx = e.key + 1;
-                              var m = e.value;
-                              return FadeSlideIn(
-                                key: ValueKey('exp_${m['id']}'),
-                                child: ListTile(
-                                  dense: true,
-                                  leading: _paraderoMovilLeading(m, Colors.blue[800]!),
-                                  title: Text(
-                                    '#$idx. ${m['nombre'].toString().toUpperCase()}',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                  subtitle: _subtituloMovilFlota(m),
-                                  trailing: _movilTrailing(m),
-                                  onTap: () => _abrirMenuAccionesMovil(context, m),
-                                ),
+                                  if (!_seccionesOcultasFlota.contains(key))
+                                    if (fila.isEmpty)
+                                      const Padding(
+                                        padding: EdgeInsets.all(8),
+                                        child: Text(
+                                          'Sin móviles en cola',
+                                          style: TextStyle(color: Colors.grey, fontSize: 11),
+                                        ),
+                                      )
+                                    else
+                                      ...fila.asMap().entries.map((e) {
+                                        final idx = e.key + 1;
+                                        final m   = e.value;
+                                        return FadeSlideIn(
+                                          key: ValueKey('${key}_${m['id']}'),
+                                          child: ListTile(
+                                            dense: true,
+                                            leading: _paraderoMovilLeading(m, color),
+                                            title: Text(
+                                              '#$idx. ${m['nombre'].toString().toUpperCase()}',
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                            subtitle: _subtituloMovilFlota(m),
+                                            trailing: _movilTrailing(m),
+                                            onTap: () => _abrirMenuAccionesMovil(context, m),
+                                          ),
+                                        );
+                                      }),
+                                ],
                               );
                             }),
-                        ],
-
-                        GestureDetector(
-                          onTap: () => setState(() {
-                            if (_seccionesOcultasFlota.contains('memos')) {
-                              _seccionesOcultasFlota.remove('memos');
-                            } else {
-                              _seccionesOcultasFlota.add('memos');
-                            }
-                          }),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            color: Colors.purple[50],
-                            child: Row(
-                              children: [
-                                const Expanded(
-                                  child: Text(
-                                    '📍 PARADERO 2 (Memos)',
-                                    style: TextStyle(fontWeight: FontWeight.bold, color: Colors.purple, fontSize: 11),
-                                  ),
-                                ),
-                                AnimatedSwitcher(
-                                  duration: const Duration(milliseconds: 220),
-                                  child: Container(
-                                    key: ValueKey('mem_cnt_${filaMemos.length}'),
-                                    margin: const EdgeInsets.only(right: 6),
-                                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: filaMemos.isNotEmpty ? Colors.purple[800] : Colors.purple[200],
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    child: Text('${filaMemos.length}',
-                                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-                                  ),
-                                ),
-                                if (filaMemos.isNotEmpty)
-                                  TextButton.icon(
-                                    onPressed: () => _vaciarParadero('Memos', filaMemos),
-                                    icon: const Icon(Icons.delete_sweep, size: 14, color: Colors.red),
-                                    label: const Text('Vaciar', style: TextStyle(fontSize: 10, color: Colors.red)),
-                                    style: TextButton.styleFrom(
-                                      padding: EdgeInsets.zero,
-                                      minimumSize: Size.zero,
-                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                    ),
-                                  ),
-                                Icon(
-                                  _seccionesOcultasFlota.contains('memos') ? Icons.expand_more : Icons.expand_less,
-                                  size: 16,
-                                  color: Colors.purple[300],
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        if (!_seccionesOcultasFlota.contains('memos')) ...[
-                          if (filaMemos.isEmpty)
-                            const Padding(
-                              padding: EdgeInsets.all(8),
-                              child: Text(
-                                'Sin móviles en cola',
-                                style: TextStyle(
-                                  color: Colors.grey,
-                                  fontSize: 11,
-                                ),
-                              ),
-                            )
-                          else
-                            ...filaMemos.asMap().entries.map((e) {
-                              int idx = e.key + 1;
-                              var m = e.value;
-                              return FadeSlideIn(
-                                key: ValueKey('memos_${m['id']}'),
-                                child: ListTile(
-                                  dense: true,
-                                  leading: _paraderoMovilLeading(m, Colors.purple[800]!),
-                                  title: Text(
-                                    '#$idx. ${m['nombre'].toString().toUpperCase()}',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                  subtitle: _subtituloMovilFlota(m),
-                                  trailing: _movilTrailing(m),
-                                  onTap: () => _abrirMenuAccionesMovil(context, m),
-                                ),
-                              );
-                            }),
-                        ],
-
-                        // ── PARADERO BOCONO (posición 3, entre Memos y Nocturno) ──
-                        GestureDetector(
-                          onTap: () => setState(() {
-                            if (_seccionesOcultasFlota.contains('bocono')) {
-                              _seccionesOcultasFlota.remove('bocono');
-                            } else {
-                              _seccionesOcultasFlota.add('bocono');
-                            }
-                          }),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            color: Colors.brown[700],
-                            child: Row(
-                              children: [
-                                const Expanded(
-                                  child: Text(
-                                    '📍 PARADERO BOCONO',
-                                    style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 11),
-                                  ),
-                                ),
-                                AnimatedSwitcher(
-                                  duration: const Duration(milliseconds: 220),
-                                  child: Container(
-                                    key: ValueKey('boc_cnt_${filaBocono.length}'),
-                                    margin: const EdgeInsets.only(right: 6),
-                                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: filaBocono.isNotEmpty ? Colors.brown[300] : Colors.brown[500],
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    child: Text('${filaBocono.length}',
-                                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-                                  ),
-                                ),
-                                if (filaBocono.isNotEmpty)
-                                  TextButton.icon(
-                                    onPressed: () => _vaciarParadero('Bocono', filaBocono),
-                                    icon: const Icon(Icons.delete_sweep, size: 14, color: Colors.orangeAccent),
-                                    label: const Text('Vaciar', style: TextStyle(fontSize: 10, color: Colors.orangeAccent)),
-                                    style: TextButton.styleFrom(
-                                      padding: EdgeInsets.zero,
-                                      minimumSize: Size.zero,
-                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                    ),
-                                  ),
-                                Icon(
-                                  _seccionesOcultasFlota.contains('bocono') ? Icons.expand_more : Icons.expand_less,
-                                  size: 16,
-                                  color: Colors.brown[200],
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        if (!_seccionesOcultasFlota.contains('bocono')) ...[
-                          if (filaBocono.isEmpty)
-                            const Padding(
-                              padding: EdgeInsets.all(8),
-                              child: Text(
-                                'Sin móviles en cola',
-                                style: TextStyle(color: Colors.grey, fontSize: 11),
-                              ),
-                            )
-                          else
-                            ...filaBocono.asMap().entries.map((e) {
-                              int idx = e.key + 1;
-                              var m = e.value;
-                              return FadeSlideIn(
-                                key: ValueKey('boc_${m['id']}'),
-                                child: ListTile(
-                                  dense: true,
-                                  leading: _paraderoMovilLeading(m, Colors.brown[600]!),
-                                  title: Text(
-                                    '#$idx. ${m['nombre'].toString().toUpperCase()}',
-                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                                  ),
-                                  subtitle: _subtituloMovilFlota(m),
-                                  trailing: _movilTrailing(m),
-                                  onTap: () => _abrirMenuAccionesMovil(context, m),
-                                ),
-                              );
-                            }),
-                        ],
-
-                        GestureDetector(
-                          onTap: () => setState(() {
-                            if (_seccionesOcultasFlota.contains('nocturno')) {
-                              _seccionesOcultasFlota.remove('nocturno');
-                            } else {
-                              _seccionesOcultasFlota.add('nocturno');
-                            }
-                          }),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            color: Colors.indigo[900],
-                            child: Row(
-                              children: [
-                                const Expanded(
-                                  child: Text(
-                                    '🌙 PARADERO NOCTURNO',
-                                    style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 11),
-                                  ),
-                                ),
-                                AnimatedSwitcher(
-                                  duration: const Duration(milliseconds: 220),
-                                  child: Container(
-                                    key: ValueKey('noc_cnt_${filaNocturno.length}'),
-                                    margin: const EdgeInsets.only(right: 6),
-                                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: filaNocturno.isNotEmpty ? Colors.indigo[300] : Colors.indigo[700],
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    child: Text('${filaNocturno.length}',
-                                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-                                  ),
-                                ),
-                                if (filaNocturno.isNotEmpty)
-                                  TextButton.icon(
-                                    onPressed: () => _vaciarParadero('Nocturno', filaNocturno),
-                                    icon: const Icon(Icons.delete_sweep, size: 14, color: Colors.orangeAccent),
-                                    label: const Text('Vaciar', style: TextStyle(fontSize: 10, color: Colors.orangeAccent)),
-                                    style: TextButton.styleFrom(
-                                      padding: EdgeInsets.zero,
-                                      minimumSize: Size.zero,
-                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                    ),
-                                  ),
-                                Icon(
-                                  _seccionesOcultasFlota.contains('nocturno') ? Icons.expand_more : Icons.expand_less,
-                                  size: 16,
-                                  color: Colors.indigo[200],
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        if (!_seccionesOcultasFlota.contains('nocturno')) ...[
-                          if (filaNocturno.isEmpty)
-                            const Padding(
-                              padding: EdgeInsets.all(8),
-                              child: Text(
-                                'Sin móviles en cola',
-                                style: TextStyle(
-                                  color: Colors.grey,
-                                  fontSize: 11,
-                                ),
-                              ),
-                            )
-                          else
-                            ...filaNocturno.asMap().entries.map((e) {
-                              int idx = e.key + 1;
-                              var m = e.value;
-                              return FadeSlideIn(
-                                key: ValueKey('noc_${m['id']}'),
-                                child: ListTile(
-                                  dense: true,
-                                  leading: _paraderoMovilLeading(m, Colors.indigo[400]!),
-                                  title: Text(
-                                    '#$idx. ${m['nombre'].toString().toUpperCase()}',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                  subtitle: _subtituloMovilFlota(m),
-                                  trailing: _movilTrailing(m),
-                                  onTap: () => _abrirMenuAccionesMovil(context, m),
-                                ),  // ListTile
-                              );    // FadeSlideIn
-                            }),
-                        ],
+                          ],
 
                         // =====================================================
                         // SECCIÓN: EN SERVICIO
@@ -1433,42 +1176,37 @@ extension CentralScreenPanelControl on _CentralScreenState {
                     stream: _streamUsuariosMoviles,
                     builder: (context, snapMoviles) {
                       List<Marker> marcadores = [];
-                      marcadores.add(
-                        Marker(
-                          point: const LatLng(7.863439, -72.475760),
-                          width: 40,
-                          height: 40,
-                          child: const Icon(
-                            Icons.location_on,
-                            color: Colors.blue,
-                            size: 40,
-                          ),
-                        ),
-                      );
-                      marcadores.add(
-                        Marker(
-                          point: const LatLng(7.863283, -72.476152),
-                          width: 40,
-                          height: 40,
-                          child: const Icon(
-                            Icons.location_on,
-                            color: Colors.indigo,
-                            size: 40,
-                          ),
-                        ),
-                      );
-                      marcadores.add(
-                        Marker(
-                          point: const LatLng(7.863976, -72.479256),
-                          width: 40,
-                          height: 40,
-                          child: const Icon(
-                            Icons.location_on,
-                            color: Colors.purple,
-                            size: 40,
-                          ),
-                        ),
-                      );
+                      // ── Pins de paraderos — dinámicos desde BD ─────────
+                      for (final p in _paraderosPanel) {
+                        final lat = (p['latitud'] as num?)?.toDouble();
+                        final lng = (p['longitud'] as num?)?.toDouble();
+                        if (lat == null || lng == null) continue;
+                        final pinColor = _hexToColorPanel(
+                            p['color_hex'] as String? ?? '#1565C0');
+                        final pinLabel = p['nombre'].toString();
+                        final pinEmoji = p['emoji'] as String? ?? '📍';
+                        marcadores.add(Marker(
+                          point: LatLng(lat, lng),
+                          width: 72,
+                          height: 56,
+                          child: Column(mainAxisSize: MainAxisSize.min, children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: pinColor,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                '$pinEmoji $pinLabel',
+                                style: const TextStyle(color: Colors.white,
+                                    fontSize: 8, fontWeight: FontWeight.bold),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            Icon(Icons.location_on, color: pinColor, size: 28),
+                          ]),
+                        ));
+                      }
 
                       if (snapMoviles.hasData) {
                         for (var m in snapMoviles.data!) {
@@ -1995,4 +1733,24 @@ extension CentralScreenPanelControl on _CentralScreenState {
   // apretados que se puedan tocar por error. Se abre al tocar la
   // tarjeta del moto en cualquiera de las filas de paradero.
   // =========================================================================
+
+  // ── PARADEROS-C: carga dinámica desde BD ──────────────────────────────────
+  Future<void> _cargarParaderosPanel() async {
+    if (!mounted) return;
+    try {
+      final data = await Supabase.instance.client
+          .from('paraderos')
+          .select()
+          .eq('activo', true)
+          .order('orden', ascending: true);
+      if (mounted) {
+        setState(() => _paraderosPanel = List<Map<String, dynamic>>.from(data));
+      }
+    } catch (_) {
+      // Si falla, el panel muestra los fallbacks hardcoded
+    }
+  }
+
+  /// Alias local de _hexColor (definido en central_screen_gestion.dart).
+  Color _hexToColorPanel(String hex) => _hexColor(hex);
 }

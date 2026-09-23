@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart';
 import 'package:serviexpress_app/utils/widgets_compartidos.dart';
+import 'package:serviexpress_app/utils/cascada_config.dart';
 
 class GuestTrackingScreen extends StatefulWidget {
   const GuestTrackingScreen({super.key});
@@ -59,6 +60,7 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
 
       if (aprobada) {
         // --- CASCADA 4 FASES — igual que el resto de la app ---
+        final cascada = await CascadaConfig.cargar();
         final int svcId = servicio['id'] as int;
         final double? origLat = (servicio['origen_lat'] as num?)?.toDouble();
         final double? origLng = (servicio['origen_lng'] as num?)?.toDouble();
@@ -94,7 +96,7 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
             externalIds: paraderoIds,
             titulo: 'TU TURNO DE PARADERO',
             mensaje: 'Servicio de Invitado disponible.',
-            segundosRetardo: 30,
+            segundosRetardo: cascada.seF2Seg,
           );
           if (id30s != null) {
             await Supabase.instance.client
@@ -138,14 +140,14 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
             externalIds: idsZonaG,
             titulo: '📡 SERVICIO CERCA (1km)',
             mensaje: 'Servicio de Invitado disponible.',
-            segundosRetardo: 60,
+            segundosRetardo: cascada.seF3Seg,
           );
         if (idsTodosG.isNotEmpty)
           id90sG = await MotorNotificaciones.programarMisilRetardado(
             externalIds: idsTodosG,
             titulo: '🚨 SERVICIO SIN TOMAR',
             mensaje: 'Servicio de Invitado sin asignar.',
-            segundosRetardo: 90,
+            segundosRetardo: cascada.seF4Seg,
           );
         if (id60sG != null || id90sG != null) {
           await Supabase.instance.client.from('servicios').update({

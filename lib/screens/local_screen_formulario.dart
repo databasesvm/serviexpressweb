@@ -1775,11 +1775,12 @@ mixin _FormularioMixin on State<LocalScreen> {
                                   minutosRetardo: retardoProgramado,
                                 );
                               } else {
+                                final cascadaForm = await CascadaConfig.cargar(); // CONFIG-CASCADA-EXT
                                 id30s = await _programarMisilRetardado(
                                   externalIds: targetPilotos,
                                   titulo: 'TU TURNO DE PARADERO',
                                   mensaje: mensajeAlarma,
-                                  segundosRetardo: 30,
+                                  segundosRetardo: cascadaForm.seF2Seg,
                                 );
                               }
                               if (id30s != null) {
@@ -1872,6 +1873,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                                   .map((u) => u['id'].toString())
                                   .where((id) => !_mSnap.contains(id))
                                   .toList();
+                              final cascadaForm2 = await CascadaConfig.cargar(); // CONFIG-CASCADA-EXT
                               String? id60s;
                               String? id90s;
                               if (idsZona60.isNotEmpty)
@@ -1879,14 +1881,14 @@ mixin _FormularioMixin on State<LocalScreen> {
                                   externalIds: idsZona60,
                                   titulo: '📡 SERVICIO CERCA (1km)',
                                   mensaje: _msg2,
-                                  segundosRetardo: 60,
+                                  segundosRetardo: cascadaForm2.seF3Seg,
                                 );
                               if (idsTodos90.isNotEmpty)
                                 id90s = await _programarMisilRetardado(
                                   externalIds: idsTodos90,
                                   titulo: '🚨 SERVICIO SIN TOMAR',
                                   mensaje: _msg2,
-                                  segundosRetardo: 90,
+                                  segundosRetardo: cascadaForm2.seF4Seg,
                                 );
                               if (id60s != null || id90s != null) {
                                 await Supabase.instance.client.from('servicios').update({

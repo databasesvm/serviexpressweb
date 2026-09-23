@@ -25,6 +25,8 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
   List<Map<String, dynamic>> _clientes = [];
   List<Map<String, dynamic>> _sedesFn = [];
   bool _cargando = true;
+  String _planFiltroWallet = ''; // '' = todos, 'prediario', 'postdia', 'semanal'
+  String _filtroFaccion = ''; // '' = todos, 'ninguna', 'se', 'fn', 'ambas'
 
   @override
   void initState() {
@@ -58,7 +60,7 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
             .or('eliminado.is.null,eliminado.eq.false')
             .order('created_at'),
         _db.from('usuarios')
-            .select('id, nombre, usuario, rango_movil, puntuacion, activo, tipo_plan_movil, numero_movil, saldo_wallet, comision_pct')
+            .select('id, nombre, usuario, rango_movil, puntuacion, activo, tipo_plan_movil, numero_movil, saldo_wallet, comision_pct, wallet_bloqueado, tiene_fn, tiene_se')
             .eq('rol', 'movil').order('usuario', ascending: true),
         _db.from('usuarios')
             .select('id, nombre, usuario, rol, estado_local, activo, suspendido, created_at')
@@ -274,13 +276,273 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
       }
     }
 
+    // ── Seleccionar facción (solo móviles) ───────────────────────────────
+    bool selSE = false;
+    bool selFN = false;
+    if (esMovil) {
+      final faccion = await showDialog<(bool, bool)?>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => StatefulBuilder(
+          builder: (ctx, setSt) => AlertDialog(
+            backgroundColor: const Color(0xFF1A1A1A),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: const Row(children: [
+              Icon(Icons.military_tech_rounded, color: Colors.amber, size: 18),
+              SizedBox(width: 8),
+              Text('Asignar facción', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+            ]),
+            content: Column(mainAxisSize: MainAxisSize.min, children: [
+              Text('Selecciona las facciones para $identificador.\nSin facción asignada, el móvil no podrá conectarse.',
+                  style: const TextStyle(color: Colors.white54, fontSize: 12, height: 1.5)),
+              const SizedBox(height: 16),
+              Row(children: [
+                Expanded(child: GestureDetector(
+                  onTap: () => setSt(() => selSE = !selSE),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    decoration: BoxDecoration(
+                      color: selSE ? const Color(0xFF1B5E20) : Colors.white.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: selSE ? const Color(0xFF3AF500) : Colors.white24, width: 1.5),
+                    ),
+                    child: Column(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(Icons.electric_bolt, color: selSE ? const Color(0xFF3AF500) : Colors.white38, size: 22),
+                      const SizedBox(height: 4),
+                      Text('SE', style: TextStyle(color: selSE ? const Color(0xFF3AF500) : Colors.white38,
+                          fontWeight: FontWeight.bold, fontSize: 14, letterSpacing: 1.2)),
+                      Text('ServiExpress', style: TextStyle(color: selSE ? Colors.white70 : Colors.white24, fontSize: 9)),
+                    ]),
+                  ),
+                )),
+                const SizedBox(width: 10),
+                Expanded(child: GestureDetector(
+                  onTap: () => setSt(() => selFN = !selFN),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    decoration: BoxDecoration(
+                      color: selFN ? const Color(0xFF001A5E) : Colors.white.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: selFN ? const Color(0xFF3949AB) : Colors.white24, width: 1.5),
+                    ),
+                    child: Column(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(Icons.local_pharmacy, color: selFN ? const Color(0xFF7986CB) : Colors.white38, size: 22),
+                      const SizedBox(height: 4),
+                      Text('FN', style: TextStyle(color: selFN ? const Color(0xFF7986CB) : Colors.white38,
+                          fontWeight: FontWeight.bold, fontSize: 14, letterSpacing: 1.2)),
+                      Text('Farmanorte', style: TextStyle(color: selFN ? Colors.white70 : Colors.white24, fontSize: 9)),
+                    ]),
+                  ),
+                )),
+              ]),
+              if (!selSE && !selFN) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(color: Colors.orange.withValues(alpha: 0.10), borderRadius: BorderRadius.circular(8)),
+                  child: const Text('⚠️ Sin facción: el móvil no podrá conectarse hasta que le asignes una.',
+                      style: TextStyle(color: Colors.orange, fontSize: 11)),
+                ),
+              ],
+            ]),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, null),
+                child: const Text('CANCELAR', style: TextStyle(color: Colors.white38)),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.green[700], foregroundColor: Colors.white),
+                onPressed: () => Navigator.pop(ctx, (selSE, selFN)),
+                child: const Text('ACTIVAR', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (faccion == null) return; // canceló
+      selSE = faccion.$1;
+      selFN = faccion.$2;
+    }
+
     // ── Activar ──────────────────────────────────────────────────────────
-    await _db.from('usuarios').update({'activo': true}).eq('id', u['id']);
+    await _db.from('usuarios').update({
+      'activo': true,
+      if (esMovil) 'tiene_se': selSE,
+      if (esMovil) 'tiene_fn': selFN,
+    }).eq('id', u['id']);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('✅ $identificador activado'), backgroundColor: Colors.green[700]),
     );
     _cargar();
+  }
+
+  // ── Cambiar facción de un móvil ──────────────────────────────────────────
+  Future<void> _cambiarFaccionDialog(Map<String, dynamic> u) async {
+    bool selSE = u['tiene_se'] == true;
+    bool selFN = u['tiene_fn'] == true;
+    final nombre = u['nombre']?.toString() ?? '—';
+
+    final faccion = await showDialog<(bool, bool)?>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSt) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A1A),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(children: [
+            Icon(Icons.military_tech_rounded, color: Colors.amber, size: 18),
+            SizedBox(width: 8),
+            Text('Cambiar facción', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+          ]),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text(nombre, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+            const SizedBox(height: 16),
+            Row(children: [
+              Expanded(child: GestureDetector(
+                onTap: () => setSt(() => selSE = !selSE),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  decoration: BoxDecoration(
+                    color: selSE ? const Color(0xFF1B5E20) : Colors.white.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: selSE ? const Color(0xFF3AF500) : Colors.white24, width: 1.5),
+                  ),
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.electric_bolt, color: selSE ? const Color(0xFF3AF500) : Colors.white38, size: 22),
+                    const SizedBox(height: 4),
+                    Text('SE', style: TextStyle(color: selSE ? const Color(0xFF3AF500) : Colors.white38,
+                        fontWeight: FontWeight.bold, fontSize: 14, letterSpacing: 1.2)),
+                    Text('ServiExpress', style: TextStyle(color: selSE ? Colors.white70 : Colors.white24, fontSize: 9)),
+                  ]),
+                ),
+              )),
+              const SizedBox(width: 10),
+              Expanded(child: GestureDetector(
+                onTap: () => setSt(() => selFN = !selFN),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  decoration: BoxDecoration(
+                    color: selFN ? const Color(0xFF001A5E) : Colors.white.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: selFN ? const Color(0xFF3949AB) : Colors.white24, width: 1.5),
+                  ),
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.local_pharmacy, color: selFN ? const Color(0xFF7986CB) : Colors.white38, size: 22),
+                    const SizedBox(height: 4),
+                    Text('FN', style: TextStyle(color: selFN ? const Color(0xFF7986CB) : Colors.white38,
+                        fontWeight: FontWeight.bold, fontSize: 14, letterSpacing: 1.2)),
+                    Text('Farmanorte', style: TextStyle(color: selFN ? Colors.white70 : Colors.white24, fontSize: 9)),
+                  ]),
+                ),
+              )),
+            ]),
+            if (!selSE && !selFN) ...[
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: Colors.orange.withValues(alpha: 0.10), borderRadius: BorderRadius.circular(8)),
+                child: const Text('⚠️ Sin facción: el móvil no podrá conectarse.',
+                    style: TextStyle(color: Colors.orange, fontSize: 11)),
+              ),
+            ],
+          ]),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, null),
+              child: const Text('CANCELAR', style: TextStyle(color: Colors.white38)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.green[700], foregroundColor: Colors.white),
+              onPressed: () => Navigator.pop(ctx, (selSE, selFN)),
+              child: const Text('GUARDAR', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (faccion == null || !mounted) return;
+    await _db.from('usuarios').update({'tiene_se': faccion.$1, 'tiene_fn': faccion.$2}).eq('id', u['id']);
+    final idx = _moviles.indexWhere((m) => m['id'] == u['id']);
+    if (idx != -1) setState(() => _moviles[idx] = {..._moviles[idx], 'tiene_se': faccion.$1, 'tiene_fn': faccion.$2});
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: const Text('✅ Facción actualizada'), backgroundColor: Colors.green[700]),
+    );
+  }
+
+  // ── Cambiar plan (tipo_plan_movil) ───────────────────────────────────────
+  Future<void> _cambiarPlanDialog(Map<String, dynamic> u) async {
+    String selPlan = u['tipo_plan_movil']?.toString() ?? 'prediario';
+    final nombre = u['nombre']?.toString() ?? '—';
+
+    const planes = [
+      ('prediario', 'PRE-DIARIO', 'Paga antes de conectar', Icons.wb_sunny_rounded, Color(0xFFE65100)),
+      ('postdia',   'POST-DÍA',   'Paga al finalizar el día', Icons.nightlight_round, Color(0xFF1565C0)),
+      ('semanal',   'SEMANAL',    'Cobro automático lunes',   Icons.calendar_today_rounded, Color(0xFF6A1B9A)),
+    ];
+
+    final nuevoPlan = await showDialog<String?>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSt) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A1A),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(children: [
+            Icon(Icons.credit_card_rounded, color: Colors.lightBlueAccent, size: 18),
+            SizedBox(width: 8),
+            Text('Cambiar método de pago', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+          ]),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text(nombre, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+            const SizedBox(height: 14),
+            ...planes.map((p) {
+              final activo = selPlan == p.$1;
+              return GestureDetector(
+                onTap: () => setSt(() => selPlan = p.$1),
+                child: Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: activo ? p.$5.withValues(alpha: 0.15) : Colors.white.withValues(alpha: 0.04),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: activo ? p.$5 : Colors.white24, width: 1.5),
+                  ),
+                  child: Row(children: [
+                    Icon(p.$4, color: activo ? p.$5 : Colors.white38, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(p.$2, style: TextStyle(color: activo ? p.$5 : Colors.white70,
+                          fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 0.8)),
+                      Text(p.$3, style: TextStyle(color: activo ? Colors.white70 : Colors.white30, fontSize: 10)),
+                    ])),
+                    if (activo) Icon(Icons.check_circle_rounded, color: p.$5, size: 18),
+                  ]),
+                ),
+              );
+            }),
+          ]),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, null),
+              child: const Text('CANCELAR', style: TextStyle(color: Colors.white38)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.lightBlue[700], foregroundColor: Colors.white),
+              onPressed: () => Navigator.pop(ctx, selPlan),
+              child: const Text('GUARDAR', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (nuevoPlan == null || !mounted) return;
+    await _db.from('usuarios').update({'tipo_plan_movil': nuevoPlan}).eq('id', u['id']);
+    final idx = _moviles.indexWhere((m) => m['id'] == u['id']);
+    if (idx != -1) setState(() => _moviles[idx] = {..._moviles[idx], 'tipo_plan_movil': nuevoPlan});
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('✅ Plan actualizado a $nuevoPlan'), backgroundColor: Colors.lightBlue[700]),
+    );
   }
 
   // ── Cambiar contraseña ────────────────────────────────────────────────────
@@ -576,8 +838,8 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                       _statBox('${_eliminados.length}', 'Eliminados', Colors.red[400]!, onTap: () => _tabCtrl.animateTo(5)),
                       const SizedBox(width: 8),
                       _statBox(
-                        '${_moviles.where((m) => (m['tipo_plan_movil']?.toString() == 'prediario' || m['tipo_plan_movil']?.toString() == 'postdia')).length}',
-                        'Wallet',
+                        '${_moviles.where((m) => (m['tipo_plan_movil']?.toString() == 'prediario' || m['tipo_plan_movil']?.toString() == 'postdia' || m['tipo_plan_movil']?.toString() == 'semanal')).length}',
+                        'Billetera',
                         const Color(0xFF818CF8),
                         onTap: () => _tabCtrl.animateTo(6),
                       ),
@@ -1054,10 +1316,75 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
 
   // ── Tab 2: Ascensos / gestión de rangos de móviles ───────────────────────
   Widget _tabAscensos() {
-    final lista = _filtrar(_moviles);
-    if (lista.isEmpty) return _empty(Icons.military_tech_rounded, 'Sin móviles registrados');
+    // Filtro por facción
+    var listaBase = _filtrar(_moviles);
+    if (_filtroFaccion == 'ninguna') {
+      listaBase = listaBase.where((u) => u['tiene_se'] != true && u['tiene_fn'] != true).toList();
+    } else if (_filtroFaccion == 'se') {
+      listaBase = listaBase.where((u) => u['tiene_se'] == true && u['tiene_fn'] != true).toList();
+    } else if (_filtroFaccion == 'fn') {
+      listaBase = listaBase.where((u) => u['tiene_fn'] == true && u['tiene_se'] != true).toList();
+    } else if (_filtroFaccion == 'ambas') {
+      listaBase = listaBase.where((u) => u['tiene_se'] == true && u['tiene_fn'] == true).toList();
+    }
+    final lista = listaBase;
+
+    // Conteos para los chips
+    final cntNinguna = _moviles.where((u) => u['tiene_se'] != true && u['tiene_fn'] != true).length;
+    final cntSE = _moviles.where((u) => u['tiene_se'] == true && u['tiene_fn'] != true).length;
+    final cntFN = _moviles.where((u) => u['tiene_fn'] == true && u['tiene_se'] != true).length;
+    final cntAmbas = _moviles.where((u) => u['tiene_se'] == true && u['tiene_fn'] == true).length;
+
     const rangos = ['NOVATO', 'PRO', 'ÉLITE', 'LEYENDA', 'MASTER'];
-    return ListView.builder(
+    return Column(children: [
+      // Chips de filtro por facción
+      Container(
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(14, 8, 14, 4),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(children: [
+            for (final entry in [
+              ('', 'Todos', null),
+              ('ninguna', 'Sin facción ($cntNinguna)', Colors.orange),
+              ('se', 'SE ($cntSE)', const Color(0xFF3AF500)),
+              ('fn', 'FN ($cntFN)', const Color(0xFF7986CB)),
+              ('ambas', 'Ambas ($cntAmbas)', Colors.amber),
+            ]) ...[
+              GestureDetector(
+                onTap: () => setState(() => _filtroFaccion = entry.$1),
+                child: Container(
+                  margin: const EdgeInsets.only(right: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: _filtroFaccion == entry.$1
+                        ? (entry.$3 ?? Colors.white).withValues(alpha: 0.15)
+                        : Colors.white.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: _filtroFaccion == entry.$1
+                          ? (entry.$3 ?? Colors.white)
+                          : Colors.white24,
+                      width: 1.5,
+                    ),
+                  ),
+                  child: Text(entry.$2,
+                      style: TextStyle(
+                          color: _filtroFaccion == entry.$1
+                              ? (entry.$3 ?? Colors.white)
+                              : Colors.white54,
+                          fontSize: 11,
+                          fontWeight: _filtroFaccion == entry.$1
+                              ? FontWeight.bold
+                              : FontWeight.normal)),
+                ),
+              ),
+            ],
+          ]),
+        ),
+      ),
+      if (lista.isEmpty) Expanded(child: _empty(Icons.military_tech_rounded, 'Sin móviles en esta categoría')),
+      if (lista.isNotEmpty) Expanded(child: ListView.builder(
       padding: const EdgeInsets.fromLTRB(14, 6, 14, 24),
       itemCount: lista.length,
       itemBuilder: (_, i) {
@@ -1089,25 +1416,62 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                   Text(u['nombre'] ?? '—', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
                   Row(children: [
                     Text('@${u['usuario'] ?? ''}', style: const TextStyle(color: Colors.white38, fontSize: 11)),
-                    if (u['tipo_plan'] != null) ...[
+                    if (u['tipo_plan_movil'] != null) ...[
                       const SizedBox(width: 6),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                         decoration: BoxDecoration(
-                          color: u['tipo_plan'] == 'prediario' ? Colors.orange[700] : Colors.green[700],
+                          color: u['tipo_plan_movil'] == 'semanal'
+                              ? Colors.purple[700]
+                              : u['tipo_plan_movil'] == 'prediario'
+                                  ? Colors.orange[700]
+                                  : Colors.blue[700],
                           borderRadius: BorderRadius.circular(3),
                         ),
                         child: Text(
-                          u['tipo_plan'] == 'prediario' ? 'PREDIA' : 'SUSCR',
+                          u['tipo_plan_movil'] == 'prediario'
+                              ? 'PREDIA'
+                              : u['tipo_plan_movil'] == 'semanal'
+                                  ? 'SEMANL'
+                                  : 'POSTDÍA',
                           style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
                         ),
                       ),
                     ],
                   ]),
                 ])),
+                // Badges de facción
+                if (u['tiene_se'] == true)
+                  Container(
+                    margin: const EdgeInsets.only(right: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(color: const Color(0xFF1B5E20), borderRadius: BorderRadius.circular(6)),
+                    child: const Text('SE', style: TextStyle(color: Color(0xFF3AF500), fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.8)),
+                  ),
+                if (u['tiene_fn'] == true)
+                  Container(
+                    margin: const EdgeInsets.only(right: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(color: const Color(0xFF002DA2), borderRadius: BorderRadius.circular(6)),
+                    child: const Text('FN', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.8)),
+                  ),
+                IconButton(
+                  tooltip: 'Cambiar facción',
+                  icon: const Icon(Icons.military_tech_rounded, color: Colors.amber, size: 16),
+                  onPressed: () => _cambiarFaccionDialog(u),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                ),
+                IconButton(
+                  tooltip: 'Cambiar plan de pago',
+                  icon: const Icon(Icons.credit_card_rounded, color: Colors.lightBlueAccent, size: 16),
+                  onPressed: () => _cambiarPlanDialog(u),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                ),
                 IconButton(
                   tooltip: 'Cambiar contraseña',
-                  icon: const Icon(Icons.lock_reset_rounded, color: Colors.amber, size: 16),
+                  icon: const Icon(Icons.lock_reset_rounded, color: Colors.white38, size: 16),
                   onPressed: () => _cambiarContrasenaDialog(u),
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
@@ -1147,7 +1511,8 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
           ),
         );
       },
-    );
+    )),
+    ]);
   }
 
   // ── Tab 3: Registros de hoy (se reinicia a medianoche) ───────────────────
@@ -1447,49 +1812,247 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
     final externos = _moviles
         .where((m) =>
             m['tipo_plan_movil']?.toString() == 'prediario' ||
-            m['tipo_plan_movil']?.toString() == 'postdia')
+            m['tipo_plan_movil']?.toString() == 'postdia'  ||
+            m['tipo_plan_movil']?.toString() == 'semanal')
         .toList();
-    final filtrados = _busq.isEmpty
+
+    // Stats derivadas de la lista local (sin query extra)
+    final bloqueados  = externos.where((m) => m['wallet_bloqueado'] == true).toList();
+    final conDeuda    = externos.where((m) {
+      final plan  = m['tipo_plan_movil']?.toString();
+      final saldo = (m['saldo_wallet'] as num?)?.toDouble() ?? 0.0;
+      if (plan == 'prediario') return saldo <= 0;
+      if (plan == 'postdia')   return saldo < 0;
+      return false;
+    }).toList();
+    final cntPre  = externos.where((m) => m['tipo_plan_movil'] == 'prediario').length;
+    final cntPost = externos.where((m) => m['tipo_plan_movil'] == 'postdia').length;
+    final cntSem  = externos.where((m) => m['tipo_plan_movil'] == 'semanal').length;
+
+    // Filtro por plan + búsqueda
+    var filtrados = _planFiltroWallet.isEmpty
         ? externos
-        : externos.where((m) {
-            final q = _busq.toLowerCase();
-            return (m['nombre']?.toString().toLowerCase().contains(q) ?? false) ||
-                (m['usuario']?.toString().toLowerCase().contains(q) ?? false);
-          }).toList();
+        : externos.where((m) => m['tipo_plan_movil'] == _planFiltroWallet).toList();
+    if (_busq.isNotEmpty) {
+      final q = _busq.toLowerCase();
+      filtrados = filtrados.where((m) =>
+          (m['nombre']?.toString().toLowerCase().contains(q) ?? false) ||
+          (m['usuario']?.toString().toLowerCase().contains(q) ?? false)).toList();
+    }
 
     return FutureBuilder<List<dynamic>>(
       future: Future.wait([
         _db
             .from('solicitudes_recarga_wallet')
-            .select('id, movil_id, monto_solicitado, nota, comprobante_url, estado, created_at, usuarios(nombre, usuario, numero_movil)')
+            .select('id, movil_id, monto_solicitado, nota, comprobante_url, estado, tipo_solicitud, created_at, usuarios(nombre, usuario, numero_movil, tipo_plan_movil)')
             .eq('estado', 'pendiente')
             .order('created_at', ascending: false),
         _db.from('config_sistema').select('info_recarga_wallet').eq('id', 1).maybeSingle(),
+        _db
+            .from('wallet_movimientos')
+            .select('id, movil_id, tipo, monto, concepto, created_at, usuarios(nombre, numero_movil)')
+            .order('created_at', ascending: false)
+            .limit(8),
       ]),
       builder: (ctx, snap) {
-        final solicitudes = snap.hasData ? (snap.data![0] as List? ?? []) : [];
-        final cfgMap = snap.hasData ? snap.data![1] as Map<String, dynamic>? : null;
-        final infoRecarga = cfgMap?['info_recarga_wallet']?.toString() ?? '';
+        final solicitudes  = snap.hasData ? (snap.data![0] as List? ?? []) : [];
+        final cfgMap       = snap.hasData ? snap.data![1] as Map<String, dynamic>? : null;
+        final infoRecarga  = cfgMap?['info_recarga_wallet']?.toString() ?? '';
+        final movimientos  = snap.hasData ? (snap.data![2] as List? ?? []) : [];
 
         return ListView(
           padding: const EdgeInsets.fromLTRB(14, 10, 14, 24),
           children: [
+
+            // ── RESUMEN ────────────────────────────────────────────────────
+            _encabezadoSeccion('RESUMEN', Colors.white54),
+            Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFF141414),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.white12),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  // Fila 1: bloqueados + en deuda
+                  Row(children: [
+                    Expanded(child: _statChip(
+                      Icons.lock_rounded,
+                      '${bloqueados.length}',
+                      'Bloqueados',
+                      bloqueados.isEmpty ? Colors.white24 : Colors.redAccent,
+                    )),
+                    const SizedBox(width: 8),
+                    Expanded(child: _statChip(
+                      Icons.trending_down_rounded,
+                      '${conDeuda.length}',
+                      'Con deuda/sin saldo',
+                      conDeuda.isEmpty ? Colors.white24 : Colors.orange,
+                    )),
+                  ]),
+                  const SizedBox(height: 8),
+                  // Fila 2: conteo por plan
+                  Row(children: [
+                    Expanded(child: _statChip(Icons.today_rounded,     '$cntPre',  'Prediario', const Color(0xFF818CF8))),
+                    const SizedBox(width: 6),
+                    Expanded(child: _statChip(Icons.event_rounded,     '$cntPost', 'Postdia',   Colors.teal)),
+                    const SizedBox(width: 6),
+                    Expanded(child: _statChip(Icons.date_range_rounded, '$cntSem',  'Semanal',   Colors.orange)),
+                  ]),
+                ]),
+              ),
+            ),
+
+            // ── FILTROS POR PLAN ───────────────────────────────────────────
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(children: [
+                for (final entry in [
+                  ('', 'Todos'),
+                  ('prediario', 'Prediario'),
+                  ('postdia', 'Postdia'),
+                  ('semanal', 'Semanal'),
+                ])
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: ChoiceChip(
+                      label: Text(entry.$2,
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: _planFiltroWallet == entry.$1
+                                  ? Colors.black
+                                  : Colors.white70)),
+                      selected: _planFiltroWallet == entry.$1,
+                      selectedColor: const Color(0xFF818CF8),
+                      backgroundColor: const Color(0xFF1E1E1E),
+                      side: BorderSide(
+                          color: _planFiltroWallet == entry.$1
+                              ? const Color(0xFF818CF8)
+                              : Colors.white24),
+                      onSelected: (_) =>
+                          setState(() => _planFiltroWallet = entry.$1),
+                    ),
+                  ),
+              ]),
+            ),
+            const SizedBox(height: 10),
+
             // ── Configurar datos de transferencia ──────────────────────────
             _encabezadoSeccion('DATOS DE TRANSFERENCIA', Colors.white54),
             _cardInfoRecarga(infoRecarga),
             const SizedBox(height: 8),
-            // ── Solicitudes pendientes ─────────────────────────────────────
-            if (solicitudes.isNotEmpty) ...[
-              _encabezadoSeccion('RECARGAS PENDIENTES (${solicitudes.length})', Colors.amber[600]!),
-              ...solicitudes.map((s) => _cardSolicitudRecarga(s as Map<String, dynamic>)),
+
+            // ── Solicitudes pendientes — separadas por tipo ────────────────
+            () {
+              final semanales = solicitudes
+                  .where((s) => (s as Map)['tipo_solicitud'] == 'pago_semanal')
+                  .toList();
+              final recargas = solicitudes
+                  .where((s) => (s as Map)['tipo_solicitud'] != 'pago_semanal')
+                  .toList();
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (semanales.isNotEmpty) ...[
+                    _encabezadoSeccion(
+                        '🔒 CONSIGNACIONES SEMANALES (${semanales.length})',
+                        Colors.orange[400]!),
+                    ...semanales.map((s) =>
+                        _cardSolicitudRecarga(s as Map<String, dynamic>)),
+                    const SizedBox(height: 8),
+                  ],
+                  if (recargas.isNotEmpty) ...[
+                    _encabezadoSeccion(
+                        '💳 RECARGAS PENDIENTES (${recargas.length})',
+                        Colors.amber[600]!),
+                    ...recargas.map((s) =>
+                        _cardSolicitudRecarga(s as Map<String, dynamic>)),
+                    const SizedBox(height: 8),
+                  ],
+                ],
+              );
+            }(),
+
+            // ── Movimientos recientes ──────────────────────────────────────
+            if (movimientos.isNotEmpty) ...[
+              _encabezadoSeccion('MOVIMIENTOS RECIENTES', Colors.white38),
+              ...movimientos.map((mv) {
+                final m      = mv as Map<String, dynamic>;
+                final monto  = (m['monto'] as num?)?.toDouble() ?? 0.0;
+                final tipo   = m['tipo']?.toString() ?? '';
+                final nombre = (m['usuarios'] as Map?)?['nombre']?.toString() ?? '—';
+                final numMov = (m['usuarios'] as Map?)?['numero_movil'];
+                final label  = numMov != null
+                    ? 'Movil${numMov.toString().padLeft(2, '0')}'
+                    : nombre;
+                final esDescuento = monto < 0;
+                final color  = esDescuento ? Colors.redAccent : const Color(0xFF22C55E);
+                final icon   = switch (tipo) {
+                  'descuento_servicio' => Icons.remove_circle_outline_rounded,
+                  'pago_semanal'       => Icons.lock_open_rounded,
+                  'bloqueo_semanal'    => Icons.lock_rounded,
+                  'recarga'            => Icons.add_circle_outline_rounded,
+                  'desbloqueo_manual'  => Icons.admin_panel_settings_rounded,
+                  _                    => Icons.swap_horiz_rounded,
+                };
+                final fecha = m['created_at'] != null
+                    ? DateTime.parse(m['created_at'].toString()).toLocal()
+                    : null;
+                final fechaStr = fecha != null
+                    ? '${fecha.day}/${fecha.month} ${fecha.hour.toString().padLeft(2,'0')}:${fecha.minute.toString().padLeft(2,'0')}'
+                    : '';
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 6),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF141414),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.white10),
+                  ),
+                  child: Row(children: [
+                    Icon(icon, color: color, size: 16),
+                    const SizedBox(width: 10),
+                    Expanded(child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(label,
+                            style: const TextStyle(
+                                color: Colors.white, fontSize: 12,
+                                fontWeight: FontWeight.bold)),
+                        Text(m['concepto']?.toString() ?? tipo,
+                            style: const TextStyle(
+                                color: Colors.white54, fontSize: 10),
+                            maxLines: 1, overflow: TextOverflow.ellipsis),
+                      ],
+                    )),
+                    Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                      Text(
+                        monto == 0 ? '—' : '${monto >= 0 ? '+' : ''}\$${monto.abs().toStringAsFixed(0)}',
+                        style: TextStyle(
+                            color: monto == 0 ? Colors.white38 : color,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold),
+                      ),
+                      Text(fechaStr,
+                          style: const TextStyle(
+                              color: Colors.white38, fontSize: 9)),
+                    ]),
+                  ]),
+                );
+              }),
               const SizedBox(height: 8),
             ],
+
             // ── Saldos de móviles externos ─────────────────────────────────
             _encabezadoSeccion('MÓVILES EXTERNOS', const Color(0xFF818CF8)),
             if (filtrados.isEmpty)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 24),
-                child: _empty(Icons.account_balance_wallet_rounded, 'Sin móviles externos registrados'),
+                child: _empty(Icons.account_balance_wallet_rounded,
+                    'Sin móviles con billetera registrados'),
               )
             else
               ...filtrados.map((u) => _cardWallet(u)),
@@ -1498,6 +2061,35 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
       },
     );
   }
+
+  Widget _statChip(IconData icon, String valor, String etiqueta, Color color) =>
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: color.withValues(alpha: 0.35)),
+        ),
+        child: Row(children: [
+          Icon(icon, color: color, size: 14),
+          const SizedBox(width: 6),
+          Expanded(child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(valor,
+                  style: TextStyle(
+                      color: color,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold)),
+              Text(etiqueta,
+                  style: const TextStyle(
+                      color: Colors.white54, fontSize: 9),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis),
+            ],
+          )),
+        ]),
+      );
 
   Widget _cardInfoRecarga(String infoActual) {
     final ctrl = TextEditingController(text: infoActual);
@@ -1573,6 +2165,7 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
     final monto = (s['monto_solicitado'] as num?)?.toDouble() ?? 0.0;
     final nota = s['nota']?.toString();
     final comprUrl = s['comprobante_url']?.toString();
+    final esSemanal = s['tipo_solicitud']?.toString() == 'pago_semanal';
     final fecha = s['created_at'] != null
         ? DateTime.tryParse(s['created_at'].toString())?.toLocal()
         : null;
@@ -1580,21 +2173,46 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
         ? '${fecha.day.toString().padLeft(2,'0')}/${fecha.month.toString().padLeft(2,'0')} ${fecha.hour.toString().padLeft(2,'0')}:${fecha.minute.toString().padLeft(2,'0')}'
         : '';
 
+    final borderColor = esSemanal
+        ? Colors.orange[700]!.withValues(alpha: 0.5)
+        : Colors.amber[700]!.withValues(alpha: 0.4);
+    final bgColor = esSemanal
+        ? Colors.orange[900]!.withValues(alpha: 0.15)
+        : Colors.amber[900]!.withValues(alpha: 0.15);
+
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: Colors.amber[900]!.withValues(alpha: 0.15),
+        color: bgColor,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.amber[700]!.withValues(alpha: 0.4)),
+        border: Border.all(color: borderColor),
       ),
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            const Icon(Icons.pending_actions_rounded, color: Colors.amber, size: 16),
+            Icon(
+              esSemanal ? Icons.lock_clock : Icons.pending_actions_rounded,
+              color: esSemanal ? Colors.orange : Colors.amber,
+              size: 16,
+            ),
             const SizedBox(width: 8),
-            Expanded(child: Text('$nombre — \$${monto.toStringAsFixed(0)}',
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13))),
+            Expanded(child: Text(
+              '$nombre — \$${monto.toStringAsFixed(0)}',
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+            )),
+            if (esSemanal)
+              Container(
+                margin: const EdgeInsets.only(right: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: Colors.orange.withValues(alpha: 0.5)),
+                ),
+                child: const Text('SEMANAL',
+                    style: TextStyle(color: Colors.orange, fontSize: 9, fontWeight: FontWeight.bold)),
+              ),
             Text(fechaStr, style: const TextStyle(color: Colors.white38, fontSize: 10)),
           ]),
           if (nota != null && nota.isNotEmpty) ...[
@@ -1618,7 +2236,7 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(8),
-                child: Image.network(comprUrl, height: 100, width: double.infinity, fit: BoxFit.cover,
+                child: Image.network(comprUrl, height: 120, width: double.infinity, fit: BoxFit.cover,
                     errorBuilder: (_, __, ___) => const SizedBox.shrink()),
               ),
             ),
@@ -1638,7 +2256,7 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                     'estado': 'rechazada', 'revisado_por': 'central',
                     'revisado_at': DateTime.now().toUtc().toIso8601String(),
                   }).eq('id', s['id']);
-                  setState(() {});
+                  _cargar();
                 },
                 child: const Text('RECHAZAR', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
               ),
@@ -1647,31 +2265,49 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
             Expanded(
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF22C55E), foregroundColor: Colors.white,
+                  backgroundColor: esSemanal ? Colors.orange : const Color(0xFF22C55E),
+                  foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
                 onPressed: () async {
                   try {
-                    await _db.from('wallet_movimientos').insert({
-                      'movil_id': s['movil_id'],
-                      'tipo': 'recarga',
-                      'monto': monto,
-                      'concepto': 'Recarga aprobada',
-                      'registrado_por': 'central',
-                    });
-                    await _db.rpc('fn_wallet_ajuste_saldo', params: {
-                      'p_movil_id': s['movil_id'],
-                      'p_monto': monto,
-                    });
+                    if (esSemanal) {
+                      // Pago semanal: desbloquear + registrar movimiento
+                      await _db.from('usuarios').update({
+                        'wallet_bloqueado': false,
+                      }).eq('id', s['movil_id']);
+                      await _db.from('wallet_movimientos').insert({
+                        'movil_id': s['movil_id'],
+                        'tipo': 'pago_semanal',
+                        'monto': monto,
+                        'concepto': 'Pago semanal aprobado — billetera desbloqueada',
+                        'registrado_por': 'central',
+                      });
+                    } else {
+                      // Recarga normal: acreditar saldo
+                      await _db.from('wallet_movimientos').insert({
+                        'movil_id': s['movil_id'],
+                        'tipo': 'recarga',
+                        'monto': monto,
+                        'concepto': 'Recarga aprobada',
+                        'registrado_por': 'central',
+                      });
+                      await _db.rpc('fn_wallet_ajuste_saldo', params: {
+                        'p_movil_id': s['movil_id'],
+                        'p_monto': monto,
+                      });
+                    }
                     await _db.from('solicitudes_recarga_wallet').update({
                       'estado': 'aprobada', 'revisado_por': 'central',
                       'revisado_at': DateTime.now().toUtc().toIso8601String(),
                     }).eq('id', s['id']);
                     _cargar();
                     if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                      content: Text('✅ Recarga de \$${monto.toStringAsFixed(0)} aprobada para $nombre'),
-                      backgroundColor: const Color(0xFF22C55E),
+                      content: Text(esSemanal
+                          ? '🔓 Pago semanal aprobado — $nombre desbloqueado'
+                          : '✅ Recarga de \$${monto.toStringAsFixed(0)} aprobada para $nombre'),
+                      backgroundColor: esSemanal ? Colors.orange : const Color(0xFF22C55E),
                       behavior: SnackBarBehavior.floating,
                     ));
                   } catch (e) {
@@ -1681,7 +2317,10 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                     ));
                   }
                 },
-                child: const Text('APROBAR', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                child: Text(
+                  esSemanal ? 'APROBAR Y DESBLOQUEAR' : 'APROBAR',
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                ),
               ),
             ),
           ]),
@@ -1695,21 +2334,95 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
     final plan = u['tipo_plan_movil']?.toString() ?? '';
     final saldo = (u['saldo_wallet'] as num?)?.toDouble() ?? 0.0;
     final comPct = (u['comision_pct'] as num?)?.toDouble() ?? 10.0;
-    final positivo = plan == 'postdia' ? saldo >= 0 : saldo > 0;
+    final bloqueado = u['wallet_bloqueado'] == true;
+    final esSemanal = plan == 'semanal';
+
+    final positivo = esSemanal ? !bloqueado : (plan == 'postdia' ? saldo >= 0 : saldo > 0);
     final colorSaldo = positivo ? const Color(0xFF22C55E) : Colors.redAccent;
-    final planChip = plan == 'prediario' ? 'PREDIA' : 'POSTDIA';
-    final planColor = plan == 'prediario' ? Colors.orange[700]! : Colors.blue[600]!;
+
+    final planChip = esSemanal ? 'SEMANAL'
+        : plan == 'prediario' ? 'PREDIA' : 'POSTDIA';
+    final planColor = esSemanal ? Colors.purple[400]!
+        : plan == 'prediario' ? Colors.orange[700]! : Colors.blue[600]!;
+
+    final borderColor = bloqueado
+        ? Colors.orange.withValues(alpha: 0.5)
+        : (positivo ? Colors.white12 : Colors.redAccent.withValues(alpha: 0.3));
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
         color: const Color(0xFF141414),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: positivo ? Colors.white12 : Colors.redAccent.withValues(alpha: 0.3)),
+        border: Border.all(color: borderColor),
       ),
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          // Banner de bloqueo semanal
+          if (bloqueado && esSemanal) ...[
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.orange.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange.withValues(alpha: 0.4)),
+              ),
+              child: Row(children: [
+                const Icon(Icons.lock_rounded, color: Colors.orange, size: 14),
+                const SizedBox(width: 6),
+                const Expanded(
+                  child: Text('BILLETERA BLOQUEADA — pendiente pago semanal',
+                      style: TextStyle(color: Colors.orange, fontSize: 10, fontWeight: FontWeight.bold)),
+                ),
+                TextButton(
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.orange,
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  onPressed: () async {
+                    final ok = await showDialog<bool>(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        backgroundColor: const Color(0xFF1A1A1A),
+                        title: const Text('🔓 Desbloquear billetera',
+                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+                        content: Text('¿Desbloquear manualmente la billetera de $nombre sin comprobante?',
+                            style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.pop(ctx, false),
+                              child: const Text('CANCELAR', style: TextStyle(color: Colors.grey))),
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.orange, foregroundColor: Colors.black),
+                            onPressed: () => Navigator.pop(ctx, true),
+                            child: const Text('DESBLOQUEAR', style: TextStyle(fontWeight: FontWeight.bold)),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (ok == true) {
+                      await _db.from('usuarios')
+                          .update({'wallet_bloqueado': false}).eq('id', u['id']);
+                      await _db.from('wallet_movimientos').insert({
+                        'movil_id': u['id'],
+                        'tipo': 'desbloqueo_manual',
+                        'monto': 0,
+                        'concepto': 'Desbloqueo manual por central',
+                        'registrado_por': 'central',
+                      });
+                      _cargar();
+                    }
+                  },
+                  child: const Text('DESBLOQUEAR', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                ),
+              ]),
+            ),
+          ],
           Row(children: [
             CircleAvatar(
               radius: 18,
@@ -1719,15 +2432,25 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
             const SizedBox(width: 10),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(nombre, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
-              Text('Comisión ${comPct.toStringAsFixed(0)}%', style: const TextStyle(color: Colors.white38, fontSize: 10)),
+              Text(
+                esSemanal ? 'Pago semanal fijo' : 'Comisión ${comPct.toStringAsFixed(0)}%',
+                style: const TextStyle(color: Colors.white38, fontSize: 10),
+              ),
             ])),
             Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
               _chip(planChip, planColor),
               const SizedBox(height: 4),
-              Text(
-                '\$${saldo.toStringAsFixed(0)}',
-                style: TextStyle(color: colorSaldo, fontWeight: FontWeight.bold, fontSize: 16),
-              ),
+              if (!esSemanal)
+                Text(
+                  '\$${saldo.toStringAsFixed(0)}',
+                  style: TextStyle(color: colorSaldo, fontWeight: FontWeight.bold, fontSize: 16),
+                )
+              else
+                Icon(
+                  bloqueado ? Icons.lock_rounded : Icons.lock_open_rounded,
+                  color: bloqueado ? Colors.orange : const Color(0xFF22C55E),
+                  size: 20,
+                ),
             ]),
           ]),
           const SizedBox(height: 12),
@@ -1745,20 +2468,22 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                 onPressed: () => _abrirDialogWallet(u, soloLectura: true),
               ),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: ElevatedButton.icon(
-                icon: const Icon(Icons.add_rounded, size: 14),
-                label: const Text('Movimiento', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF818CF8),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            if (!esSemanal) ...[
+              const SizedBox(width: 8),
+              Expanded(
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.add_rounded, size: 14),
+                  label: const Text('Movimiento', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF818CF8),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onPressed: () => _abrirDialogWallet(u, soloLectura: false),
                 ),
-                onPressed: () => _abrirDialogWallet(u, soloLectura: false),
               ),
-            ),
+            ],
           ]),
         ]),
       ),
@@ -1771,7 +2496,9 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
     final plan = u['tipo_plan_movil']?.toString() ?? '';
     final montoCtrl = TextEditingController();
     final conceptoCtrl = TextEditingController();
-    String tipoMov = plan == 'prediario' ? 'recarga' : 'pago_postdia';
+    String tipoMov = plan == 'prediario' ? 'recarga'
+        : plan == 'semanal' ? 'pago_semanal'
+        : 'pago_postdia';
     bool procesando = false;
 
     showDialog(
@@ -1783,7 +2510,7 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
           title: Row(children: [
             const Icon(Icons.account_balance_wallet_rounded, color: Color(0xFF818CF8), size: 20),
             const SizedBox(width: 8),
-            Expanded(child: Text('Wallet · $nombre',
+            Expanded(child: Text('Billetera · $nombre',
                 style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
                 overflow: TextOverflow.ellipsis)),
           ]),

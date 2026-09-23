@@ -13,6 +13,7 @@ import 'package:serviexpress_app/screens/login_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'fn_facturacion_screen.dart';
+import 'package:serviexpress_app/utils/cascada_config.dart'; // CONFIG-CASCADA-EXT
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Panel sede FN — rol: sede_fn
@@ -1124,13 +1125,14 @@ class _FormularioTabState extends State<_FormularioTab> {
       }).eq('id', serviceId);
 
       // ── FASE 3 (T+60s): zona 2km ────────────────────────────────────────────
+      final cascadaSede1 = await CascadaConfig.cargar(); // CONFIG-CASCADA-EXT
       String? id60s;
       if (fase3Ids.isNotEmpty) {
         id60s = await MotorNotificaciones.programarMisilRetardado(
           externalIds: fase3Ids,
           titulo: titulo,
           mensaje: msg,
-          segundosRetardo: 60,
+          segundosRetardo: cascadaSede1.fnF3Seg,
           sonido: Sonidos.fnCotizacion,
         );
       }
@@ -1149,7 +1151,7 @@ class _FormularioTabState extends State<_FormularioTab> {
           externalIds: fase4NoMasters,
           titulo: '🚨 FN SIN CUBRIR — $consec',
           mensaje: msg,
-          segundosRetardo: 90,
+          segundosRetardo: cascadaSede1.fnF4Seg,
           sonido: Sonidos.fnCotizacion,
         );
       }
@@ -1161,7 +1163,7 @@ class _FormularioTabState extends State<_FormularioTab> {
           externalIds: masterIds,
           titulo: '🚨 FN SIN CUBRIR — $consec',
           mensaje: msg,
-          segundosRetardo: 90,
+          segundosRetardo: cascadaSede1.fnF4Seg,
           sonido: 'master',
           canalAndroidId: MotorNotificaciones.canalMasterId,
         );
@@ -2525,13 +2527,14 @@ class _ActivosTabState extends State<_ActivosTab> {
       // fn_radar_t0 y asigna automáticamente. No se programa notificación aquí.
 
       // ── FASE 3 (T+60s): Zona 2km ────────────────────────────────────────────
+      final cascadaSede2 = await CascadaConfig.cargar(); // CONFIG-CASCADA-EXT
       String? notifF3;
       if (fase3Ids.isNotEmpty) {
         notifF3 = await MotorNotificaciones.programarMisilRetardado(
           externalIds: fase3Ids,
           titulo: '🔵 TURNO FN CERCA',
           mensaje: 'Servicio disponible · $zona',
-          segundosRetardo: 60,
+          segundosRetardo: cascadaSede2.fnF3Seg,
           sonido: Sonidos.movilParadero,
         );
       }
@@ -2551,7 +2554,7 @@ class _ActivosTabState extends State<_ActivosTab> {
           externalIds: fase4Todos,
           titulo: '🚨 FN SIN CUBRIR — $consec',
           mensaje: 'Servicio sin cubrir · $zona',
-          segundosRetardo: 90,
+          segundosRetardo: cascadaSede2.fnF4Seg,
           sonido: Sonidos.movilParadero,
         );
       }

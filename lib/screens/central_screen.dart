@@ -86,6 +86,17 @@ class _CentralScreenState extends State<CentralScreen>
   // Offset para mostrar el consecutivo de servicios desde 1 tras un reset
   int _serviciosConsecutivoOffset = 0;
 
+  // ── CONFIG-CASCADA: tiempos de cascada configurables desde la UI ─────────
+  // SE offsets desde T=0
+  int _cascadaSeF2Seg = 30; // auto-asigna #1 paradero (edge fn)
+  int _cascadaSeF3Seg = 60; // push radio 1km (misil OneSignal)
+  int _cascadaSeF4Seg = 90; // push todos disponibles (misil OneSignal)
+  // FN offsets desde T=0
+  int _cascadaFnF2Seg          = 30; // ofrece al más cercano (edge fn)
+  int _cascadaFnF2TimeoutSeg   = 30; // tiempo para aceptar antes de liberar (edge fn)
+  int _cascadaFnF3Seg          = 60; // push no-Masters 2km (misil OneSignal)
+  int _cascadaFnF4Seg          = 90; // push global (misil OneSignal)
+
   final Set<int> _demorasAlertadas =
       {}; // IDs ya alertados por demora (no repetir)
 
@@ -108,7 +119,8 @@ class _CentralScreenState extends State<CentralScreen>
   // con las usadas en _construirBloqueServicios.
   final Set<String> _seccionesOcultasMonitor = {};
   // Secciones colapsadas en el panel de flota (Control Operativo).
-  // Claves: 'fn', 'expuente', 'memos', 'nocturno', 'servicio', 'libre'
+  // Claves fijas: 'fn', 'servicio', 'libre', 'bloqueados', 'descanso', 'desconectados', 'suspendidos'
+  // Claves dinámicas (PARADEROS-C): nombre.toLowerCase() de cada paradero activo en BD
   final Set<String> _seccionesOcultasFlota = {};
   // Categorías colapsadas en el monitor de servicios (tap en el header).
   final Set<String> _categoriasColapsadas = {};
@@ -165,6 +177,11 @@ class _CentralScreenState extends State<CentralScreen>
 
   // Usuarios pendientes de activación (activo=false)
   int _usuariosPendientes = 0;
+
+  // ── PARADEROS-C: lista dinámica desde BD (panel de control) ─────────────
+  // Se carga una sola vez al iniciar. Los cambios en BD se reflejan
+  // automáticamente al próximo initState (reinicio de sesión).
+  List<Map<String, dynamic>> _paraderosPanel = [];
 
   @override
   void initState() {
@@ -228,6 +245,7 @@ class _CentralScreenState extends State<CentralScreen>
     Future.delayed(const Duration(milliseconds: 700), _cargarReportesSinLeer);
     Future.delayed(const Duration(milliseconds: 900), _cargarMinutosHoyMoviles);
     Future.delayed(const Duration(milliseconds: 1100), _cargarBloqueoInactividad);
+    Future.delayed(const Duration(milliseconds: 1300), _cargarParaderosPanel);
 
     // OTA: cubre sesión persistente (solo Android/iOS, no web)
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -597,12 +615,24 @@ class _CentralScreenState extends State<CentralScreen>
     try {
       final row = await Supabase.instance.client
           .from('config_sistema')
-          .select('bloqueo_inactividad_activo, servicios_consecutivo_offset')
+          .select(
+            'bloqueo_inactividad_activo, servicios_consecutivo_offset, '
+            'cascada_se_f2_seg, cascada_se_f3_seg, cascada_se_f4_seg, '
+            'cascada_fn_f2_seg, cascada_fn_f2_timeout_seg, '
+            'cascada_fn_f3_seg, cascada_fn_f4_seg',
+          )
           .eq('id', 1)
           .single();
       if (mounted) setState(() {
-        _bloqueoInactividadActivo = row['bloqueo_inactividad_activo'] as bool? ?? false;
-        _serviciosConsecutivoOffset = (row['servicios_consecutivo_offset'] as int?) ?? 0;
+        _bloqueoInactividadActivo    = row['bloqueo_inactividad_activo'] as bool? ?? false;
+        _serviciosConsecutivoOffset  = (row['servicios_consecutivo_offset'] as int?) ?? 0;
+        _cascadaSeF2Seg              = (row['cascada_se_f2_seg']          as int?) ?? 30;
+        _cascadaSeF3Seg              = (row['cascada_se_f3_seg']          as int?) ?? 60;
+        _cascadaSeF4Seg              = (row['cascada_se_f4_seg']          as int?) ?? 90;
+        _cascadaFnF2Seg              = (row['cascada_fn_f2_seg']          as int?) ?? 30;
+        _cascadaFnF2TimeoutSeg       = (row['cascada_fn_f2_timeout_seg']  as int?) ?? 30;
+        _cascadaFnF3Seg              = (row['cascada_fn_f3_seg']          as int?) ?? 60;
+        _cascadaFnF4Seg              = (row['cascada_fn_f4_seg']          as int?) ?? 90;
       });
     } catch (_) {}
   }

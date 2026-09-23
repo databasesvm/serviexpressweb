@@ -22,6 +22,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:serviexpress_app/utils/deeplink_service.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:serviexpress_app/utils/cascada_config.dart'; // CONFIG-CASCADA-EXT
 
 part 'local_screen_dispatch.dart';
 part 'local_screen_cards.dart';

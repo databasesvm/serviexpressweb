@@ -353,6 +353,7 @@ mixin _CardsMixin on State<LocalScreen> {
             Future.microtask(() async {
               try {
                 final db = Supabase.instance.client;
+                final cascada = await CascadaConfig.cargar();
 
                 // 1. Cancelar misiles viejos del snapshot de creación
                 final svcOld = await db.from('servicios')
@@ -421,7 +422,7 @@ mixin _CardsMixin on State<LocalScreen> {
                     externalIds: pilotosParadero,
                     titulo: 'TU TURNO DE PARADERO',
                     mensaje: msgAlarma,
-                    segundosRetardo: 30,
+                    segundosRetardo: cascada.seF2Seg,
                   );
                 }
 
@@ -449,13 +450,13 @@ mixin _CardsMixin on State<LocalScreen> {
                 if (idsZona.isNotEmpty) {
                   id60s = await _programarMisilRetardado(
                     externalIds: idsZona, titulo: '📡 SERVICIO CERCA (1km)',
-                    mensaje: msgAlarma, segundosRetardo: 60,
+                    mensaje: msgAlarma, segundosRetardo: cascada.seF3Seg,
                   );
                 }
                 if (idsTodos.isNotEmpty) {
                   id90s = await _programarMisilRetardado(
                     externalIds: idsTodos, titulo: '🚨 SERVICIO SIN TOMAR',
-                    mensaje: msgAlarma, segundosRetardo: 90,
+                    mensaje: msgAlarma, segundosRetardo: cascada.seF4Seg,
                   );
                 }
 

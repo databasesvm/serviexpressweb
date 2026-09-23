@@ -136,14 +136,22 @@ extension CentralScreenFormularios on _CentralScreenState {
                 Wrap(
                   spacing: 6,
                   runSpacing: 6,
-                  children: ['EXPUENTE', 'MEMOS', 'BOCONO', 'NOCTURNO'].map((p) {
-                    final bool sel = paraderoOrigen == p;
+                  children: _paraderosPanel.map((pd) {
+                    final nombre = pd['nombre'].toString();
+                    final emoji  = pd['emoji'] as String? ?? '📍';
+                    final color  = _hexColor(pd['color_hex'] as String? ?? '#1565C0');
+                    final bool sel = paraderoOrigen == nombre;
                     return ChoiceChip(
-                      label: Text(p, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: sel ? Colors.white : Colors.black87)),
+                      label: Text('$emoji $nombre',
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: sel ? Colors.white : color)),
                       selected: sel,
-                      selectedColor: Colors.blue[800],
-                      backgroundColor: Colors.grey[200],
-                      onSelected: (v) => setDialogState(() => paraderoOrigen = v ? p : null),
+                      selectedColor: color,
+                      backgroundColor: color.withValues(alpha: 0.08),
+                      side: BorderSide(color: color.withValues(alpha: 0.4), width: 1),
+                      onSelected: (v) => setDialogState(() => paraderoOrigen = v ? nombre : null),
                     );
                   }).toList(),
                 ),
@@ -834,7 +842,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                                 externalIds: idsZonaC,
                                 titulo: '📡 SERVICIO CERCA (2km)',
                                 mensaje: msg,
-                                segundosRetardo: 60,
+                                segundosRetardo: _cascadaSeF3Seg, // CONFIG-CASCADA-C
                                 sonido: Sonidos.movilParadero,
                               );
                             }
@@ -843,7 +851,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                                 externalIds: idsTodosC,
                                 titulo: '🚨 SERVICIO SIN TOMAR',
                                 mensaje: msg,
-                                segundosRetardo: 90,
+                                segundosRetardo: _cascadaSeF4Seg, // CONFIG-CASCADA-C
                                 sonido: Sonidos.movilParadero,
                               );
                             }
@@ -1670,7 +1678,15 @@ extension CentralScreenFormularios on _CentralScreenState {
                                 ? null
                                 : () => setDialogState(() {
                                       modoAsignacion = 'paradero';
-                                      paraderoFN ??= 'EXPUENTE';
+                                      // Pre-selecciona el primer paradero diurno activo de la BD
+                                      paraderoFN ??= _paraderosPanel
+                                          .firstWhere(
+                                            (p) => p['es_nocturno'] != true,
+                                            orElse: () => _paraderosPanel.isNotEmpty
+                                                ? _paraderosPanel.first
+                                                : {'nombre': 'EXPUENTE'},
+                                          )['nombre']
+                                          .toString();
                                     }),
                             child: Container(
                               padding: const EdgeInsets.symmetric(
@@ -1812,23 +1828,25 @@ extension CentralScreenFormularios on _CentralScreenState {
                       Wrap(
                         spacing: 8,
                         runSpacing: 6,
-                        children: ['EXPUENTE', 'MEMOS', 'BOCONO', 'NOCTURNO']
-                            .map((p) {
-                          final bool sel = paraderoFN == p;
+                        children: _paraderosPanel.map((pd) {
+                          final nombre = pd['nombre'].toString();
+                          final emoji  = pd['emoji'] as String? ?? '📍';
+                          final color  = _hexColor(pd['color_hex'] as String? ?? '#00695C');
+                          final bool sel = paraderoFN == nombre;
                           return ChoiceChip(
-                            label: Text(p,
+                            label: Text('$emoji $nombre',
                                 style: TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.bold,
-                                    color: sel ? Colors.white : Colors.teal[700])),
+                                    color: sel ? Colors.white : color)),
                             selected: sel,
-                            selectedColor: Colors.teal[700],
-                            backgroundColor: Colors.grey[100],
-                            side: BorderSide(color: Colors.teal[700]!, width: 1.5),
+                            selectedColor: color,
+                            backgroundColor: color.withValues(alpha: 0.08),
+                            side: BorderSide(color: color.withValues(alpha: 0.5), width: 1.5),
                             onSelected: procesando
                                 ? null
                                 : (v) => setDialogState(
-                                    () => paraderoFN = v ? p : paraderoFN),
+                                    () => paraderoFN = v ? nombre : paraderoFN),
                           );
                         }).toList(),
                       ),
@@ -2279,31 +2297,31 @@ extension CentralScreenFormularios on _CentralScreenState {
                                 externalIds: fase3IdsP,
                                 titulo: '🔵 TURNO FN CERCA',
                                 mensaje: 'Servicio Farmanorte disponible · $zonaLabel',
-                                segundosRetardo: 60,
+                                segundosRetardo: _cascadaFnF3Seg, // CONFIG-CASCADA-C
                                 sonido: Sonidos.movilParadero,
                               );
                             }
 
-                            // ── FASE 4 (T+90s): global ───────────────────────
+                            // ── FASE 4 (T+cascadaFnF4Seg): global ────────────
                             String? notifFase4P;
                             if (fase4IdsP.isNotEmpty) {
                               notifFase4P = await MotorNotificaciones.programarMisilRetardado(
                                 externalIds: fase4IdsP,
                                 titulo: '🔵 TURNO FN SIN TOMAR',
                                 mensaje: 'Servicio Farmanorte · $zonaLabel',
-                                segundosRetardo: 90,
+                                segundosRetardo: _cascadaFnF4Seg, // CONFIG-CASCADA-C
                                 sonido: Sonidos.movilParadero,
                               );
                             }
 
-                            // ── FASE 4b (T+90s): re-alerta Masters ───────────
+                            // ── FASE 4b (T+cascadaFnF4Seg): re-alerta Masters ──
                             String? notifFase4bP;
                             if (masterIdsP.isNotEmpty) {
                               notifFase4bP = await MotorNotificaciones.programarMisilRetardado(
                                 externalIds: masterIdsP,
                                 titulo: '🚨 FN SIN CUBRIR',
                                 mensaje: 'Servicio Farmanorte sin tomar · $zonaLabel',
-                                segundosRetardo: 90,
+                                segundosRetardo: _cascadaFnF4Seg, // CONFIG-CASCADA-C
                                 sonido: 'master',
                                 canalAndroidId: MotorNotificaciones.canalMasterId,
                               );
@@ -2529,12 +2547,12 @@ extension CentralScreenFormularios on _CentralScreenState {
                                 titulo: '🔵 TURNO FN CERCA',
                                 mensaje:
                                     'Servicio Farmanorte disponible · $zonaLabel',
-                                segundosRetardo: 60,
+                                segundosRetardo: _cascadaFnF3Seg, // CONFIG-CASCADA-C
                                 sonido: Sonidos.movilParadero,
                               );
                             }
 
-                            // ── FASE 4 (T+90s): global — todos los demás ────
+                            // ── FASE 4 (T+cascadaFnF4Seg): global ───────────
                             String? notifFase4;
                             if (fase4Ids.isNotEmpty) {
                               notifFase4 = await MotorNotificaciones
@@ -2543,12 +2561,12 @@ extension CentralScreenFormularios on _CentralScreenState {
                                 titulo: '🔵 TURNO FN SIN TOMAR',
                                 mensaje:
                                     'Servicio Farmanorte · $zonaLabel',
-                                segundosRetardo: 90,
+                                segundosRetardo: _cascadaFnF4Seg, // CONFIG-CASCADA-C
                                 sonido: Sonidos.movilParadero,
                               );
                             }
 
-                            // ── FASE 4b (T+90s): re-alerta Masters ───────────
+                            // ── FASE 4b (T+cascadaFnF4Seg): re-alerta Masters ──
                             String? notifFase4b;
                             if (masterIds.isNotEmpty) {
                               notifFase4b = await MotorNotificaciones
@@ -2556,7 +2574,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                                 externalIds: masterIds,
                                 titulo: '🚨 FN SIN CUBRIR',
                                 mensaje: 'Servicio Farmanorte sin tomar · $zonaLabel',
-                                segundosRetardo: 90,
+                                segundosRetardo: _cascadaFnF4Seg, // CONFIG-CASCADA-C
                                 sonido: 'master',
                                 canalAndroidId: MotorNotificaciones.canalMasterId,
                               );

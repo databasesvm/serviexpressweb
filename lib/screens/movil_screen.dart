@@ -29,6 +29,7 @@ import 'package:serviexpress_app/utils/widgets_compartidos.dart'; // PulsingPani
 import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart' show FilteringTextInputFormatter;
+import 'package:serviexpress_app/utils/cascada_config.dart'; // CONFIG-CASCADA-EXT
 
 part 'movil_widgets.dart';
 
@@ -113,17 +114,12 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
   // -------------------------------------------------
 
   // --- ZONAS DE PARADERO: nombre -> [lat, lng, radio en metros] ---
-  // Fuente única — la usan tanto _intentarRegistroParadero() (registro
-  // manual/automático) como el loop de GPS (expulsión automática por
-  // geocerca). Evita que ambos lugares tengan números mágicos propios
-  // que puedan desincronizarse si alguno se actualiza y el otro no.
-  static const Map<String, List<double>> _kZonasParadero = {
-    'BASE CASA': [7.860035, -72.482059, 200],
-    'EXPUENTE': [7.863439, -72.475760, 100],
-    'MEMOS': [7.863976, -72.479256, 100],
-    'NOCTURNO': [7.863283, -72.476152, 100],
-    'BOCONO': [7.851809, -72.467278, 100],
-  };
+  // PARADEROS-E: cargado dinámicamente desde la tabla `paraderos` en BD.
+  // Cada entrada: [latitud, longitud, radio_metros].
+  // Se inicializa vacío y se llena en _cargarZonasParadero() al arrancar.
+  Map<String, List<double>> _kZonasParadero = {};
+  // Mapa auxiliar: nombre -> es_nocturno (controla qué paraderos son de horario nocturno)
+  Map<String, bool> _zonasParaderoNocturno = {};
 
   // Caché local del paradero actual — se sincroniza en
   // _intentarRegistroParadero() y _salirDelParadero(). El loop de GPS
@@ -359,6 +355,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     _estabaSuspendido = widget.usuario['suspendido'] ?? false;
     _miParaderoCache = widget.usuario['paradero_actual']?.toString();
 
+    _cargarZonasParadero(); // PARADEROS-E: carga geocercas desde BD
     _construirStreams(); // primera vez — luego se reconstruyen solos
     _iniciarVigilanteDeConexion();
     // Fix #3: escalonar operaciones de red del arranque para no saturar
@@ -985,6 +982,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       }
 
       // T=30s: paradero (misil — sobrevive aunque el widget se desmonte)
+      final cascadaMovil1 = await CascadaConfig.cargar(); // CONFIG-CASCADA-EXT
       final enParaderoData = await db
           .from('usuarios')
           .select('id')
@@ -1002,7 +1000,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
           externalIds: paraderoIds,
           titulo: '🔄 DOMICILIO SIN MÓVIL',
           mensaje: msgAlerta,
-          segundosRetardo: 30,
+          segundosRetardo: cascadaMovil1.seF2Seg,
         );
       }
 
@@ -1023,7 +1021,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
             externalIds: idsTodosD,
             titulo: '🚨 DOMICILIO SIN TOMAR',
             mensaje: msgAlerta,
-            segundosRetardo: 60,
+            segundosRetardo: cascadaMovil1.seF3Seg,
           );
           if (id60sD != null) {
             await db
@@ -1106,6 +1104,174 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       ),
     );
   }
+
+  // ── Overlay de bloqueo semanal: cubre TODA la pantalla cuando wallet_bloqueado=true ──
+  Widget _overlayBilleteraBlockeada(dynamic movilId) => Positioned.fill(
+        child: Container(
+          color: const Color(0xFF0D0D0D),
+          child: SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(28),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  const SizedBox(height: 32),
+                  Container(
+                    width: 80,
+                    height: 80,
+                    decoration: BoxDecoration(
+                      color: Colors.red.withValues(alpha: 0.12),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                          color: Colors.redAccent.withValues(alpha: 0.5),
+                          width: 2),
+                    ),
+                    child: const Icon(Icons.lock_rounded,
+                        color: Colors.redAccent, size: 38),
+                  ),
+                  const SizedBox(height: 20),
+                  const Text('BILLETERA BLOQUEADA',
+                      style: TextStyle(
+                          color: Colors.redAccent,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.5)),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Tu billetera semanal ha sido bloqueada por falta de pago.\nPara reactivarla, realiza tu consignación y envía el comprobante.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                        color: Colors.white60, fontSize: 13, height: 1.6),
+                  ),
+                  const SizedBox(height: 24),
+                  // Instrucciones de pago
+                  FutureBuilder<Map<String, dynamic>?>(
+                    future: Supabase.instance.client
+                        .from('config_sistema')
+                        .select('info_recarga_wallet')
+                        .eq('id', 1)
+                        .maybeSingle(),
+                    builder: (_, snapCfg) {
+                      final info =
+                          snapCfg.data?['info_recarga_wallet']?.toString();
+                      if (info == null || info.isEmpty)
+                        return const SizedBox.shrink();
+                      return Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color:
+                              const Color(0xFF818CF8).withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                              color: const Color(0xFF818CF8)
+                                  .withValues(alpha: 0.4)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Row(children: [
+                              Icon(Icons.account_balance_rounded,
+                                  color: Color(0xFF818CF8), size: 14),
+                              SizedBox(width: 6),
+                              Text('CÓMO Y DÓNDE PAGAR',
+                                  style: TextStyle(
+                                      color: Color(0xFF818CF8),
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                      letterSpacing: 0.8)),
+                            ]),
+                            const SizedBox(height: 8),
+                            SelectableText(info,
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13,
+                                    height: 1.6)),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 20),
+                  // Check solicitud pendiente
+                  FutureBuilder<List<dynamic>>(
+                    future: Supabase.instance.client
+                        .from('solicitudes_recarga_wallet')
+                        .select('id, created_at')
+                        .eq('movil_id', movilId)
+                        .eq('estado', 'pendiente')
+                        .eq('tipo_solicitud', 'pago_semanal')
+                        .limit(1),
+                    builder: (_, snapPend) {
+                      final pendiente =
+                          snapPend.hasData && snapPend.data!.isNotEmpty;
+                      if (pendiente) {
+                        return Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: Colors.amber[900]!.withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                                color:
+                                    Colors.amber[700]!.withValues(alpha: 0.5)),
+                          ),
+                          child: const Row(children: [
+                            SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.amber),
+                            ),
+                            SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                'Comprobante en revisión — espera la aprobación de central para ser desbloqueado.',
+                                style: TextStyle(
+                                    color: Colors.amber,
+                                    fontSize: 12,
+                                    height: 1.4,
+                                    fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                          ]),
+                        );
+                      }
+                      return SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          icon: const Icon(Icons.upload_rounded, size: 16),
+                          label: const Text(
+                              'ENVIAR COMPROBANTE PARA DESBLOQUEAR',
+                              style: TextStyle(
+                                  fontSize: 12, fontWeight: FontWeight.bold)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.redAccent,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10)),
+                          ),
+                          onPressed: () => _solicitarRecargaWallet(
+                              movilId, 'semanal',
+                              tipoSolicitud: 'pago_semanal'),
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Si ya enviaste el comprobante, espera la revisión de central.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                        color: Colors.white38, fontSize: 11, height: 1.5),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
 
   // #91: overlay semi-transparente cuando hay error de conexión pero tenemos caché.
   // No bloquea la UI — las cards del servicio siguen visibles de fondo.
@@ -1492,7 +1658,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       final data = await Supabase.instance.client
           .from('usuarios')
           .select('id, nombre, en_linea, paradero_actual, ingreso_fila, '
-              'ticket_prioridad, rango_movil, numero_movil')
+              'ticket_prioridad, rango_movil, numero_movil, tiene_fn, tiene_se')
           .eq('rol', 'movil')
           .eq('en_linea', true);
       _actualizarFilaNotifier(List<Map<String, dynamic>>.from(data));
@@ -2554,59 +2720,23 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       final hora = DateTime.now().hour;
       String? nuevoParadero;
 
-      // 1. Calculamos la distancia a tu casa (Polígono de pruebas)
-      final casa = _kZonasParadero['BASE CASA']!;
-      double distCasa = Geolocator.distanceBetween(
-        pos.latitude,
-        pos.longitude,
-        casa[0],
-        casa[1],
-      );
-
-      // 2. Evaluamos primero tu casa. Si estás a menos de 200m, entras directo.
-      if (distCasa <= casa[2]) {
-        nuevoParadero = 'BASE CASA';
-      }
-      // 3. Si no estás en tu casa, evalúa los paraderos reales
-      else if (hora >= 6 &&
-          Geolocator.distanceBetween(
-                pos.latitude,
-                pos.longitude,
-                _kZonasParadero['EXPUENTE']![0],
-                _kZonasParadero['EXPUENTE']![1],
-              ) <=
-              _kZonasParadero['EXPUENTE']![2]) {
-        nuevoParadero = 'EXPUENTE';
-      } else if (hora >= 16 &&
-          Geolocator.distanceBetween(
-                pos.latitude,
-                pos.longitude,
-                _kZonasParadero['MEMOS']![0],
-                _kZonasParadero['MEMOS']![1],
-              ) <=
-              _kZonasParadero['MEMOS']![2]) {
-        // Horario ampliado: 4:00pm a 11:59pm (antes 6:00pm-10:59pm).
-        // No hace falta tope superior — la hora vuelve a 0 a medianoche,
-        // así que "hora >= 16" ya cubre exactamente hasta las 11:59pm.
-        nuevoParadero = 'MEMOS';
-      } else if (hora < 6 &&
-          Geolocator.distanceBetween(
-                pos.latitude,
-                pos.longitude,
-                _kZonasParadero['NOCTURNO']![0],
-                _kZonasParadero['NOCTURNO']![1],
-              ) <=
-              _kZonasParadero['NOCTURNO']![2]) {
-        nuevoParadero = 'NOCTURNO';
-      } else if (hora >= 6 &&
-          Geolocator.distanceBetween(
-                pos.latitude,
-                pos.longitude,
-                _kZonasParadero['BOCONO']![0],
-                _kZonasParadero['BOCONO']![1],
-              ) <=
-              _kZonasParadero['BOCONO']![2]) {
-        nuevoParadero = 'BOCONO';
+      // PARADEROS-E: evaluación dinámica desde BD (reemplaza hardcoding por nombre)
+      // Itera todos los paraderos activos. Los nocturnos (es_nocturno=true) solo
+      // aplican en horario 0-5h; los diurnos aplican en horario 6-23h.
+      for (final entry in _kZonasParadero.entries) {
+        final nombre    = entry.key;
+        final zona      = entry.value; // [lat, lng, radio]
+        final esNocturno = _zonasParaderoNocturno[nombre] ?? false;
+        // Filtro horario: nocturno solo de 0-5h, diurno solo de 6-23h
+        final horaPermitida = esNocturno ? hora < 6 : hora >= 6;
+        if (!horaPermitida) continue;
+        final dist = Geolocator.distanceBetween(
+          pos.latitude, pos.longitude, zona[0], zona[1],
+        );
+        if (dist <= zona[2]) {
+          nuevoParadero = nombre;
+          break; // primer paradero dentro del radio gana
+        }
       }
 
       if (nuevoParadero != null) {
@@ -3092,9 +3222,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     String paradero,
   ) async {
     final reportadoNombre =
-        (movilReportado['usuario'] ?? movilReportado['nombre'] ?? '')
-            .toString()
-            .toUpperCase();
+        'Movil${((movilReportado['numero_movil'] as num?)?.toInt() ?? 0).toString().padLeft(2, '0')}';
 
     final bool? confirmar = await showDialog<bool>(
       context: context,
@@ -3517,9 +3645,105 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     try {
       final nuevoEstado = !_estaEnLinea;
 
-      // ── WALLET CHECK: prediario/postdia deben tener saldo suficiente ─────
+      // ── FACCIÓN CHECK (sin facción no puede conectarse) ──────────────────
       if (nuevoEstado) {
+        final perfilActual = _cacheMiPerfil ?? widget.usuario;
+        final tieneSE = perfilActual['tiene_se'] == true;
+        final tieneFNFacc = perfilActual['tiene_fn'] == true;
+        if (!tieneSE && !tieneFNFacc) {
+          setState(() => _procesando = false);
+          showDialog(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14)),
+              backgroundColor: const Color(0xFF1A1A1A),
+              title: const Row(children: [
+                Icon(Icons.block_rounded, color: Colors.orange, size: 20),
+                SizedBox(width: 8),
+                Text('Sin facción asignada',
+                    style: TextStyle(
+                        color: Colors.orange,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16)),
+              ]),
+              content: const Text(
+                'Tu cuenta aún no tiene una facción asignada (SE / FN). Comunícate con central para activar tu acceso a los servicios.',
+                style:
+                    TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
+              ),
+              actions: [
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.orange,
+                      foregroundColor: Colors.black),
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('ENTENDIDO',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ],
+            ),
+          );
+          return;
+        }
+      }
+      // ── WALLET CHECK (Masters exentos de todo bloqueo) ────────────────────
+      if (nuevoEstado) {
+        final esMaster =
+            (_cacheMiPerfil ?? widget.usuario)['rango_movil']
+                    ?.toString()
+                    .toUpperCase() ==
+                'MASTER';
         final tipoPlan = widget.usuario['tipo_plan_movil']?.toString() ?? '';
+        if (!esMaster) {
+        // Semanal: bloqueado por falta de pago semanal
+        if (tipoPlan == 'semanal') {
+          try {
+            final walletData = await Supabase.instance.client
+                .from('usuarios')
+                .select('wallet_bloqueado')
+                .eq('id', widget.usuario['id'])
+                .single();
+            if (walletData['wallet_bloqueado'] == true && mounted) {
+              setState(() => _procesando = false);
+              showDialog(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14)),
+                  backgroundColor: const Color(0xFF1A1A1A),
+                  title: const Row(children: [
+                    Icon(Icons.lock_rounded,
+                        color: Colors.redAccent, size: 20),
+                    SizedBox(width: 8),
+                    Text('Billetera bloqueada',
+                        style: TextStyle(
+                            color: Colors.redAccent,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16)),
+                  ]),
+                  content: const Text(
+                    'Tu billetera semanal está bloqueada. Ve a la pestaña de Perfil, envía el comprobante de pago y espera la aprobación de central.',
+                    style: TextStyle(
+                        color: Colors.white70, fontSize: 13, height: 1.5),
+                  ),
+                  actions: [
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.redAccent,
+                          foregroundColor: Colors.white),
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('ENTENDIDO',
+                          style: TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                  ],
+                ),
+              );
+              return;
+            }
+          } catch (_) {}
+        }
+        // Prediario/postdia: saldo insuficiente
         if (tipoPlan == 'prediario' || tipoPlan == 'postdia') {
           try {
             final walletData = await Supabase.instance.client
@@ -3539,14 +3763,14 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14)),
                   backgroundColor: const Color(0xFF1A1A1A),
-                  title: const Text('💳 Wallet insuficiente',
+                  title: const Text('💳 Billetera insuficiente',
                       style: TextStyle(
                           color: Colors.orange,
                           fontWeight: FontWeight.bold,
                           fontSize: 16)),
                   content: Text(
                     tipoPlan == 'prediario'
-                        ? 'Tu saldo actual es \$${saldo.toStringAsFixed(0)}. Recarga tu wallet antes de conectarte.'
+                        ? 'Tu saldo actual es \$${saldo.toStringAsFixed(0)}. Recarga tu billetera antes de conectarte.'
                         : 'Tienes una deuda de \$$deuda del día anterior. Comunícate con central para ponerte al día.',
                     style: const TextStyle(
                         color: Colors.white70, fontSize: 13, height: 1.5),
@@ -3567,6 +3791,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
             }
           } catch (_) {}
         }
+        } // cierra if (!esMaster)
       }
       // ─────────────────────────────────────────────────────────────────────
 
@@ -4351,6 +4576,38 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                             ),
                           ),
                         ),
+                        // Badge SE
+                        if (miPerfil['tiene_se'] == true) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF1B5E20)
+                                  .withValues(alpha: 0.40),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                  color: const Color(0xFF3AF500), width: 1.5),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.electric_bolt,
+                                    size: 10, color: Color(0xFF3AF500)),
+                                SizedBox(width: 4),
+                                Text(
+                                  'SE',
+                                  style: TextStyle(
+                                    color: Color(0xFF3AF500),
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 11,
+                                    letterSpacing: 1.2,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                         // Badge FN — reconocimiento visible en el perfil
                         if (miPerfil['tiene_fn'] == true) ...[
                           const SizedBox(width: 8),
@@ -4490,9 +4747,305 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                 },
               ),
 
-              // ── WALLET (solo prediario / postdia) ─────────────────────────
+              // ── BILLETERA (prediario, postdia, semanal) ────────────────────
               Builder(builder: (_) {
                 final tipoPlan = miPerfil['tipo_plan_movil']?.toString() ?? '';
+
+                // ── SEMANAL ───────────────────────────────────────────────
+                if (tipoPlan == 'semanal') {
+                  final bloqueado = miPerfil['wallet_bloqueado'] == true;
+                  final hoy = DateTime.now();
+                  final esDomingo = hoy.weekday == DateTime.sunday;
+                  return FutureBuilder<List<dynamic>>(
+                    future: Supabase.instance.client
+                        .from('solicitudes_recarga_wallet')
+                        .select('monto_solicitado, estado, created_at')
+                        .eq('movil_id', miPerfil['id'])
+                        .eq('estado', 'pendiente')
+                        .eq('tipo_solicitud', 'pago_semanal')
+                        .order('created_at', ascending: false)
+                        .limit(1),
+                    builder: (_, snapRec) {
+                      final pendiente =
+                          snapRec.hasData && snapRec.data!.isNotEmpty
+                              ? snapRec.data!.first as Map<String, dynamic>
+                              : null;
+                      return Container(
+                        margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                        decoration: BoxDecoration(
+                          color: Colors.black,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: bloqueado
+                                ? Colors.redAccent.withValues(alpha: 0.5)
+                                : esDomingo
+                                    ? Colors.orange.withValues(alpha: 0.5)
+                                    : const Color(0xFF22C55E)
+                                        .withValues(alpha: 0.4),
+                          ),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Encabezado
+                              Row(children: [
+                                Icon(
+                                  bloqueado
+                                      ? Icons.lock_rounded
+                                      : Icons.lock_open_rounded,
+                                  color: bloqueado
+                                      ? Colors.redAccent
+                                      : Colors.white54,
+                                  size: 16,
+                                ),
+                                const SizedBox(width: 8),
+                                const Text('MI BILLETERA · SEMANAL',
+                                    style: TextStyle(
+                                        color: Colors.white54,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                        letterSpacing: 1)),
+                                const Spacer(),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: bloqueado
+                                        ? Colors.red.withValues(alpha: 0.15)
+                                        : const Color(0xFF22C55E)
+                                            .withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: Text(
+                                    bloqueado ? 'BLOQUEADA' : 'ACTIVA',
+                                    style: TextStyle(
+                                        color: bloqueado
+                                            ? Colors.redAccent
+                                            : const Color(0xFF22C55E),
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.bold,
+                                        letterSpacing: 0.8),
+                                  ),
+                                ),
+                              ]),
+                              const SizedBox(height: 12),
+                              // Banner: billetera bloqueada
+                              if (bloqueado) ...[
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: Colors.red.withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                        color: Colors.redAccent
+                                            .withValues(alpha: 0.4)),
+                                  ),
+                                  child: const Row(children: [
+                                    Icon(Icons.lock_rounded,
+                                        color: Colors.redAccent, size: 18),
+                                    SizedBox(width: 10),
+                                    Expanded(
+                                      child: Text(
+                                        'Tu billetera está bloqueada. Envía el comprobante de pago para reactivarla.',
+                                        style: TextStyle(
+                                            color: Colors.redAccent,
+                                            fontSize: 12,
+                                            height: 1.4),
+                                      ),
+                                    ),
+                                  ]),
+                                ),
+                                const SizedBox(height: 12),
+                              ],
+                              // Banner: aviso del domingo
+                              if (!bloqueado && esDomingo) ...[
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color:
+                                        Colors.orange.withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                        color: Colors.orange
+                                            .withValues(alpha: 0.5)),
+                                  ),
+                                  child: const Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text('⚠️',
+                                          style: TextStyle(fontSize: 16)),
+                                      SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          'Mañana lunes a las 12:00pm tu billetera será bloqueada automáticamente.\n\nRealiza tu pago antes de esa hora para seguir trabajando sin interrupciones.',
+                                          style: TextStyle(
+                                              color: Colors.orange,
+                                              fontSize: 12,
+                                              height: 1.4,
+                                              fontWeight: FontWeight.w600),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                              ],
+                              // Instrucciones de pago (desde config_sistema)
+                              FutureBuilder<Map<String, dynamic>?>(
+                                future: Supabase.instance.client
+                                    .from('config_sistema')
+                                    .select('info_recarga_wallet')
+                                    .eq('id', 1)
+                                    .maybeSingle(),
+                                builder: (_, snapCfg) {
+                                  final info = snapCfg
+                                      .data?['info_recarga_wallet']
+                                      ?.toString();
+                                  if (info == null || info.isEmpty)
+                                    return const SizedBox.shrink();
+                                  return Container(
+                                    margin: const EdgeInsets.only(bottom: 12),
+                                    padding: const EdgeInsets.all(12),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF818CF8)
+                                          .withValues(alpha: 0.1),
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(
+                                          color: const Color(0xFF818CF8)
+                                              .withValues(alpha: 0.35)),
+                                    ),
+                                    child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          const Row(children: [
+                                            Icon(
+                                                Icons.account_balance_rounded,
+                                                color: Color(0xFF818CF8),
+                                                size: 13),
+                                            SizedBox(width: 6),
+                                            Text('CÓMO Y DÓNDE PAGAR',
+                                                style: TextStyle(
+                                                    color: Color(0xFF818CF8),
+                                                    fontSize: 10,
+                                                    fontWeight: FontWeight.bold,
+                                                    letterSpacing: 0.8)),
+                                          ]),
+                                          const SizedBox(height: 6),
+                                          SelectableText(info,
+                                              style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 12,
+                                                  height: 1.5)),
+                                        ]),
+                                  );
+                                },
+                              ),
+                              // Comprobante en revisión
+                              if (pendiente != null) ...[
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: Colors.amber[900]!
+                                        .withValues(alpha: 0.2),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                        color: Colors.amber[700]!
+                                            .withValues(alpha: 0.5)),
+                                  ),
+                                  child: const Row(children: [
+                                    SizedBox(
+                                      width: 14,
+                                      height: 14,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Colors.amber),
+                                    ),
+                                    SizedBox(width: 10),
+                                    Expanded(
+                                      child: Text(
+                                        'Comprobante en revisión — espera la aprobación de central.',
+                                        style: TextStyle(
+                                            color: Colors.amber,
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w600),
+                                      ),
+                                    ),
+                                  ]),
+                                ),
+                                const SizedBox(height: 12),
+                              ] else
+                                const SizedBox(height: 4),
+                              // Botón enviar comprobante
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton.icon(
+                                  icon: const Icon(Icons.upload_rounded,
+                                      size: 14),
+                                  label: Text(
+                                    bloqueado
+                                        ? 'ENVIAR COMPROBANTE PARA DESBLOQUEAR'
+                                        : 'ENVIAR COMPROBANTE DE PAGO',
+                                    style: const TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold),
+                                  ),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: pendiente != null
+                                        ? Colors.grey[700]
+                                        : bloqueado
+                                            ? Colors.redAccent
+                                            : const Color(0xFF818CF8),
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 10),
+                                    shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(8)),
+                                  ),
+                                  onPressed: pendiente != null
+                                      ? null
+                                      : () => _solicitarRecargaWallet(
+                                          miPerfil['id'], tipoPlan,
+                                          tipoSolicitud: 'pago_semanal'),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  icon: const Icon(Icons.history_rounded,
+                                      size: 13),
+                                  label: const Text('Historial',
+                                      style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.bold)),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: Colors.white70,
+                                    side: const BorderSide(
+                                        color: Colors.white24),
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 8),
+                                    shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(8)),
+                                  ),
+                                  onPressed: () =>
+                                      _mostrarHistorialWallet(miPerfil['id']),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  );
+                }
+
                 if (tipoPlan != 'prediario' && tipoPlan != 'postdia')
                   return const SizedBox.shrink();
                 final saldo =
@@ -4583,6 +5136,79 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                 style: const TextStyle(
                                     color: Colors.white38, fontSize: 11),
                               ),
+                              // ── Aviso saldo bajo (prediario) ─────────────
+                              if (tipoPlan == 'prediario' &&
+                                  saldo > 0 &&
+                                  saldo <= 3000) ...[
+                                const SizedBox(height: 10),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 9),
+                                  decoration: BoxDecoration(
+                                    color:
+                                        Colors.orange.withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                        color: Colors.orange
+                                            .withValues(alpha: 0.45)),
+                                  ),
+                                  child: const Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text('⚠️',
+                                          style: TextStyle(fontSize: 14)),
+                                      SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          'Saldo bajo — recarga pronto para seguir operando sin interrupciones.',
+                                          style: TextStyle(
+                                              color: Colors.orange,
+                                              fontSize: 11,
+                                              height: 1.4,
+                                              fontWeight: FontWeight.w600),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                              // ── Aviso cierre de jornada (postdia) ────────
+                              if (tipoPlan == 'postdia' &&
+                                  DateTime.now().hour >= 12) ...[
+                                const SizedBox(height: 10),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 9),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF818CF8)
+                                        .withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                        color: const Color(0xFF818CF8)
+                                            .withValues(alpha: 0.4)),
+                                  ),
+                                  child: const Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text('⏰',
+                                          style: TextStyle(fontSize: 14)),
+                                      SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          'Tu jornada está por vencer. Liquida tu saldo antes de las 12:00pm de mañana para seguir operando.',
+                                          style: TextStyle(
+                                              color: Color(0xFF818CF8),
+                                              fontSize: 11,
+                                              height: 1.4,
+                                              fontWeight: FontWeight.w600),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
                               // Banner de recarga en verificación
                               if (pendiente != null) ...[
                                 const SizedBox(height: 10),
@@ -5577,6 +6203,37 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         );
       },
     );
+  }
+
+  // PARADEROS-E — carga dinámica de geocercas desde la tabla `paraderos`
+  Future<void> _cargarZonasParadero() async {
+    try {
+      final data = await Supabase.instance.client
+          .from('paraderos')
+          .select('nombre, latitud, longitud, radio_metros, es_nocturno')
+          .eq('activo', true);
+      if (!mounted) return;
+      final zonas = <String, List<double>>{};
+      final nocturno = <String, bool>{};
+      for (final p in data) {
+        final nombre = (p['nombre'] as String?)?.trim().toUpperCase();
+        final lat    = (p['latitud']      as num?)?.toDouble();
+        final lng    = (p['longitud']     as num?)?.toDouble();
+        final radio  = (p['radio_metros'] as int?) ?? 150;
+        if (nombre == null || lat == null || lng == null) continue;
+        zonas[nombre]    = [lat, lng, radio.toDouble()];
+        nocturno[nombre] = p['es_nocturno'] == true;
+      }
+      if (mounted) {
+        setState(() {
+          _kZonasParadero       = zonas;
+          _zonasParaderoNocturno = nocturno;
+        });
+      }
+    } catch (_) {
+      // Si falla la BD, _kZonasParadero queda vacío → el registro manual
+      // mostrará "DENEGADO" y la geocerca de expulsión no actuará (seguro).
+    }
   }
 
   Future<void> _cargarProduccion() async {
@@ -7053,6 +7710,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                 final bool tieneTicket =
                                     movil['ticket_prioridad'] == true;
                                 final bool tieneFN = movil['tiene_fn'] == true;
+                                final bool tieneSE = movil['tiene_se'] == true;
                                 final String rango = movil['rango_movil']
                                         ?.toString()
                                         .toUpperCase() ??
@@ -7095,7 +7753,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                             const SizedBox(width: 8),
                                             Expanded(
                                               child: Text(
-                                                '${(movil['usuario'] ?? movil['nombre'] ?? '').toString().toUpperCase()}',
+                                                'Movil${((movil['numero_movil'] as num?)?.toInt() ?? 0).toString().padLeft(2, '0')}',
                                                 style: TextStyle(
                                                   fontWeight: soyYo
                                                       ? FontWeight.bold
@@ -7122,6 +7780,30 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                                   'FN',
                                                   style: TextStyle(
                                                     color: Colors.white,
+                                                    fontSize: 8,
+                                                    fontWeight: FontWeight.bold,
+                                                    letterSpacing: 0.8,
+                                                  ),
+                                                ),
+                                              ),
+                                            if (tieneSE)
+                                              Container(
+                                                margin: const EdgeInsets.only(
+                                                    left: 4),
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                        horizontal: 5,
+                                                        vertical: 2),
+                                                decoration: BoxDecoration(
+                                                  color:
+                                                      const Color(0xFF1B5E20),
+                                                  borderRadius:
+                                                      BorderRadius.circular(6),
+                                                ),
+                                                child: const Text(
+                                                  'SE',
+                                                  style: TextStyle(
+                                                    color: Color(0xFF3AF500),
                                                     fontSize: 8,
                                                     fontWeight: FontWeight.bold,
                                                     letterSpacing: 0.8,
@@ -7474,7 +8156,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     }
 
     int efectivos = 0;
-    int tiempoMeta = servicio['tiempo_estimado_minutos'] ?? 15;
+    int tiempoMeta = servicio['tiempo_estimado_minutos'] ?? 30;
     bool mostrarReloj = false;
 
     // --- CÁLCULO DE TIEMPOS BIFURCADO ---
@@ -11862,13 +12544,15 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         }).eq('id', servicioId);
 
         // FASE 2 (T+31s): auto-asignación vía pg_cron al más cercano
+        // (+1s de offset para evitar race condition con pg_cron — ver FN-RACE)
+        final cascadaMovil2 = await CascadaConfig.cargar(); // CONFIG-CASCADA-EXT
         String? notifFase2Lib;
         if (fase2IdFn != null) {
           notifFase2Lib = await MotorNotificaciones.programarMisilRetardado(
             externalIds: [fase2IdFn],
             titulo: '🔵 TURNO FN LIBERADO — PARA TI',
             mensaje: 'Servicio Farmanorte disponible · $zonaFn',
-            segundosRetardo: 31,
+            segundosRetardo: cascadaMovil2.fnF2Seg + 1,
             sonido: Sonidos.movilParadero,
           );
         }
@@ -11880,7 +12564,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
             externalIds: fase3IdsFn,
             titulo: '🔵 TURNO FN LIBERADO',
             mensaje: 'Servicio Farmanorte sin tomar · $zonaFn',
-            segundosRetardo: 61,
+            segundosRetardo: cascadaMovil2.fnF3Seg + 1,
             sonido: Sonidos.movilParadero,
           );
         }
@@ -11892,7 +12576,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
             externalIds: fase4IdsFn,
             titulo: '🔵 TURNO FN LIBERADO',
             mensaje: 'Servicio Farmanorte sin tomar · $zonaFn',
-            segundosRetardo: 91,
+            segundosRetardo: cascadaMovil2.fnF4Seg + 1,
             sonido: Sonidos.movilParadero,
           );
         }
@@ -11959,12 +12643,13 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                 .where((e) => e.isNotEmpty && !masterMobileIds2.contains(e))
                 .toList();
 
+        final cascadaMovil3 = await CascadaConfig.cargar(); // CONFIG-CASCADA-EXT
         if (paraderoIds.isNotEmpty) {
           final id30s = await MotorNotificaciones.programarMisilRetardado(
             externalIds: paraderoIds,
             titulo: 'TU TURNO DE PARADERO',
             mensaje: msgAlerta,
-            segundosRetardo: 30,
+            segundosRetardo: cascadaMovil3.seF2Seg,
           );
           if (id30s != null) {
             await Supabase.instance.client
@@ -12009,7 +12694,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
             externalIds: idsZona60,
             titulo: '📡 SERVICIO CERCA (1km)',
             mensaje: msgAlerta,
-            segundosRetardo: 60,
+            segundosRetardo: cascadaMovil3.seF3Seg,
           );
         }
         if (idsTodos90.isNotEmpty) {
@@ -12017,7 +12702,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
             externalIds: idsTodos90,
             titulo: '🚨 SERVICIO SIN TOMAR',
             mensaje: msgAlerta,
-            segundosRetardo: 90,
+            segundosRetardo: cascadaMovil3.seF4Seg,
           );
         }
         if (idLib60 != null || idLib90 != null) {
@@ -12172,8 +12857,9 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     }
   }
 
-  // ── WALLET: solicitud de recarga con comprobante ─────────────────────────
-  Future<void> _solicitarRecargaWallet(dynamic movilId, String tipoPlan) async {
+  // ── WALLET: solicitud de recarga / pago semanal con comprobante ──────────
+  Future<void> _solicitarRecargaWallet(dynamic movilId, String tipoPlan,
+      {String tipoSolicitud = 'recarga'}) async {
     final montoCtrl = TextEditingController();
     final notaCtrl = TextEditingController();
     Uint8List? _imgBytes;
@@ -12190,7 +12876,12 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
             const Icon(Icons.add_card_rounded,
                 color: Color(0xFF818CF8), size: 20),
             const SizedBox(width: 8),
-            Text(tipoPlan == 'prediario' ? 'Recargar Saldo' : 'Pagar Deuda',
+            Text(
+                tipoSolicitud == 'pago_semanal'
+                    ? 'Enviar Consignación Semanal'
+                    : tipoPlan == 'prediario'
+                        ? 'Recargar Saldo'
+                        : 'Pagar Deuda',
                 style: const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
@@ -12248,9 +12939,11 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                       );
                     },
                   ),
-                  const Text(
-                    'Ingresa el monto y adjunta el comprobante de transferencia. Tu saldo se actualizará automáticamente.',
-                    style: TextStyle(
+                  Text(
+                    tipoSolicitud == 'pago_semanal'
+                        ? 'Adjunta el comprobante de tu consignación semanal. La central lo revisará y desbloqueará tu billetera.'
+                        : 'Ingresa el monto y adjunta el comprobante de transferencia. Tu saldo se actualizará automáticamente.',
+                    style: const TextStyle(
                         color: Colors.white54, fontSize: 11, height: 1.4),
                   ),
                   const SizedBox(height: 14),
@@ -12259,7 +12952,9 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                     keyboardType: TextInputType.number,
                     style: const TextStyle(color: Colors.white, fontSize: 14),
                     decoration: InputDecoration(
-                      labelText: 'Monto a recargar (\$)',
+                      labelText: tipoSolicitud == 'pago_semanal'
+                          ? 'Monto del pago semanal (\$)'
+                          : 'Monto a recargar (\$)',
                       labelStyle:
                           const TextStyle(color: Colors.white54, fontSize: 12),
                       prefixText: '\$ ',
@@ -12376,6 +13071,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                               : null,
                           'comprobante_url': urlComprobante,
                           'estado': 'pendiente',
+                          'tipo_solicitud': tipoSolicitud,
                         });
                         if (mounted) {
                           Navigator.pop(ctx);
@@ -12396,7 +13092,9 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                         fontSize: 16)),
                               ]),
                               content: Text(
-                                'Tu recarga de \$${monto.toStringAsFixed(0)} está siendo revisada por el equipo.\n\nTu saldo se actualizará automáticamente en cuanto sea aprobada.',
+                                tipoSolicitud == 'pago_semanal'
+                                    ? 'Tu comprobante de \$${monto.toStringAsFixed(0)} está siendo revisado.\n\nTu billetera será desbloqueada en cuanto la central lo apruebe.'
+                                    : 'Tu recarga de \$${monto.toStringAsFixed(0)} está siendo revisada por el equipo.\n\nTu saldo se actualizará automáticamente en cuanto sea aprobada.',
                                 style: const TextStyle(
                                     color: Colors.white70,
                                     fontSize: 13,
@@ -14825,6 +15523,25 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
             ), // Column
             // #91: overlay "Has perdido la conexión" — solo cuando stream falla con caché disponible
             if (_conexionPerdida) _overlayDesconexion(),
+            // Overlay bloqueo billetera semanal (Masters exentos)
+            StreamBuilder<Map<String, dynamic>?>(
+              stream: _streamMiPerfil,
+              initialData: _cacheMiPerfil,
+              builder: (_, snap) {
+                final perfil =
+                    snap.data ?? _cacheMiPerfil ?? widget.usuario;
+                final esMaster = perfil['rango_movil']
+                        ?.toString()
+                        .toUpperCase() ==
+                    'MASTER';
+                final esSemanal =
+                    perfil['tipo_plan_movil']?.toString() == 'semanal';
+                final bloqueado = perfil['wallet_bloqueado'] == true;
+                if (esMaster || !esSemanal || !bloqueado)
+                  return const SizedBox.shrink();
+                return _overlayBilleteraBlockeada(perfil['id']);
+              },
+            ),
           ], // Stack children
         ), // Stack
         bottomNavigationBar: BottomNavigationBar(

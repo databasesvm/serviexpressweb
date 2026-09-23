@@ -181,7 +181,9 @@ extension CentralScreenPanico on _CentralScreenState {
     String? paraderoSel;
     Map<String, dynamic>? movilSel;
     bool incluirDesconectados = false;
-    const paraderos = ['EXPUENTE', 'MEMOS', 'NOCTURNO', 'BASE CASA'];
+    // PARADEROS-E: lista dinámica desde BD (solo SE, es_nocturno o no)
+    // BASE CASA ya no está hardcodeada — agrégala en el CRUD de paraderos si se necesita.
+    final paraderos = _paraderosPanel;
 
     // Carga lista de móviles una sola vez al abrir el diálogo
     final futureMoviles = Supabase.instance.client
@@ -269,7 +271,7 @@ extension CentralScreenPanico on _CentralScreenState {
                       selected: scope == 'paradero',
                       onTap: () => setDlg(() {
                         scope = 'paradero';
-                        paraderoSel ??= paraderos.first;
+                        paraderoSel ??= paraderos.isNotEmpty ? paraderos.first['nombre'].toString() : null;
                         movilSel = null;
                       }),
                     ),
@@ -290,23 +292,26 @@ extension CentralScreenPanico on _CentralScreenState {
                   Wrap(
                     spacing: 6,
                     runSpacing: 6,
-                    children: paraderos.map((p) {
-                      final sel = paraderoSel == p;
+                    children: paraderos.map((pd) {
+                      final nombre = pd['nombre'].toString();
+                      final emoji  = pd['emoji'] as String? ?? '📍';
+                      final color  = _hexColor(pd['color_hex'] as String? ?? '#1565C0');
+                      final sel = paraderoSel == nombre;
                       return GestureDetector(
-                        onTap: () => setDlg(() => paraderoSel = p),
+                        onTap: () => setDlg(() => paraderoSel = nombre),
                         child: Container(
                           padding: const EdgeInsets.symmetric(
                               horizontal: 10, vertical: 5),
                           decoration: BoxDecoration(
-                            color: sel ? Colors.orange : Colors.white10,
+                            color: sel ? color : Colors.white10,
                             borderRadius: BorderRadius.circular(20),
                             border: Border.all(
-                                color: sel ? Colors.orange : Colors.white24),
+                                color: sel ? color : Colors.white24),
                           ),
                           child: Text(
-                            p,
+                            '$emoji $nombre',
                             style: TextStyle(
-                              color: sel ? Colors.black : Colors.white70,
+                              color: sel ? Colors.white : Colors.white70,
                               fontSize: 12,
                               fontWeight: FontWeight.bold,
                             ),

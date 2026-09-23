@@ -1,0 +1,1504 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ServiExpress — Estructura de la App</title>
+<style>
+  :root {
+    --verde: #3AF500;
+    --negro: #0f0f0f;
+    --gris: #1a1a1a;
+    --gris2: #252525;
+    --gris3: #333;
+    --texto: #e8e8e8;
+    --subtexto: #888;
+    --azul: #3b82f6;
+    --naranja: #f97316;
+    --rojo: #ef4444;
+    --morado: #a855f7;
+    --cyan: #06b6d4;
+    --amarillo: #eab308;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--negro);
+    color: var(--texto);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    min-height: 100vh;
+  }
+
+  /* ── NAV ── */
+  nav {
+    background: var(--gris);
+    border-bottom: 1px solid #2a2a2a;
+    padding: 0 24px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    overflow-x: auto;
+  }
+  .logo {
+    font-weight: 800;
+    font-size: 15px;
+    color: var(--verde);
+    margin-right: 16px;
+    white-space: nowrap;
+    letter-spacing: -0.5px;
+  }
+  .tab {
+    padding: 14px 16px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--subtexto);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    white-space: nowrap;
+    transition: all .2s;
+    letter-spacing: .3px;
+  }
+  .tab:hover { color: var(--texto); }
+  .tab.active { color: var(--verde); border-bottom-color: var(--verde); }
+
+  /* ── CONTENIDO ── */
+  .section { display: none; padding: 32px 24px; max-width: 1200px; margin: 0 auto; }
+  .section.active { display: block; }
+
+  h2 { font-size: 22px; font-weight: 800; margin-bottom: 6px; }
+  h3 { font-size: 14px; font-weight: 700; margin-bottom: 10px; text-transform: uppercase; letter-spacing: .8px; }
+  p { font-size: 13px; line-height: 1.6; color: var(--subtexto); margin-bottom: 16px; }
+
+  /* ── CARDS ── */
+  .grid { display: grid; gap: 16px; }
+  .grid-2 { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+  .grid-3 { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+  .grid-4 { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+
+  .card {
+    background: var(--gris2);
+    border: 1px solid var(--gris3);
+    border-radius: 12px;
+    padding: 18px;
+  }
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .icon {
+    width: 36px; height: 36px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+  .card-title { font-size: 14px; font-weight: 700; }
+  .card-sub { font-size: 11px; color: var(--subtexto); margin-top: 1px; }
+
+  ul.features { list-style: none; }
+  ul.features li {
+    font-size: 12px;
+    color: #bbb;
+    padding: 5px 0;
+    border-bottom: 1px solid #2a2a2a;
+    display: flex;
+    align-items: flex-start;
+    gap: 7px;
+  }
+  ul.features li:last-child { border-bottom: none; }
+  ul.features li::before { content: '›'; color: var(--verde); font-weight: bold; }
+
+  /* ── BADGE ── */
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 20px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .5px;
+  }
+
+  /* ── FLUJO / CASCADA ── */
+  .flow { display: flex; flex-direction: column; gap: 0; }
+  .flow-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    position: relative;
+  }
+  .flow-step:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    left: 19px;
+    top: 40px;
+    width: 2px;
+    height: calc(100% - 8px);
+    background: var(--gris3);
+  }
+  .flow-dot {
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px;
+    font-weight: 800;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 1;
+  }
+  .flow-body {
+    background: var(--gris2);
+    border: 1px solid var(--gris3);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 12px;
+    flex: 1;
+  }
+  .flow-title { font-size: 13px; font-weight: 700; margin-bottom: 4px; }
+  .flow-desc { font-size: 12px; color: #999; line-height: 1.5; }
+  .flow-time {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: .5px;
+    padding: 2px 8px;
+    border-radius: 20px;
+    display: inline-block;
+    margin-bottom: 6px;
+  }
+
+  /* ── ROLES ── */
+  .role-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+  .role-card {
+    background: var(--gris2);
+    border: 1px solid var(--gris3);
+    border-radius: 10px;
+    padding: 16px;
+    text-align: center;
+    cursor: pointer;
+    transition: all .2s;
+  }
+  .role-card:hover { border-color: #555; transform: translateY(-2px); }
+  .role-emoji { font-size: 30px; margin-bottom: 8px; }
+  .role-name { font-size: 13px; font-weight: 700; margin-bottom: 4px; }
+  .role-desc { font-size: 11px; color: var(--subtexto); }
+
+  /* ── LOGIN FLOW ── */
+  .login-box {
+    background: var(--gris2);
+    border: 1px solid var(--gris3);
+    border-radius: 12px;
+    padding: 24px;
+    text-align: center;
+    max-width: 320px;
+    margin: 0 auto 32px;
+  }
+  .login-box .app-logo { font-size: 32px; font-weight: 900; color: var(--verde); margin-bottom: 4px; }
+  .login-box .app-sub { font-size: 11px; color: var(--subtexto); margin-bottom: 20px; }
+  .login-field {
+    background: var(--gris3);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 12px;
+    color: #ccc;
+    margin-bottom: 8px;
+    text-align: left;
+  }
+  .login-btn {
+    background: var(--negro);
+    color: var(--verde);
+    border: 1px solid var(--verde);
+    border-radius: 8px;
+    padding: 10px 24px;
+    font-size: 13px;
+    font-weight: 700;
+    margin-top: 8px;
+    cursor: pointer;
+    width: 100%;
+    letter-spacing: .5px;
+  }
+
+  .arrow-down {
+    text-align: center;
+    font-size: 24px;
+    color: var(--verde);
+    margin: 8px 0;
+  }
+
+  /* ── TABLA ── */
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th {
+    background: var(--gris2);
+    padding: 10px 14px;
+    text-align: left;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--subtexto);
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    border-bottom: 1px solid var(--gris3);
+  }
+  td {
+    padding: 10px 14px;
+    border-bottom: 1px solid #222;
+    color: #ccc;
+    vertical-align: top;
+  }
+  tr:last-child td { border-bottom: none; }
+
+  /* ── TIMELINE CASCADA ── */
+  .cascada-wrap { display: flex; gap: 24px; flex-wrap: wrap; }
+  .cascada-col { flex: 1; min-width: 280px; }
+  .cascada-label {
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 14px;
+    padding: 6px 12px;
+    border-radius: 6px;
+    display: inline-block;
+  }
+
+  .timeline-item {
+    display: flex;
+    gap: 14px;
+    margin-bottom: 6px;
+    align-items: flex-start;
+    position: relative;
+  }
+  .timeline-item:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    left: 22px;
+    top: 44px;
+    width: 2px;
+    height: calc(100% - 12px);
+    background: #2a2a2a;
+  }
+  .tl-time {
+    width: 46px; height: 46px;
+    border-radius: 10px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 1;
+  }
+  .tl-t { font-size: 10px; font-weight: 800; line-height: 1; }
+  .tl-s { font-size: 8px; color: inherit; opacity: .7; }
+  .tl-body {
+    background: var(--gris2);
+    border: 1px solid var(--gris3);
+    border-radius: 8px;
+    padding: 10px 13px;
+    flex: 1;
+    margin-bottom: 6px;
+  }
+  .tl-title { font-size: 12px; font-weight: 700; margin-bottom: 3px; }
+  .tl-desc { font-size: 11px; color: #888; line-height: 1.5; }
+
+  /* ── PILL ── */
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+    margin: 3px 2px;
+  }
+  .pill-dot { width: 6px; height: 6px; border-radius: 50%; }
+
+  /* ── SECTION HEADER ── */
+  .section-header { margin-bottom: 28px; }
+  .section-header h2 { font-size: 24px; margin-bottom: 6px; }
+
+  .divider { height: 1px; background: #222; margin: 28px 0; }
+
+  /* ── ESTADO BADGE ── */
+  .estados { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .estado {
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 700;
+    border: 1px solid;
+  }
+
+  .callout {
+    background: #1a1a00;
+    border: 1px solid #3a3a00;
+    border-left: 3px solid var(--amarillo);
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: 12px;
+    color: #ccc;
+    margin: 12px 0;
+    line-height: 1.6;
+  }
+  .callout-green { background: #001a00; border-color: #003a00; border-left-color: var(--verde); }
+  .callout-blue { background: #00101a; border-color: #00263a; border-left-color: var(--azul); }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="logo">⚡ ServiExpress</div>
+  <div class="tab active" onclick="show('estructura')">🗺 Estructura</div>
+  <div class="tab" onclick="show('login')">🔐 Login & Roles</div>
+  <div class="tab" onclick="show('paneles')">📱 Paneles</div>
+  <div class="tab" onclick="show('servicios')">🛵 Servicios SE</div>
+  <div class="tab" onclick="show('fn')">💊 Servicios FN</div>
+  <div class="tab" onclick="show('domicilios')">📦 Domicilios</div>
+  <div class="tab" onclick="show('cascada')">📡 Cascada Push</div>
+  <div class="tab" onclick="show('estados')">🔄 Estados</div>
+  <div class="tab" onclick="show('billetera')">💳 Billetera</div>
+</nav>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- TAB 1 — ESTRUCTURA GENERAL -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<div id="tab-estructura" class="section active">
+  <div class="section-header">
+    <h2>Estructura General</h2>
+    <p>Vista de alto nivel: cómo se organizan los módulos, roles y flujos principales.</p>
+  </div>
+
+  <div class="grid grid-2" style="margin-bottom:28px">
+    <div class="card">
+      <div class="card-header">
+        <div class="icon" style="background:#1a3a1a">🛵</div>
+        <div><div class="card-title">ServiExpress (SE)</div><div class="card-sub">Mototaxi · Encomiendas · Express</div></div>
+      </div>
+      <ul class="features">
+        <li>Servicios creados por Central o Cliente</li>
+        <li>Distribución por paraderos + zonas</li>
+        <li>Cascada: Master → Paradero → 1km → Global</li>
+        <li>Rangos (Novato/Pro/Elite/Leyenda) limitan servicios simultáneos</li>
+        <li>Domicilios desde locales (comida, tiendas)</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <div class="icon" style="background:#001a3a">💊</div>
+        <div><div class="card-title">FN — La Cascada</div><div class="card-sub">Farmanorte · Medicamentos</div></div>
+      </div>
+      <ul class="features">
+        <li>Servicios desde sede FN (farmacia)</li>
+        <li>T=0: Push a Masters</li>
+        <li>T+30s: Auto-asigna el más cercano libre</li>
+        <li>T+60s: Push no-Masters en 2km</li>
+        <li>T+90s: Push global</li>
+        <li>pg_cron cancela fases innecesarias al asignar</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+  <h3>Stack Tecnológico</h3>
+  <div class="grid grid-4" style="margin-top:14px">
+    <div class="card" style="text-align:center;padding:14px">
+      <div style="font-size:28px;margin-bottom:6px">🐦</div>
+      <div class="card-title" style="font-size:13px">Flutter</div>
+      <div class="card-sub">UI · iOS · Android</div>
+    </div>
+    <div class="card" style="text-align:center;padding:14px">
+      <div style="font-size:28px;margin-bottom:6px">🟢</div>
+      <div class="card-title" style="font-size:13px">Supabase</div>
+      <div class="card-sub">DB · Auth · Realtime · RLS</div>
+    </div>
+    <div class="card" style="text-align:center;padding:14px">
+      <div style="font-size:28px;margin-bottom:6px">🔔</div>
+      <div class="card-title" style="font-size:13px">OneSignal</div>
+      <div class="card-sub">Push Notifications</div>
+    </div>
+    <div class="card" style="text-align:center;padding:14px">
+      <div style="font-size:28px;margin-bottom:6px">⏱</div>
+      <div class="card-title" style="font-size:13px">pg_cron</div>
+      <div class="card-sub">Cascada automática</div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+  <h3>Tablas Clave</h3>
+  <div style="overflow-x:auto;margin-top:14px">
+    <table>
+      <tr>
+        <th>Tabla</th><th>Propósito</th><th>Relación</th>
+      </tr>
+      <tr>
+        <td><span style="color:var(--verde);font-weight:700">usuarios</span></td>
+        <td>Todos los roles: móvil, cliente, local, central, supervisor</td>
+        <td>FK de casi todo</td>
+      </tr>
+      <tr>
+        <td><span style="color:var(--verde);font-weight:700">servicios</span></td>
+        <td>Servicios SE activos/histórico</td>
+        <td>movil_id, cliente_id, central_id</td>
+      </tr>
+      <tr>
+        <td><span style="color:var(--verde);font-weight:700">pedidos</span></td>
+        <td>Pedidos de domicilio (food)</td>
+        <td>cliente_id, local_id, movil_id</td>
+      </tr>
+      <tr>
+        <td><span style="color:var(--verde);font-weight:700">items_pedido</span></td>
+        <td>Líneas de cada pedido</td>
+        <td>pedido_id → modificadores_json</td>
+      </tr>
+      <tr>
+        <td><span style="color:var(--azul);font-weight:700">red_dir_se</span></td>
+        <td>Red de direcciones SE (clientes + locales)</td>
+        <td>usuario_id, precio, sector_id</td>
+      </tr>
+      <tr>
+        <td><span style="color:var(--morado);font-weight:700">red_direcciones</span></td>
+        <td>Red de direcciones FN (⚠️ NUNCA mezclar con red_dir_se)</td>
+        <td>Solo para FN</td>
+      </tr>
+      <tr>
+        <td><span style="color:var(--naranja);font-weight:700">productos</span></td>
+        <td>Menú de locales</td>
+        <td>local_id → grupos_opciones → opciones</td>
+      </tr>
+    </table>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- TAB 2 — LOGIN & ROLES -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<div id="tab-login" class="section">
+  <div class="section-header">
+    <h2>Login & Roles</h2>
+    <p>Un solo login — el rol detectado redirige al panel correspondiente.</p>
+  </div>
+
+  <div class="login-box">
+    <div class="app-logo">⚡SE</div>
+    <div class="app-sub">ServiExpress · Cúcuta & Villa del Rosario</div>
+    <div class="login-field">📧 Correo electrónico</div>
+    <div class="login-field">🔒 Contraseña</div>
+    <button class="login-btn">INGRESAR</button>
+  </div>
+
+  <div class="arrow-down">↓ detect rol</div>
+
+  <div class="role-grid" style="margin-bottom:32px">
+    <div class="role-card">
+      <div class="role-emoji">🛵</div>
+      <div class="role-name">Móvil</div>
+      <div class="role-desc">Mototaxista<br>Panel radar + servicios</div>
+    </div>
+    <div class="role-card">
+      <div class="role-emoji">👤</div>
+      <div class="role-name">Cliente</div>
+      <div class="role-desc">Usuario final<br>Pide domicilios</div>
+    </div>
+    <div class="role-card">
+      <div class="role-emoji">🏪</div>
+      <div class="role-name">Local</div>
+      <div class="role-desc">Tienda / restaurante<br>Gestiona carta y pedidos</div>
+    </div>
+    <div class="role-card">
+      <div class="role-emoji">📞</div>
+      <div class="role-name">Central</div>
+      <div class="role-desc">Operador call center<br>Crea servicios y pedidos</div>
+    </div>
+    <div class="role-card">
+      <div class="role-emoji">💊</div>
+      <div class="role-name">Sede FN</div>
+      <div class="role-desc">Farmanorte<br>Crea servicios farmacia</div>
+    </div>
+    <div class="role-card">
+      <div class="role-emoji">👁</div>
+      <div class="role-name">Supervisor FN</div>
+      <div class="role-desc">Monitor global<br>Solo lectura</div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+  <h3>Permisos por rol</h3>
+  <div style="overflow-x:auto;margin-top:14px">
+    <table>
+      <tr>
+        <th>Acción</th>
+        <th>Móvil</th><th>Cliente</th><th>Local</th>
+        <th>Central</th><th>Sede FN</th><th>Supervisor</th>
+      </tr>
+      <tr><td>Ver radar / fila</td><td>✅</td><td>❌</td><td>❌</td><td>✅</td><td>❌</td><td>✅</td></tr>
+      <tr><td>Crear servicio SE</td><td>❌</td><td>✅</td><td>❌</td><td>✅</td><td>❌</td><td>❌</td></tr>
+      <tr><td>Crear servicio FN</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>✅</td><td>❌</td></tr>
+      <tr><td>Aceptar / rechazar servicio</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td></tr>
+      <tr><td>Gestionar carta (menú)</td><td>❌</td><td>❌</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
+      <tr><td>Pedir domicilio</td><td>❌</td><td>✅</td><td>❌</td><td>✅*</td><td>❌</td><td>❌</td></tr>
+      <tr><td>Ver historial global</td><td>❌</td><td>❌</td><td>❌</td><td>✅</td><td>✅</td><td>✅</td></tr>
+      <tr><td>Registrarse en paradero</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td></tr>
+    </table>
+  </div>
+  <p style="margin-top:8px;font-size:11px">* Central crea pedidos en nombre de clientes externos (sin cuenta) — usando modoCentral.</p>
+
+  <div class="divider"></div>
+  <h3>Rangos de Móvil</h3>
+  <p style="font-size:12px;margin-bottom:14px">De mayor a menor capacidad · el límite es de servicios simultáneos que puede llevar</p>
+  <div class="grid grid-3" style="margin-top:14px">
+    <div class="card">
+      <div class="card-header">
+        <div class="icon" style="background:#2a003a"><span style="color:#E040FB;font-weight:800">M</span></div>
+        <div><div class="card-title" style="color:#E040FB">Master</div><div class="card-sub">∞ — prioridad absoluta</div></div>
+      </div>
+      <ul class="features">
+        <li>Límite: <strong>999</strong> servicios simultáneos (ilimitado)</li>
+        <li>Recibe notif T=0 en SE y FN</li>
+        <li>En FN acepta voluntariamente o queda para T+30s</li>
+        <li>En SE: tarjeta expandida con detalles completos</li>
+        <li>Color: <span style="color:#E040FB">■</span> Morado (#E040FB)</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <div class="icon" style="background:#2a1a00"><span style="color:#FF9800;font-weight:800">L</span></div>
+        <div><div class="card-title" style="color:#FF9800">Leyenda</div><div class="card-sub">3 servicios simultáneos</div></div>
+      </div>
+      <ul class="features">
+        <li>Límite: <strong>3</strong> servicios simultáneos</li>
+        <li>Servicios VIP exclusivos con +$3.000 de tarifa</li>
+        <li>Recibe en fases normales del embudo SE</li>
+        <li>Color: <span style="color:#FF9800">■</span> Naranja (#FF9800)</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <div class="icon" style="background:#001a3a"><span style="color:#2196F3;font-weight:800">E</span></div>
+        <div><div class="card-title" style="color:#2196F3">Elite</div><div class="card-sub">2 servicios simultáneos</div></div>
+      </div>
+      <ul class="features">
+        <li>Límite: <strong>2</strong> servicios simultáneos</li>
+        <li>Recibe en fases normales del embudo SE</li>
+        <li>Color: <span style="color:#2196F3">■</span> Azul (#2196F3)</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <div class="icon" style="background:#001a00"><span style="color:#4CAF50;font-weight:800">P</span></div>
+        <div><div class="card-title" style="color:#4CAF50">Pro</div><div class="card-sub">1 servicio simultáneo</div></div>
+      </div>
+      <ul class="features">
+        <li>Límite: <strong>1</strong> servicio simultáneo</li>
+        <li>Recibe en fases normales del embudo SE</li>
+        <li>Color: <span style="color:#4CAF50">■</span> Verde (#4CAF50)</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <div class="icon" style="background:#1a1a1a"><span style="color:#888;font-weight:800">N</span></div>
+        <div><div class="card-title" style="color:#888">Novato</div><div class="card-sub">1 servicio simultáneo</div></div>
+      </div>
+      <ul class="features">
+        <li>Límite: <strong>1</strong> servicio simultáneo</li>
+        <li>Sin color de rango especial (blanco/gris)</li>
+        <li>Rango por defecto al registrarse</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- TAB 3 — PANELES -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<div id="tab-paneles" class="section">
+  <div class="section-header">
+    <h2>Paneles por Rol</h2>
+    <p>Pantallas principales y funciones de cada panel.</p>
+  </div>
+
+  <div class="grid grid-2">
+
+    <div class="card">
+      <div class="card-header">
+        <div class="icon" style="background:#1a3a1a">🛵</div>
+        <div><div class="card-title">Panel Móvil</div><div class="card-sub">movil_screen.dart</div></div>
+      </div>
+      <ul class="features">
+        <li>Radar en tiempo real — stream de servicios pendientes</li>
+        <li>Fila del paradero — posición en cola por zona</li>
+        <li>Registro / salida de paradero (con geocerca)</li>
+        <li>Aceptar · Rechazar · Liberar servicio</li>
+        <li>GPS en background — pg_cron de geocerca</li>
+        <li>Push notifications (SE y FN en el mismo flow)</li>
+        <li>Perfil: Rango · Número móvil · Calificación</li>
+        <li>Botón reportar ausente 🚩 (mismo paradero)</li>
+        <li>Ticket de prioridad 🎟️ — salta la fila</li>
+        <li>Silenciar radar por servicio tipo</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div class="icon" style="background:#1a1a3a">📞</div>
+        <div><div class="card-title">Panel Central</div><div class="card-sub">central_screen.dart</div></div>
+      </div>
+      <ul class="features">
+        <li>Nuevo servicio SE → formulario completo</li>
+        <li>Pedido domicilio en nombre de cliente externo</li>
+        <li>Monitor de servicios en curso (tiempo real)</li>
+        <li>Búsqueda y asignación manual de móvil</li>
+        <li>Cancelar / reasignar servicios</li>
+        <li>Vista de radar (posición de todos los móviles)</li>
+        <li>Drawer: NUEVO SERVICIO · PEDIDO DOMICILIO · ...</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div class="icon" style="background:#1a2a1a">👤</div>
+        <div><div class="card-title">Panel Cliente</div><div class="card-sub">pedidos_cliente_screen.dart</div></div>
+      </div>
+      <ul class="features">
+        <li>Lista de locales con domicilio activo</li>
+        <li>Menú del local con modificadores (Rappi-style)</li>
+        <li>Carrito — cantidad · mods · notas</li>
+        <li>Checkout: dirección (red_dir_se) + tarifa dinámica</li>
+        <li>Tracking del pedido en tiempo real</li>
+        <li>Historial con modificadores + notas snapshot</li>
+        <li>Repetir pedido (restaura mods y notas)</li>
+        <li>Perfil + red de direcciones guardadas</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div class="icon" style="background:#2a1a1a">🏪</div>
+        <div><div class="card-title">Panel Local</div><div class="card-sub">carta_local_screen.dart</div></div>
+      </div>
+      <ul class="features">
+        <li>Gestión de carta: categorías → productos</li>
+        <li>Modificadores: grupos_opciones + opciones</li>
+        <li>Toggle disponible / no disponible por producto</li>
+        <li>Pedidos entrantes en tiempo real</li>
+        <li>Cambiar estado del pedido</li>
+        <li>Red de direcciones (red_dir_se) con tarifas</li>
+        <li>Horario de atención y pedido mínimo</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div class="icon" style="background:#00101a">💊</div>
+        <div><div class="card-title">Panel Sede FN</div><div class="card-sub">sede_fn_screen.dart</div></div>
+      </div>
+      <ul class="features">
+        <li>Crear servicio FN (medicamentos)</li>
+        <li>Monitor de pedidos FN activos</li>
+        <li>Stream filtrado por estado y fecha de hoy</li>
+        <li>Cancelar / reasignar servicio FN</li>
+        <li>Historial de entregas de la sede</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div class="icon" style="background:#1a1000">👁</div>
+        <div><div class="card-title">Supervisor FN</div><div class="card-sub">supervisor_fn_screen.dart</div></div>
+      </div>
+      <ul class="features">
+        <li>Monitor global de servicios FN</li>
+        <li>Toggles FIN/CANC — oculta por defecto</li>
+        <li>Filtro fecha → solo hoy</li>
+        <li>Sin capacidad de crear ni modificar</li>
+        <li>Vista de rendimiento por móvil</li>
+      </ul>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- TAB 4 — SERVICIOS SE -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<div id="tab-servicios" class="section">
+  <div class="section-header">
+    <h2>Servicios ServiExpress (SE)</h2>
+    <p>Mototaxi, encomiendas y express entre puntos de la ciudad.</p>
+  </div>
+
+  <h3>Creación del Servicio</h3>
+  <div class="flow" style="margin-top:16px;margin-bottom:28px">
+    <div class="flow-step">
+      <div class="flow-dot" style="background:#1a1a3a;border:2px solid #3b82f6;color:var(--azul)">1</div>
+      <div class="flow-body">
+        <div class="flow-title">Origen del pedido</div>
+        <div class="flow-desc">
+          <span class="badge" style="background:#1a1a3a;color:#60a5fa;margin-right:6px">📞 Central</span>
+          Operador llena formulario: origen, destino, cliente, tipo, precio<br>
+          <span class="badge" style="background:#1a3a1a;color:#4ade80;margin-top:4px;display:inline-block">👤 Cliente app</span>
+          El cliente solicita desde su panel
+        </div>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-dot" style="background:#1a2a00;border:2px solid var(--verde);color:var(--verde)">2</div>
+      <div class="flow-body">
+        <div class="flow-title">Inserción en BD</div>
+        <div class="flow-desc">Se crea el registro en <code style="color:var(--verde)">servicios</code> con estado <strong>pendiente</strong>. fn_radar_t0 = NOW()</div>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-dot" style="background:#3a1a00;border:2px solid var(--naranja);color:var(--naranja)">3</div>
+      <div class="flow-body">
+        <div class="flow-title">Cascada de Push (ver tab 📡)</div>
+        <div class="flow-desc">Masters → Paradero #1 → 1km → Global — en escalones de 30s</div>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-dot" style="background:#1a0a3a;border:2px solid var(--morado);color:var(--morado)">4</div>
+      <div class="flow-body">
+        <div class="flow-title">Móvil acepta</div>
+        <div class="flow-desc">Estado → <strong>en_ruta_origen</strong>. Se para el embudo. Se asigna movil_id.</div>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-dot" style="background:#002020;border:2px solid var(--cyan);color:var(--cyan)">5</div>
+      <div class="flow-body">
+        <div class="flow-title">Progreso del servicio</div>
+        <div class="flow-desc">
+          en_ruta_origen → en_origen → en_ruta_destino → <strong>entregado</strong><br>
+          En cualquier punto puede ir a: <strong>cancelado</strong> o <strong>problema</strong>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="callout">
+    🔄 <strong>Si el móvil libera el servicio</strong>, el estado vuelve a <strong>pendiente</strong> y el embudo de push se reinicia desde cero (fn_radar_t0 = NOW()).
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- TAB 5 — SERVICIOS FN -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<div id="tab-fn" class="section">
+  <div class="section-header">
+    <h2>Servicios FN — La Cascada</h2>
+    <p>Farmanorte. Flujo diferente al SE: auto-asignación por proximidad en T+30s.</p>
+  </div>
+
+  <div class="flow" style="margin-bottom:28px">
+    <div class="flow-step">
+      <div class="flow-dot" style="background:#00101a;border:2px solid var(--azul);color:var(--azul)">1</div>
+      <div class="flow-body">
+        <div class="flow-title">Sede FN crea el servicio</div>
+        <div class="flow-desc">Registro en <code style="color:var(--verde)">servicios</code> — estado <strong>pendiente</strong>. fn_radar_t0 = NOW(). red_direcciones (¡nunca red_dir_se!)</div>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-dot" style="background:#1a0a3a;border:2px solid var(--morado);color:var(--morado)">T=0</div>
+      <div class="flow-body">
+        <div class="flow-title">Push a Masters</div>
+        <div class="flow-desc">Notificación a todos los móviles Master conectados. <strong>Aceptación voluntaria</strong> — si un Master acepta, el flujo termina aquí.</div>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-dot" style="background:#1a2a00;border:2px solid var(--amarillo);color:var(--amarillo)">+30s</div>
+      <div class="flow-body">
+        <div class="flow-title">Auto-asignación al más cercano</div>
+        <div class="flow-desc">
+          pg_cron verifica el móvil más cercano disponible.<br>
+          • Si está <strong>libre</strong> → auto-asigna, cancela fases 3 y 4<br>
+          • Si está <strong>ocupado</strong> → salta, servicio queda para fase 3/4
+        </div>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-dot" style="background:#2a1a00;border:2px solid var(--naranja);color:var(--naranja)">+60s</div>
+      <div class="flow-body">
+        <div class="flow-title">Push a no-Masters dentro de 2km</div>
+        <div class="flow-desc">Solo si nadie aceptó aún. Excluye a quien participó en fase 2. Radio: 2km desde el origen del servicio.</div>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-dot" style="background:#1a0000;border:2px solid var(--rojo);color:var(--rojo)">+90s</div>
+      <div class="flow-body">
+        <div class="flow-title">Push global</div>
+        <div class="flow-desc">Todos los móviles conectados disponibles, sin límite de distancia. Último recurso.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="callout">
+    ⚠️ <strong>CRÍTICO:</strong> FN usa <code>red_direcciones</code> — NUNCA mezclar con <code>red_dir_se</code> que es de ServiExpress.
+  </div>
+  <div class="callout callout-green" style="margin-top:8px">
+    ✅ <strong>pg_cron</strong> cancela <code>fn_notif_fase3</code> y <code>fn_notif_fase4</code> automáticamente cuando hay auto-asignación en T+30s.
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- TAB 6 — DOMICILIOS -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<div id="tab-domicilios" class="section">
+  <div class="section-header">
+    <h2>Domicilios (Food & Delivery)</h2>
+    <p>Pedidos de comida y tiendas locales — flujo Rappi-style con modificadores.</p>
+  </div>
+
+  <div class="grid grid-2" style="margin-bottom:28px">
+    <div>
+      <h3>Flujo Cliente App</h3>
+      <div class="flow" style="margin-top:14px">
+        <div class="flow-step">
+          <div class="flow-dot" style="background:#1a3a1a;border:2px solid var(--verde);color:var(--verde);font-size:10px">1</div>
+          <div class="flow-body">
+            <div class="flow-title">Lista de locales</div>
+            <div class="flow-desc">Filtro por categoría, búsqueda. Solo activos con domicilios_activo=true</div>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="flow-dot" style="background:#1a3a1a;border:2px solid var(--verde);color:var(--verde);font-size:10px">2</div>
+          <div class="flow-body">
+            <div class="flow-title">Menú del local</div>
+            <div class="flow-desc">Categorías → Productos → Toca para personalizar (modificadores)</div>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="flow-dot" style="background:#1a3a1a;border:2px solid var(--verde);color:var(--verde);font-size:10px">3</div>
+          <div class="flow-body">
+            <div class="flow-title">Personalización (mods)</div>
+            <div class="flow-desc">grupos_opciones + opciones. Precio extra acumulado en CartItem</div>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="flow-dot" style="background:#1a3a1a;border:2px solid var(--verde);color:var(--verde);font-size:10px">4</div>
+          <div class="flow-body">
+            <div class="flow-title">Carrito</div>
+            <div class="flow-desc">Items con mods visibles (├─/└─). Subtotal dinámico.</div>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="flow-dot" style="background:#1a3a1a;border:2px solid var(--verde);color:var(--verde);font-size:10px">5</div>
+          <div class="flow-body">
+            <div class="flow-title">Checkout</div>
+            <div class="flow-desc">Dirección (red_dir_se chips con tarifa dinámica) · Notas · Método de pago</div>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="flow-dot" style="background:#1a3a1a;border:2px solid var(--verde);color:var(--verde);font-size:10px">6</div>
+          <div class="flow-body">
+            <div class="flow-title">Tracking en vivo</div>
+            <div class="flow-desc">Estado del pedido en tiempo real. Items con mods en la tarjeta de tracking.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <h3>Flujo Central (modoCentral)</h3>
+      <div class="flow" style="margin-top:14px">
+        <div class="flow-step">
+          <div class="flow-dot" style="background:#1a1a3a;border:2px solid var(--naranja);color:var(--naranja);font-size:10px">1</div>
+          <div class="flow-body">
+            <div class="flow-title">Central abre "Pedido Domicilio"</div>
+            <div class="flow-desc">CentralPedidoDomicilioScreen — lista locales con domicilio activo</div>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="flow-dot" style="background:#1a1a3a;border:2px solid var(--naranja);color:var(--naranja);font-size:10px">2</div>
+          <div class="flow-body">
+            <div class="flow-title">Selecciona local → Menú</div>
+            <div class="flow-desc">MenuLocalScreen(modoCentral: true). Sin identity card del cliente.</div>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="flow-dot" style="background:#1a1a3a;border:2px solid var(--naranja);color:var(--naranja);font-size:10px">3</div>
+          <div class="flow-body">
+            <div class="flow-title">Checkout Central</div>
+            <div class="flow-desc">Nombre + Teléfono del cliente externo (sin cuenta). Dirección desde red_dir_se del local.</div>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="flow-dot" style="background:#1a1a3a;border:2px solid var(--naranja);color:var(--naranja);font-size:10px">4</div>
+          <div class="flow-body">
+            <div class="flow-title">Pedido creado</div>
+            <div class="flow-desc">cliente_id = null. Notas prefijadas con "📞 CENTRAL | [nombre] | Tel: [tel]"</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+  <h3>Modificadores (grupos_opciones + opciones)</h3>
+  <div class="grid grid-3" style="margin-top:14px">
+    <div class="card">
+      <div class="card-title" style="margin-bottom:8px">📋 Estructura</div>
+      <ul class="features">
+        <li>productos → grupos_opciones → opciones</li>
+        <li>CASCADE DELETE automático</li>
+        <li>min_selecciones / max_selecciones por grupo</li>
+        <li>precio_extra por opción (suma al total)</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-title" style="margin-bottom:8px">🛒 En el carrito</div>
+      <ul class="features">
+        <li>CartItem.modificadores: List de grupos con selecciones</li>
+        <li>CartItem.precioExtra: suma de todos los precio_extra</li>
+        <li>CartItem.clave: hash único (producto + mods + notas)</li>
+        <li>Visualización ├─ / └─ bajo el nombre del item</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-title" style="margin-bottom:8px">💾 En BD</div>
+      <ul class="features">
+        <li>items_pedido.modificadores_json: JSONB snapshot</li>
+        <li>items_pedido.notas_snapshot: texto libre</li>
+        <li>Snapshot inmutable — no cambia si el menú se edita</li>
+        <li>Repetir pedido restaura mods + precioExtra + notas</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- TAB 7 — CASCADA PUSH -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<div id="tab-cascada" class="section">
+  <div class="section-header">
+    <h2>Cascada de Push Notifications</h2>
+    <p>Cómo se distribuyen los servicios a los móviles según el tiempo transcurrido.</p>
+  </div>
+
+  <div class="cascada-wrap">
+
+    <!-- SE -->
+    <div class="cascada-col">
+      <div class="cascada-label" style="background:#1a3a1a;color:var(--verde)">⚡ ServiExpress (SE)</div>
+      <div class="flow">
+        <div class="timeline-item">
+          <div class="tl-time" style="background:#1a0a3a;border:2px solid var(--morado)">
+            <div class="tl-t" style="color:var(--morado)">T=0</div>
+          </div>
+          <div class="tl-body">
+            <div class="tl-title">🎖 Masters</div>
+            <div class="tl-desc">Push a todos los móviles Master conectados. Aceptación <strong>voluntaria</strong>. Si acepta → fin del embudo.</div>
+          </div>
+        </div>
+        <div class="timeline-item">
+          <div class="tl-time" style="background:#1a2a00;border:2px solid var(--amarillo)">
+            <div class="tl-t" style="color:var(--amarillo)">+30s</div>
+          </div>
+          <div class="tl-body">
+            <div class="tl-title">📍 Paradero #1</div>
+            <div class="tl-desc">Push al móvil #1 en la fila del paradero más cercano al origen. Solo ese móvil.</div>
+          </div>
+        </div>
+        <div class="timeline-item">
+          <div class="tl-time" style="background:#2a1a00;border:2px solid var(--naranja)">
+            <div class="tl-t" style="color:var(--naranja)">+60s</div>
+          </div>
+          <div class="tl-body">
+            <div class="tl-title">📡 Radio 1km</div>
+            <div class="tl-desc">Push a todos los móviles conectados dentro de 1km del origen (excluyendo fases anteriores).</div>
+          </div>
+        </div>
+        <div class="timeline-item">
+          <div class="tl-time" style="background:#1a0000;border:2px solid var(--rojo)">
+            <div class="tl-t" style="color:var(--rojo)">+90s</div>
+          </div>
+          <div class="tl-body">
+            <div class="tl-title">🌐 Global</div>
+            <div class="tl-desc">Push a <strong>todos los disponibles</strong> conectados, respetando rangos (no enviar si el móvil ya llenó su cupo de servicios).</div>
+          </div>
+        </div>
+      </div>
+      <div class="callout callout-green" style="margin-top:16px">
+        ⏱ Total hasta cobertura global: <strong>2 minutos</strong><br>
+        🔄 Si el móvil libera → reinicia desde T=0
+      </div>
+    </div>
+
+    <!-- FN -->
+    <div class="cascada-col">
+      <div class="cascada-label" style="background:#00101a;color:var(--azul)">💊 FN — La Cascada</div>
+      <div class="flow">
+        <div class="timeline-item">
+          <div class="tl-time" style="background:#1a0a3a;border:2px solid var(--morado)">
+            <div class="tl-t" style="color:var(--morado)">T=0</div>
+          </div>
+          <div class="tl-body">
+            <div class="tl-title">🎖 Masters</div>
+            <div class="tl-desc">Push a Masters. Aceptan <strong>voluntariamente</strong>. Si acepta → fin.</div>
+          </div>
+        </div>
+        <div class="timeline-item">
+          <div class="tl-time" style="background:#1a2a00;border:2px solid var(--amarillo)">
+            <div class="tl-t" style="color:var(--amarillo)">+30s</div>
+          </div>
+          <div class="tl-body">
+            <div class="tl-title">🤖 Auto-asignación</div>
+            <div class="tl-desc">
+              pg_cron busca el móvil más cercano:<br>
+              • <strong>Libre</strong> → auto-asigna + cancela fases 3 y 4<br>
+              • <strong>Ocupado</strong> → salta → queda para fase 3/4
+            </div>
+          </div>
+        </div>
+        <div class="timeline-item">
+          <div class="tl-time" style="background:#2a1a00;border:2px solid var(--naranja)">
+            <div class="tl-t" style="color:var(--naranja)">+60s</div>
+          </div>
+          <div class="tl-body">
+            <div class="tl-title">📡 No-Masters 2km</div>
+            <div class="tl-desc">Push a móviles que NO son Master, dentro de 2km. Excluye al de la fase 2.</div>
+          </div>
+        </div>
+        <div class="timeline-item">
+          <div class="tl-time" style="background:#1a0000;border:2px solid var(--rojo)">
+            <div class="tl-t" style="color:var(--rojo)">+90s</div>
+          </div>
+          <div class="tl-body">
+            <div class="tl-title">🌐 Global</div>
+            <div class="tl-desc">Push al resto de móviles conectados sin restricción de zona.</div>
+          </div>
+        </div>
+      </div>
+      <div class="callout" style="margin-top:16px">
+        🛑 <strong>fn_notif_fase3</strong> y <strong>fn_notif_fase4</strong> se cancelan con pg_cron si hubo auto-asignación en T+30s — sin notifs innecesarias.
+      </div>
+    </div>
+
+  </div>
+
+  <div class="divider"></div>
+  <h3>Diferencias clave SE vs FN</h3>
+  <div style="overflow-x:auto;margin-top:14px">
+    <table>
+      <tr><th>Característica</th><th>ServiExpress (SE)</th><th>FN — La Cascada</th></tr>
+      <tr><td>Quién crea el servicio</td><td>Central / Cliente app</td><td>Sede Farmanorte</td></tr>
+      <tr><td>T+30s</td><td>Push al #1 del paradero</td><td>Auto-asignación al más cercano</td></tr>
+      <tr><td>Aceptación del móvil</td><td>Siempre voluntaria</td><td>T=0 voluntaria · T+30s automática</td></tr>
+      <tr><td>Tabla de direcciones</td><td>red_dir_se</td><td>red_direcciones ⚠️</td></tr>
+      <tr><td>Paraderos involucrados</td><td>Sí — #1 paradero en T+30s</td><td>No — solo proximidad GPS</td></tr>
+      <tr><td>pg_cron cancela fases</td><td>No</td><td>Sí — al auto-asignar T+30s</td></tr>
+      <tr><td>Duración total del embudo</td><td>90s (2 min total)</td><td>90s (2 min total)</td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- TAB 8 — ESTADOS -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<div id="tab-estados" class="section">
+  <div class="section-header">
+    <h2>Estados & Ciclo de Vida</h2>
+    <p>Máquina de estados de servicios y pedidos.</p>
+  </div>
+
+  <h3>Servicio (SE y FN)</h3>
+  <div style="overflow-x:auto;margin-top:14px;margin-bottom:28px">
+    <table>
+      <tr><th>Estado</th><th>Descripción</th><th>Quién puede avanzar</th><th>Stream visible en</th></tr>
+      <tr>
+        <td><span class="estado" style="color:#eab308;border-color:#3a3a00;background:#1a1a00">pendiente</span></td>
+        <td>Esperando móvil. Cascada push activa.</td><td>Móvil (acepta)</td><td>Radar del móvil · Central · Supervisor</td>
+      </tr>
+      <tr>
+        <td><span class="estado" style="color:#3b82f6;border-color:#001a3a;background:#00101a">en_ruta_origen</span></td>
+        <td>Móvil va hacia el punto de recogida</td><td>Móvil</td><td>Central · Cliente · Sede FN</td>
+      </tr>
+      <tr>
+        <td><span class="estado" style="color:#a855f7;border-color:#1a003a;background:#0f0020">en_origen</span></td>
+        <td>Móvil llegó al origen — esperando</td><td>Móvil</td><td>Central · Cliente</td>
+      </tr>
+      <tr>
+        <td><span class="estado" style="color:#06b6d4;border-color:#003a40;background:#001a20">en_ruta_destino</span></td>
+        <td>Móvil va hacia el destino final</td><td>Móvil</td><td>Central · Cliente</td>
+      </tr>
+      <tr>
+        <td><span class="estado" style="color:#4ade80;border-color:#003a00;background:#001a00">entregado</span></td>
+        <td>Servicio completado exitosamente</td><td>Móvil</td><td>Historial</td>
+      </tr>
+      <tr>
+        <td><span class="estado" style="color:#ef4444;border-color:#3a0000;background:#1a0000">cancelado</span></td>
+        <td>Cancelado por central / cliente / timeout</td><td>Central · Sistema</td><td>Historial</td>
+      </tr>
+      <tr>
+        <td><span class="estado" style="color:#f97316;border-color:#3a1a00;background:#1a0800">problema</span></td>
+        <td>Incidencia reportada durante el servicio</td><td>Móvil · Central</td><td>Central · Supervisor</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="divider"></div>
+  <h3>Pedido de Domicilio</h3>
+  <div style="overflow-x:auto;margin-top:14px">
+    <table>
+      <tr><th>Estado</th><th>Descripción</th><th>Quién avanza</th></tr>
+      <tr>
+        <td><span class="estado" style="color:#eab308;border-color:#3a3a00;background:#1a1a00">pendiente</span></td>
+        <td>Recibido — local aún no confirma</td><td>Local</td>
+      </tr>
+      <tr>
+        <td><span class="estado" style="color:#a855f7;border-color:#1a003a;background:#0f0020">aceptado</span></td>
+        <td>Local confirmó — preparando</td><td>Local</td>
+      </tr>
+      <tr>
+        <td><span class="estado" style="color:#3b82f6;border-color:#001a3a;background:#00101a">listo</span></td>
+        <td>Comida lista — esperando repartidor</td><td>Local</td>
+      </tr>
+      <tr>
+        <td><span class="estado" style="color:#06b6d4;border-color:#003a40;background:#001a20">en_camino</span></td>
+        <td>Móvil recogió y va al cliente</td><td>Móvil</td>
+      </tr>
+      <tr>
+        <td><span class="estado" style="color:#4ade80;border-color:#003a00;background:#001a00">entregado</span></td>
+        <td>Cliente recibió el pedido</td><td>Móvil</td>
+      </tr>
+      <tr>
+        <td><span class="estado" style="color:#ef4444;border-color:#3a0000;background:#1a0000">cancelado</span></td>
+        <td>Cancelado por cualquier parte</td><td>Cliente · Local · Central</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="divider"></div>
+  <h3>Estado del Móvil (en radar)</h3>
+  <div class="grid grid-3" style="margin-top:14px">
+    <div class="card">
+      <div class="card-title" style="color:var(--rojo);margin-bottom:8px">🔴 Desconectado</div>
+      <ul class="features">
+        <li>en_linea = false</li>
+        <li>No aparece en radar ni fila</li>
+        <li>No recibe push notifications</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-title" style="color:var(--verde);margin-bottom:8px">🟢 Conectado / Sin paradero</div>
+      <ul class="features">
+        <li>en_linea = true, paradero_actual = null</li>
+        <li>Visible en radar global</li>
+        <li>Solo recibe servicios FN (no SE)</li>
+        <li>Mensaje: "Dirígete a un paradero"</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-title" style="color:var(--azul);margin-bottom:8px">🔵 En paradero</div>
+      <ul class="features">
+        <li>en_linea = true, paradero_actual = "MEMOS"</li>
+        <li>En fila ordenada por ingreso_fila</li>
+        <li>Recibe SE según posición en cola</li>
+        <li>Geocerca activa — expulsión automática</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- TAB 9 — BILLETERA -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<div id="tab-billetera" class="section">
+  <div class="section-header">
+    <h2>💳 Sistema de Billetera</h2>
+    <p>Control de cobro y bloqueo por plan de móvil. Aplica a SE y FN — el badge FN no exime.</p>
+  </div>
+
+  <!-- PLANES -->
+  <h3>Planes de Móvil</h3>
+  <div class="grid grid-3" style="margin-top:14px;margin-bottom:28px">
+    <div class="card">
+      <div class="card-header">
+        <div class="icon" style="background:#1a2a00"><span style="color:var(--verde);font-weight:800">P</span></div>
+        <div><div class="card-title" style="color:var(--verde)">Prediario</div><div class="card-sub">tipo_plan_movil = 'prediario'</div></div>
+      </div>
+      <ul class="features">
+        <li>Paga por día antes de conectarse</li>
+        <li>Tiene <strong>saldo_wallet</strong> numérico</li>
+        <li>⚠️ Aviso si saldo ≤ $3.000</li>
+        <li>🚫 Bloqueo al conectar si saldo = 0</li>
+        <li>💸 Descuento 10% de tarifa al finalizar</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <div class="icon" style="background:#1a003a"><span style="color:var(--morado);font-weight:800">D</span></div>
+        <div><div class="card-title" style="color:var(--morado)">Postdia</div><div class="card-sub">tipo_plan_movil = 'postdia'</div></div>
+      </div>
+      <ul class="features">
+        <li>Paga al final de la jornada</li>
+        <li>Tiene <strong>saldo_wallet</strong> numérico</li>
+        <li>⚠️ Aviso desde 12:00pm ("jornada por vencer")</li>
+        <li>🚫 Bloqueo al conectar si saldo = 0</li>
+        <li>💸 Descuento 10% de tarifa al finalizar</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <div class="icon" style="background:#3a1a00"><span style="color:var(--naranja);font-weight:800">S</span></div>
+        <div><div class="card-title" style="color:var(--naranja)">Semanal</div><div class="card-sub">tipo_plan_movil = 'semanal'</div></div>
+      </div>
+      <ul class="features">
+        <li>Paga semanalmente (lunes a lunes)</li>
+        <li><strong>Sin saldo numérico</strong> — control por bandera</li>
+        <li>⚠️ Aviso los domingos ("paga esta semana")</li>
+        <li>🔒 Auto-bloqueo lunes 12:00pm (pg_cron)</li>
+        <li>🔓 Desbloqueo manual desde central al verificar pago</li>
+        <li>Sin descuento por servicio (pago plano)</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="callout" style="margin-bottom:8px">
+    🎖 <strong>Masters exentos de todo:</strong> <code>rango_movil = 'MASTER'</code> — nunca se bloquean, nunca se les descuenta, sin avisos de billetera. Aplica en Flutter (connect check + overlay) y en BD (fn_bloquear_semanales).
+  </div>
+  <div class="callout callout-blue" style="margin-bottom:28px">
+    💊 <strong>Badge FN no exime:</strong> <code>tiene_fn = true</code> NO exime del sistema de billetera. El descuento y el bloqueo aplican igual para servicios SE y FN.
+  </div>
+
+  <!-- BLOQUEO AUTOMÁTICO SEMANAL -->
+  <div class="divider"></div>
+  <h3>Flujo de Bloqueo Semanal</h3>
+  <div class="flow" style="margin-top:16px;margin-bottom:28px">
+    <div class="flow-step">
+      <div class="flow-dot" style="background:#1a1a00;border:2px solid var(--amarillo);color:var(--amarillo)">DOM</div>
+      <div class="flow-body">
+        <div class="flow-title">Aviso en la app (domingo)</div>
+        <div class="flow-desc">
+          Banner naranja en panel móvil: "Tu semana vence mañana — realiza tu pago".<br>
+          Incluye instrucciones de pago desde <code>config_sistema.info_recarga_wallet</code>.<br>
+          Botón <strong>ENVIAR COMPROBANTE</strong> → crea solicitud tipo <code>'pago_semanal'</code>.
+        </div>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-dot" style="background:#1a0000;border:2px solid var(--rojo);color:var(--rojo)">LUN<br>12pm</div>
+      <div class="flow-body">
+        <div class="flow-title">Auto-bloqueo (pg_cron lunes 12:00pm Colombia)</div>
+        <div class="flow-desc">
+          <code>fn_bloquear_semanales()</code> ejecutado por pg_cron a las <strong>17:00 UTC</strong> (12pm Colombia UTC-5).<br>
+          Setea <code>wallet_bloqueado = true</code> para todos los semanales excepto Masters.<br>
+          Condición: <code>rango_movil IS NULL OR UPPER(rango_movil) != 'MASTER'</code>
+        </div>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-dot" style="background:#0a001a;border:2px solid var(--morado);color:var(--morado)">APP</div>
+      <div class="flow-body">
+        <div class="flow-title">Pantalla de bloqueo (overlay en móvil)</div>
+        <div class="flow-desc">
+          Overlay negro de pantalla completa con 🔒, mensaje "BILLETERA BLOQUEADA".<br>
+          Instrucciones de pago desde BD. Si no hay solicitud pendiente → botón <strong>ENVIAR COMPROBANTE PARA DESBLOQUEAR</strong>.<br>
+          Bloquea también el botón de conectarse online.<br>
+          Stream <code>_streamMiPerfil</code> detecta desbloqueo en tiempo real → overlay desaparece.
+        </div>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-dot" style="background:#001a00;border:2px solid var(--verde);color:var(--verde)">CTR</div>
+      <div class="flow-body">
+        <div class="flow-title">Revisión y desbloqueo (central)</div>
+        <div class="flow-desc">
+          Central ve la solicitud en la tab Billetera de Gestión de Usuarios.<br>
+          Verifica el comprobante → aprueba → <code>fn_wallet_ajuste_saldo</code> o setea <code>wallet_bloqueado = false</code>.<br>
+          El móvil se desbloquea en tiempo real via stream.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DESCUENTO AUTOMÁTICO -->
+  <div class="divider"></div>
+  <h3>Descuento Automático por Servicio (10%)</h3>
+  <div class="callout callout-blue" style="margin-bottom:16px">
+    Trigger BD: <code>trg_descuento_servicio</code> — AFTER UPDATE on <code>servicios</code> (ROW level)
+  </div>
+  <div style="overflow-x:auto;margin-top:14px;margin-bottom:28px">
+    <table>
+      <tr><th>Estado final</th><th>¿Descuenta?</th><th>Detalle</th></tr>
+      <tr>
+        <td><span class="estado" style="color:#4ade80;border-color:#003a00;background:#001a00">finalizado</span></td>
+        <td>✅ Sí — automático</td>
+        <td>10% de <code>tarifa</code> deducido via <code>fn_wallet_ajuste_saldo(movil_id, -monto)</code></td>
+      </tr>
+      <tr>
+        <td><span class="estado" style="color:#06b6d4;border-color:#003a40;background:#001a20">finalizado_por_demora</span></td>
+        <td>✅ Sí — automático</td>
+        <td>Igual que finalizado. Demora por defecto: <strong>30 minutos</strong> (tiempoMeta)</td>
+      </tr>
+      <tr>
+        <td><span class="estado" style="color:#f97316;border-color:#3a1a00;background:#1a0800">finalizado_con_problema</span></td>
+        <td>❌ No automático</td>
+        <td>Central decide manualmente según el problema reportado</td>
+      </tr>
+      <tr>
+        <td><span class="estado" style="color:#ef4444;border-color:#3a0000;background:#1a0000">cancelado</span></td>
+        <td>❌ No</td>
+        <td>Sin tarifa cobrada = sin comisión</td>
+      </tr>
+    </table>
+  </div>
+  <div class="callout callout-green" style="margin-bottom:28px">
+    🛡 <strong>Anti-doble descuento:</strong> el trigger verifica <code>IF OLD.estado IN ('finalizado', 'finalizado_por_demora') THEN RETURN NEW</code> — no vuelve a descontar si ya estaba en ese estado.<br>
+    🎖 <strong>Masters exentos:</strong> el trigger verifica <code>rango_movil = 'MASTER'</code> antes de descontar.
+  </div>
+
+  <!-- BD -->
+  <div class="divider"></div>
+  <h3>Tablas y Funciones BD</h3>
+  <div class="grid grid-2" style="margin-top:14px;margin-bottom:28px">
+    <div class="card">
+      <div class="card-title" style="margin-bottom:8px">🗃 Columnas en <code>usuarios</code></div>
+      <ul class="features">
+        <li><code>tipo_plan_movil</code> — 'prediario' | 'postdia' | 'semanal'</li>
+        <li><code>saldo_wallet</code> — numeric, balance actual (prediario/postdia)</li>
+        <li><code>wallet_bloqueado</code> — boolean DEFAULT false (semanales)</li>
+        <li><code>rango_movil</code> — 'MASTER' | 'LEYENDA' | 'ELITE' | 'PRO' | 'NOVATO'</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-title" style="margin-bottom:8px">📋 Tabla <code>wallet_movimientos</code></div>
+      <ul class="features">
+        <li><code>movil_id</code> → FK usuarios</li>
+        <li><code>tipo</code> — 'recarga' | 'descuento' | 'ajuste'</li>
+        <li><code>monto</code> — numeric (+ recarga, - descuento)</li>
+        <li><code>concepto</code> — texto descriptivo</li>
+        <li><code>servicio_id</code> → FK servicios (nullable)</li>
+        <li><code>registrado_por</code> — quién hizo el movimiento</li>
+        <li><code>created_at</code> — timestamp</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-title" style="margin-bottom:8px">📋 Tabla <code>solicitudes_recarga_wallet</code></div>
+      <ul class="features">
+        <li><code>movil_id</code> — quién solicita</li>
+        <li><code>tipo_solicitud</code> — <strong>'recarga'</strong> (prediario/postdia) | <strong>'pago_semanal'</strong></li>
+        <li><code>monto</code> — monto solicitado</li>
+        <li><code>comprobante_url</code> — imagen del pago</li>
+        <li><code>estado</code> — 'pendiente' | 'aprobado' | 'rechazado'</li>
+        <li><code>created_at</code> — timestamp</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-title" style="margin-bottom:8px">⚙️ Funciones y Triggers</div>
+      <ul class="features">
+        <li><code>fn_wallet_ajuste_saldo(movil_id, monto)</code> — suma monto al saldo (negativo = descuento)</li>
+        <li><code>fn_bloquear_semanales()</code> — pg_cron lunes 17:00 UTC · excluye Masters</li>
+        <li><code>trg_descuento_servicio</code> — AFTER UPDATE servicios · 10% al finalizar</li>
+        <li><code>config_sistema.info_recarga_wallet</code> — instrucciones de pago para la app</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- FLUJO MÓVIL -->
+  <div class="divider"></div>
+  <h3>Pantallas en el Panel Móvil</h3>
+  <div class="grid grid-3" style="margin-top:14px;margin-bottom:28px">
+    <div class="card">
+      <div class="card-title" style="color:var(--verde);margin-bottom:8px">✅ Prediario — saldo OK</div>
+      <ul class="features">
+        <li>Muestra saldo en verde</li>
+        <li>Botón RECARGAR disponible</li>
+        <li>Sin avisos</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-title" style="color:var(--naranja);margin-bottom:8px">⚠️ Prediario — saldo bajo</div>
+      <ul class="features">
+        <li>Banner naranja cuando saldo ≤ $3.000</li>
+        <li>"Tu saldo es bajo — considera recargar"</li>
+        <li>Puede seguir conectado</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-title" style="color:var(--rojo);margin-bottom:8px">🚫 Prediario — sin saldo</div>
+      <ul class="features">
+        <li>Bloqueo al intentar conectar</li>
+        <li>Diálogo rojo explicando el bloqueo</li>
+        <li>Debe recargar para conectarse</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-title" style="color:var(--morado);margin-bottom:8px">⚠️ Postdia — jornada por vencer</div>
+      <ul class="features">
+        <li>Banner morado desde las 12:00pm</li>
+        <li>"Tu jornada está por vencer — paga tu postdia"</li>
+        <li>Botón ENVIAR COMPROBANTE</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-title" style="color:var(--naranja);margin-bottom:8px">⚠️ Semanal — aviso domingo</div>
+      <ul class="features">
+        <li>Banner naranja los domingos</li>
+        <li>"Tu semana vence mañana"</li>
+        <li>Instrucciones de pago + botón comprobante</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-title" style="color:var(--rojo);margin-bottom:8px">🔒 Semanal — bloqueado</div>
+      <ul class="features">
+        <li>Overlay negro pantalla completa</li>
+        <li>Bloquea conectarse y toda la app</li>
+        <li>Botón ENVIAR COMPROBANTE</li>
+        <li>Se desbloquea en tiempo real al aprobar central</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- FLUJO CENTRAL -->
+  <div class="divider"></div>
+  <h3>Panel Central — Tab Billetera</h3>
+  <div class="grid grid-2" style="margin-top:14px">
+    <div class="card">
+      <div class="card-title" style="margin-bottom:8px">📊 Resumen Stats</div>
+      <ul class="features">
+        <li>🔴 Bloqueados (semanales con wallet_bloqueado)</li>
+        <li>💸 Con deuda (saldo &lt; 0)</li>
+        <li>📋 Cantidad por plan (prediario / postdia / semanal)</li>
+        <li>Chips de filtro rápido por plan</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-title" style="margin-bottom:8px">💬 Solicitudes Pendientes</div>
+      <ul class="features">
+        <li>Lista de <code>solicitudes_recarga_wallet</code> en estado 'pendiente'</li>
+        <li>Badge diferenciador: RECARGA vs PAGO SEMANAL</li>
+        <li>Acciones: ✅ APROBAR → ajusta saldo o desbloquea · ❌ RECHAZAR</li>
+        <li>Thumbnail del comprobante</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-title" style="margin-bottom:8px">📈 Movimientos Recientes</div>
+      <ul class="features">
+        <li>Últimos 8 movimientos de wallet_movimientos</li>
+        <li>Icono por tipo: ↑ recarga (verde) · ↓ descuento (rojo) · ⚖️ ajuste (azul)</li>
+        <li>Monto con color (+verde / -rojo)</li>
+        <li>Nombre del móvil y fecha</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-title" style="margin-bottom:8px">🔍 Búsqueda y Filtros</div>
+      <ul class="features">
+        <li>Búsqueda por nombre / número de móvil</li>
+        <li>ChoiceChips: Todos · Prediario · Postdia · Semanal</li>
+        <li>Filtros combinados: plan + texto de búsqueda</li>
+        <li>Ajuste manual de saldo disponible para central</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<script>
+function show(tab) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('tab-' + tab).classList.add('active');
+  event.target.classList.add('active');
+}
+</script>
+</body>
+</html>

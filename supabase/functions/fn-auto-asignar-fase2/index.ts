@@ -1,14 +1,17 @@
 // supabase/functions/fn-auto-asignar-fase2/index.ts
 //
 // Corre cada minuto via pg_cron.
-// Maneja DOS tipos de auto-asignación en fase 2 (T+30s):
+// Maneja TRES flujos:
+//
+//   0. [CONFIG-CASCADA-B] Liberar FN pre-asignados (directo_presel) que superaron
+//      el timeout de aceptación (cascada_fn_f2_timeout_seg) → resetear a cascada F3/F4.
 //
 //   1. Servicios FN (tipo_fn = true):
-//      Busca fn_fase2_movil_id + fn_radar_t0 ≥ 30s atrás.
-//      Auto-asigna el más cercano a la sede, cancela fases 3 y 4.
+//      Busca fn_fase2_movil_id + fn_radar_t0 ≥ cascada_fn_f2_seg atrás.
+//      Pre-asigna al más cercano. Si libre → cancela F3/F4. Si ocupado → solo push.
 //
 //   2. Servicios no-FN (tipo_fn = false / null):
-//      Busca paradero_auto_movil_id + created_at/liberacion_at ≥ 30s.
+//      Busca paradero_auto_movil_id + created_at/liberacion_at ≥ cascada_se_f2_seg.
 //      Auto-asigna el #1 del paradero, cancela zona y global.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -23,8 +26,12 @@ const supabase = createClient(
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
 );
 
-const restKey = Deno.env.get('ONESIGNAL_REST_API_KEY') ?? '';
+const restKey    = Deno.env.get('ONESIGNAL_REST_API_KEY') ?? '';
 const authHeader = restKey.startsWith('os_v2_') ? `Key ${restKey}` : `Basic ${restKey}`;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
 
 async function cancelarNotif(notifId: string | null) {
   if (!notifId) return;
@@ -46,6 +53,7 @@ async function enviarHeadsup(movilId: string, titulo: string, mensaje: string) {
       body: JSON.stringify({
         app_id: ONESIGNAL_APP_ID,
         include_external_user_ids: [movilId],
+        channel_for_external_user_ids: 'push',
         headings: { en: titulo, es: titulo },
         contents: { en: mensaje, es: mensaje },
         priority: 10,
@@ -59,6 +67,29 @@ async function enviarHeadsup(movilId: string, titulo: string, mensaje: string) {
   }
 }
 
+async function enviarPushGrupo(ids: string[], titulo: string, mensaje: string) {
+  if (ids.length === 0) return;
+  try {
+    await fetch(SEND_NOTIF_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        app_id: ONESIGNAL_APP_ID,
+        include_external_user_ids: ids,
+        channel_for_external_user_ids: 'push',
+        headings: { en: titulo, es: titulo },
+        contents: { en: mensaje, es: mensaje },
+        priority: 10,
+        android_sound: 'movil_paradero',
+        ios_sound: 'movil_paradero.mp3',
+        existing_android_channel_id: CANAL_ALARMA,
+      }),
+    });
+  } catch (e) {
+    console.warn(`[auto-asignar] Error push grupo:`, e);
+  }
+}
+
 async function movilEstaOcupado(movilId: string): Promise<boolean> {
   const { data } = await supabase
     .from('servicios')
@@ -69,8 +100,7 @@ async function movilEstaOcupado(movilId: string): Promise<boolean> {
   return !!data;
 }
 
-// Auto-asignación para servicios NO-FN: cambia estado a en_ruta_origen
-// (el #1 del paradero queda activo de inmediato).
+// Auto-asignación SE: cambia estado a en_ruta_origen (el #1 del paradero queda activo).
 async function autoAsignar(
   srvId: number,
   movilId: string,
@@ -86,8 +116,8 @@ async function autoAsignar(
       accepted_at: new Date().toISOString(),
     })
     .eq('id', srvId)
-    .eq('estado', 'pendiente')   // guard anti-doble-asignación
-    .is('movil_id', null);
+    .eq('estado', 'pendiente')
+    .is('movil_id', null); // guard anti-doble-asignación
 
   if (error) {
     console.error(`[auto-asignar] Error asignando srv ${srvId}:`, error.message);
@@ -100,10 +130,7 @@ async function autoAsignar(
   return true;
 }
 
-// Pre-asignación FN fase 2:
-//   - Libre  → set movil_id (mantiene estado=pendiente). El móvil confirma
-//              aceptando in-app. Cancela FASE 3/4 para no notificar a otros.
-//   - Ocupado → solo push. El servicio sigue en cascada abierta (FASE 3/4).
+// Pre-asignación FN: el móvil debe confirmar. Si está libre cancela F3/F4.
 async function preasignarFn(
   srvId: number,
   movilId: string,
@@ -112,8 +139,6 @@ async function preasignarFn(
   const ocupado = await movilEstaOcupado(movilId);
 
   if (!ocupado) {
-    // Libre: marcar movil_id y cambiar fn_asignacion_tipo para que
-    // el radar del móvil lo muestre directamente (como directo_presel).
     const { error } = await supabase
       .from('servicios')
       .update({
@@ -129,21 +154,98 @@ async function preasignarFn(
       return;
     }
 
-    // Cancelar notificaciones de fases siguientes (ya está pre-asignado)
     for (const n of notifCancelar) await cancelarNotif(n);
     await enviarHeadsup(movilId, '🎯 SERVICIO FN PARA TI', 'Un servicio FN quedó asignado a ti — confírmalo en la app');
     console.log(`[fn-fase2] Srv ${srvId} pre-asignado libre → móvil ${movilId} ✓`);
   } else {
-    // Ocupado: solo push. El servicio sigue en cascada y llega a FASE 3/4.
+    // Ocupado: solo push. El servicio sigue en cascada abierta (F3/F4).
     await enviarHeadsup(movilId, '🔵 SERVICIO FN CERCANO', 'Hay un servicio FN cerca — revisa si te conviene la ruta');
     console.log(`[fn-fase2] Srv ${srvId} → móvil ${movilId} ocupado, solo push`);
   }
 }
 
-Deno.serve(async () => {
-  const umbral = new Date(Date.now() - 30_000).toISOString();
+// ─────────────────────────────────────────────────────────────────────────────
+// Handler principal
+// ─────────────────────────────────────────────────────────────────────────────
 
-  // ── 1. SERVICIOS FN ──────────────────────────────────────────────────────
+Deno.serve(async () => {
+  // ── Leer tiempos de cascada configurados en BD ────────────────────────────
+  const { data: cfg } = await supabase
+    .from('config_sistema')
+    .select('cascada_se_f2_seg, cascada_fn_f2_seg, cascada_fn_f2_timeout_seg')
+    .single();
+
+  const seFase2Ms   = (cfg?.cascada_se_f2_seg          ?? 30) * 1000;
+  const fnFase2Ms   = (cfg?.cascada_fn_f2_seg           ?? 30) * 1000;
+  const fnTimeoutMs = (cfg?.cascada_fn_f2_timeout_seg   ?? 30) * 1000;
+
+  // Umbral SE: cuándo ha pasado suficiente tiempo para auto-asignar #1 paradero
+  const umbralSE = new Date(Date.now() - seFase2Ms).toISOString();
+
+  // Umbral FN F2: cuándo ofrecer al móvil más cercano
+  const umbralFN = new Date(Date.now() - fnFase2Ms).toISOString();
+
+  // Umbral de release: fn_radar_t0 debe ser anterior a (ahora - f2 - timeout)
+  // Ej: f2=30s, timeout=30s → el servicio lleva ≥60s sin ser aceptado
+  const umbralRelease = new Date(Date.now() - (fnFase2Ms + fnTimeoutMs)).toISOString();
+
+  // ── 0. LIBERAR FN pre-asignados que no aceptaron en el timeout ────────────
+  {
+    const { data: expirados } = await supabase
+      .from('servicios')
+      .select('id, movil_id')
+      .eq('fn_asignacion_tipo', 'directo_presel')
+      .eq('estado', 'pendiente')
+      .not('movil_id', 'is', null)
+      .lte('fn_radar_t0', umbralRelease);
+
+    for (const srv of expirados ?? []) {
+      // Liberar: quitar movil_id y volver a modo radar para F3/F4
+      const { error } = await supabase
+        .from('servicios')
+        .update({ movil_id: null, fn_asignacion_tipo: 'radar' })
+        .eq('id', srv.id)
+        .eq('fn_asignacion_tipo', 'directo_presel'); // guard anti-doble
+
+      if (error) {
+        console.error(`[fn-timeout] Error liberando srv ${srv.id}:`, error.message);
+        continue;
+      }
+
+      console.log(`[fn-timeout] Srv ${srv.id} — timeout F2, liberando a cascada F3/F4`);
+
+      // Informar al móvil que perdió la ventana
+      await enviarHeadsup(
+        srv.movil_id.toString(),
+        '⏰ Tiempo agotado',
+        'No aceptaste el servicio FN a tiempo — fue liberado a otros',
+      );
+
+      // Re-disparar push a no-Masters FN disponibles (F3 + F4 combinados).
+      // Los misiles OneSignal originales ya fueron cancelados al pre-asignar,
+      // así que notificamos directamente desde aquí.
+      const { data: disponibles } = await supabase
+        .from('usuarios')
+        .select('id')
+        .eq('en_linea', true)
+        .eq('tiene_fn', true)
+        .eq('activo', true)
+        .neq('rango_movil', 'master')
+        .neq('id', srv.movil_id)
+        .or('suspendido.is.null,suspendido.eq.false')
+        .or('bloqueado_inactividad.is.null,bloqueado_inactividad.eq.false');
+
+      const ids = (disponibles ?? []).map((u: { id: number }) => u.id.toString());
+      await enviarPushGrupo(
+        ids,
+        '🟣 SERVICIO FN DISPONIBLE',
+        'Un servicio FN quedó disponible — revísalo ahora',
+      );
+      console.log(`[fn-timeout] Srv ${srv.id} — re-push a ${ids.length} no-Masters disponibles`);
+    }
+  }
+
+  // ── 1. SERVICIOS FN — pre-asignar al más cercano ─────────────────────────
   {
     const { data: serviciosFN } = await supabase
       .from('servicios')
@@ -153,7 +255,7 @@ Deno.serve(async () => {
       .eq('tipo_fn', true)
       .not('fn_fase2_movil_id', 'is', null)
       .is('movil_id', null)
-      .lte('fn_radar_t0', umbral);
+      .lte('fn_radar_t0', umbralFN);
 
     for (const srv of serviciosFN ?? []) {
       await preasignarFn(
@@ -165,10 +267,8 @@ Deno.serve(async () => {
     }
   }
 
-  // ── 2. SERVICIOS NO-FN — #1 DEL PARADERO ────────────────────────────────
+  // ── 2. SERVICIOS NO-FN — #1 DEL PARADERO ─────────────────────────────────
   // El anchor de tiempo es GREATEST(created_at, COALESCE(liberacion_at, created_at)).
-  // Aquí en Deno usamos el umbral de 30s y filtramos solo por created_at como
-  // aproximación — liberacion_at se verifica como fallback implícito.
   {
     const { data: serviciosNormal } = await supabase
       .from('servicios')
@@ -177,13 +277,13 @@ Deno.serve(async () => {
       .is('tipo_fn', null)    // no-FN
       .not('paradero_auto_movil_id', 'is', null)
       .is('movil_id', null)
-      .lte('created_at', umbral);
+      .lte('created_at', umbralSE);
 
     for (const srv of serviciosNormal ?? []) {
-      // Si liberacion_at existe y es más reciente, verificar que también pasaron 30s
+      // Si liberacion_at existe y es más reciente, verificar que también pasaron seFase2Ms
       if (srv.liberacion_at) {
         const libAt = new Date(srv.liberacion_at).getTime();
-        if (Date.now() - libAt < 30_000) continue;
+        if (Date.now() - libAt < seFase2Ms) continue;
       }
 
       const movilId = srv.paradero_auto_movil_id as string;
@@ -192,12 +292,12 @@ Deno.serve(async () => {
       const asignado = await autoAsignar(
         srv.id,
         movilId,
-        [srv.onesignal_2m, srv.onesignal_5m], // Cancelar Fase 3/4 para no spamear a otros móviles
+        [srv.onesignal_2m, srv.onesignal_5m], // cancelar F3/F4 para no spamear
         '📍 TU TURNO EN EL PARADERO',
         'Un servicio está esperando por ti',
       );
 
-      // Si se asignó exitosamente, limpiar la cola del paradero
+      // Si se asignó exitosamente, sacar al móvil de la fila del paradero
       if (asignado) {
         await supabase
           .from('usuarios')
