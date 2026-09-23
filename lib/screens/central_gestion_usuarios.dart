@@ -1419,9 +1419,11 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
           ),
           child: Padding(
             padding: const EdgeInsets.all(14),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              // Fila 1: avatar + info + badges facción + chip rango
-              Row(children: [
+            child: LayoutBuilder(builder: (context, constraints) {
+              final esPC = constraints.maxWidth > 520;
+
+              // ── Info del móvil (avatar + nombre + plan) ──────────────────
+              Widget filaInfo({bool conBadges = false}) => Row(children: [
                 CircleAvatar(
                   radius: 18,
                   backgroundColor: numMovil.isNotEmpty ? rc : rc.withValues(alpha: 0.15),
@@ -1465,7 +1467,29 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                     ],
                   ]),
                 ])),
-                // Badges de facción
+                // Badges en móvil (en PC van a la columna derecha)
+                if (conBadges) ...[
+                  if (u['tiene_se'] == true)
+                    Container(
+                      margin: const EdgeInsets.only(right: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(color: const Color(0xFF1B5E20), borderRadius: BorderRadius.circular(6)),
+                      child: const Text('SE', style: TextStyle(color: Color(0xFF3AF500), fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.8)),
+                    ),
+                  if (u['tiene_fn'] == true)
+                    Container(
+                      margin: const EdgeInsets.only(right: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(color: const Color(0xFF002DA2), borderRadius: BorderRadius.circular(6)),
+                      child: const Text('FN', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.8)),
+                    ),
+                  if (rangoActual != null && rangoActual.isNotEmpty)
+                    _chip(rangoActual, rc),
+                ],
+              ]);
+
+              // ── Badges + rango (columna derecha en PC) ───────────────────
+              final badgesPC = Row(mainAxisSize: MainAxisSize.min, children: [
                 if (u['tiene_se'] == true)
                   Container(
                     margin: const EdgeInsets.only(right: 4),
@@ -1482,17 +1506,18 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                   ),
                 if (rangoActual != null && rangoActual.isNotEmpty)
                   _chip(rangoActual, rc),
-              ]),
-              const SizedBox(height: 6),
-              // Fila 2: botones de acción con espacio táctil amplio
-              Row(mainAxisSize: MainAxisSize.min, children: [
+              ]);
+
+              // ── Botones de acción ─────────────────────────────────────────
+              final botones = Row(mainAxisSize: MainAxisSize.min, children: [
                 _botonAccion(Icons.military_tech_rounded, Colors.amber, 'Facción', () => _cambiarFaccionDialog(u)),
                 _botonAccion(Icons.credit_card_rounded, Colors.lightBlueAccent, 'Plan', () => _cambiarPlanDialog(u)),
                 _botonAccion(Icons.lock_reset_rounded, Colors.white54, 'Clave', () => _cambiarContrasenaDialog(u)),
                 _botonAccion(Icons.delete_forever_rounded, Colors.red[300]!, 'Eliminar', () => _eliminarCuentaMovil(u)),
-              ]),
-              const SizedBox(height: 10),
-              Wrap(spacing: 6, runSpacing: 6, children: rangos.map((r) {
+              ]);
+
+              // ── Chips de rangos ───────────────────────────────────────────
+              final wrapRangos = Wrap(spacing: 6, runSpacing: 6, children: rangos.map((r) {
                 final activo = rangoActual == r;
                 final rangoColor = _colorRango(r);
                 return GestureDetector(
@@ -1511,8 +1536,34 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                           fontSize: 11, fontWeight: activo ? FontWeight.bold : FontWeight.normal)),
                   ),
                 );
-              }).toList()),
-            ]),
+              }).toList());
+
+              // ── Layout PC: info+rangos izquierda | badges+botones derecha ─
+              if (esPC) {
+                return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    filaInfo(conBadges: false),
+                    const SizedBox(height: 10),
+                    wrapRangos,
+                  ])),
+                  const SizedBox(width: 12),
+                  Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                    badgesPC,
+                    const SizedBox(height: 8),
+                    botones,
+                  ]),
+                ]);
+              }
+
+              // ── Layout móvil: apilado ─────────────────────────────────────
+              return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                filaInfo(conBadges: true),
+                const SizedBox(height: 6),
+                botones,
+                const SizedBox(height: 10),
+                wrapRangos,
+              ]);
+            }),
           ),
         );
       },

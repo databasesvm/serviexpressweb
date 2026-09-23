@@ -42,7 +42,7 @@ class _PanelReportesBottomSheetState
     try {
       final rows = await Supabase.instance.client
           .from('reportes_servicio')
-          .select('id, servicio_id, movil_id, origen, categoria, nota, created_at')
+          .select('id, servicio_id, movil_id, origen, categoria, nota, created_at, sede_id, fn_sedes(numero, nombre)')
           .order('created_at', ascending: false)
           .limit(100);
       if (mounted) setState(() { _reportes = List<Map<String, dynamic>>.from(rows); _cargando = false; });
@@ -279,6 +279,12 @@ class _PanelReportesBottomSheetState
                       itemBuilder: (_, i) {
                         final r = _reportesFiltrados[i];
                         final esCliente = r['origen'] == 'cliente';
+                        final sedeData = r['fn_sedes'] as Map<String, dynamic>?;
+                        final sedeLabel = sedeData != null
+                            ? (sedeData['numero'] != null
+                                ? 'FN${sedeData['numero'].toString().padLeft(2, '0')} - ${sedeData['nombre'] ?? ''}'
+                                : sedeData['nombre'] ?? 'SEDE FN')
+                            : 'SEDE FN';
                         return Padding(
                           padding: const EdgeInsets.symmetric(vertical: 8),
                           child: Row(
@@ -308,7 +314,7 @@ class _PanelReportesBottomSheetState
                                             borderRadius: BorderRadius.circular(4),
                                           ),
                                           child: Text(
-                                            esCliente ? 'CLIENTE' : 'SEDE FN',
+                                            esCliente ? 'CLIENTE' : sedeLabel,
                                             style: TextStyle(
                                               fontSize: 9,
                                               fontWeight: FontWeight.bold,
@@ -487,7 +493,7 @@ class _PanelReportesScreenState extends State<_PanelReportesScreen>
     try {
       final rows = await Supabase.instance.client
           .from('reportes_servicio')
-          .select('id, servicio_id, movil_id, origen, categoria, nota, created_at')
+          .select('id, servicio_id, movil_id, origen, categoria, nota, created_at, sede_id, fn_sedes(numero, nombre)')
           .order('created_at', ascending: false)
           .limit(100);
       if (mounted) setState(() { _reportes = List<Map<String, dynamic>>.from(rows); _cargando = false; });
@@ -608,14 +614,21 @@ class _PanelReportesScreenState extends State<_PanelReportesScreen>
           const Text('Filtrar:', style: TextStyle(color: Colors.white54, fontSize: 11)),
           const SizedBox(width: 8),
           ...[('todos', 'Todos'), ('cliente', 'Cliente'), ('fn_sede', 'Sede FN')].map((e) =>
-            Padding(padding: const EdgeInsets.only(right: 6), child: FilterChip(
-              label: Text(e.$2, style: TextStyle(fontSize: 11,
-                  color: _filtroOrigen == e.$1 ? Colors.black : Colors.white60)),
-              selected: _filtroOrigen == e.$1,
-              selectedColor: Colors.orange, backgroundColor: Colors.white12, showCheckmark: false,
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              onSelected: (_) => setState(() => _filtroOrigen = e.$1),
+            Padding(padding: const EdgeInsets.only(right: 6), child: GestureDetector(
+              onTap: () => setState(() => _filtroOrigen = e.$1),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: _filtroOrigen == e.$1 ? Colors.orange : Colors.transparent,
+                  border: Border.all(color: Colors.orange, width: 1.2),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(e.$2, style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: _filtroOrigen == e.$1 ? Colors.black : Colors.orange,
+                )),
+              ),
             )),
           ),
           const Spacer(),
@@ -639,6 +652,12 @@ class _PanelReportesScreenState extends State<_PanelReportesScreen>
                     itemBuilder: (_, i) {
                       final r = _reportesFiltrados[i];
                       final esCliente = r['origen'] == 'cliente';
+                      final sedeData2 = r['fn_sedes'] as Map<String, dynamic>?;
+                      final sedeLabel2 = sedeData2 != null
+                          ? (sedeData2['numero'] != null
+                              ? 'FN${sedeData2['numero'].toString().padLeft(2, '0')} - ${sedeData2['nombre'] ?? ''}'
+                              : sedeData2['nombre'] ?? 'SEDE FN')
+                          : 'SEDE FN';
                       return Padding(
                         padding: const EdgeInsets.symmetric(vertical: 8),
                         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -660,7 +679,7 @@ class _PanelReportesScreenState extends State<_PanelReportesScreen>
                                       : Colors.indigo.withValues(alpha: 0.2),
                                   borderRadius: BorderRadius.circular(4),
                                 ),
-                                child: Text(esCliente ? 'CLIENTE' : 'SEDE FN',
+                                child: Text(esCliente ? 'CLIENTE' : sedeLabel2,
                                   style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold,
                                       color: esCliente ? Colors.blue[300] : Colors.indigo[300], letterSpacing: 0.5)),
                               ),

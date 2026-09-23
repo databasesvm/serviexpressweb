@@ -185,11 +185,11 @@ class _CentralScreenState extends State<CentralScreen>
   List<Map<String, dynamic>> _puntosFN = [];
   List<Map<String, dynamic>> _localesUbicacion = [];
 
-  // Filtros del mapa
-  bool _mapaParaderos = true;
-  bool _mapaSedesFN   = true;
-  bool _mapaPuntosFN  = true;
-  bool _mapaLocales   = true;
+  // Filtros del mapa — solo móviles activos por defecto
+  bool _mapaParaderos = false;
+  bool _mapaSedesFN   = false;
+  bool _mapaPuntosFN  = false;
+  bool _mapaLocales   = false;
   bool _mapaMoviles   = true;
 
   @override

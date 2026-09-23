@@ -2940,6 +2940,7 @@ class _ActivosTabState extends State<_ActivosTab> {
                           'origen': 'fn_sede',
                           'categoria': cat,
                           'nota': nota.isEmpty ? null : nota,
+                          'sede_id': widget.usuario['fn_sede_id'],
                         });
                         await MotorNotificaciones.dispararACentral(
                           titulo:
