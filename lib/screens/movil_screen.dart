@@ -3834,6 +3834,46 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
             .catchError((_) {});
       }
 
+      // SE-CONNECT-NOTIFY: al conectarse, notificar servicios SE pendientes
+      // que ya pasaron F4 (se_f4_enviado=true) pero aún no fueron tomados.
+      // No notifica servicios ya aceptados, asignados, finalizados o cancelados.
+      // Masters reciben notificación con sonido y canal exclusivo de Master.
+      if (nuevoEstado) {
+        final perfilConex = _cacheMiPerfil ?? widget.usuario;
+        final esMasterConex = perfilConex['rango_movil']?.toString().toUpperCase() == 'MASTER';
+        if (perfilConex['tiene_se'] == true) {
+          try {
+            final svcsPendientes = await Supabase.instance.client
+                .from('servicios')
+                .select('id, origen, destino')
+                .eq('estado', 'pendiente')
+                .eq('se_f4_enviado', true);
+            for (final svc in svcsPendientes) {
+              final origen = svc['origen']?.toString() ?? 'Origen';
+              final destino = svc['destino']?.toString() ?? '';
+              final msg = destino.isNotEmpty
+                  ? '$origen → $destino'
+                  : origen;
+              if (esMasterConex) {
+                await MotorNotificaciones.dispararMisil(
+                  idDestino: widget.usuario['id'].toString(),
+                  titulo: '👑 SERVICIO SIN TOMAR',
+                  mensaje: msg,
+                  sonido: 'master',
+                  canalAndroidId: MotorNotificaciones.canalMasterId,
+                );
+              } else {
+                await MotorNotificaciones.dispararMisil(
+                  idDestino: widget.usuario['id'].toString(),
+                  titulo: '🚨 SERVICIO SIN TOMAR',
+                  mensaje: msg,
+                );
+              }
+            }
+          } catch (_) {} // silencioso — la conexión no debe fallar por esto
+        }
+      }
+
       // Sonido de conexión — se reproduce justo antes del setState para
       // que el feedback auditivo coincida con el cambio visual.
       if (nuevoEstado) _sonidos.reproducirSuave(Sonidos.movilConectado);
@@ -12658,59 +12698,12 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
           }
         }
 
-        final double? origLat = (servicio['origen_lat'] as num?)?.toDouble();
-        final double? origLng = (servicio['origen_lng'] as num?)?.toDouble();
-        final movilesLib = await Supabase.instance.client
-            .from('usuarios')
-            .select('id, latitud, longitud')
-            .eq('rol', 'movil')
-            .eq('en_linea', true)
-            .eq('tiene_se', true)
-            .neq('suspendido', true)
-            .or('rango_movil.is.null,rango_movil.neq.MASTER');
-        final idsZona60 = movilesLib
-            .where((u) {
-              final id = u['id'].toString();
-              if (masterMobileIds2.contains(id) || paraderoIds.contains(id))
-                return false;
-              if (origLat == null || origLng == null) return true;
-              final uLat = (u['latitud'] as num?)?.toDouble();
-              final uLng = (u['longitud'] as num?)?.toDouble();
-              if (uLat == null || uLng == null) return false;
-              return const Distance().as(LengthUnit.Meter, LatLng(uLat, uLng),
-                      LatLng(origLat, origLng)) <=
-                  1000;
-            })
-            .map((u) => u['id'].toString())
-            .toList();
-        final idsTodos90 = movilesLib
-            .map((u) => u['id'].toString())
-            .where((id) => !masterMobileIds2.contains(id))
-            .toList();
-        String? idLib60;
-        String? idLib90;
-        if (idsZona60.isNotEmpty) {
-          idLib60 = await MotorNotificaciones.programarMisilRetardado(
-            externalIds: idsZona60,
-            titulo: '📡 SERVICIO CERCA (1km)',
-            mensaje: msgAlerta,
-            segundosRetardo: cascadaMovil3.seF3Seg,
-          );
-        }
-        if (idsTodos90.isNotEmpty) {
-          idLib90 = await MotorNotificaciones.programarMisilRetardado(
-            externalIds: idsTodos90,
-            titulo: '🚨 SERVICIO SIN TOMAR',
-            mensaje: msgAlerta,
-            segundosRetardo: cascadaMovil3.seF4Seg,
-          );
-        }
-        if (idLib60 != null || idLib90 != null) {
-          await Supabase.instance.client.from('servicios').update({
-            if (idLib60 != null) 'onesignal_2m': idLib60,
-            if (idLib90 != null) 'onesignal_5m': idLib90,
-          }).eq('id', servicioId);
-        }
+        // F3/F4 — pg_cron consulta en_linea en tiempo real
+        await Supabase.instance.client.from('servicios').update({
+          'se_cascade_t0': DateTime.now().toUtc().toIso8601String(),
+          'se_f3_enviado': false,
+          'se_f4_enviado': false,
+        }).eq('id', servicioId);
       }
 
       if (mounted) {

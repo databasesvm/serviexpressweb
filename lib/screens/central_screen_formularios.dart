@@ -778,90 +778,12 @@ extension CentralScreenFormularios on _CentralScreenState {
                           // headsup tras asignar. paradero_auto_movil_id ya fue
                           // guardado arriba.
 
-                          // --- FASE 3 (T+60s) y FASE 4 (T+90s) ---
-                          // Ambas fases usan la RPC moviles_elegibles_notificacion
-                          // para respetar el cupo por rango (NOVATO/PRO=1, ELITE=2,
-                          // LEYENDA=3, MASTER=sin tope) y excluir prediarios/postdia
-                          // que son FN exclusivo.
-                          {
-                            final int svcId = nuevoServicioId;
-                            final String msg = tipoServicio == 'RECOGIDA LOCAL'
-                                ? 'Recogida Local en ${origenController.text.trim()}'
-                                : 'Nuevo servicio disponible en el radar';
-                            final List<String> masterSnap = List<String>.from(idsMasters);
-                            // Excluir Masters y #1 del paradero (auto-asignado por cron)
-                            final List<String> excluidos = [
-                              ...masterSnap,
-                              if (paraderoAutoMovilId != null) paraderoAutoMovilId,
-                            ];
-
-                            final double? oLat = origenLatCapturada;
-                            final double? oLng = origenLngCapturada;
-
-                            // FASE 3: zona 2km — solo suscripción, respeta cupo por rango
-                            // (Novato/Pro: 0 activos; Elite: <2; Leyenda: <3; Master: <10)
-                            List<String> idsZonaC = [];
-                            try {
-                              final params3 = <String, dynamic>{
-                                'p_solo_master': false,
-                                'p_solo_completamente_libres': false,
-                                'p_radio_metros': 2000.0,
-                                'p_tiene_se': true,
-                              };
-                              if (oLat != null) params3['p_origen_lat'] = oLat;
-                              if (oLng != null) params3['p_origen_lng'] = oLng;
-                              final resp3 = await Supabase.instance.client
-                                  .rpc('moviles_elegibles_notificacion', params: params3);
-                              idsZonaC = (resp3 as List)
-                                  .map((m) => m['id'].toString())
-                                  .where((id) => !excluidos.contains(id))
-                                  .toList();
-                            } catch (_) {}
-
-                            // FASE 4: todos los conectados — solo suscripción, respeta cupo
-                            List<String> idsTodosC = [];
-                            try {
-                              final resp4 = await Supabase.instance.client.rpc(
-                                'moviles_elegibles_notificacion',
-                                params: {
-                                  'p_solo_master': false,
-                                  'p_solo_completamente_libres': false,
-                                  'p_tiene_se': true,
-                                },
-                              );
-                              idsTodosC = (resp4 as List)
-                                  .map((m) => m['id'].toString())
-                                  .where((id) => !masterSnap.contains(id))
-                                  .toList();
-                            } catch (_) {}
-
-                            String? id60sC;
-                            String? id90sC;
-                            if (idsZonaC.isNotEmpty) {
-                              id60sC = await MotorNotificaciones.programarMisilRetardado(
-                                externalIds: idsZonaC,
-                                titulo: '📡 SERVICIO CERCA (2km)',
-                                mensaje: msg,
-                                segundosRetardo: _cascadaSeF3Seg, // CONFIG-CASCADA-C
-                                sonido: Sonidos.movilParadero,
-                              );
-                            }
-                            if (idsTodosC.isNotEmpty) {
-                              id90sC = await MotorNotificaciones.programarMisilRetardado(
-                                externalIds: idsTodosC,
-                                titulo: '🚨 SERVICIO SIN TOMAR',
-                                mensaje: msg,
-                                segundosRetardo: _cascadaSeF4Seg, // CONFIG-CASCADA-C
-                                sonido: Sonidos.movilParadero,
-                              );
-                            }
-                            if (id60sC != null || id90sC != null) {
-                              await Supabase.instance.client.from('servicios').update({
-                                if (id60sC != null) 'onesignal_2m': id60sC,
-                                if (id90sC != null) 'onesignal_5m': id90sC,
-                              }).eq('id', svcId);
-                            }
-                          }
+                          // F3/F4 — pg_cron consulta en_linea en tiempo real
+                          await Supabase.instance.client.from('servicios').update({
+                            'se_cascade_t0': DateTime.now().toUtc().toIso8601String(),
+                            'se_f3_enviado': false,
+                            'se_f4_enviado': false,
+                          }).eq('id', nuevoServicioId);
                         }
 
                         if (context.mounted) {

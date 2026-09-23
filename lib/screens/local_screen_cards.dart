@@ -426,45 +426,12 @@ mixin _CardsMixin on State<LocalScreen> {
                   );
                 }
 
-                // T+60s: zona 1km  |  T+90s: todos
-                final oLat = (servicio['origen_lat'] as num?)?.toDouble();
-                final oLng = (servicio['origen_lng'] as num?)?.toDouble();
-                final movilesStd = await db.from('usuarios').select('id, latitud, longitud')
-                    .eq('rol', 'movil').eq('en_linea', true).eq('tiene_se', true).neq('suspendido', true)
-                    .or('rango_movil.is.null,rango_movil.neq.MASTER');
-                final idsZona = movilesStd.where((u) {
-                  final id = u['id'].toString();
-                  if (masterIds.contains(id) || pilotosParadero.contains(id)) return false;
-                  if (oLat == null || oLng == null) return true;
-                  final uLat = (u['latitud'] as num?)?.toDouble();
-                  final uLng = (u['longitud'] as num?)?.toDouble();
-                  if (uLat == null || uLng == null) return false;
-                  return const Distance().as(LengthUnit.Meter, LatLng(uLat, uLng), LatLng(oLat, oLng)) <= 1000;
-                }).map((u) => u['id'].toString()).toList();
-                final idsTodos = movilesStd
-                    .map((u) => u['id'].toString())
-                    .where((id) => !masterIds.contains(id) && !pilotosParadero.contains(id))
-                    .toList();
-                String? id60s;
-                String? id90s;
-                if (idsZona.isNotEmpty) {
-                  id60s = await _programarMisilRetardado(
-                    externalIds: idsZona, titulo: '📡 SERVICIO CERCA (1km)',
-                    mensaje: msgAlarma, segundosRetardo: cascada.seF3Seg,
-                  );
-                }
-                if (idsTodos.isNotEmpty) {
-                  id90s = await _programarMisilRetardado(
-                    externalIds: idsTodos, titulo: '🚨 SERVICIO SIN TOMAR',
-                    mensaje: msgAlarma, segundosRetardo: cascada.seF4Seg,
-                  );
-                }
-
-                // 4. Guardar IDs de nuevos misiles
+                // 4. Guardar misil F2 + arrancar cascada F3/F4 via pg_cron
                 await db.from('servicios').update({
                   'onesignal_30s': id30s,
-                  'onesignal_2m': id60s,
-                  'onesignal_5m': id90s,
+                  'se_cascade_t0': DateTime.now().toUtc().toIso8601String(),
+                  'se_f3_enviado': false,
+                  'se_f4_enviado': false,
                 }).eq('id', svcId);
 
               } catch (_) {}

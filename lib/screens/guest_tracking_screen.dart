@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:latlong2/latlong.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart';
 import 'package:serviexpress_app/utils/widgets_compartidos.dart';
 import 'package:serviexpress_app/utils/cascada_config.dart';
@@ -62,8 +61,6 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
         // --- CASCADA 4 FASES — igual que el resto de la app ---
         final cascada = await CascadaConfig.cargar();
         final int svcId = servicio['id'] as int;
-        final double? origLat = (servicio['origen_lat'] as num?)?.toDouble();
-        final double? origLng = (servicio['origen_lng'] as num?)?.toDouble();
         final exclusivoStr = servicio['exclusivo_id']?.toString() ?? '';
 
         // T=0: Masters
@@ -105,56 +102,11 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
           }
         }
 
-        // T=+60s y T=+90s — misiles server-side (pre-fetch al aprobar cotización)
-        final movilesG = await Supabase.instance.client
-            .from('usuarios')
-            .select('id, latitud, longitud')
-            .eq('rol', 'movil')
-            .eq('en_linea', true)
-            .eq('tiene_se', true)
-            .neq('suspendido', true)
-            .or('rango_movil.is.null,rango_movil.neq.MASTER');
-        final idsZonaG = movilesG
-            .where((u) {
-              final id = u['id'].toString();
-              if (masterIds.contains(id) || paraderoIds.contains(id))
-                return false;
-              if (origLat == null || origLng == null) return true;
-              final uLat = (u['latitud'] as num?)?.toDouble();
-              final uLng = (u['longitud'] as num?)?.toDouble();
-              if (uLat == null || uLng == null) return false;
-              return const Distance().as(LengthUnit.Meter, LatLng(uLat, uLng),
-                      LatLng(origLat, origLng)) <=
-                  1000;
-            })
-            .map((u) => u['id'].toString())
-            .toList();
-        final idsTodosG = movilesG
-            .map((u) => u['id'].toString())
-            .where((id) => !masterIds.contains(id))
-            .toList();
-        String? id60sG;
-        String? id90sG;
-        if (idsZonaG.isNotEmpty)
-          id60sG = await MotorNotificaciones.programarMisilRetardado(
-            externalIds: idsZonaG,
-            titulo: '📡 SERVICIO CERCA (1km)',
-            mensaje: 'Servicio de Invitado disponible.',
-            segundosRetardo: cascada.seF3Seg,
-          );
-        if (idsTodosG.isNotEmpty)
-          id90sG = await MotorNotificaciones.programarMisilRetardado(
-            externalIds: idsTodosG,
-            titulo: '🚨 SERVICIO SIN TOMAR',
-            mensaje: 'Servicio de Invitado sin asignar.',
-            segundosRetardo: cascada.seF4Seg,
-          );
-        if (id60sG != null || id90sG != null) {
-          await Supabase.instance.client.from('servicios').update({
-            if (id60sG != null) 'onesignal_2m': id60sG,
-            if (id90sG != null) 'onesignal_5m': id90sG,
-          }).eq('id', svcId);
-        }
+        // F3/F4 — pg_cron consulta en_linea en tiempo real (se_cascade_t0 = ahora)
+        await Supabase.instance.client
+            .from('servicios')
+            .update({'se_cascade_t0': DateTime.now().toUtc().toIso8601String()})
+            .eq('id', svcId);
       }
     } catch (e) {}
     // ignore: empty_catches

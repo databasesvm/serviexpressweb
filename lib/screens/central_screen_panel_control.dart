@@ -1208,6 +1208,65 @@ extension CentralScreenPanelControl on _CentralScreenState {
                         ));
                       }
 
+                      // ── Pins de sedes FN ───────────────────────────────
+                      for (final s in _sedesFN) {
+                        final lat = (s['lat'] as num?)?.toDouble();
+                        final lng = (s['lng'] as num?)?.toDouble();
+                        if (lat == null || lng == null) continue;
+                        final numero = s['numero']?.toString() ?? '';
+                        final label = numero.isNotEmpty ? 'FN$numero' : 'FN';
+                        marcadores.add(Marker(
+                          point: LatLng(lat, lng),
+                          width: 64,
+                          height: 52,
+                          child: Column(mainAxisSize: MainAxisSize.min, children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF002DA2),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                label,
+                                style: const TextStyle(color: Colors.white,
+                                    fontSize: 8, fontWeight: FontWeight.bold),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const Icon(Icons.store_rounded, color: Color(0xFF002DA2), size: 26),
+                          ]),
+                        ));
+                      }
+
+                      // ── Pins de locales con coordenadas ────────────────
+                      for (final l in _localesUbicacion) {
+                        final lat = (l['lat_fija'] as num?)?.toDouble();
+                        final lng = (l['lng_fija'] as num?)?.toDouble();
+                        if (lat == null || lng == null) continue;
+                        final label = (l['nombre']?.toString() ?? 'LOCAL').toUpperCase();
+                        marcadores.add(Marker(
+                          point: LatLng(lat, lng),
+                          width: 80,
+                          height: 52,
+                          child: Column(mainAxisSize: MainAxisSize.min, children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFC62828),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                label,
+                                style: const TextStyle(color: Colors.white,
+                                    fontSize: 8, fontWeight: FontWeight.bold),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const Icon(Icons.storefront_rounded, color: Color(0xFFC62828), size: 26),
+                          ]),
+                        ));
+                      }
+
                       if (snapMoviles.hasData) {
                         for (var m in snapMoviles.data!) {
                           if (m['en_linea'] == true &&
@@ -1749,6 +1808,33 @@ extension CentralScreenPanelControl on _CentralScreenState {
     } catch (_) {
       // Si falla, el panel muestra los fallbacks hardcoded
     }
+
+    // Sedes FN con coordenadas
+    try {
+      final sedes = await Supabase.instance.client
+          .from('fn_sedes')
+          .select('id, numero, nombre, lat, lng')
+          .eq('activo', true)
+          .not('lat', 'is', null)
+          .not('lng', 'is', null);
+      if (mounted) {
+        setState(() => _sedesFN = List<Map<String, dynamic>>.from(sedes));
+      }
+    } catch (_) {}
+
+    // Locales con coordenadas fijas
+    try {
+      final locales = await Supabase.instance.client
+          .from('usuarios')
+          .select('id, nombre, lat_fija, lng_fija')
+          .eq('rol', 'local')
+          .eq('suspendido', false)
+          .not('lat_fija', 'is', null)
+          .not('lng_fija', 'is', null);
+      if (mounted) {
+        setState(() => _localesUbicacion = List<Map<String, dynamic>>.from(locales));
+      }
+    } catch (_) {}
   }
 
   /// Alias local de _hexColor (definido en central_screen_gestion.dart).

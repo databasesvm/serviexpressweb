@@ -1795,11 +1795,6 @@ mixin _FormularioMixin on State<LocalScreen> {
                           // Olas T=+60s y T=+90s
                           if (!esPuntoAPunto) {
                             final int _svcId2 = nuevoServicioId;
-                            final String _msg2 = mensajeAlarma;
-                            final List<String> _mSnap = List<String>.from(masterIds);
-                            final List<String> _pSnap = paraderoAutoMovilId != null
-                                ? [paraderoAutoMovilId]
-                                : List<String>.from(pilotosSeleccionadosIds);
 
                             if (retardoProgramado > 0) {
                               List<String> zona1kmIds = [];
@@ -1849,53 +1844,11 @@ mixin _FormularioMixin on State<LocalScreen> {
                                     }).eq('id', _svcId2);
                               }
                             } else {
-                              final double? _oLat2 = (coords['lat'] as num?)?.toDouble();
-                              final double? _oLng2 = (coords['lng'] as num?)?.toDouble();
-                              final movilesInm = await Supabase.instance.client
-                                  .from('usuarios').select('id, latitud, longitud')
-                                  .eq('rol', 'movil').eq('en_linea', true).eq('tiene_se', true)
-                                  .neq('suspendido', true)
-                                  .or('rango_movil.is.null,rango_movil.neq.MASTER');
-                              final idsZona60 = movilesInm.where((u) {
-                                final id = u['id'].toString();
-                                if (_mSnap.contains(id) || _pSnap.contains(id)) return false;
-                                if (_oLat2 == null || _oLng2 == null) return true;
-                                final uLat = (u['latitud'] as num?)?.toDouble();
-                                final uLng = (u['longitud'] as num?)?.toDouble();
-                                if (uLat == null || uLng == null) return false;
-                                return const Distance().as(
-                                      LengthUnit.Meter,
-                                      LatLng(uLat, uLng),
-                                      LatLng(_oLat2, _oLng2),
-                                    ) <= 1000;
-                              }).map((u) => u['id'].toString()).toList();
-                              final idsTodos90 = movilesInm
-                                  .map((u) => u['id'].toString())
-                                  .where((id) => !_mSnap.contains(id))
-                                  .toList();
-                              final cascadaForm2 = await CascadaConfig.cargar(); // CONFIG-CASCADA-EXT
-                              String? id60s;
-                              String? id90s;
-                              if (idsZona60.isNotEmpty)
-                                id60s = await _programarMisilRetardado(
-                                  externalIds: idsZona60,
-                                  titulo: '📡 SERVICIO CERCA (1km)',
-                                  mensaje: _msg2,
-                                  segundosRetardo: cascadaForm2.seF3Seg,
-                                );
-                              if (idsTodos90.isNotEmpty)
-                                id90s = await _programarMisilRetardado(
-                                  externalIds: idsTodos90,
-                                  titulo: '🚨 SERVICIO SIN TOMAR',
-                                  mensaje: _msg2,
-                                  segundosRetardo: cascadaForm2.seF4Seg,
-                                );
-                              if (id60s != null || id90s != null) {
-                                await Supabase.instance.client.from('servicios').update({
-                                  if (id60s != null) 'onesignal_2m': id60s,
-                                  if (id90s != null) 'onesignal_5m': id90s,
-                                }).eq('id', _svcId2);
-                              }
+                              // F3/F4 — pg_cron consulta en_linea en tiempo real
+                              await Supabase.instance.client
+                                  .from('servicios')
+                                  .update({'se_cascade_t0': DateTime.now().toUtc().toIso8601String()})
+                                  .eq('id', _svcId2);
                             }
                           }
                         }

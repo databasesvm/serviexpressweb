@@ -265,52 +265,12 @@ mixin _DispatchMixin on State<LocalScreen> {
                   }
                 }
               }
-              // T=+60s y T=+90s — misiles server-side (pre-fetch al despachar)
-              {
-                final double? _oLat = (coords?['lat'] as num?)?.toDouble();
-                final double? _oLng = (coords?['lng'] as num?)?.toDouble();
-                final movilesStd = await Supabase.instance.client
-                    .from('usuarios').select('id, latitud, longitud')
-                    .eq('rol', 'movil').eq('en_linea', true).eq('tiene_se', true).neq('suspendido', true)
-                    .or('rango_movil.is.null,rango_movil.neq.MASTER');
-                final idsZonaStd = movilesStd.where((u) {
-                  final id = u['id'].toString();
-                  if (masterStdIds.contains(id) || pilotosParadero.contains(id)) return false;
-                  if (_oLat == null || _oLng == null) return true;
-                  final uLat = (u['latitud'] as num?)?.toDouble();
-                  final uLng = (u['longitud'] as num?)?.toDouble();
-                  if (uLat == null || uLng == null) return false;
-                  return const Distance().as(
-                        LengthUnit.Meter, LatLng(uLat, uLng), LatLng(_oLat, _oLng),
-                      ) <= 1000;
-                }).map((u) => u['id'].toString()).toList();
-                final idsTodosStd = movilesStd
-                    .map((u) => u['id'].toString())
-                    .where((id) => !masterStdIds.contains(id))
-                    .toList();
-                String? id60sStd;
-                String? id90sStd;
-                if (idsZonaStd.isNotEmpty)
-                  id60sStd = await _programarMisilRetardado(
-                    externalIds: idsZonaStd,
-                    titulo: '📡 SERVICIO CERCA (1km)',
-                    mensaje: msgStd,
-                    segundosRetardo: cascadaStd.seF3Seg, // CONFIG-CASCADA-EXT
-                  );
-                if (idsTodosStd.isNotEmpty)
-                  id90sStd = await _programarMisilRetardado(
-                    externalIds: idsTodosStd,
-                    titulo: '🚨 SERVICIO SIN TOMAR',
-                    mensaje: msgStd,
-                    segundosRetardo: cascadaStd.seF4Seg, // CONFIG-CASCADA-EXT
-                  );
-                if (id60sStd != null || id90sStd != null) {
-                  await Supabase.instance.client.from('servicios').update({
-                    if (id60sStd != null) 'onesignal_2m': id60sStd,
-                    if (id90sStd != null) 'onesignal_5m': id90sStd,
-                  }).eq('id', servicioId);
-                }
-              }
+              // F3/F4 — pg_cron consulta en_linea en tiempo real
+              await Supabase.instance.client.from('servicios').update({
+                'se_cascade_t0': DateTime.now().toUtc().toIso8601String(),
+                'se_f3_enviado': false,
+                'se_f4_enviado': false,
+              }).eq('id', servicioId);
 
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -515,65 +475,12 @@ mixin _DispatchMixin on State<LocalScreen> {
 
       // Fase 2: pg_cron auto-asigna al #1 del paradero a T+30s
 
-      // Fases 3 y 4: misiles retardados a no-Masters
-      final Set<String> excluidos = {
-        ...masterIds,
-        if (paraderoAutoMovilId != null) paraderoAutoMovilId,
-      };
-      final movilesNoMaster = await Supabase.instance.client
-          .from('usuarios')
-          .select('id, latitud, longitud')
-          .eq('rol', 'movil')
-          .eq('en_linea', true)
-          .eq('tiene_se', true)
-          .neq('suspendido', true)
-          // rango_movil=null = "Nuevo/Novato" → incluirlos (NULL NOT IN no funciona en PG)
-          .or('rango_movil.is.null,rango_movil.neq.MASTER');
-
-      // Fase 3 (T+60s): 2km alrededor del local
-      final List<String> ids2km = movilesNoMaster.where((u) {
-        final id = u['id'].toString();
-        if (excluidos.contains(id)) return false;
-        if (oLat == null || oLng == null) return true;
-        final uLat = (u['latitud'] as num?)?.toDouble();
-        final uLng = (u['longitud'] as num?)?.toDouble();
-        if (uLat == null || uLng == null) return false;
-        return const Distance().as(
-              LengthUnit.Meter, LatLng(uLat, uLng), LatLng(oLat, oLng),
-            ) <= 2000;
-      }).map((u) => u['id'].toString()).toList();
-
-      // Fase 4 (T+90s): todos los conectados
-      final List<String> idsTodos = movilesNoMaster
-          .map((u) => u['id'].toString())
-          .where((id) => !excluidos.contains(id))
-          .toList();
-
-      final cascadaDir = await CascadaConfig.cargar(); // CONFIG-CASCADA-EXT
-      String? id60s;
-      String? id90s;
-      if (ids2km.isNotEmpty) {
-        id60s = await _programarMisilRetardado(
-          externalIds: ids2km,
-          titulo: '📡 RECOGIDA CERCA (2km)',
-          mensaje: msg,
-          segundosRetardo: cascadaDir.seF3Seg,
-        );
-      }
-      if (idsTodos.isNotEmpty) {
-        id90s = await _programarMisilRetardado(
-          externalIds: idsTodos,
-          titulo: '🚨 RECOGIDA SIN TOMAR',
-          mensaje: msg,
-          segundosRetardo: cascadaDir.seF4Seg,
-        );
-      }
-      if (id60s != null || id90s != null) {
-        await Supabase.instance.client.from('servicios').update({
-          if (id60s != null) 'onesignal_2m': id60s,
-          if (id90s != null) 'onesignal_5m': id90s,
-        }).eq('id', svcId);
-      }
+      // F3/F4 — pg_cron consulta en_linea en tiempo real
+      await Supabase.instance.client.from('servicios').update({
+        'se_cascade_t0': DateTime.now().toUtc().toIso8601String(),
+        'se_f3_enviado': false,
+        'se_f4_enviado': false,
+      }).eq('id', svcId);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -1103,9 +1010,6 @@ mixin _DispatchMixin on State<LocalScreen> {
       // T=+60s (zonal 1km) y T=+90s (todos) — nuevas olas del embudo de 2 min
       if (!esPuntoAPunto) {
         final int _svcId3 = nuevoServicioId;
-        final String _msg3 = mensajeAlarma;
-        final List<String> _mSnap3 = List<String>.from(masterIds);
-        final List<String> _pSnap3 = paraderoAutoMovilId != null ? [paraderoAutoMovilId] : [];
 
         if (retardoProgramado > 0) {
           // Misiles programados para servicios con retardo
@@ -1151,55 +1055,12 @@ mixin _DispatchMixin on State<LocalScreen> {
             }).eq('id', _svcId3);
           }
         } else {
-          // Servicio inmediato: T=+60s y T=+90s — misiles server-side
-          // Pre-fetch al momento de aprobación; se cancelan si alguien acepta
-          final double? _oLat3 = (servicio['origen_lat'] as num?)?.toDouble();
-          final double? _oLng3 = (servicio['origen_lng'] as num?)?.toDouble();
-          final movilesInm3 = await Supabase.instance.client
-              .from('usuarios').select('id, latitud, longitud')
-              .eq('rol', 'movil').eq('en_linea', true).eq('tiene_se', true).neq('suspendido', true)
-              // rango_movil=null = "Nuevo/Novato" → incluirlos (NULL NOT IN no funciona en PG)
-              .or('rango_movil.is.null,rango_movil.neq.MASTER');
-          final idsZona3 = movilesInm3.where((u) {
-            final id = u['id'].toString();
-            if (_mSnap3.contains(id) || _pSnap3.contains(id)) return false;
-            if (_oLat3 == null || _oLng3 == null) return true;
-            final uLat = (u['latitud'] as num?)?.toDouble();
-            final uLng = (u['longitud'] as num?)?.toDouble();
-            if (uLat == null || uLng == null) return false;
-            return const Distance().as(
-                  LengthUnit.Meter,
-                  LatLng(uLat, uLng),
-                  LatLng(_oLat3, _oLng3),
-                ) <= 1000;
-          }).map((u) => u['id'].toString()).toList();
-          final idsTodos3 = movilesInm3
-              .map((u) => u['id'].toString())
-              .where((id) => !_mSnap3.contains(id))
-              .toList();
-          final cascadaRed = await CascadaConfig.cargar(); // CONFIG-CASCADA-EXT
-          String? id60s3;
-          String? id90s3;
-          if (idsZona3.isNotEmpty)
-            id60s3 = await _programarMisilRetardado(
-              externalIds: idsZona3,
-              titulo: '📡 SERVICIO CERCA (1km)',
-              mensaje: _msg3,
-              segundosRetardo: cascadaRed.seF3Seg,
-            );
-          if (idsTodos3.isNotEmpty)
-            id90s3 = await _programarMisilRetardado(
-              externalIds: idsTodos3,
-              titulo: '🚨 SERVICIO SIN TOMAR',
-              mensaje: _msg3,
-              segundosRetardo: cascadaRed.seF4Seg,
-            );
-          if (id60s3 != null || id90s3 != null) {
-            await Supabase.instance.client.from('servicios').update({
-              if (id60s3 != null) 'onesignal_2m': id60s3,
-              if (id90s3 != null) 'onesignal_5m': id90s3,
-            }).eq('id', _svcId3);
-          }
+          // F3/F4 — pg_cron consulta en_linea en tiempo real
+          await Supabase.instance.client.from('servicios').update({
+            'se_cascade_t0': DateTime.now().toUtc().toIso8601String(),
+            'se_f3_enviado': false,
+            'se_f4_enviado': false,
+          }).eq('id', _svcId3);
         }
       }
 

@@ -182,6 +182,8 @@ class _CentralScreenState extends State<CentralScreen>
   // Se carga una sola vez al iniciar. Los cambios en BD se reflejan
   // automáticamente al próximo initState (reinicio de sesión).
   List<Map<String, dynamic>> _paraderosPanel = [];
+  List<Map<String, dynamic>> _sedesFN = [];
+  List<Map<String, dynamic>> _localesUbicacion = [];
 
   @override
   void initState() {
@@ -277,8 +279,13 @@ class _CentralScreenState extends State<CentralScreen>
                 _sonidos.reproducir(Sonidos.centralRadar);
               }
               // Agregar al cache — los inserts nunca llegan con archivado=true
+              // Verificar duplicado: el .stream() puede haber añadido el mismo
+              // servicio antes que este canal → no prepend si ya existe.
               if (!_ctrlServiciosMonitor.isClosed) {
-                _cacheSvcMonitor = [payload.newRecord, ..._cacheSvcMonitor];
+                final newId = payload.newRecord['id'];
+                if (_cacheSvcMonitor.every((s) => s['id'] != newId)) {
+                  _cacheSvcMonitor = [payload.newRecord, ..._cacheSvcMonitor];
+                }
                 _chatServicioTotal.value = _cacheSvcMonitor
                     .where((s) =>
                         s['chat_movil_central'] == true ||
@@ -1157,13 +1164,6 @@ class _CentralScreenState extends State<CentralScreen>
                   tooltip: 'Nuevo servicio',
                   onPressed: () => _abrirFormularioDespacho(context),
                 ),
-                // Acceso rápido: Pedido domicilio central
-                IconButton(
-                  icon: const Icon(Icons.delivery_dining_rounded, color: Colors.deepOrange),
-                  tooltip: 'Pedido domicilio',
-                  onPressed: () => Navigator.push(context,
-                      MaterialPageRoute(builder: (_) => const CentralPedidoDomicilioScreen())),
-                ),
                 // Badge de gestión + menú lateral
                 Stack(
                   clipBehavior: Clip.none,
@@ -1387,7 +1387,7 @@ class _CentralScreenState extends State<CentralScreen>
               child: Text('OPERACIONES', style: TextStyle(color: Colors.white38, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
             ),
             _item(Icons.add_box_rounded, 'Nuevo servicio', const Color(0xff3AF500), () => _abrirFormularioDespacho(context)),
-            _item(Icons.delivery_dining_rounded, 'Pedido domicilio', Colors.deepOrange, () {
+            _item(Icons.delivery_dining_rounded, 'Pedido a local', Colors.deepOrange, () {
               Navigator.pop(context);
               Navigator.push(context, MaterialPageRoute(builder: (_) => const CentralPedidoDomicilioScreen()));
             }),

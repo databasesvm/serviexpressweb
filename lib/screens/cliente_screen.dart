@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:latlong2/latlong.dart';
 import 'package:serviexpress_app/utils/widgets_compartidos.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart';
 import 'package:serviexpress_app/utils/permisos_criticos.dart';
@@ -396,51 +395,11 @@ class _ClienteScreenState extends State<ClienteScreen>
         }
       }
 
-      // T+60s y T+90s — misiles server-side (pre-fetch al aprobar cotización)
-      final double? origLat = (servicio['origen_lat'] as num?)?.toDouble();
-      final double? origLng = (servicio['origen_lng'] as num?)?.toDouble();
-      final movilesK = await Supabase.instance.client
-          .from('usuarios').select('id, latitud, longitud')
-          .eq('rol', 'movil').eq('en_linea', true).eq('tiene_se', true).neq('suspendido', true)
-          .or('rango_movil.is.null,rango_movil.neq.MASTER');
-      final idsZonaK = movilesK.where((u) {
-        final uid = u['id'].toString();
-        if (masterIds.contains(uid) || paraderoIds.contains(uid)) return false;
-        if (origLat == null || origLng == null) return true;
-        final uLat = (u['latitud'] as num?)?.toDouble();
-        final uLng = (u['longitud'] as num?)?.toDouble();
-        if (uLat == null || uLng == null) return false;
-        return const Distance().as(LengthUnit.Meter,
-            LatLng(uLat, uLng), LatLng(origLat, origLng)) <= 1000;
-      }).map((u) => u['id'].toString()).toList();
-      final idsTodosK = movilesK
-          .map((u) => u['id'].toString())
-          .where((uid) => !masterIds.contains(uid))
-          .toList();
-      String? id60sK;
-      String? id90sK;
-      if (idsZonaK.isNotEmpty) {
-        id60sK = await MotorNotificaciones.programarMisilRetardado(
-          externalIds: idsZonaK,
-          titulo: '📡 SERVICIO CERCA (1km)',
-          mensaje: msgAlerta,
-          segundosRetardo: cascada.seF3Seg,
-        );
-      }
-      if (idsTodosK.isNotEmpty) {
-        id90sK = await MotorNotificaciones.programarMisilRetardado(
-          externalIds: idsTodosK,
-          titulo: '🚨 SERVICIO SIN TOMAR',
-          mensaje: msgAlerta,
-          segundosRetardo: cascada.seF4Seg,
-        );
-      }
-      if (id60sK != null || id90sK != null) {
-        await Supabase.instance.client.from('servicios').update({
-          if (id60sK != null) 'onesignal_2m': id60sK,
-          if (id90sK != null) 'onesignal_5m': id90sK,
-        }).eq('id', id);
-      }
+      // F3/F4 — pg_cron consulta en_linea en tiempo real (se_cascade_t0 = ahora)
+      await Supabase.instance.client
+          .from('servicios')
+          .update({'se_cascade_t0': DateTime.now().toUtc().toIso8601String()})
+          .eq('id', id);
     } catch (e) {
       debugPrint('Error responderCotizacion: $e');
     }

@@ -23,7 +23,6 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
   List<Map<String, dynamic>> _eliminados = [];
   List<Map<String, dynamic>> _locales = [];
   List<Map<String, dynamic>> _clientes = [];
-  List<Map<String, dynamic>> _sedesFn = [];
   bool _cargando = true;
   String _planFiltroWallet = ''; // '' = todos, 'prediario', 'postdia', 'semanal'
   String _filtroFaccion = ''; // '' = todos, 'ninguna', 'se', 'fn', 'ambas'
@@ -31,7 +30,7 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: 10, vsync: this, initialIndex: widget.tabInicial);
+    _tabCtrl = TabController(length: 9, vsync: this, initialIndex: widget.tabInicial);
     _cargar();
   }
 
@@ -83,9 +82,6 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
             .eq('rol', 'cliente')
             .or('eliminado.is.null,eliminado.eq.false')
             .order('created_at', ascending: false),
-        _db.from('fn_sedes')
-            .select('id, nombre, numero, tipo_sede, zona_fn, sector, activo')
-            .order('nombre', ascending: true),
       ]);
       if (!mounted) return;
       setState(() {
@@ -97,7 +93,6 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
         _eliminados               = List<Map<String, dynamic>>.from(results[5]);
         _locales                  = List<Map<String, dynamic>>.from(results[6]);
         _clientes                 = List<Map<String, dynamic>>.from(results[7]);
-        _sedesFn                  = List<Map<String, dynamic>>.from(results[8]);
         _cargando = false;
       });
     } catch (e) {
@@ -147,6 +142,23 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
     ),
     child: Text(label, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w600)),
   );
+
+  // Botón de acción con etiqueta — para la fila 2 de la tarjeta de móvil
+  Widget _botonAccion(IconData icono, Color color, String label, VoidCallback onTap) =>
+    Expanded(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icono, color: color, size: 18),
+            const SizedBox(height: 2),
+            Text(label, style: TextStyle(color: color, fontSize: 9, fontWeight: FontWeight.w600)),
+          ]),
+        ),
+      ),
+    );
 
   List<Map<String, dynamic>> _filtrar(List<Map<String, dynamic>> lista) {
     if (_busq.isEmpty) return lista;
@@ -537,12 +549,18 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
       ),
     );
     if (nuevoPlan == null || !mounted) return;
-    await _db.from('usuarios').update({'tipo_plan_movil': nuevoPlan}).eq('id', u['id']);
-    final idx = _moviles.indexWhere((m) => m['id'] == u['id']);
-    if (idx != -1) setState(() => _moviles[idx] = {..._moviles[idx], 'tipo_plan_movil': nuevoPlan});
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('✅ Plan actualizado a $nuevoPlan'), backgroundColor: Colors.lightBlue[700]),
-    );
+    try {
+      await _db.from('usuarios').update({'tipo_plan_movil': nuevoPlan}).eq('id', u['id']);
+      final idx = _moviles.indexWhere((m) => m['id'] == u['id']);
+      if (idx != -1) setState(() => _moviles[idx] = {..._moviles[idx], 'tipo_plan_movil': nuevoPlan});
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('✅ Plan actualizado a $nuevoPlan'), backgroundColor: Colors.lightBlue[700]),
+      );
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('❌ Error al guardar plan: $e'), backgroundColor: Colors.red[700]),
+      );
+    }
   }
 
   // ── Cambiar contraseña ────────────────────────────────────────────────────
@@ -848,7 +866,7 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                       const SizedBox(width: 8),
                       _statBox('${_clientes.length}', 'Clientes', const Color(0xFF22C55E), onTap: () => _tabCtrl.animateTo(8)),
                       const SizedBox(width: 8),
-                      _statBox('${_sedesFn.length}', 'Sedes FN', Colors.indigo[400]!, onTap: () => _tabCtrl.animateTo(9)),
+                      _statBox('🏪', 'Panel FN', Colors.indigo[400]!, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FnPanelScreen()))),
                     ],
                   ),
                 ),
@@ -886,7 +904,6 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                 _tabWallet(),
                 _tabLocales(),
                 _tabClientes(),
-                _tabSedesFn(),
               ])),
             ]),
       ),
@@ -1261,52 +1278,51 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
             borderRadius: BorderRadius.circular(14),
             border: Border.all(color: color.withValues(alpha: 0.25)),
           ),
-          child: ListTile(
-            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            leading: CircleAvatar(
-              radius: 20,
-              backgroundColor: numMovilStr.isNotEmpty ? color : color.withValues(alpha: 0.15),
-              child: numMovilStr.isNotEmpty
-                  ? Text(numMovilStr, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 10))
-                  : Text(_iniciales(u['nombre']), style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 13)),
-            ),
-            title: Text(u['nombre'] ?? '—', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
-            subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              if ((u['usuario'] ?? '').toString().isNotEmpty)
-                Text('@${u['usuario']}', style: const TextStyle(color: Colors.white54, fontSize: 11)),
-              if (numMovilStr.isNotEmpty)
-                Text('Número solicitado: #$numMovilStr${planLabel != null ? ' · $planLabel' : ''}',
-                    style: const TextStyle(color: Color(0xFF3B82F6), fontSize: 11, fontWeight: FontWeight.w600)),
-              _chip(rol.toUpperCase(), color),
-            ]),
-            trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-              IconButton(
-                tooltip: 'Ver registro',
-                icon: const Icon(Icons.person_search_rounded, color: Colors.lightBlueAccent, size: 20),
-                onPressed: () => _verRegistroDialog(u),
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
-              ),
-              const SizedBox(width: 2),
-              IconButton(
-                tooltip: 'Cambiar contraseña',
-                icon: const Icon(Icons.lock_reset_rounded, color: Colors.amber, size: 18),
-                onPressed: () => _cambiarContrasenaDialog(u),
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
-              ),
-              const SizedBox(width: 4),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green[700],
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              // Fila 1: avatar + info
+              Row(children: [
+                CircleAvatar(
+                  radius: 20,
+                  backgroundColor: numMovilStr.isNotEmpty ? color : color.withValues(alpha: 0.15),
+                  child: numMovilStr.isNotEmpty
+                      ? Text(numMovilStr, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 10))
+                      : Text(_iniciales(u['nombre']), style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 13)),
                 ),
-                onPressed: () => _activarUsuario(u),
-                child: const Text('ACTIVAR'),
-              ),
+                const SizedBox(width: 10),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(u['nombre'] ?? '—', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                  if ((u['usuario'] ?? '').toString().isNotEmpty)
+                    Text('@${u['usuario']}', style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                  if (numMovilStr.isNotEmpty)
+                    Text('Número solicitado: #$numMovilStr${planLabel != null ? ' · $planLabel' : ''}',
+                        style: const TextStyle(color: Color(0xFF3B82F6), fontSize: 11, fontWeight: FontWeight.w600)),
+                  _chip(rol.toUpperCase(), color),
+                ])),
+              ]),
+              const SizedBox(height: 8),
+              // Fila 2: botones de acción
+              Row(children: [
+                _botonAccion(Icons.person_search_rounded, Colors.lightBlueAccent, 'Registro', () => _verRegistroDialog(u)),
+                _botonAccion(Icons.lock_reset_rounded, Colors.amber, 'Contraseña', () => _cambiarContrasenaDialog(u)),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green[700],
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 6),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                      onPressed: () => _activarUsuario(u),
+                      child: const Text('ACTIVAR'),
+                    ),
+                  ),
+                ),
+              ]),
             ]),
           ),
         );
@@ -1402,6 +1418,7 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
           child: Padding(
             padding: const EdgeInsets.all(14),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              // Fila 1: avatar + info + badges facción + chip rango
               Row(children: [
                 CircleAvatar(
                   radius: 18,
@@ -1413,9 +1430,15 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                 ),
                 const SizedBox(width: 10),
                 Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(u['nombre'] ?? '—', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                  Text(u['nombre'] ?? '—',
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                      overflow: TextOverflow.ellipsis),
                   Row(children: [
-                    Text('@${u['usuario'] ?? ''}', style: const TextStyle(color: Colors.white38, fontSize: 11)),
+                    Flexible(
+                      child: Text('@${u['usuario'] ?? ''}',
+                          style: const TextStyle(color: Colors.white38, fontSize: 11),
+                          overflow: TextOverflow.ellipsis),
+                    ),
                     if (u['tipo_plan_movil'] != null) ...[
                       const SizedBox(width: 6),
                       Container(
@@ -1432,7 +1455,7 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                           u['tipo_plan_movil'] == 'prediario'
                               ? 'PREDIA'
                               : u['tipo_plan_movil'] == 'semanal'
-                                  ? 'SEMANL'
+                                  ? 'SEM'
                                   : 'POSTDÍA',
                           style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
                         ),
@@ -1455,36 +1478,16 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                     decoration: BoxDecoration(color: const Color(0xFF002DA2), borderRadius: BorderRadius.circular(6)),
                     child: const Text('FN', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.8)),
                   ),
-                IconButton(
-                  tooltip: 'Cambiar facción',
-                  icon: const Icon(Icons.military_tech_rounded, color: Colors.amber, size: 16),
-                  onPressed: () => _cambiarFaccionDialog(u),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                ),
-                IconButton(
-                  tooltip: 'Cambiar plan de pago',
-                  icon: const Icon(Icons.credit_card_rounded, color: Colors.lightBlueAccent, size: 16),
-                  onPressed: () => _cambiarPlanDialog(u),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                ),
-                IconButton(
-                  tooltip: 'Cambiar contraseña',
-                  icon: const Icon(Icons.lock_reset_rounded, color: Colors.white38, size: 16),
-                  onPressed: () => _cambiarContrasenaDialog(u),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                ),
-                IconButton(
-                  tooltip: 'Eliminar cuenta',
-                  icon: Icon(Icons.delete_forever_rounded, color: Colors.red[300], size: 16),
-                  onPressed: () => _eliminarCuentaMovil(u),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                ),
                 if (rangoActual != null && rangoActual.isNotEmpty)
                   _chip(rangoActual, rc),
+              ]),
+              const SizedBox(height: 6),
+              // Fila 2: botones de acción con espacio táctil amplio
+              Row(children: [
+                _botonAccion(Icons.military_tech_rounded, Colors.amber, 'Facción', () => _cambiarFaccionDialog(u)),
+                _botonAccion(Icons.credit_card_rounded, Colors.lightBlueAccent, 'Plan', () => _cambiarPlanDialog(u)),
+                _botonAccion(Icons.lock_reset_rounded, Colors.white54, 'Clave', () => _cambiarContrasenaDialog(u)),
+                _botonAccion(Icons.delete_forever_rounded, Colors.red[300]!, 'Eliminar', () => _eliminarCuentaMovil(u)),
               ]),
               const SizedBox(height: 10),
               Wrap(spacing: 6, runSpacing: 6, children: rangos.map((r) {
@@ -3024,213 +3027,8 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
     );
   }
 
-  // ── Tab 9: Sedes FN ─────────────────────────────────────────────────────────
-  Widget _tabSedesFn() {
-    if (_sedesFn.isEmpty) return _empty(Icons.local_pharmacy_rounded, 'Sin sedes FN registradas');
-    return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(14, 6, 14, 24),
-      itemCount: _sedesFn.length,
-      itemBuilder: (_, i) => _CardSedeFn(sede: _sedesFn[i], db: _db),
-    );
-  }
 }
 
-// ── Card editable de sede FN ──────────────────────────────────────────────────
-class _CardSedeFn extends StatefulWidget {
-  final Map<String, dynamic> sede;
-  final dynamic db;
-  const _CardSedeFn({required this.sede, required this.db});
-  @override
-  State<_CardSedeFn> createState() => _CardSedeFnState();
-}
-
-class _CardSedeFnState extends State<_CardSedeFn> {
-  late String? _zonaSel;
-  late final TextEditingController _sectorCtrl;
-  bool _guardando = false;
-
-  static const _zonas = [
-    {'code': 'CUCUTA',      'label': 'Cúcuta'},
-    {'code': 'V_ROSARIO',   'label': 'Villa del Rosario'},
-    {'code': 'LOS_PATIOS',  'label': 'Los Patios'},
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    _zonaSel = widget.sede['zona_fn']?.toString();
-    _sectorCtrl = TextEditingController(text: widget.sede['sector']?.toString() ?? '');
-  }
-
-  @override
-  void dispose() {
-    _sectorCtrl.dispose();
-    super.dispose();
-  }
-
-  Future<void> _guardar() async {
-    setState(() => _guardando = true);
-    try {
-      await widget.db.from('fn_sedes').update({
-        'zona_fn': _zonaSel,
-        'sector':  _sectorCtrl.text.trim().isEmpty ? null : _sectorCtrl.text.trim(),
-      }).eq('id', widget.sede['id']);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('✅ Sede actualizada'), backgroundColor: Colors.indigo),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _guardando = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final nombre    = widget.sede['nombre']?.toString() ?? '—';
-    final numero    = widget.sede['numero']?.toString() ?? '';
-    final tipoSede  = widget.sede['tipo_sede']?.toString() ?? '';
-    final activo    = widget.sede['activo'] == true;
-    final color     = Colors.indigo[400]!;
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF141414),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withValues(alpha: 0.25)),
-      ),
-      child: Column(children: [
-        // ── Header ──────────────────────────────────────────────────────────
-        Container(
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(colors: [
-              color.withValues(alpha: 0.09),
-              Colors.transparent,
-            ]),
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-          ),
-          child: Row(children: [
-            Container(
-              width: 36, height: 36,
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.15),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(Icons.local_pharmacy_rounded, color: color, size: 18),
-            ),
-            const SizedBox(width: 10),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(
-                nombre,
-                style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700),
-                overflow: TextOverflow.ellipsis,
-              ),
-              if (numero.isNotEmpty || tipoSede.isNotEmpty)
-                Text(
-                  [if (numero.isNotEmpty) '#$numero', if (tipoSede.isNotEmpty) tipoSede].join(' · '),
-                  style: const TextStyle(color: Colors.white38, fontSize: 11),
-                ),
-            ])),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: (activo ? Colors.green : Colors.grey).withValues(alpha: 0.18),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                activo ? 'Activa' : 'Inactiva',
-                style: TextStyle(
-                  color: activo ? Colors.green[300] : Colors.grey,
-                  fontSize: 10, fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ]),
-        ),
-        // ── Formulario ──────────────────────────────────────────────────────
-        Padding(
-          padding: const EdgeInsets.fromLTRB(14, 4, 14, 14),
-          child: Column(children: [
-            // Municipio dropdown
-            DropdownButtonFormField<String>(
-              value: _zonas.any((z) => z['code'] == _zonaSel) ? _zonaSel : null,
-              decoration: InputDecoration(
-                labelText: 'Municipio',
-                labelStyle: TextStyle(color: color, fontSize: 12),
-                filled: true,
-                fillColor: Colors.white.withValues(alpha: 0.04),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(color: color.withValues(alpha: 0.3)),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(color: color.withValues(alpha: 0.2)),
-                ),
-              ),
-              dropdownColor: const Color(0xFF1E1E2E),
-              style: const TextStyle(color: Colors.white, fontSize: 13),
-              hint: const Text('Seleccionar municipio', style: TextStyle(color: Colors.white38, fontSize: 12)),
-              items: _zonas.map((z) => DropdownMenuItem<String>(
-                value: z['code'],
-                child: Text(z['label']!, style: const TextStyle(color: Colors.white, fontSize: 13)),
-              )).toList(),
-              onChanged: (v) => setState(() => _zonaSel = v),
-            ),
-            const SizedBox(height: 10),
-            // Sector / barrio
-            TextField(
-              controller: _sectorCtrl,
-              style: const TextStyle(color: Colors.white, fontSize: 13),
-              decoration: InputDecoration(
-                labelText: 'Sector / Barrio',
-                labelStyle: TextStyle(color: color, fontSize: 12),
-                hintText: 'Ej: Bocono, Centro, El Llano...',
-                hintStyle: const TextStyle(color: Colors.white24, fontSize: 12),
-                filled: true,
-                fillColor: Colors.white.withValues(alpha: 0.04),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(color: color.withValues(alpha: 0.3)),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(color: color.withValues(alpha: 0.2)),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: color,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-                onPressed: _guardando ? null : _guardar,
-                child: _guardando
-                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Text('GUARDAR', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-              ),
-            ),
-          ]),
-        ),
-      ]),
-    );
-  }
-}
 
 // ── Diálogo: historial de servicios de cuenta eliminada ─────────────────────
 class _DialogHistorialEliminado extends StatefulWidget {
