@@ -137,6 +137,9 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
   // Suprime el sonido in-app en el primer evento post-resume para evitar
   // doble sonido: el push ya sonó mientras la app estaba en background.
   bool _vieneDeBackground = false;
+  // En el primer evento del stream (arranque en frío), solo inicializamos
+  // el contador sin sonar — el push OS ya notificó al usuario.
+  bool _streamInicializado = false;
 
   bool _sonidoSoporteReproducido = false;
 
@@ -14802,6 +14805,11 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                                         _,
                                                       ) async {
                                                         if (mounted) {
+                                                          // Primer evento tras arranque en frío: solo inicializar contador, no sonar.
+                                                          if (!_streamInicializado) {
+                                                            _streamInicializado = true;
+                                                            _cantidadPendientesAnterior = pendientes.length;
+                                                          } else
                                                           // INYECCIÓN TÁCTICA: Permite sonar si tienes permiso O SI un misil rompió el candado (pendientes.isNotEmpty)
                                                           if ((tienePermisoDeRadar ||
                                                                   pendientes
