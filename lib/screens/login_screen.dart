@@ -108,19 +108,27 @@ class _LoginScreenState extends State<LoginScreen>
         final Map<String, dynamic> usuario = jsonDecode(sesionJson);
         final int? uid = usuario['id'] as int?;
 
-        // Verificación ligera: confirmar que el ID aún existe en la tabla.
+        // Verificación ligera: confirmar que el ID aún existe y refrescar datos.
+        // Se trae el usuario completo para que campos nuevos (es_dual, etc.)
+        // estén siempre actualizados aunque el JSON local sea de una versión anterior.
         bool existe = false;
+        Map<String, dynamic>? usuarioActualizado;
         if (uid != null) {
           try {
             final check = await Supabase.instance.client
                 .from('usuarios')
-                .select('id')
+                .select()
                 .eq('id', uid)
                 .maybeSingle()
                 .timeout(const Duration(seconds: 6));
-            existe = check != null;
+            if (check != null) {
+              existe = true;
+              usuarioActualizado = check;
+              // Actualizar la sesión guardada con los datos más recientes
+              await prefs.setString('sesion_usuario_json', jsonEncode(check));
+            }
           } catch (_) {
-            // Sin red — asumimos válido para no bloquear el acceso offline.
+            // Sin red — usar datos locales como respaldo.
             existe = true;
           }
         }
@@ -156,7 +164,7 @@ class _LoginScreenState extends State<LoginScreen>
         // Si auth_id es null, el usuario nunca completó PASO 5 — forzamos
         // login manual para que PASO 5 corra y cree la sesión Supabase Auth.
         // Sin sesión, los INSERT/UPDATE/DELETE fallan por RLS (authenticated-only).
-        final storedAuthId = usuario['auth_id']?.toString();
+        final storedAuthId = (usuarioActualizado ?? usuario)['auth_id']?.toString();
         if (storedAuthId == null || storedAuthId.isEmpty) {
           if (Supabase.instance.client.auth.currentSession == null) {
             // Primera vez con RLS activo — el usuario debe hacer login manual
@@ -172,7 +180,7 @@ class _LoginScreenState extends State<LoginScreen>
           }
         }
 
-        if (mounted) _navegarSegunRol(usuario);
+        if (mounted) _navegarSegunRol(usuarioActualizado ?? usuario);
         return;
       } catch (_) {
         await prefs.remove('sesion_usuario_json');
