@@ -13170,7 +13170,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
             child: FutureBuilder<List<dynamic>>(
               future: Supabase.instance.client
                   .from('wallet_movimientos')
-                  .select('tipo, monto, concepto, created_at')
+                  .select('tipo, monto, concepto, created_at, comprobante_url')
                   .eq('movil_id', movilId)
                   .order('created_at', ascending: false)
                   .limit(50),
@@ -13207,7 +13207,10 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                             ? Icons.remove_circle_outline
                             : tipo == 'pago_postdia'
                                 ? Icons.check_circle_outline
-                                : Icons.tune_rounded;
+                                : tipo == 'pago_semanal'
+                                    ? Icons.lock_open_rounded
+                                    : Icons.tune_rounded;
+                    final comprUrl = item['comprobante_url']?.toString();
                     return Container(
                       margin: const EdgeInsets.only(bottom: 8),
                       padding: const EdgeInsets.symmetric(
@@ -13216,36 +13219,67 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                         color: Colors.white.withValues(alpha: 0.05),
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: Row(children: [
-                        Icon(icono,
-                            size: 18,
-                            color: positivo
-                                ? const Color(0xFF22C55E)
-                                : Colors.redAccent),
-                        const SizedBox(width: 12),
-                        Expanded(
-                            child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                              Text(concepto,
-                                  style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w500)),
-                              if (fechaStr.isNotEmpty)
-                                Text(fechaStr,
-                                    style: const TextStyle(
-                                        color: Colors.white38, fontSize: 10)),
-                            ])),
-                        Text(
-                          '${positivo ? '+' : ''}\$${monto.toStringAsFixed(0)}',
-                          style: TextStyle(
+                      child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                        Row(children: [
+                          Icon(icono,
+                              size: 18,
                               color: positivo
                                   ? const Color(0xFF22C55E)
-                                  : Colors.redAccent,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14),
-                        ),
+                                  : Colors.redAccent),
+                          const SizedBox(width: 12),
+                          Expanded(
+                              child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                Text(concepto,
+                                    style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w500)),
+                                if (fechaStr.isNotEmpty)
+                                  Text(fechaStr,
+                                      style: const TextStyle(
+                                          color: Colors.white38, fontSize: 10)),
+                              ])),
+                          Text(
+                            '${positivo ? '+' : ''}\$${monto.toStringAsFixed(0)}',
+                            style: TextStyle(
+                                color: positivo
+                                    ? const Color(0xFF22C55E)
+                                    : Colors.redAccent,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14),
+                          ),
+                        ]),
+                        if (comprUrl != null && comprUrl.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          GestureDetector(
+                            onTap: () => showDialog(
+                              context: context,
+                              builder: (_) => Dialog(
+                                backgroundColor: Colors.black,
+                                child: Image.network(comprUrl,
+                                    fit: BoxFit.contain,
+                                    errorBuilder: (_, __, ___) => const Padding(
+                                      padding: EdgeInsets.all(32),
+                                      child: Icon(Icons.broken_image_rounded,
+                                          color: Colors.white30, size: 48),
+                                    )),
+                              ),
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: Image.network(comprUrl,
+                                  height: 80,
+                                  width: double.infinity,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) =>
+                                      const SizedBox.shrink()),
+                            ),
+                          ),
+                        ],
                       ]),
                     );
                   },

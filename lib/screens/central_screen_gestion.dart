@@ -833,6 +833,13 @@ extension CentralScreenGestion on _CentralScreenState {
     );
   }
 
+  Future<void> _abrirBilletera(BuildContext context) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const _PanelBilletera()),
+    );
+  }
+
   // ── Avatar de moto en paradero — color índigo identifica FN conectado ────────
   Widget _paraderoMovilLeading(Map<String, dynamic> m, Color colorBase) {
     final esFn = m['tiene_fn'] == true;
@@ -1026,6 +1033,14 @@ extension CentralScreenGestion on _CentralScreenState {
                         context,
                         tabInicial: _usuariosPendientes > 0 ? 1 : 0,
                       ),
+                    ),
+                    _tarjetaGestionConBadge(
+                      icono: Icons.account_balance_wallet_rounded,
+                      color: const Color(0xFF818CF8),
+                      titulo: 'Billetera',
+                      subtitulo: 'Recargas, pagos y saldos de móviles',
+                      badge: _billeteraPendientes,
+                      onTap: () => _abrirBilletera(context),
                     ),
                     _tarjetaGestion(
                       icono: Icons.emoji_events,

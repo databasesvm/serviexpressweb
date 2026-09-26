@@ -36,6 +36,7 @@ part 'central_screen_panel_control.dart';
 part 'central_screen_gestion.dart';
 part 'central_screen_fn.dart';
 part 'central_screen_reportes.dart';
+part 'central_billetera.dart';
 
 class CentralScreen extends StatefulWidget {
   final Map<String, dynamic>? usuario;
@@ -176,6 +177,10 @@ class _CentralScreenState extends State<CentralScreen>
 
   // Usuarios pendientes de activación (activo=false)
   int _usuariosPendientes = 0;
+
+  // Billetera: solicitudes pendientes de comprobación
+  int _billeteraPendientes = 0;
+  RealtimeChannel? _canalBilletera;
 
   // ── PARADEROS-C: lista dinámica desde BD (panel de control) ─────────────
   // Se carga una sola vez al iniciar. Los cambios en BD se reflejan
@@ -577,6 +582,36 @@ class _CentralScreenState extends State<CentralScreen>
       } catch (_) {}
     });
 
+    // ── CANAL BILLETERA: solicitudes de recarga pendientes ────────────────
+    _canalBilletera = Supabase.instance.client
+        .channel('billetera_solicitudes_central')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'solicitudes_recarga_wallet',
+          callback: (_) async {
+            try {
+              final rows = await Supabase.instance.client
+                  .from('solicitudes_recarga_wallet')
+                  .select('id')
+                  .eq('estado', 'pendiente');
+              if (mounted) setState(() => _billeteraPendientes = rows.length);
+            } catch (_) {}
+          },
+        )
+        .subscribe();
+
+    // Carga inicial del contador de billetera
+    Future.microtask(() async {
+      try {
+        final rows = await Supabase.instance.client
+            .from('solicitudes_recarga_wallet')
+            .select('id')
+            .eq('estado', 'pendiente');
+        if (mounted) setState(() => _billeteraPendientes = rows.length);
+      } catch (_) {}
+    });
+
     // pg_cron en Supabase es ahora el responsable principal de caducar
     // servicios. Este timer es solo un respaldo por si el servidor falla
     // o pg_cron no está configurado (plan Free de Supabase).
@@ -843,6 +878,7 @@ class _CentralScreenState extends State<CentralScreen>
     _debounceUbicaciones?.cancel();
     _canalActivaciones?.unsubscribe();
     _canalFn?.unsubscribe();
+    _canalBilletera?.unsubscribe();
     if (_listenerActivacion != null && !kIsWeb) {
       OneSignal.Notifications.removeForegroundWillDisplayListener(
           _listenerActivacion!);
