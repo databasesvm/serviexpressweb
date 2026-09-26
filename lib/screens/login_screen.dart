@@ -491,30 +491,30 @@ class _LoginScreenState extends State<LoginScreen>
 
     if (!mounted) return;
 
-    if (rol == 'master' || rol == 'central') {
-      // Cuenta dual: selector de modo antes de navegar
-      if (usuario['es_dual'] == true && mounted) {
-        final modo = await showDialog<String>(
-          context: context,
-          barrierDismissible: false,
-          builder: (_) => const _DialogoModoInicial(),
-        );
-        if (!mounted) return;
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => DualModeScreen(
-              usuario: usuario,
-              modoInicial: modo ?? 'central',
-            ),
-          ),
-        );
-        return;
-      }
+    // Cuenta dual (cualquier rol): selector de modo antes de navegar
+    if (usuario['es_dual'] == true && mounted) {
+      final modo = await showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const _DialogoModoInicial(),
+      );
+      if (!mounted) return;
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          // ✅ FIX: antes era `const CentralScreen()` → widget.usuario llegaba null
+          builder: (_) => DualModeScreen(
+            usuario: usuario,
+            modoInicial: modo ?? 'central',
+          ),
+        ),
+      );
+      return;
+    }
+
+    if (rol == 'master' || rol == 'central') {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
           builder: (context) => CentralScreen(usuario: usuario),
         ),
       );
