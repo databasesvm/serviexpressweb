@@ -1108,8 +1108,103 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     );
   }
 
+  // ── Ventana de pago semanal: dom 00:00 Colombia → lun 12:20pm Colombia ──────
+  bool _enVentanaPago() {
+    final nowCol = DateTime.now().toUtc().subtract(const Duration(hours: 5));
+    if (nowCol.weekday == DateTime.sunday) return true;
+    if (nowCol.weekday == DateTime.monday) {
+      return nowCol.hour < 12 ||
+          (nowCol.hour == 12 && nowCol.minute < 20);
+    }
+    return false;
+  }
+
+  // ── Banner informativo de pago semanal (solo visible cuando NO está bloqueado) ──
+  Widget _bannerPagoSemanal(dynamic movilId) {
+    // Inicio de semana: último lunes 12pm Colombia = último lunes 17:00 UTC
+    final nowCol = DateTime.now().toUtc().subtract(const Duration(hours: 5));
+    final daysSinceMon = (nowCol.weekday - DateTime.monday) % 7;
+    final lastMonCol = nowCol.subtract(Duration(days: daysSinceMon));
+    final inicioSemanaUtc = DateTime.utc(
+        lastMonCol.year, lastMonCol.month, lastMonCol.day, 17, 0, 0);
+
+    return Positioned(
+      top: 0,
+      left: 0,
+      right: 0,
+      child: SafeArea(
+        child: FutureBuilder<List<dynamic>>(
+          future: Supabase.instance.client
+              .from('solicitudes_recarga_wallet')
+              .select('id, estado')
+              .eq('movil_id', movilId)
+              .inFilter('tipo_solicitud', ['pago_semanal', 'pago_semanal_con_recargo'])
+              .inFilter('estado', ['pendiente', 'aprobada'])
+              .gte('created_at', inicioSemanaUtc.toIso8601String())
+              .limit(1),
+          builder: (_, snap) {
+            if (!snap.hasData) return const SizedBox.shrink();
+            final lista = snap.data!;
+
+            Color bgColor;
+            Color borderColor;
+            Color textColor;
+            IconData icono;
+            String mensaje;
+
+            if (lista.isEmpty) {
+              bgColor = Colors.amber[900]!.withValues(alpha: 0.15);
+              borderColor = Colors.amber[700]!.withValues(alpha: 0.5);
+              textColor = Colors.amber[300]!;
+              icono = Icons.warning_amber_rounded;
+              mensaje = 'Recuerda pagar tu semana antes del lunes a las 12:00pm.';
+            } else {
+              final estado = lista.first['estado']?.toString() ?? '';
+              if (estado == 'pendiente') {
+                bgColor = const Color(0xFF818CF8).withValues(alpha: 0.12);
+                borderColor = const Color(0xFF818CF8).withValues(alpha: 0.4);
+                textColor = const Color(0xFF818CF8);
+                icono = Icons.hourglass_top_rounded;
+                mensaje = 'Tu comprobante está en revisión. Central lo aprobará pronto.';
+              } else {
+                // aprobada
+                bgColor = Colors.green[900]!.withValues(alpha: 0.2);
+                borderColor = Colors.green[700]!.withValues(alpha: 0.5);
+                textColor = Colors.green[300]!;
+                icono = Icons.check_circle_outline_rounded;
+                mensaje = '¡Tu pago de esta semana fue aprobado!';
+              }
+            }
+
+            return Container(
+              margin: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: bgColor,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: borderColor),
+              ),
+              child: Row(children: [
+                Icon(icono, color: textColor, size: 16),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(mensaje,
+                      style: TextStyle(
+                          color: textColor,
+                          fontSize: 12,
+                          height: 1.4,
+                          fontWeight: FontWeight.w500)),
+                ),
+              ]),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
   // ── Overlay de bloqueo semanal: cubre TODA la pantalla cuando wallet_bloqueado=true ──
-  Widget _overlayBilleteraBlockeada(dynamic movilId) => Positioned.fill(
+  Widget _overlayBilleteraBlockeada(dynamic movilId, {bool recargo = false}) => Positioned.fill(
         child: Container(
           color: const Color(0xFF0D0D0D),
           child: SafeArea(
@@ -1123,27 +1218,29 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                     width: 80,
                     height: 80,
                     decoration: BoxDecoration(
-                      color: Colors.red.withValues(alpha: 0.12),
+                      color: (recargo ? Colors.orange : Colors.red).withValues(alpha: 0.12),
                       shape: BoxShape.circle,
                       border: Border.all(
-                          color: Colors.redAccent.withValues(alpha: 0.5),
+                          color: (recargo ? Colors.orangeAccent : Colors.redAccent).withValues(alpha: 0.5),
                           width: 2),
                     ),
-                    child: const Icon(Icons.lock_rounded,
-                        color: Colors.redAccent, size: 38),
+                    child: Icon(Icons.lock_rounded,
+                        color: recargo ? Colors.orangeAccent : Colors.redAccent, size: 38),
                   ),
                   const SizedBox(height: 20),
-                  const Text('BILLETERA BLOQUEADA',
+                  Text(recargo ? 'RECARGO POR MORA ACTIVO' : 'BILLETERA BLOQUEADA',
                       style: TextStyle(
-                          color: Colors.redAccent,
+                          color: recargo ? Colors.orangeAccent : Colors.redAccent,
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
                           letterSpacing: 1.5)),
                   const SizedBox(height: 12),
-                  const Text(
-                    'Tu billetera semanal ha sido bloqueada por falta de pago.\nPara reactivarla, envía el soporte de pago y espera la aprobación de la central.',
+                  Text(
+                    recargo
+                        ? 'Tu billetera fue bloqueada por mora. Para desbloquearla debes pagar \$80.000 (\$60.000 semana + \$20.000 recargo por mora).'
+                        : 'Tu billetera semanal ha sido bloqueada por falta de pago.\nPara reactivarla, envía el soporte de pago y espera la aprobación de la central.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(
+                    style: const TextStyle(
                         color: Colors.white60, fontSize: 13, height: 1.6),
                   ),
                   const SizedBox(height: 24),
@@ -1196,14 +1293,14 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                     },
                   ),
                   const SizedBox(height: 20),
-                  // Check solicitud pendiente
+                  // Check solicitud pendiente (pago_semanal o pago_semanal_con_recargo)
                   FutureBuilder<List<dynamic>>(
                     future: Supabase.instance.client
                         .from('solicitudes_recarga_wallet')
                         .select('id, created_at')
                         .eq('movil_id', movilId)
                         .eq('estado', 'pendiente')
-                        .eq('tipo_solicitud', 'pago_semanal')
+                        .inFilter('tipo_solicitud', ['pago_semanal', 'pago_semanal_con_recargo'])
                         .limit(1),
                     builder: (_, snapPend) {
                       final pendiente =
@@ -1244,12 +1341,14 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                         width: double.infinity,
                         child: ElevatedButton.icon(
                           icon: const Icon(Icons.upload_rounded, size: 16),
-                          label: const Text(
-                              'ENVIAR COMPROBANTE PARA DESBLOQUEAR',
-                              style: TextStyle(
+                          label: Text(
+                              recargo
+                                  ? 'ENVIAR COMPROBANTE \$80.000'
+                                  : 'ENVIAR COMPROBANTE PARA DESBLOQUEAR',
+                              style: const TextStyle(
                                   fontSize: 12, fontWeight: FontWeight.bold)),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.redAccent,
+                            backgroundColor: recargo ? Colors.orangeAccent : Colors.redAccent,
                             foregroundColor: Colors.white,
                             padding: const EdgeInsets.symmetric(vertical: 14),
                             shape: RoundedRectangleBorder(
@@ -1257,7 +1356,9 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                           ),
                           onPressed: () => _solicitarRecargaWallet(
                               movilId, 'semanal',
-                              tipoSolicitud: 'pago_semanal'),
+                              tipoSolicitud: recargo
+                                  ? 'pago_semanal_con_recargo'
+                                  : 'pago_semanal'),
                         ),
                       );
                     },
@@ -3697,7 +3798,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                     ?.toString()
                     .toUpperCase() ==
                 'MASTER';
-        final tipoPlan = widget.usuario['tipo_plan_movil']?.toString() ?? '';
+        final tipoPlan = (_cacheMiPerfil ?? widget.usuario)['tipo_plan_movil']?.toString() ?? '';
         if (!esMaster) {
         // Semanal: bloqueado por falta de pago semanal
         if (tipoPlan == 'semanal') {
@@ -3744,7 +3845,18 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
               );
               return;
             }
-          } catch (_) {}
+          } catch (_) {
+            // Si falla la consulta, bloqueamos por seguridad
+            setState(() => _procesando = false);
+            if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('No se pudo verificar el estado de la billetera. Intenta de nuevo.'),
+                backgroundColor: Colors.orange,
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+            return;
+          }
         }
         // Prediario/postdia: saldo insuficiente
         if (tipoPlan == 'prediario' || tipoPlan == 'postdia') {
@@ -3773,8 +3885,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                           fontSize: 16)),
                   content: Text(
                     tipoPlan == 'prediario'
-                        ? 'Tu saldo actual es \$${saldo.toStringAsFixed(0)}. Recarga tu billetera antes de conectarte.'
-                        : 'Tienes una deuda de \$$deuda del día anterior. Comunícate con central para ponerte al día.',
+                        ? 'Tu saldo actual es \$${saldo.toStringAsFixed(0)}. Ve a la pestaña Perfil > Billetera y envía el comprobante de recarga para que central lo apruebe.'
+                        : 'Tienes una deuda de \$$deuda del día anterior. Ve a la pestaña Perfil > Billetera, envía el comprobante de pago y espera la aprobación de central.',
                     style: const TextStyle(
                         color: Colors.white70, fontSize: 13, height: 1.5),
                   ),
@@ -3792,7 +3904,18 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
               );
               return;
             }
-          } catch (_) {}
+          } catch (_) {
+            // Si falla la consulta, bloqueamos por seguridad
+            setState(() => _procesando = false);
+            if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('No se pudo verificar el saldo. Intenta de nuevo.'),
+                backgroundColor: Colors.orange,
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+            return;
+          }
         }
         } // cierra if (!esMaster)
       }
@@ -12935,8 +13058,31 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                       );
                     },
                   ),
+                  // Banner de recargo por mora
+                  if (tipoSolicitud == 'pago_semanal_con_recargo') ...[
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      margin: const EdgeInsets.only(bottom: 10),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.orangeAccent.withValues(alpha: 0.5)),
+                      ),
+                      child: const Row(children: [
+                        Icon(Icons.warning_amber_rounded, color: Colors.orangeAccent, size: 16),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '⚠️ Recargo por mora activo. El monto mínimo es \$80.000 (\$60.000 semana + \$20.000 recargo).',
+                            style: TextStyle(color: Colors.orangeAccent, fontSize: 11, height: 1.4),
+                          ),
+                        ),
+                      ]),
+                    ),
+                  ],
                   Text(
-                    tipoSolicitud == 'pago_semanal'
+                    tipoSolicitud == 'pago_semanal' || tipoSolicitud == 'pago_semanal_con_recargo'
                         ? 'Adjunta el soporte de pago. La central lo revisará y desbloqueará tu billetera.'
                         : 'Ingresa el monto y adjunta el comprobante de transferencia. Tu saldo se actualizará automáticamente.',
                     style: const TextStyle(
@@ -13042,6 +13188,15 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                       final monto = double.tryParse(
                           montoCtrl.text.replaceAll(',', '.').trim());
                       if (monto == null || monto <= 0) return;
+                      // Validación monto mínimo con recargo por mora
+                      if (tipoSolicitud == 'pago_semanal_con_recargo' && monto < 80000) {
+                        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                          content: Text('El monto mínimo con recargo por mora es \$80.000 (\$60.000 semana + \$20.000 recargo).'),
+                          backgroundColor: Colors.orangeAccent,
+                          behavior: SnackBarBehavior.floating,
+                        ));
+                        return;
+                      }
                       setDs(() => _subiendo = true);
                       try {
                         String? urlComprobante;
@@ -13069,6 +13224,27 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                           'estado': 'pendiente',
                           'tipo_solicitud': tipoSolicitud,
                         });
+                        // Notificar a la central
+                        final _mp = _cacheMiPerfil ?? widget.usuario;
+                        final _numMov = _mp['numero_movil'];
+                        final _movilLabel = _numMov != null
+                            ? 'Movil ${_numMov.toString().padLeft(2, '0')}'
+                            : (_mp['nombre']?.toString() ?? 'Móvil');
+                        MotorNotificaciones.dispararACentral(
+                          titulo: tipoSolicitud == 'pago_semanal_con_recargo'
+                              ? '⚠️ Pago con recargo por mora'
+                              : tipoSolicitud == 'pago_semanal'
+                                  ? '📎 Soporte de pago semanal'
+                                  : '💳 Solicitud de recarga',
+                          mensaje: tipoSolicitud == 'pago_semanal_con_recargo'
+                              ? '$_movilLabel envió soporte de \$${monto.toStringAsFixed(0)} con recargo por mora. Verifica \$80.000. Revisa en Gestión > Billetera.'
+                              : tipoSolicitud == 'pago_semanal'
+                                  ? '$_movilLabel envió un soporte de \$${monto.toStringAsFixed(0)}. Revisa en Gestión > Billetera.'
+                                  : '$_movilLabel solicita recarga de \$${monto.toStringAsFixed(0)}. Revisa en Gestión > Billetera.',
+                          urgente: false,
+                          sonido: 'central_cotizacion',
+                          canalAndroidId: MotorNotificaciones.canalCotizacionId,
+                        );
                         if (mounted) {
                           Navigator.pop(ctx);
                           showDialog(
@@ -15558,6 +15734,20 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
             ), // Column
             // #91: overlay "Has perdido la conexión" — solo cuando stream falla con caché disponible
             if (_conexionPerdida) _overlayDesconexion(),
+            // Banner informativo pago semanal (ventana domingo-lunes, sin bloqueo)
+            StreamBuilder<Map<String, dynamic>?>(
+              stream: _streamMiPerfil,
+              initialData: _cacheMiPerfil,
+              builder: (_, snap) {
+                final perfil = snap.data ?? _cacheMiPerfil ?? widget.usuario;
+                final esMaster = perfil['rango_movil']?.toString().toUpperCase() == 'MASTER';
+                final esSemanal = perfil['tipo_plan_movil']?.toString() == 'semanal';
+                final bloqueado = perfil['wallet_bloqueado'] == true;
+                if (esMaster || !esSemanal || bloqueado || !_enVentanaPago())
+                  return const SizedBox.shrink();
+                return _bannerPagoSemanal(perfil['id']);
+              },
+            ),
             // Overlay bloqueo billetera semanal (Masters exentos)
             StreamBuilder<Map<String, dynamic>?>(
               stream: _streamMiPerfil,
@@ -15572,9 +15762,10 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                 final esSemanal =
                     perfil['tipo_plan_movil']?.toString() == 'semanal';
                 final bloqueado = perfil['wallet_bloqueado'] == true;
+                final recargo = perfil['recargo_mora_activo'] == true;
                 if (esMaster || !esSemanal || !bloqueado)
                   return const SizedBox.shrink();
-                return _overlayBilleteraBlockeada(perfil['id']);
+                return _overlayBilleteraBlockeada(perfil['id'], recargo: recargo);
               },
             ),
           ], // Stack children

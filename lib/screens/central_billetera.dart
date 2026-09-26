@@ -33,7 +33,7 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
     try {
       final rows = await _db
           .from('usuarios')
-          .select('id, nombre, usuario, rango_movil, puntuacion, activo, tipo_plan_movil, numero_movil, saldo_wallet, comision_pct, wallet_bloqueado, tiene_fn, tiene_se')
+          .select('id, auth_id, nombre, usuario, rango_movil, puntuacion, activo, tipo_plan_movil, numero_movil, saldo_wallet, comision_pct, wallet_bloqueado, recargo_mora_activo, tiene_fn, tiene_se')
           .eq('rol', 'movil')
           .order('usuario', ascending: true);
       if (mounted) setState(() { _moviles = List<Map<String, dynamic>>.from(rows); _cargando = false; });
@@ -172,7 +172,10 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
     final monto = (s['monto_solicitado'] as num?)?.toDouble() ?? 0.0;
     final nota = s['nota']?.toString();
     final comprUrl = s['comprobante_url']?.toString();
-    final esSemanal = s['tipo_solicitud']?.toString() == 'pago_semanal';
+    final tipoSolicitud = s['tipo_solicitud']?.toString() ?? '';
+    final esSemanal = tipoSolicitud == 'pago_semanal';
+    final esConRecargo = tipoSolicitud == 'pago_semanal_con_recargo';
+    final esPagoSemanal = esSemanal || esConRecargo;
     final fecha = s['created_at'] != null
         ? DateTime.tryParse(s['created_at'].toString())?.toLocal()
         : null;
@@ -180,12 +183,16 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
         ? '${fecha.day.toString().padLeft(2,'0')}/${fecha.month.toString().padLeft(2,'0')} ${fecha.hour.toString().padLeft(2,'0')}:${fecha.minute.toString().padLeft(2,'0')}'
         : '';
 
-    final borderColor = esSemanal
-        ? Colors.orange[700]!.withValues(alpha: 0.5)
-        : Colors.amber[700]!.withValues(alpha: 0.4);
-    final bgColor = esSemanal
-        ? Colors.orange[900]!.withValues(alpha: 0.15)
-        : Colors.amber[900]!.withValues(alpha: 0.15);
+    final borderColor = esConRecargo
+        ? Colors.red[700]!.withValues(alpha: 0.6)
+        : esSemanal
+            ? Colors.orange[700]!.withValues(alpha: 0.5)
+            : Colors.amber[700]!.withValues(alpha: 0.4);
+    final bgColor = esConRecargo
+        ? Colors.red[900]!.withValues(alpha: 0.2)
+        : esSemanal
+            ? Colors.orange[900]!.withValues(alpha: 0.15)
+            : Colors.amber[900]!.withValues(alpha: 0.15);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -197,10 +204,13 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          // ── Cabecera ─────────────────────────────────────────────────────
           Row(children: [
             Icon(
-              esSemanal ? Icons.lock_clock : Icons.pending_actions_rounded,
-              color: esSemanal ? Colors.orange : Colors.amber,
+              esConRecargo ? Icons.warning_amber_rounded
+                  : esSemanal ? Icons.lock_clock
+                  : Icons.pending_actions_rounded,
+              color: esConRecargo ? Colors.red[400] : esSemanal ? Colors.orange : Colors.amber,
               size: 16,
             ),
             const SizedBox(width: 8),
@@ -208,7 +218,19 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
               '$nombre — \$${monto.toStringAsFixed(0)}',
               style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
             )),
-            if (esSemanal)
+            if (esConRecargo)
+              Container(
+                margin: const EdgeInsets.only(right: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.red.withValues(alpha: 0.25),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: Colors.red.withValues(alpha: 0.6)),
+                ),
+                child: const Text('⚠️ MORA',
+                    style: TextStyle(color: Colors.red, fontSize: 9, fontWeight: FontWeight.bold)),
+              )
+            else if (esSemanal)
               Container(
                 margin: const EdgeInsets.only(right: 6),
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -222,6 +244,23 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
               ),
             Text(fechaStr, style: const TextStyle(color: Colors.white38, fontSize: 10)),
           ]),
+          // ── Aviso mora ───────────────────────────────────────────────────
+          if (esConRecargo) ...[
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.red.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+              ),
+              child: const Text(
+                'Pago con recargo por mora. Monto mínimo esperado: \$80.000 (\$60.000 semana + \$20.000 recargo).',
+                style: TextStyle(color: Colors.red, fontSize: 10),
+              ),
+            ),
+          ],
           if (nota != null && nota.isNotEmpty) ...[
             const SizedBox(height: 4),
             Text(nota, style: const TextStyle(color: Colors.white54, fontSize: 11)),
@@ -249,6 +288,7 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
             ),
           ],
           const SizedBox(height: 10),
+          // ── Botones ──────────────────────────────────────────────────────
           Row(children: [
             Expanded(
               child: OutlinedButton(
@@ -259,15 +299,57 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
                 onPressed: () async {
+                  bool activarRecargo = false;
+                  // Para pago_semanal normal: preguntar si activar recargo
+                  if (esSemanal) {
+                    final opcion = await showDialog<String>(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        backgroundColor: const Color(0xFF1A1A1A),
+                        title: const Text('Rechazar soporte',
+                            style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
+                        content: const Text(
+                            '¿Deseas activar recargo por mora para este móvil tras el rechazo?',
+                            style: TextStyle(color: Colors.white70, fontSize: 13)),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx, 'cancelar'),
+                            child: const Text('CANCELAR', style: TextStyle(color: Colors.white38)),
+                          ),
+                          OutlinedButton(
+                            style: OutlinedButton.styleFrom(
+                                foregroundColor: Colors.red[400],
+                                side: BorderSide(color: Colors.red[800]!)),
+                            onPressed: () => Navigator.pop(ctx, 'rechazar'),
+                            child: const Text('SOLO RECHAZAR', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                          ),
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.red[800], foregroundColor: Colors.white),
+                            onPressed: () => Navigator.pop(ctx, 'rechazar_mora'),
+                            child: const Text('RECHAZAR + MORA', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (opcion == null || opcion == 'cancelar') return;
+                    activarRecargo = opcion == 'rechazar_mora';
+                  }
                   await _db.from('solicitudes_recarga_wallet').update({
                     'estado': 'rechazada', 'revisado_por': 'central',
                     'revisado_at': DateTime.now().toUtc().toIso8601String(),
                   }).eq('id', s['id']);
+                  if (activarRecargo) {
+                    await _db.from('usuarios')
+                        .update({'recargo_mora_activo': true}).eq('id', s['movil_id']);
+                  }
                   MotorNotificaciones.dispararMisil(
                     idDestino: s['movil_id'].toString(),
-                    titulo: '❌ Solicitud rechazada',
-                    mensaje: esSemanal
-                        ? 'Tu comprobante de pago semanal fue rechazado. Comunícate con la Central.'
+                    titulo: '❌ Soporte rechazado',
+                    mensaje: esPagoSemanal
+                        ? activarRecargo
+                            ? 'Tu comprobante fue rechazado y se activó recargo por mora. Debes pagar \$80.000. Comunícate con la Central.'
+                            : 'Tu comprobante de pago semanal fue rechazado. Comunícate con la Central.'
                         : 'Tu solicitud de recarga de \$${monto.toStringAsFixed(0)} fue rechazada. Comunícate con la Central.',
                     urgente: false,
                   );
@@ -280,7 +362,9 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
             Expanded(
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: esSemanal ? Colors.orange : const Color(0xFF22C55E),
+                  backgroundColor: esConRecargo
+                      ? Colors.red[700]
+                      : esSemanal ? Colors.orange : const Color(0xFF22C55E),
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -288,15 +372,18 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                 onPressed: () async {
                   try {
                     final comprUrlAp = s['comprobante_url']?.toString();
-                    if (esSemanal) {
+                    if (esPagoSemanal) {
                       await _db.from('usuarios').update({
                         'wallet_bloqueado': false,
+                        if (esConRecargo) 'recargo_mora_activo': false,
                       }).eq('id', s['movil_id']);
                       await _db.from('wallet_movimientos').insert({
                         'movil_id': s['movil_id'],
-                        'tipo': 'pago_semanal',
+                        'tipo': esConRecargo ? 'pago_semanal_con_recargo' : 'pago_semanal',
                         'monto': monto,
-                        'concepto': 'Pago semanal aprobado — billetera desbloqueada',
+                        'concepto': esConRecargo
+                            ? 'Pago semanal con recargo aprobado — billetera desbloqueada'
+                            : 'Pago semanal aprobado — billetera desbloqueada',
                         'registrado_por': 'central',
                         if (comprUrlAp != null) 'comprobante_url': comprUrlAp,
                       });
@@ -320,18 +407,24 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                     }).eq('id', s['id']);
                     MotorNotificaciones.dispararMisil(
                       idDestino: s['movil_id'].toString(),
-                      titulo: esSemanal ? '🔓 Billetera desbloqueada' : '✅ Recarga aprobada',
-                      mensaje: esSemanal
-                          ? 'Tu pago semanal fue aprobado. Ya puedes usar tu billetera con normalidad.'
-                          : 'Se acreditaron \$${monto.toStringAsFixed(0)} en tu billetera.',
+                      titulo: esPagoSemanal ? '🔓 Billetera desbloqueada' : '✅ Recarga aprobada',
+                      mensaje: esConRecargo
+                          ? 'Tu pago semanal con recargo fue aprobado. Tu billetera está activa nuevamente.'
+                          : esSemanal
+                              ? 'Tu pago semanal fue aprobado. Ya puedes usar tu billetera con normalidad.'
+                              : 'Se acreditaron \$${monto.toStringAsFixed(0)} en tu billetera.',
                       urgente: false,
                     );
                     _cargar();
                     if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                      content: Text(esSemanal
-                          ? '🔓 Pago semanal aprobado — $nombre desbloqueado'
-                          : '✅ Recarga de \$${monto.toStringAsFixed(0)} aprobada para $nombre'),
-                      backgroundColor: esSemanal ? Colors.orange : const Color(0xFF22C55E),
+                      content: Text(esConRecargo
+                          ? '🔓 Pago con recargo aprobado — $nombre desbloqueado'
+                          : esSemanal
+                              ? '🔓 Pago semanal aprobado — $nombre desbloqueado'
+                              : '✅ Recarga de \$${monto.toStringAsFixed(0)} aprobada para $nombre'),
+                      backgroundColor: esConRecargo
+                          ? Colors.red[700]
+                          : esSemanal ? Colors.orange : const Color(0xFF22C55E),
                       behavior: SnackBarBehavior.floating,
                     ));
                   } catch (e) {
@@ -342,7 +435,7 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                   }
                 },
                 child: Text(
-                  esSemanal ? 'APROBAR Y DESBLOQUEAR' : 'APROBAR',
+                  esPagoSemanal ? 'APROBAR Y DESBLOQUEAR' : 'APROBAR',
                   style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
                 ),
               ),
@@ -360,6 +453,7 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
     final saldo = (u['saldo_wallet'] as num?)?.toDouble() ?? 0.0;
     final comPct = (u['comision_pct'] as num?)?.toDouble() ?? 10.0;
     final bloqueado = u['wallet_bloqueado'] == true;
+    final recargo = u['recargo_mora_activo'] == true;
     final esSemanal = plan == 'semanal';
 
     final positivo = esSemanal ? !bloqueado : (plan == 'postdia' ? saldo >= 0 : saldo > 0);
@@ -370,9 +464,11 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
     final planColor = esSemanal ? Colors.purple[400]!
         : plan == 'prediario' ? Colors.orange[700]! : Colors.blue[600]!;
 
-    final borderColor = bloqueado
-        ? Colors.orange.withValues(alpha: 0.5)
-        : (positivo ? Colors.white12 : Colors.redAccent.withValues(alpha: 0.3));
+    final borderColor = (bloqueado && recargo)
+        ? Colors.red.withValues(alpha: 0.6)
+        : bloqueado
+            ? Colors.orange.withValues(alpha: 0.5)
+            : (positivo ? Colors.white12 : Colors.redAccent.withValues(alpha: 0.3));
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -384,67 +480,159 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          // Banner de bloqueo semanal
+          // Banner de bloqueo semanal (diferencia mora vs normal)
           if (bloqueado && esSemanal) ...[
             Container(
               width: double.infinity,
               margin: const EdgeInsets.only(bottom: 10),
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
               decoration: BoxDecoration(
-                color: Colors.orange.withValues(alpha: 0.15),
+                color: recargo
+                    ? Colors.red.withValues(alpha: 0.15)
+                    : Colors.orange.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.orange.withValues(alpha: 0.4)),
+                border: Border.all(color: recargo
+                    ? Colors.red.withValues(alpha: 0.5)
+                    : Colors.orange.withValues(alpha: 0.4)),
               ),
-              child: Row(children: [
-                const Icon(Icons.lock_rounded, color: Colors.orange, size: 14),
-                const SizedBox(width: 6),
-                const Expanded(
-                  child: Text('BILLETERA BLOQUEADA — pendiente pago semanal',
-                      style: TextStyle(color: Colors.orange, fontSize: 10, fontWeight: FontWeight.bold)),
-                ),
-                TextButton(
-                  style: TextButton.styleFrom(
-                    foregroundColor: Colors.orange,
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  Icon(
+                    recargo ? Icons.warning_amber_rounded : Icons.lock_rounded,
+                    color: recargo ? Colors.red[400] : Colors.orange,
+                    size: 14,
                   ),
-                  onPressed: () async {
-                    final ok = await showDialog<bool>(
-                      context: context,
-                      builder: (ctx) => AlertDialog(
-                        backgroundColor: const Color(0xFF1A1A1A),
-                        title: const Text('🔓 Desbloquear billetera',
-                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
-                        content: Text('¿Desbloquear manualmente la billetera de $nombre sin comprobante?',
-                            style: const TextStyle(color: Colors.white70, fontSize: 13)),
-                        actions: [
-                          TextButton(onPressed: () => Navigator.pop(ctx, false),
-                              child: const Text('CANCELAR', style: TextStyle(color: Colors.grey))),
-                          ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.orange, foregroundColor: Colors.black),
-                            onPressed: () => Navigator.pop(ctx, true),
-                            child: const Text('DESBLOQUEAR', style: TextStyle(fontWeight: FontWeight.bold)),
-                          ),
-                        ],
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      recargo
+                          ? '⚠️ MORA — debe pagar \$80.000'
+                          : 'BILLETERA BLOQUEADA — pendiente pago semanal',
+                      style: TextStyle(
+                        color: recargo ? Colors.red[400] : Colors.orange,
+                        fontSize: 10, fontWeight: FontWeight.bold,
                       ),
-                    );
-                    if (ok == true) {
-                      await _db.from('usuarios')
-                          .update({'wallet_bloqueado': false}).eq('id', u['id']);
-                      await _db.from('wallet_movimientos').insert({
-                        'movil_id': u['id'],
-                        'tipo': 'desbloqueo_manual',
-                        'monto': 0,
-                        'concepto': 'Desbloqueo manual por central',
-                        'registrado_por': 'central',
-                      });
-                      _cargar();
-                    }
-                  },
-                  child: const Text('DESBLOQUEAR', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
-                ),
+                    ),
+                  ),
+                ]),
+                const SizedBox(height: 6),
+                Row(children: [
+                  if (recargo) ...[
+                    Expanded(
+                      child: TextButton(
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.orange,
+                          backgroundColor: Colors.orange.withValues(alpha: 0.12),
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                        ),
+                        onPressed: () async {
+                          final ok = await showDialog<bool>(
+                            context: context,
+                            builder: (ctx) => AlertDialog(
+                              backgroundColor: const Color(0xFF1A1A1A),
+                              title: const Text('Exonerar recargo',
+                                  style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
+                              content: Text(
+                                  '¿Exonerar el recargo por mora de $nombre?\nPodrá pagar \$60.000 en lugar de \$80.000.',
+                                  style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                              actions: [
+                                TextButton(onPressed: () => Navigator.pop(ctx, false),
+                                    child: const Text('CANCELAR', style: TextStyle(color: Colors.grey))),
+                                ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.orange, foregroundColor: Colors.black),
+                                  onPressed: () => Navigator.pop(ctx, true),
+                                  child: const Text('EXONERAR', style: TextStyle(fontWeight: FontWeight.bold)),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (ok == true) {
+                            await _db.from('usuarios')
+                                .update({'recargo_mora_activo': false}).eq('id', u['id']);
+                            await _db.from('wallet_movimientos').insert({
+                              'movil_id': u['id'],
+                              'tipo': 'exoneracion_recargo',
+                              'monto': 0,
+                              'concepto': 'Recargo por mora exonerado por central',
+                              'registrado_por': 'central',
+                            });
+                            MotorNotificaciones.dispararMisil(
+                              idDestino: u['id'].toString(),
+                              titulo: '✅ Recargo exonerado',
+                              mensaje: 'Tu recargo por mora fue exonerado. Puedes pagar tu semana por \$60.000.',
+                              urgente: false,
+                            );
+                            _cargar();
+                          }
+                        },
+                        child: const Text('EXONERAR RECARGO',
+                            style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                  ],
+                  Expanded(
+                    child: TextButton(
+                      style: TextButton.styleFrom(
+                        foregroundColor: Colors.white60,
+                        backgroundColor: Colors.white.withValues(alpha: 0.07),
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                      ),
+                      onPressed: () async {
+                        final ok = await showDialog<bool>(
+                          context: context,
+                          builder: (ctx) => AlertDialog(
+                            backgroundColor: const Color(0xFF1A1A1A),
+                            title: const Text('Activar semana',
+                                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+                            content: Text(
+                                '¿Activar la semana de $nombre manualmente sin comprobante?\n\nUsar solo cuando haya razones externas conocidas por la central.',
+                                style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                            actions: [
+                              TextButton(onPressed: () => Navigator.pop(ctx, false),
+                                  child: const Text('CANCELAR', style: TextStyle(color: Colors.grey))),
+                              ElevatedButton(
+                                style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.orange, foregroundColor: Colors.black),
+                                onPressed: () => Navigator.pop(ctx, true),
+                                child: const Text('ACTIVAR SEMANA', style: TextStyle(fontWeight: FontWeight.bold)),
+                              ),
+                            ],
+                          ),
+                        );
+                        if (ok == true) {
+                          await _db.from('usuarios').update({
+                            'wallet_bloqueado': false,
+                            'recargo_mora_activo': false,
+                          }).eq('id', u['id']);
+                          await _db.from('wallet_movimientos').insert({
+                            'movil_id': u['id'],
+                            'tipo': 'activacion_manual',
+                            'monto': 0,
+                            'concepto': 'Semana activada manualmente por central',
+                            'registrado_por': 'central',
+                          });
+                          MotorNotificaciones.dispararMisil(
+                            idDestino: u['id'].toString(),
+                            titulo: '🔓 Semana activada',
+                            mensaje: 'Tu semana fue activada por la central. Ya puedes conectarte.',
+                            urgente: false,
+                          );
+                          _cargar();
+                        }
+                      },
+                      child: const Text('ACTIVAR SEMANA',
+                          style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                ]),
               ]),
             ),
           ],
@@ -838,7 +1026,7 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                       _db.from('config_sistema').select('info_recarga_wallet').eq('id', 1).maybeSingle(),
                       _db
                           .from('wallet_movimientos')
-                          .select('id, movil_id, tipo, monto, concepto, created_at, usuarios(nombre, numero_movil)')
+                          .select('id, movil_id, tipo, monto, concepto, created_at, comprobante_url, usuarios(nombre, numero_movil)')
                           .order('created_at', ascending: false)
                           .limit(8),
                     ]),
@@ -928,15 +1116,27 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
 
                           // ── SOLICITUDES PENDIENTES ──────────────────────
                           () {
+                            final conMora = solicitudes
+                                .where((s) => (s as Map)['tipo_solicitud'] == 'pago_semanal_con_recargo')
+                                .toList();
                             final semanales = solicitudes
                                 .where((s) => (s as Map)['tipo_solicitud'] == 'pago_semanal')
                                 .toList();
-                            final recargas = solicitudes
-                                .where((s) => (s as Map)['tipo_solicitud'] != 'pago_semanal')
-                                .toList();
+                            final recargas = solicitudes.where((s) {
+                              final tipo = (s as Map)['tipo_solicitud']?.toString() ?? '';
+                              return tipo != 'pago_semanal' && tipo != 'pago_semanal_con_recargo';
+                            }).toList();
                             return Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
+                                if (conMora.isNotEmpty) ...[
+                                  _encabezadoSeccion(
+                                      '⚠️ PAGOS CON MORA (${conMora.length})',
+                                      Colors.red[400]!),
+                                  ...conMora.map((s) =>
+                                      _cardSolicitudRecarga(s as Map<String, dynamic>)),
+                                  const SizedBox(height: 8),
+                                ],
                                 if (semanales.isNotEmpty) ...[
                                   _encabezadoSeccion(
                                       '🔒 SOPORTES DE PAGO (${semanales.length})',
@@ -972,12 +1172,15 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                               final esDescuento = monto < 0;
                               final color  = esDescuento ? Colors.redAccent : const Color(0xFF22C55E);
                               final icon   = switch (tipo) {
-                                'descuento_servicio' => Icons.remove_circle_outline_rounded,
-                                'pago_semanal'       => Icons.lock_open_rounded,
-                                'bloqueo_semanal'    => Icons.lock_rounded,
-                                'recarga'            => Icons.add_circle_outline_rounded,
-                                'desbloqueo_manual'  => Icons.admin_panel_settings_rounded,
-                                _                    => Icons.swap_horiz_rounded,
+                                'descuento_servicio'       => Icons.remove_circle_outline_rounded,
+                                'pago_semanal'             => Icons.lock_open_rounded,
+                                'pago_semanal_con_recargo' => Icons.lock_open_rounded,
+                                'bloqueo_semanal'          => Icons.lock_rounded,
+                                'recarga'                  => Icons.add_circle_outline_rounded,
+                                'desbloqueo_manual'        => Icons.admin_panel_settings_rounded,
+                                'activacion_manual'        => Icons.check_circle_outline_rounded,
+                                'exoneracion_recargo'      => Icons.remove_moderator_rounded,
+                                _                          => Icons.swap_horiz_rounded,
                               };
                               final fecha = m['created_at'] != null
                                   ? DateTime.parse(m['created_at'].toString()).toLocal()
@@ -985,6 +1188,7 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                               final fechaStr = fecha != null
                                   ? '${fecha.day}/${fecha.month} ${fecha.hour.toString().padLeft(2,'0')}:${fecha.minute.toString().padLeft(2,'0')}'
                                   : '';
+                              final comprUrlMv = m['comprobante_url']?.toString();
                               return Container(
                                 margin: const EdgeInsets.only(bottom: 6),
                                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
@@ -993,28 +1197,54 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                                   borderRadius: BorderRadius.circular(10),
                                   border: Border.all(color: Colors.white10),
                                 ),
-                                child: Row(children: [
-                                  Icon(icon, color: color, size: 16),
-                                  const SizedBox(width: 10),
-                                  Expanded(child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(label,
-                                          style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
-                                      Text(m['concepto']?.toString() ?? tipo,
-                                          style: const TextStyle(color: Colors.white54, fontSize: 10),
-                                          maxLines: 1, overflow: TextOverflow.ellipsis),
-                                    ],
-                                  )),
-                                  Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                                    Text(
-                                      monto == 0 ? '—' : '${monto >= 0 ? '+' : ''}\$${monto.abs().toStringAsFixed(0)}',
-                                      style: TextStyle(
-                                          color: monto == 0 ? Colors.white38 : color,
-                                          fontSize: 12, fontWeight: FontWeight.bold),
-                                    ),
-                                    Text(fechaStr, style: const TextStyle(color: Colors.white38, fontSize: 9)),
+                                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                  Row(children: [
+                                    Icon(icon, color: color, size: 16),
+                                    const SizedBox(width: 10),
+                                    Expanded(child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(label,
+                                            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                                        Text(m['concepto']?.toString() ?? tipo,
+                                            style: const TextStyle(color: Colors.white54, fontSize: 10),
+                                            maxLines: 1, overflow: TextOverflow.ellipsis),
+                                      ],
+                                    )),
+                                    Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                                      Text(
+                                        monto == 0 ? '—' : '${monto >= 0 ? '+' : ''}\$${monto.abs().toStringAsFixed(0)}',
+                                        style: TextStyle(
+                                            color: monto == 0 ? Colors.white38 : color,
+                                            fontSize: 12, fontWeight: FontWeight.bold),
+                                      ),
+                                      Text(fechaStr, style: const TextStyle(color: Colors.white38, fontSize: 9)),
+                                    ]),
                                   ]),
+                                  if (comprUrlMv != null && comprUrlMv.isNotEmpty) ...[
+                                    const SizedBox(height: 8),
+                                    GestureDetector(
+                                      onTap: () => showDialog(
+                                        context: context,
+                                        builder: (_) => Dialog(
+                                          backgroundColor: Colors.black,
+                                          child: Image.network(comprUrlMv, fit: BoxFit.contain,
+                                            errorBuilder: (_, __, ___) => const Padding(
+                                              padding: EdgeInsets.all(32),
+                                              child: Icon(Icons.broken_image_rounded, color: Colors.white30, size: 48),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      child: ClipRRect(
+                                        borderRadius: BorderRadius.circular(6),
+                                        child: Image.network(comprUrlMv,
+                                            height: 60, width: double.infinity,
+                                            fit: BoxFit.cover,
+                                            errorBuilder: (_, __, ___) => const SizedBox.shrink()),
+                                      ),
+                                    ),
+                                  ],
                                 ]),
                               );
                             }),
