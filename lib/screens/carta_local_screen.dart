@@ -1,7 +1,10 @@
 import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart';
 import 'package:serviexpress_app/utils/sonido_manager.dart';
@@ -84,7 +87,7 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
           .order('orden');
       final peds = await _db
           .from('pedidos')
-          .select('*, comprobante_url, items_pedido(nombre_snapshot, cantidad, precio_snapshot, modificadores_json, notas_snapshot)')
+          .select('*, comprobante_url, items_pedido(nombre_snapshot, cantidad, precio_snapshot, modificadores_json, notas_snapshot), movil:movil_id(telefono, nombre)')
           .eq('local_id', widget.localId)
           .neq('estado', 'entregado')
           .neq('estado', 'cancelado')
@@ -163,10 +166,13 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
         TextEditingController(text: producto?['descripcion'] ?? '');
     final precioCtrl = TextEditingController(
         text: producto != null ? producto['precio'].toString() : '');
+    final cantidadCtrl = TextEditingController(
+        text: producto?['cantidad_disponible']?.toString() ?? '');
     String categoria = producto?['categoria'] ??
         (_categorias.isNotEmpty ? _categorias.first : 'General');
     String? nuevaCatCtrl;
     bool disponible = producto?['disponible'] ?? true;
+    bool stockLimitado = producto?['cantidad_disponible'] != null;
     String? fotoUrl = producto?['foto_url'];
     XFile? fotoLocal;
     Uint8List? fotoBytesLocal;
@@ -353,13 +359,13 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
                             color: disponible
                                 ? const Color(0xff3AF500)
                                     .withValues(alpha: 0.08)
-                                : Colors.grey[50],
+                                : Colors.grey[900],
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(
                                 color: disponible
                                     ? const Color(0xff3AF500)
                                         .withValues(alpha: 0.4)
-                                    : Colors.grey[300]!),
+                                    : Colors.white12),
                           ),
                           child: SwitchListTile(
                             contentPadding: const EdgeInsets.symmetric(
@@ -379,6 +385,52 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
                                 setLocal(() => disponible = v),
                           ),
                         ),
+                        const SizedBox(height: 10),
+
+                        // ---- STOCK ----
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          decoration: BoxDecoration(
+                            color: stockLimitado
+                                ? Colors.orange.withValues(alpha: 0.08)
+                                : Colors.white.withValues(alpha: 0.05),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                                color: stockLimitado
+                                    ? Colors.orange.withValues(alpha: 0.4)
+                                    : Colors.white12),
+                          ),
+                          child: SwitchListTile(
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 0),
+                            title: Text(
+                                stockLimitado ? 'Stock limitado' : 'Stock ilimitado',
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w600, color: Colors.white)),
+                            subtitle: Text(
+                                stockLimitado
+                                    ? 'Se desactivará al agotarse'
+                                    : 'Sin límite de unidades',
+                                style: const TextStyle(fontSize: 12, color: Colors.white54)),
+                            value: stockLimitado,
+                            activeThumbColor: Colors.orange,
+                            onChanged: (v) {
+                              setLocal(() {
+                                stockLimitado = v;
+                                if (!v) cantidadCtrl.clear();
+                              });
+                            },
+                          ),
+                        ),
+                        if (stockLimitado) ...[
+                          const SizedBox(height: 10),
+                          _campoTexto(
+                            controller: cantidadCtrl,
+                            label: 'Cantidad disponible',
+                            icon: Icons.inventory_2_outlined,
+                            keyboardType: TextInputType.number,
+                          ),
+                        ],
                         const SizedBox(height: 20),
 
                         // ---- PERSONALIZACIONES (solo en edición) ----
@@ -429,7 +481,10 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
                                         urlFinal =
                                             await _subirFoto(fotoLocal!);
                                       }
-                                      final data = {
+                                      final cantidadFinal = stockLimitado
+                                        ? (int.tryParse(cantidadCtrl.text.trim()))
+                                        : null;
+                                    final data = {
                                         'local_id': widget.localId,
                                         'nombre': nombre,
                                         'descripcion':
@@ -438,6 +493,7 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
                                         'categoria': catFinal,
                                         'disponible': disponible,
                                         'foto_url': urlFinal,
+                                        'cantidad_disponible': cantidadFinal,
                                       };
                                       if (esEdicion) {
                                         await _db
@@ -786,6 +842,20 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
         title: Text(widget.localNombre,
             style: const TextStyle(
                 fontWeight: FontWeight.bold, fontSize: 16)),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.share_outlined),
+            tooltip: 'Compartir mi carta',
+            onPressed: () {
+              const supaUrl = 'https://oukiofdtargjrclualgm.supabase.co';
+              final link = '$supaUrl/functions/v1/carta-publica?local=${widget.localId}';
+              Share.share(
+                '🛵 Haz tu pedido en línea a ${widget.localNombre}:\n$link',
+                subject: 'Carta de ${widget.localNombre}',
+              );
+            },
+          ),
+        ],
         bottom: TabBar(
           controller: _tabCtrl,
           indicatorColor: const Color(0xff3AF500),
@@ -995,6 +1065,8 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
 
   Widget _buildProductoCard(Map<String, dynamic> p) {
     final disponible = p['disponible'] as bool;
+    final cantDisp = p['cantidad_disponible'] as int?;
+    final pocasUnidades = cantDisp != null && cantDisp > 0 && cantDisp <= 10;
     return GestureDetector(
       onTap: () => _mostrarFormProducto(producto: p),
       child: Container(
@@ -1109,6 +1181,24 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
                             _buildMenuProducto(p),
                           ],
                         ),
+                        if (cantDisp != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Text(
+                              cantDisp == 0
+                                  ? 'Stock: 0'
+                                  : 'Stock: $cantDisp',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: cantDisp <= 5
+                                    ? Colors.red[400]
+                                    : cantDisp <= 10
+                                        ? Colors.orange[400]
+                                        : Colors.grey[500],
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
                       ],
                     ),
                   ),
@@ -1124,14 +1214,35 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
                   padding: const EdgeInsets.symmetric(
                       horizontal: 6, vertical: 3),
                   decoration: BoxDecoration(
-                    color: Colors.orange,
+                    color: Colors.red[700],
                     borderRadius: BorderRadius.circular(6),
                   ),
-                  child: Text('AGOTADO',
+                  child: const Text('AGOTADO',
                       style: TextStyle(
                           color: Colors.white,
                           fontSize: 9,
                           fontWeight: FontWeight.bold)),
+                ),
+              ),
+            // Badge pocas unidades
+            if (disponible && pocasUnidades)
+              Positioned(
+                top: 8,
+                left: 8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 6, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.orange[700],
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    cantDisp == 1 ? '¡Última unidad!' : 'Últimas $cantDisp',
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 9,
+                        fontWeight: FontWeight.bold),
+                  ),
                 ),
               ),
             // Overlay semitransparente si agotado
@@ -1327,6 +1438,9 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
     final esPendiente = estado == 'pendiente_confirmacion';
     final total = (p['total'] as num?)?.toInt() ?? 0;
     final elapsed = _tiempoElapsado(p['created_at']?.toString());
+    final esWeb = p['origen'] == 'web';
+    final clienteNombre = p['cliente_nombre']?.toString() ?? '';
+    final clienteTel = p['cliente_telefono']?.toString() ?? '';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
@@ -1366,6 +1480,24 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
                         letterSpacing: 0.5),
                   ),
                 ),
+                if (esWeb) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                        color: Colors.blue[700],
+                        borderRadius: BorderRadius.circular(20)),
+                    child: const Text(
+                      'WEB',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.8),
+                    ),
+                  ),
+                ],
                 const Spacer(),
                 if (elapsed.isNotEmpty)
                   Text(elapsed,
@@ -1480,6 +1612,32 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (esWeb && clienteNombre.isNotEmpty) ...[
+                  Row(children: [
+                    Icon(Icons.person_outline,
+                        size: 14, color: Colors.blue[400]),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        '$clienteNombre${clienteTel.isNotEmpty ? ' · $clienteTel' : ''}',
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.blue[700],
+                            fontWeight: FontWeight.w600),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (clienteTel.isNotEmpty)
+                      GestureDetector(
+                        onTap: () => Clipboard.setData(
+                            ClipboardData(text: clienteTel)),
+                        child: Icon(Icons.copy_outlined,
+                            size: 14, color: Colors.blue[300]),
+                      ),
+                  ]),
+                  const SizedBox(height: 4),
+                ],
                 Row(children: [
                   Icon(Icons.location_on_outlined,
                       size: 14, color: Colors.grey[500]),
@@ -1619,6 +1777,34 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
               ],
             ),
           ),
+          // Botón WhatsApp al móvil (solo cuando hay móvil asignado y pedido en curso)
+          Builder(builder: (ctx) {
+            final movil = p['movil'] as Map<String, dynamic>?;
+            final telMovil = movil?['telefono']?.toString() ?? '';
+            final nombreMovil = movil?['nombre']?.toString() ?? 'el móvil';
+            final estadosActivos = ['confirmado', 'en_preparacion', 'listo_para_recoger', 'en_camino'];
+            if (telMovil.isEmpty || !estadosActivos.contains(estado)) return const SizedBox.shrink();
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF25D366),
+                  side: const BorderSide(color: Color(0xFF25D366)),
+                  minimumSize: const Size(double.infinity, 40),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                icon: const Icon(Icons.chat_outlined, size: 16),
+                label: Text('WhatsApp a $nombreMovil', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                onPressed: () {
+                  final num = telMovil.replaceAll(RegExp(r'\D'), '');
+                  final tel = num.startsWith('57') ? num : '57$num';
+                  final pedidoRef = p['id'].toString().substring(0, 8).toUpperCase();
+                  final msg = Uri.encodeComponent('Hola $nombreMovil, soy ${widget.localNombre}. Te escribo sobre el pedido #$pedidoRef.');
+                  launchUrl(Uri.parse('https://wa.me/$tel?text=$msg'), mode: LaunchMode.externalApplication);
+                },
+              ),
+            );
+          }),
           if (puedeAvanzar || estado == 'listo_para_recoger')
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),

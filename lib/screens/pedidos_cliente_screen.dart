@@ -2093,25 +2093,53 @@ class _MenuLocalScreenState extends State<MenuLocalScreen> {
 
   Widget _buildProductoCard(Map<String, dynamic> p) {
     final cant = _cantidadEn(p);
+    final cantDisp = p['cantidad_disponible'] as int?;
+    final pocasUnidades = cantDisp != null && cantDisp > 0 && cantDisp <= 10;
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12)),
       child: Row(
         children: [
-          // Foto
-          ClipRRect(
-            borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(12),
-                bottomLeft: Radius.circular(12)),
-            child: p['foto_url'] != null
-                ? Image.network(p['foto_url'],
-                    width: 100,
-                    height: 100,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) =>
-                        _placeholder())
-                : _placeholder(),
+          // Foto con badge de stock
+          Stack(
+            children: [
+              ClipRRect(
+                borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(12),
+                    bottomLeft: Radius.circular(12)),
+                child: p['foto_url'] != null
+                    ? Image.network(p['foto_url'],
+                        width: 100,
+                        height: 100,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) =>
+                            _placeholder())
+                    : _placeholder(),
+              ),
+              if (pocasUnidades)
+                Positioned(
+                  bottom: 4,
+                  left: 4,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 5, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: cantDisp <= 3
+                          ? Colors.red[700]
+                          : Colors.orange[700],
+                      borderRadius: BorderRadius.circular(5),
+                    ),
+                    child: Text(
+                      cantDisp == 1 ? '¡Última!' : '${cantDisp} uds',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 8,
+                          fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ),
+            ],
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -2138,10 +2166,29 @@ class _MenuLocalScreenState extends State<MenuLocalScreen> {
                               color: Colors.grey[600])),
                     ),
                   const SizedBox(height: 6),
-                  Text(_fmt(p['precio'] as int),
-                      style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14)),
+                  Row(
+                    children: [
+                      Text(_fmt(p['precio'] as int),
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14)),
+                      if (pocasUnidades) ...[
+                        const SizedBox(width: 8),
+                        Text(
+                          cantDisp <= 3
+                              ? '¡Quedan $cantDisp!'
+                              : 'Últimas $cantDisp unidades',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: cantDisp <= 3
+                                ? Colors.red[600]
+                                : Colors.orange[700],
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
                 ],
               ),
             ),

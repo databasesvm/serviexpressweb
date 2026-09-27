@@ -596,8 +596,7 @@ class _RegistroScreenState extends State<RegistroScreen> {
 
           final String usuarioMostrar =
               filaInsertada['usuario']?.toString() ?? usuarioText;
-          final String telefonoPwd =
-              filaInsertada['telefono']?.toString() ?? telefono;
+          final String telefonoPwd = password;
           if (!mounted) return;
           showDialog(
             context: context,

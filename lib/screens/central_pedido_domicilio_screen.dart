@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:serviexpress_app/screens/pedidos_cliente_screen.dart';
 
@@ -276,6 +277,28 @@ class _CentralPedidoDomicilioScreenState
                     ]),
                   ],
                 ),
+              ),
+              // Botón compartir carta
+              IconButton(
+                icon: const Icon(Icons.share_outlined),
+                color: Colors.green[700],
+                tooltip: 'Compartir carta por WhatsApp',
+                onPressed: () {
+                  const supaUrl =
+                      'https://oukiofdtargjrclualgm.supabase.co';
+                  final link =
+                      '$supaUrl/functions/v1/carta-publica?local=${local['id']}';
+                  Clipboard.setData(ClipboardData(text: link));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                          '🔗 Link de ${local['nombre']} copiado — pégalo en WhatsApp'),
+                      backgroundColor: Colors.green[700],
+                      behavior: SnackBarBehavior.floating,
+                      duration: const Duration(seconds: 3),
+                    ),
+                  );
+                },
               ),
               const Icon(Icons.chevron_right_rounded,
                   color: Colors.black38),

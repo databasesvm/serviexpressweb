@@ -28,7 +28,7 @@ import 'package:serviexpress_app/utils/auth_helper.dart'; // hashContrasena — 
 import 'package:serviexpress_app/utils/widgets_compartidos.dart'; // PulsingPanicoButton y otros widgets compartidos
 import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart';
-import 'package:flutter/services.dart' show FilteringTextInputFormatter;
+import 'package:flutter/services.dart' show Clipboard, ClipboardData, FilteringTextInputFormatter;
 import 'package:serviexpress_app/utils/cascada_config.dart'; // CONFIG-CASCADA-EXT
 
 part 'movil_widgets.dart';
@@ -498,7 +498,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
             if (movilId == miId) {
               final pedido = await Supabase.instance.client
                   .from('pedidos')
-                  .select('*, items_pedido(nombre_snapshot, cantidad)')
+                  .select('*, items_pedido(nombre_snapshot, cantidad), local:local_id(nombre, telefono_local)')
                   .eq('id', pedidoId)
                   .maybeSingle();
               if (pedido == null) return;
@@ -524,7 +524,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     try {
       final data = await Supabase.instance.client
           .from('pedidos')
-          .select('*, items_pedido(nombre_snapshot, cantidad)')
+          .select('*, items_pedido(nombre_snapshot, cantidad), local:local_id(nombre, telefono_local)')
           .eq('movil_id', miId)
           .not('estado', 'in', '("entregado","cancelado")')
           .order('created_at', ascending: false)
@@ -539,7 +539,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     try {
       final pedido = await Supabase.instance.client
           .from('pedidos')
-          .select('*, items_pedido(nombre_snapshot, cantidad, precio_snapshot)')
+          .select('*, items_pedido(nombre_snapshot, cantidad, precio_snapshot), local:local_id(nombre, telefono_local)')
           .eq('id', pedidoId)
           .maybeSingle();
       if (pedido == null) return;
@@ -1558,6 +1558,36 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                     ),
                   ],
                 ),
+                // Botón WhatsApp al local
+                Builder(builder: (ctx) {
+                  final local = p['local'] as Map<String, dynamic>?;
+                  final telLocal = local?['telefono_local']?.toString() ?? '';
+                  final nombreLocal = local?['nombre']?.toString() ?? 'el local';
+                  if (telLocal.isEmpty) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF25D366),
+                          side: const BorderSide(color: Color(0xFF25D366)),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                        ),
+                        icon: const Icon(Icons.chat_outlined, size: 16),
+                        label: Text('WhatsApp a $nombreLocal', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                        onPressed: () {
+                          final num = telLocal.replaceAll(RegExp(r'\D'), '');
+                          final tel = num.startsWith('57') ? num : '57$num';
+                          final pedidoRef = p['id'].toString().substring(0, 8).toUpperCase();
+                          final msg = Uri.encodeComponent('Hola $nombreLocal, soy el domiciliario. Te escribo sobre el pedido #$pedidoRef.');
+                          launchUrl(Uri.parse('https://wa.me/$tel?text=$msg'), mode: LaunchMode.externalApplication);
+                        },
+                      ),
+                    ),
+                  );
+                }),
                 if (mostrarBoton) ...[
                   const SizedBox(height: 10),
                   SizedBox(
@@ -5462,18 +5492,37 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                         crossAxisAlignment:
                                             CrossAxisAlignment.start,
                                         children: [
-                                          const Row(children: [
-                                            Icon(
+                                          Row(children: [
+                                            const Icon(
                                                 Icons.account_balance_rounded,
                                                 color: Color(0xFF818CF8),
                                                 size: 13),
-                                            SizedBox(width: 6),
-                                            Text('CÓMO Y DÓNDE PAGAR',
-                                                style: TextStyle(
-                                                    color: Color(0xFF818CF8),
-                                                    fontSize: 10,
-                                                    fontWeight: FontWeight.bold,
-                                                    letterSpacing: 0.8)),
+                                            const SizedBox(width: 6),
+                                            const Expanded(
+                                              child: Text('CÓMO Y DÓNDE PAGAR',
+                                                  style: TextStyle(
+                                                      color: Color(0xFF818CF8),
+                                                      fontSize: 10,
+                                                      fontWeight: FontWeight.bold,
+                                                      letterSpacing: 0.8)),
+                                            ),
+                                            GestureDetector(
+                                              onTap: () {
+                                                Clipboard.setData(ClipboardData(text: info));
+                                                ScaffoldMessenger.of(context).showSnackBar(
+                                                  const SnackBar(
+                                                    content: Text('📋 Datos copiados'),
+                                                    duration: Duration(seconds: 2),
+                                                    behavior: SnackBarBehavior.floating,
+                                                  ),
+                                                );
+                                              },
+                                              child: const Padding(
+                                                padding: EdgeInsets.only(left: 8),
+                                                child: Icon(Icons.copy_rounded,
+                                                    color: Color(0xFF818CF8), size: 15),
+                                              ),
+                                            ),
                                           ]),
                                           const SizedBox(height: 6),
                                           SelectableText(info,
@@ -12266,7 +12315,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                     } else {
                       final svcActual = await Supabase.instance.client
                           .from('servicios')
-                          .select('estado')
+                          .select('estado, movil_id')
                           .eq('id', servicio['id'])
                           .maybeSingle();
                       final est = svcActual?['estado']?.toString() ?? '';
@@ -12277,15 +12326,36 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                           est == 'finalizado_con_problema') {
                         mensaje = '✅ Este servicio ya fue completado.';
                       } else {
-                        mensaje = '⚡ Ya fue asignado a otro móvil.';
+                        // Tomado por otro — buscar quién ganó
+                        final movId = svcActual?['movil_id'];
+                        String ganador = 'otro móvil';
+                        if (movId != null) {
+                          try {
+                            final u = await Supabase.instance.client
+                                .from('usuarios')
+                                .select('numero_movil, nombre')
+                                .eq('id', movId)
+                                .maybeSingle();
+                            if (u != null) {
+                              final num = u['numero_movil'];
+                              ganador = num != null
+                                  ? 'Móvil ${num.toString().padLeft(2, '0')}'
+                                  : (u['nombre']?.toString() ?? 'otro móvil');
+                            }
+                          } catch (_) {}
+                        }
+                        mensaje =
+                            '🏍️ Servicio #${servicio['id']} fue tomado por $ganador';
                       }
                     }
                     if (context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
                           content: Text(mensaje),
-                          backgroundColor: Colors.orange,
-                          duration: const Duration(seconds: 3),
+                          backgroundColor: Colors.orange[700]!,
+                          duration: motivo == 'limite_alcanzado'
+                              ? const Duration(seconds: 4)
+                              : const Duration(seconds: 10),
                         ),
                       );
                     }
@@ -12379,7 +12449,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         } else {
           final svcActual = await Supabase.instance.client
               .from('servicios')
-              .select('estado')
+              .select('estado, movil_id')
               .eq('id', servicio['id'])
               .maybeSingle();
           final est = svcActual?['estado']?.toString() ?? '';
@@ -12390,15 +12460,36 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
               est == 'finalizado_con_problema') {
             mensaje = '✅ Este servicio ya fue completado.';
           } else {
-            mensaje = '⚡ Ya fue asignado a otro móvil.';
+            // Tomado por otro — buscar quién ganó
+            final movId = svcActual?['movil_id'];
+            String ganador = 'otro móvil';
+            if (movId != null) {
+              try {
+                final u = await Supabase.instance.client
+                    .from('usuarios')
+                    .select('numero_movil, nombre')
+                    .eq('id', movId)
+                    .maybeSingle();
+                if (u != null) {
+                  final num = u['numero_movil'];
+                  ganador = num != null
+                      ? 'Móvil ${num.toString().padLeft(2, '0')}'
+                      : (u['nombre']?.toString() ?? 'otro móvil');
+                }
+              } catch (_) {}
+            }
+            mensaje =
+                '🏍️ Servicio #${servicio['id']} fue tomado por $ganador';
           }
         }
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(mensaje),
-              backgroundColor: Colors.orange,
-              duration: const Duration(seconds: 3),
+              backgroundColor: Colors.orange[700]!,
+              duration: motivo == 'limite_alcanzado'
+                  ? const Duration(seconds: 4)
+                  : const Duration(seconds: 10),
             ),
           );
         }
@@ -14926,6 +15017,38 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                             ),
                                           ),
                                         ),
+                                        // ── Banner aviso de pago semanal en radar ─────────────────
+                                        if (_enVentanaPago() &&
+                                            miPerfilEnVivo['tipo_plan_movil']?.toString() == 'semanal' &&
+                                            miPerfilEnVivo['wallet_bloqueado'] != true &&
+                                            !esMaster)
+                                          GestureDetector(
+                                            onTap: () => _cambiarTab(1),
+                                            child: Container(
+                                              margin: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+                                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                                              decoration: BoxDecoration(
+                                                color: Colors.orange.withValues(alpha: 0.12),
+                                                borderRadius: BorderRadius.circular(10),
+                                                border: Border.all(color: Colors.orange.withValues(alpha: 0.45)),
+                                              ),
+                                              child: const Row(children: [
+                                                Text('⚠️', style: TextStyle(fontSize: 13)),
+                                                SizedBox(width: 8),
+                                                Expanded(
+                                                  child: Text(
+                                                    'Recuerda pagar tu semana antes del lunes a las 12:00pm.',
+                                                    style: TextStyle(
+                                                        color: Colors.orange,
+                                                        fontSize: 11,
+                                                        height: 1.4,
+                                                        fontWeight: FontWeight.w600),
+                                                  ),
+                                                ),
+                                                Icon(Icons.chevron_right_rounded, color: Colors.orange, size: 16),
+                                              ]),
+                                            ),
+                                          ),
                                         Expanded(
                                           child: AnimatedSwitcher(
                                             duration: Duration.zero,

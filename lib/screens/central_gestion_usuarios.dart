@@ -175,7 +175,7 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
 
   // ── Acciones ──────────────────────────────────────────────────────────────
   Future<void> _aprobarLocal(Map<String, dynamic> l) async {
-    await _db.from('usuarios').update({'estado_local': 'aprobado', 'motivo_rechazo': null}).eq('id', l['id']);
+    await _db.from('usuarios').update({'estado_local': 'aprobado', 'activo': true, 'motivo_rechazo': null}).eq('id', l['id']);
     _pushLocal(l['id'].toString(), l['nombre']?.toString() ?? '', '✅ ¡Cuenta aprobada!',
         'Tu local "${l['nombre']}" ya está activo en Serviexpress. ¡Bienvenido!', 'local_aprobado');
     if (!mounted) return;
@@ -2182,6 +2182,33 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                     _infoR(Icons.email_outlined, l['correo'].toString(), Colors.white38),
                 ]),
               ),
+            // Botón compartir carta
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.share_outlined, size: 15),
+                label: const Text('Compartir carta', style: TextStyle(fontSize: 12)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.green[400],
+                  side: BorderSide(color: Colors.green[700]!.withValues(alpha: 0.5)),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  minimumSize: const Size(double.infinity, 32),
+                ),
+                onPressed: () {
+                  const supaUrl = 'https://oukiofdtargjrclualgm.supabase.co';
+                  final link = '$supaUrl/functions/v1/carta-publica?local=${l['id']}';
+                  Clipboard.setData(ClipboardData(text: link));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('🔗 Link de ${l['nombre']} copiado — pégalo en WhatsApp'),
+                      backgroundColor: Colors.green[700],
+                      behavior: SnackBarBehavior.floating,
+                      duration: const Duration(seconds: 3),
+                    ),
+                  );
+                },
+              ),
+            ),
           ]),
         );
       },

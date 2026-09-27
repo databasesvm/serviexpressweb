@@ -14,6 +14,8 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
   String _planFiltroWallet = ''; // '' = todos, 'prediario', 'postdia', 'semanal'
 
   List<Map<String, dynamic>> _moviles = [];
+  List<Map<String, dynamic>> _movimientosSemana = [];
+  DateTime _weekStart = DateTime.now();
   bool _cargando = true;
 
   @override
@@ -31,12 +33,30 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
   Future<void> _cargar() async {
     setState(() => _cargando = true);
     try {
-      final rows = await _db
-          .from('usuarios')
-          .select('id, auth_id, nombre, usuario, rango_movil, puntuacion, activo, tipo_plan_movil, numero_movil, saldo_wallet, comision_pct, wallet_bloqueado, recargo_mora_activo, tiene_fn, tiene_se')
-          .eq('rol', 'movil')
-          .order('usuario', ascending: true);
-      if (mounted) setState(() { _moviles = List<Map<String, dynamic>>.from(rows); _cargando = false; });
+      // Inicio de semana en Colombia (UTC-5, sin DST) = lunes 00:00 Colombia
+      final nowCol = DateTime.now().toUtc().subtract(const Duration(hours: 5));
+      final wd = nowCol.weekday; // 1 = lunes
+      final wsCol = DateTime(nowCol.year, nowCol.month, nowCol.day - (wd - 1));
+      final wsUtc = wsCol.add(const Duration(hours: 5)); // de vuelta a UTC
+
+      final results = await Future.wait([
+        _db
+            .from('usuarios')
+            .select('id, auth_id, nombre, usuario, rango_movil, puntuacion, activo, tipo_plan_movil, numero_movil, saldo_wallet, comision_pct, wallet_bloqueado, recargo_mora_activo, tiene_fn, tiene_se')
+            .eq('rol', 'movil')
+            .order('usuario', ascending: true),
+        _db
+            .from('wallet_movimientos')
+            .select('movil_id, monto, tipo')
+            .gte('created_at', wsUtc.toIso8601String()),
+      ]);
+
+      if (mounted) setState(() {
+        _moviles = List<Map<String, dynamic>>.from(results[0] as List);
+        _movimientosSemana = List<Map<String, dynamic>>.from(results[1] as List);
+        _weekStart = wsCol;
+        _cargando = false;
+      });
     } catch (_) {
       if (mounted) setState(() => _cargando = false);
     }
@@ -978,9 +998,362 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
     );
   }
 
-  // ── Build principal ───────────────────────────────────────────────────────
-  @override
-  Widget build(BuildContext context) {
+  // ── Tab Contabilidad ─────────────────────────────────────────────────────
+  Widget _buildContabilidadTab() {
+    String _numLabel(Map<String, dynamic> m) {
+      final n = m['numero_movil'];
+      if (n != null) return 'MOVIL${n.toString().padLeft(2, '0')}';
+      return movilLabel(m);
+    }
+
+    int _sortNum(Map<String, dynamic> a, Map<String, dynamic> b) {
+      final na = (a['numero_movil'] as num?)?.toInt() ?? 9999;
+      final nb = (b['numero_movil'] as num?)?.toInt() ?? 9999;
+      return na.compareTo(nb);
+    }
+
+    // Listas ordenadas por número de móvil
+    final semanales = (_moviles.where((m) => m['tipo_plan_movil'] == 'semanal').toList()..sort(_sortNum));
+    final prediarios = (_moviles.where((m) => m['tipo_plan_movil'] == 'prediario').toList()..sort(_sortNum));
+    final postdias  = (_moviles.where((m) => m['tipo_plan_movil'] == 'postdia').toList()..sort(_sortNum));
+
+    // Pagos de esta semana por movil_id (solo pagos semanal positivos)
+    final Map<int, double> pagosPorMovil = {};
+    for (final mv in _movimientosSemana) {
+      final tipo  = mv['tipo']?.toString() ?? '';
+      final monto = (mv['monto'] as num?)?.toDouble() ?? 0.0;
+      final mid   = mv['movil_id'] as int?;
+      if (mid == null) continue;
+      if ((tipo == 'pago_semanal' || tipo == 'pago_semanal_con_recargo') && monto > 0) {
+        pagosPorMovil[mid] = (pagosPorMovil[mid] ?? 0) + monto;
+      }
+    }
+
+    // Recargas esta semana por movil_id (prediario)
+    final Map<int, double> recargasPorMovil = {};
+    for (final mv in _movimientosSemana) {
+      final tipo  = mv['tipo']?.toString() ?? '';
+      final monto = (mv['monto'] as num?)?.toDouble() ?? 0.0;
+      final mid   = mv['movil_id'] as int?;
+      if (mid == null) continue;
+      if (tipo == 'recarga' && monto > 0) {
+        recargasPorMovil[mid] = (recargasPorMovil[mid] ?? 0) + monto;
+      }
+    }
+
+    // Cobros postdia esta semana
+    final Map<int, double> cobrosPostdia = {};
+    for (final mv in _movimientosSemana) {
+      final tipo  = mv['tipo']?.toString() ?? '';
+      final monto = (mv['monto'] as num?)?.toDouble() ?? 0.0;
+      final mid   = mv['movil_id'] as int?;
+      if (mid == null) continue;
+      if (tipo == 'pago_postdia' && monto > 0) {
+        cobrosPostdia[mid] = (cobrosPostdia[mid] ?? 0) + monto;
+      }
+    }
+
+    // Totales semanal
+    final totalRecSemanal = pagosPorMovil.values.fold<double>(0, (a, b) => a + b);
+    final semanalesSinPagar = semanales.where((m) {
+      final mid = m['id'] as int?;
+      return mid == null || !pagosPorMovil.containsKey(mid);
+    }).toList();
+    final pendienteSemanal = semanalesSinPagar.fold<double>(0, (acc, m) {
+      return acc + (m['recargo_mora_activo'] == true ? 80000.0 : 60000.0);
+    });
+
+    // Totales prediario
+    final totalRecPrediario = recargasPorMovil.values.fold<double>(0, (a, b) => a + b);
+
+    // Totales postdia
+    final totalRecPostdia = cobrosPostdia.values.fold<double>(0, (a, b) => a + b);
+    final deudaTotalPostdia = postdias.fold<double>(0, (acc, m) {
+      final s = (m['saldo_wallet'] as num?)?.toDouble() ?? 0.0;
+      return acc + (s < 0 ? s.abs() : 0);
+    });
+
+    // Etiqueta de semana
+    final wsEnd = _weekStart.add(const Duration(days: 6));
+    String _fmtD(DateTime d) => '${d.day.toString().padLeft(2,'0')}/${d.month.toString().padLeft(2,'0')}';
+    final semLabel = '${_fmtD(_weekStart)} — ${_fmtD(wsEnd)}';
+
+    // Helper: fila de tabla compacta
+    Widget _fila({
+      required String label,
+      required String estado,
+      required Color estadoColor,
+      required IconData estadoIcon,
+      required String monto,
+      required Color montoColor,
+      required bool esPrimera,
+      required bool esUltima,
+      Color? leftBorderColor,
+    }) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        decoration: BoxDecoration(
+          border: Border(
+            left: BorderSide(color: (leftBorderColor ?? estadoColor).withValues(alpha: 0.5), width: 2),
+            right: const BorderSide(color: Colors.white10),
+            top: esPrimera ? BorderSide.none : const BorderSide(color: Colors.white10),
+            bottom: esUltima ? const BorderSide(color: Colors.white12) : BorderSide.none,
+          ),
+        ),
+        child: Row(children: [
+          SizedBox(
+            width: 72,
+            child: Text(label,
+                style: const TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.bold)),
+          ),
+          Expanded(
+            child: Row(children: [
+              Icon(estadoIcon, color: estadoColor, size: 11),
+              const SizedBox(width: 4),
+              Text(estado, style: TextStyle(color: estadoColor, fontSize: 10, fontWeight: FontWeight.w600)),
+            ]),
+          ),
+          Text(monto,
+              style: TextStyle(color: montoColor, fontSize: 11, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.right),
+        ]),
+      );
+    }
+
+    // Helper: fila de total de sección
+    Widget _filaTotalSeccion(String texto, double valor, Color color) => Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.06),
+        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(8)),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Row(children: [
+        const SizedBox(width: 72),
+        Expanded(child: Text(texto, style: const TextStyle(color: Colors.white38, fontSize: 10))),
+        Text('+\$${valor.toStringAsFixed(0)}',
+            style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.bold)),
+      ]),
+    );
+
+    // Cabecera de tabla
+    Widget _cabeceraTabla() => Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.04),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
+        border: const Border(
+          left: BorderSide(color: Colors.white12),
+          right: BorderSide(color: Colors.white12),
+          top: BorderSide(color: Colors.white12),
+        ),
+      ),
+      child: const Row(children: [
+        SizedBox(width: 72, child: Text('MÓVIL', style: TextStyle(color: Colors.white30, fontSize: 9, fontWeight: FontWeight.bold))),
+        Expanded(child: Text('ESTADO', style: TextStyle(color: Colors.white30, fontSize: 9, fontWeight: FontWeight.bold))),
+        Text('MONTO', style: TextStyle(color: Colors.white30, fontSize: 9, fontWeight: FontWeight.bold)),
+      ]),
+    );
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 32),
+      children: [
+
+        // ── Encabezado de semana ──────────────────────────────────────────
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          margin: const EdgeInsets.only(bottom: 14),
+          decoration: BoxDecoration(
+            color: const Color(0xFF818CF8).withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: const Color(0xFF818CF8).withValues(alpha: 0.35)),
+          ),
+          child: Row(children: [
+            const Icon(Icons.calendar_month_rounded, color: Color(0xFF818CF8), size: 14),
+            const SizedBox(width: 8),
+            Text('Semana: $semLabel',
+                style: const TextStyle(
+                    color: Color(0xFF818CF8), fontWeight: FontWeight.bold, fontSize: 12)),
+            const Spacer(),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: const Color(0xFF22C55E).withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                'TOTAL: \$${(totalRecSemanal + totalRecPrediario + totalRecPostdia).toStringAsFixed(0)}',
+                style: const TextStyle(color: Color(0xFF22C55E), fontSize: 10, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ]),
+        ),
+
+        // ══════════════════════════════════════════════════════════════════
+        // SECCIÓN SEMANAL
+        // ══════════════════════════════════════════════════════════════════
+        if (semanales.isNotEmpty) ...[
+          _encabezadoSeccion('📋 SEMANAL (${semanales.length} MÓVILES)', Colors.orange),
+          // Banner de totales semanal
+          Row(children: [
+            Expanded(child: _statChip(
+              Icons.check_circle_rounded,
+              '${pagosPorMovil.length}/${semanales.length}',
+              'Pagados esta semana',
+              pagosPorMovil.length == semanales.length ? const Color(0xFF22C55E) : Colors.orange,
+            )),
+            const SizedBox(width: 6),
+            Expanded(child: _statChip(
+              Icons.attach_money_rounded,
+              '\$${totalRecSemanal.toStringAsFixed(0)}',
+              'Recaudado',
+              const Color(0xFF22C55E),
+            )),
+            const SizedBox(width: 6),
+            Expanded(child: _statChip(
+              Icons.pending_actions_rounded,
+              '\$${pendienteSemanal.toStringAsFixed(0)}',
+              'Pendiente',
+              pendienteSemanal > 0 ? Colors.orange : Colors.white24,
+            )),
+          ]),
+          const SizedBox(height: 10),
+          _cabeceraTabla(),
+          ...semanales.asMap().entries.map((e) {
+            final i = e.key;
+            final m = e.value;
+            final mid = m['id'] as int?;
+            final pagado  = mid != null && pagosPorMovil.containsKey(mid);
+            final montoPagado = mid != null ? (pagosPorMovil[mid] ?? 0.0) : 0.0;
+            final bloqueado = m['wallet_bloqueado'] == true;
+            final mora = m['recargo_mora_activo'] == true;
+
+            final Color stColor;
+            final String stTxt;
+            final IconData stIcon;
+            if (pagado) {
+              stColor = const Color(0xFF22C55E); stTxt = 'PAGADO'; stIcon = Icons.check_circle_rounded;
+            } else if (mora) {
+              stColor = Colors.red[400]!; stTxt = 'MORA'; stIcon = Icons.warning_amber_rounded;
+            } else if (bloqueado) {
+              stColor = Colors.orange; stTxt = 'BLOQUEADO'; stIcon = Icons.lock_rounded;
+            } else {
+              stColor = Colors.white38; stTxt = 'SIN PAGAR'; stIcon = Icons.lock_open_rounded;
+            }
+            final montoStr = pagado
+                ? '+\$${montoPagado.toStringAsFixed(0)}'
+                : mora ? '—\$80.000' : '—\$60.000';
+            final montoColor = pagado ? const Color(0xFF22C55E) : Colors.white24;
+
+            return _fila(
+              label: _numLabel(m),
+              estado: stTxt,
+              estadoColor: stColor,
+              estadoIcon: stIcon,
+              monto: montoStr,
+              montoColor: montoColor,
+              esPrimera: i == 0,
+              esUltima: i == semanales.length - 1,
+            );
+          }),
+          _filaTotalSeccion(
+            '${pagosPorMovil.length} de ${semanales.length} pagaron · Pendiente: \$${pendienteSemanal.toStringAsFixed(0)}',
+            totalRecSemanal,
+            Colors.orange,
+          ),
+          const SizedBox(height: 20),
+        ],
+
+        // ══════════════════════════════════════════════════════════════════
+        // SECCIÓN PREDIARIO
+        // ══════════════════════════════════════════════════════════════════
+        if (prediarios.isNotEmpty) ...[
+          _encabezadoSeccion('📅 PREDIARIO (${prediarios.length} MÓVILES)', const Color(0xFF818CF8)),
+          Row(children: [
+            Expanded(child: _statChip(
+              Icons.add_circle_rounded, '\$${totalRecPrediario.toStringAsFixed(0)}',
+              'Recargas esta semana', const Color(0xFF22C55E),
+            )),
+            const SizedBox(width: 6),
+            Expanded(child: _statChip(
+              Icons.money_off_rounded,
+              '${prediarios.where((m) => ((m['saldo_wallet'] as num?)?.toDouble() ?? 0.0) <= 0).length}',
+              'Sin saldo / en negativo',
+              prediarios.any((m) => ((m['saldo_wallet'] as num?)?.toDouble() ?? 0.0) <= 0) ? Colors.red[400]! : Colors.white24,
+            )),
+          ]),
+          const SizedBox(height: 10),
+          _cabeceraTabla(),
+          ...prediarios.asMap().entries.map((e) {
+            final i = e.key;
+            final m = e.value;
+            final saldo = (m['saldo_wallet'] as num?)?.toDouble() ?? 0.0;
+            final sinSaldo = saldo <= 0;
+            return _fila(
+              label: _numLabel(m),
+              estado: sinSaldo ? 'SIN SALDO' : 'CON SALDO',
+              estadoColor: sinSaldo ? Colors.red[300]! : const Color(0xFF22C55E),
+              estadoIcon: sinSaldo ? Icons.money_off_rounded : Icons.account_balance_wallet_rounded,
+              monto: '\$${saldo.toStringAsFixed(0)}',
+              montoColor: sinSaldo ? Colors.red[300]! : const Color(0xFF22C55E),
+              esPrimera: i == 0,
+              esUltima: i == prediarios.length - 1,
+              leftBorderColor: const Color(0xFF818CF8),
+            );
+          }),
+          _filaTotalSeccion('Recargas acumuladas esta semana', totalRecPrediario, const Color(0xFF818CF8)),
+          const SizedBox(height: 20),
+        ],
+
+        // ══════════════════════════════════════════════════════════════════
+        // SECCIÓN POSTDIA
+        // ══════════════════════════════════════════════════════════════════
+        if (postdias.isNotEmpty) ...[
+          _encabezadoSeccion('📆 POSTDIA (${postdias.length} MÓVILES)', Colors.teal),
+          Row(children: [
+            Expanded(child: _statChip(
+              Icons.payments_rounded, '\$${totalRecPostdia.toStringAsFixed(0)}',
+              'Cobrado esta semana', Colors.teal,
+            )),
+            const SizedBox(width: 6),
+            Expanded(child: _statChip(
+              Icons.receipt_long_rounded,
+              '\$${deudaTotalPostdia.toStringAsFixed(0)}',
+              'Deuda total pendiente',
+              deudaTotalPostdia > 0 ? Colors.red[300]! : Colors.white24,
+            )),
+          ]),
+          const SizedBox(height: 10),
+          _cabeceraTabla(),
+          ...postdias.asMap().entries.map((e) {
+            final i = e.key;
+            final m = e.value;
+            final saldo = (m['saldo_wallet'] as num?)?.toDouble() ?? 0.0;
+            final enDeuda = saldo < 0;
+            return _fila(
+              label: _numLabel(m),
+              estado: enDeuda ? 'EN DEUDA' : 'AL DÍA',
+              estadoColor: enDeuda ? Colors.red[300]! : Colors.teal,
+              estadoIcon: enDeuda ? Icons.trending_down_rounded : Icons.check_circle_outline_rounded,
+              monto: '\$${saldo.toStringAsFixed(0)}',
+              montoColor: enDeuda ? Colors.red[300]! : Colors.teal,
+              esPrimera: i == 0,
+              esUltima: i == postdias.length - 1,
+              leftBorderColor: Colors.teal,
+            );
+          }),
+          _filaTotalSeccion('Cobrado esta semana · Deuda pendiente: \$${deudaTotalPostdia.toStringAsFixed(0)}', totalRecPostdia, Colors.teal),
+          const SizedBox(height: 20),
+        ],
+
+        if (semanales.isEmpty && prediarios.isEmpty && postdias.isEmpty)
+          _empty(Icons.account_balance_wallet_rounded, 'Sin móviles con plan de pago registrados'),
+      ],
+    );
+  }
+
+  // ── Tab Solicitudes (contenido actual) ───────────────────────────────────
+  Widget _buildSolicitudesTab() {
     final externos = _moviles
         .where((m) =>
             m['tipo_plan_movil']?.toString() == 'prediario' ||
@@ -1010,310 +1383,315 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
           (m['usuario']?.toString().toLowerCase().contains(q) ?? false)).toList();
     }
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF0A0A0A),
-      body: NestedScrollView(
-        headerSliverBuilder: (ctx, _) => [
-          SliverAppBar(
-            pinned: true,
-            backgroundColor: const Color(0xFF0A0A0A),
-            iconTheme: const IconThemeData(color: Colors.white),
-            title: const Row(children: [
-              Icon(Icons.account_balance_wallet_rounded, color: Color(0xFF818CF8), size: 18),
-              SizedBox(width: 8),
-              Text('Billetera', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
-            ]),
-            centerTitle: false,
-            actions: [
-              IconButton(
-                icon: const Icon(Icons.refresh_rounded, color: Colors.white60),
-                onPressed: _cargar,
-              ),
-            ],
+    return Column(children: [
+      // ── Barra de búsqueda ────────────────────────────────────────────
+      Padding(
+        padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+        child: TextField(
+          controller: _busqCtrl,
+          onChanged: (v) => setState(() => _busq = v),
+          style: const TextStyle(color: Colors.white, fontSize: 13),
+          decoration: InputDecoration(
+            hintText: 'Buscar móvil...',
+            hintStyle: const TextStyle(color: Colors.white30, fontSize: 12),
+            prefixIcon: const Icon(Icons.search_rounded, color: Colors.white30, size: 18),
+            suffixIcon: _busq.isNotEmpty
+                ? IconButton(
+                    icon: const Icon(Icons.close_rounded, color: Colors.white30, size: 16),
+                    onPressed: () { _busqCtrl.clear(); setState(() => _busq = ''); },
+                  )
+                : null,
+            filled: true,
+            fillColor: Colors.white.withValues(alpha: 0.06),
+            contentPadding: const EdgeInsets.symmetric(vertical: 10),
+            border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
           ),
-        ],
-        body: _cargando
-            ? const Center(child: CircularProgressIndicator(color: Color(0xFF818CF8)))
-            : Column(children: [
-                // ── Barra de búsqueda ──────────────────────────────────────
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
-                  child: TextField(
-                    controller: _busqCtrl,
-                    onChanged: (v) => setState(() => _busq = v),
-                    style: const TextStyle(color: Colors.white, fontSize: 13),
-                    decoration: InputDecoration(
-                      hintText: 'Buscar móvil...',
-                      hintStyle: const TextStyle(color: Colors.white30, fontSize: 12),
-                      prefixIcon: const Icon(Icons.search_rounded, color: Colors.white30, size: 18),
-                      suffixIcon: _busq.isNotEmpty
-                          ? IconButton(
-                              icon: const Icon(Icons.close_rounded, color: Colors.white30, size: 16),
-                              onPressed: () { _busqCtrl.clear(); setState(() => _busq = ''); },
-                            )
-                          : null,
-                      filled: true,
-                      fillColor: Colors.white.withValues(alpha: 0.06),
-                      contentPadding: const EdgeInsets.symmetric(vertical: 10),
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                    ),
+        ),
+      ),
+      const SizedBox(height: 6),
+      Expanded(
+        child: FutureBuilder<List<dynamic>>(
+          future: Future.wait([
+            _db
+                .from('solicitudes_recarga_wallet')
+                .select('id, movil_id, monto_solicitado, nota, comprobante_url, estado, tipo_solicitud, created_at, usuarios(nombre, usuario, numero_movil, tipo_plan_movil, descuento_semana_pct, puntos_semana)')
+                .eq('estado', 'pendiente')
+                .order('created_at', ascending: false),
+            _db.from('config_sistema').select('info_recarga_wallet').eq('id', 1).maybeSingle(),
+            _db
+                .from('wallet_movimientos')
+                .select('id, movil_id, tipo, monto, concepto, created_at, comprobante_url, usuarios(nombre, numero_movil)')
+                .order('created_at', ascending: false)
+                .limit(8),
+          ]),
+          builder: (ctx, snap) {
+            final solicitudes = snap.hasData ? (snap.data![0] as List? ?? []) : [];
+            final cfgMap      = snap.hasData ? snap.data![1] as Map<String, dynamic>? : null;
+            final infoRecarga = cfgMap?['info_recarga_wallet']?.toString() ?? '';
+            final movimientos = snap.hasData ? (snap.data![2] as List? ?? []) : [];
+
+            return ListView(
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 24),
+              children: [
+
+                // ── RESUMEN ─────────────────────────────────────────────
+                _encabezadoSeccion('RESUMEN', Colors.white54),
+                Container(
+                  margin: const EdgeInsets.only(bottom: 10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF141414),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.white12),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Row(children: [
+                        Expanded(child: _statChip(
+                          Icons.lock_rounded, '${bloqueados.length}', 'Bloqueados',
+                          bloqueados.isEmpty ? Colors.white24 : Colors.redAccent,
+                        )),
+                        const SizedBox(width: 8),
+                        Expanded(child: _statChip(
+                          Icons.trending_down_rounded, '${conDeuda.length}', 'Con deuda/sin saldo',
+                          conDeuda.isEmpty ? Colors.white24 : Colors.orange,
+                        )),
+                      ]),
+                      const SizedBox(height: 8),
+                      Row(children: [
+                        Expanded(child: _statChip(Icons.today_rounded,      '$cntPre',  'Prediario', const Color(0xFF818CF8))),
+                        const SizedBox(width: 6),
+                        Expanded(child: _statChip(Icons.event_rounded,      '$cntPost', 'Postdia',   Colors.teal)),
+                        const SizedBox(width: 6),
+                        Expanded(child: _statChip(Icons.date_range_rounded, '$cntSem',  'Semanal',   Colors.orange)),
+                      ]),
+                    ]),
                   ),
                 ),
-                const SizedBox(height: 6),
-                // ── Contenido ──────────────────────────────────────────────
-                Expanded(
-                  child: FutureBuilder<List<dynamic>>(
-                    future: Future.wait([
-                      _db
-                          .from('solicitudes_recarga_wallet')
-                          .select('id, movil_id, monto_solicitado, nota, comprobante_url, estado, tipo_solicitud, created_at, usuarios(nombre, usuario, numero_movil, tipo_plan_movil, descuento_semana_pct, puntos_semana)')
-                          .eq('estado', 'pendiente')
-                          .order('created_at', ascending: false),
-                      _db.from('config_sistema').select('info_recarga_wallet').eq('id', 1).maybeSingle(),
-                      _db
-                          .from('wallet_movimientos')
-                          .select('id, movil_id, tipo, monto, concepto, created_at, comprobante_url, usuarios(nombre, numero_movil)')
-                          .order('created_at', ascending: false)
-                          .limit(8),
-                    ]),
-                    builder: (ctx, snap) {
-                      final solicitudes = snap.hasData ? (snap.data![0] as List? ?? []) : [];
-                      final cfgMap      = snap.hasData ? snap.data![1] as Map<String, dynamic>? : null;
-                      final infoRecarga = cfgMap?['info_recarga_wallet']?.toString() ?? '';
-                      final movimientos = snap.hasData ? (snap.data![2] as List? ?? []) : [];
 
-                      return ListView(
-                        padding: const EdgeInsets.fromLTRB(14, 10, 14, 24),
-                        children: [
+                // ── FILTROS ──────────────────────────────────────────────
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(children: [
+                    for (final entry in [
+                      ('', 'Todos'),
+                      ('prediario', 'Prediario'),
+                      ('postdia', 'Postdia'),
+                      ('semanal', 'Semanal'),
+                    ])
+                      Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: ChoiceChip(
+                          label: Text(entry.$2,
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: _planFiltroWallet == entry.$1 ? Colors.black : Colors.white70)),
+                          selected: _planFiltroWallet == entry.$1,
+                          selectedColor: const Color(0xFF818CF8),
+                          backgroundColor: const Color(0xFF1E1E1E),
+                          side: BorderSide(
+                              color: _planFiltroWallet == entry.$1
+                                  ? const Color(0xFF818CF8)
+                                  : Colors.white24),
+                          onSelected: (_) => setState(() => _planFiltroWallet = entry.$1),
+                        ),
+                      ),
+                  ]),
+                ),
+                const SizedBox(height: 10),
 
-                          // ── RESUMEN ─────────────────────────────────────
-                          _encabezadoSeccion('RESUMEN', Colors.white54),
-                          Container(
-                            margin: const EdgeInsets.only(bottom: 10),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF141414),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: Colors.white12),
+                // ── DATOS DE TRANSFERENCIA ───────────────────────────────
+                _encabezadoSeccion('DATOS DE TRANSFERENCIA', Colors.white54),
+                _cardInfoRecarga(infoRecarga),
+                const SizedBox(height: 8),
+
+                // ── SOLICITUDES PENDIENTES ───────────────────────────────
+                () {
+                  final conMora = solicitudes
+                      .where((s) => (s as Map)['tipo_solicitud'] == 'pago_semanal_con_recargo')
+                      .toList();
+                  final semsol = solicitudes
+                      .where((s) => (s as Map)['tipo_solicitud'] == 'pago_semanal')
+                      .toList();
+                  final recargas = solicitudes.where((s) {
+                    final tipo = (s as Map)['tipo_solicitud']?.toString() ?? '';
+                    return tipo != 'pago_semanal' && tipo != 'pago_semanal_con_recargo';
+                  }).toList();
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (conMora.isNotEmpty) ...[
+                        _encabezadoSeccion('⚠️ PAGOS CON MORA (${conMora.length})', Colors.red[400]!),
+                        ...conMora.map((s) => _cardSolicitudRecarga(s as Map<String, dynamic>)),
+                        const SizedBox(height: 8),
+                      ],
+                      if (semsol.isNotEmpty) ...[
+                        _encabezadoSeccion('🔒 SOPORTES DE PAGO (${semsol.length})', Colors.orange[400]!),
+                        ...semsol.map((s) => _cardSolicitudRecarga(s as Map<String, dynamic>)),
+                        const SizedBox(height: 8),
+                      ],
+                      if (recargas.isNotEmpty) ...[
+                        _encabezadoSeccion('💳 RECARGAS PENDIENTES (${recargas.length})', Colors.amber[600]!),
+                        ...recargas.map((s) => _cardSolicitudRecarga(s as Map<String, dynamic>)),
+                        const SizedBox(height: 8),
+                      ],
+                    ],
+                  );
+                }(),
+
+                // ── MOVIMIENTOS RECIENTES ────────────────────────────────
+                if (movimientos.isNotEmpty) ...[
+                  _encabezadoSeccion('MOVIMIENTOS RECIENTES', Colors.white38),
+                  ...movimientos.map((mv) {
+                    final m      = mv as Map<String, dynamic>;
+                    final monto  = (m['monto'] as num?)?.toDouble() ?? 0.0;
+                    final tipo   = m['tipo']?.toString() ?? '';
+                    final numMov = (m['usuarios'] as Map?)?['numero_movil'];
+                    final nombre = (m['usuarios'] as Map?)?['nombre']?.toString() ?? '—';
+                    final label  = numMov != null
+                        ? 'Movil${numMov.toString().padLeft(2, '0')}'
+                        : nombre;
+                    final esDescuento = monto < 0;
+                    final color  = esDescuento ? Colors.redAccent : const Color(0xFF22C55E);
+                    final icon   = switch (tipo) {
+                      'descuento_servicio'       => Icons.remove_circle_outline_rounded,
+                      'pago_semanal'             => Icons.lock_open_rounded,
+                      'pago_semanal_con_recargo' => Icons.lock_open_rounded,
+                      'bloqueo_semanal'          => Icons.lock_rounded,
+                      'recarga'                  => Icons.add_circle_outline_rounded,
+                      'desbloqueo_manual'        => Icons.admin_panel_settings_rounded,
+                      'activacion_manual'        => Icons.check_circle_outline_rounded,
+                      'exoneracion_recargo'      => Icons.remove_moderator_rounded,
+                      _                          => Icons.swap_horiz_rounded,
+                    };
+                    final fecha = m['created_at'] != null
+                        ? DateTime.parse(m['created_at'].toString()).toLocal()
+                        : null;
+                    final fechaStr = fecha != null
+                        ? '${fecha.day}/${fecha.month} ${fecha.hour.toString().padLeft(2,'0')}:${fecha.minute.toString().padLeft(2,'0')}'
+                        : '';
+                    final comprUrlMv = m['comprobante_url']?.toString();
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 6),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF141414),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.white10),
+                      ),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Row(children: [
+                          Icon(icon, color: color, size: 16),
+                          const SizedBox(width: 10),
+                          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Text(label,
+                                style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                            Text(m['concepto']?.toString() ?? tipo,
+                                style: const TextStyle(color: Colors.white54, fontSize: 10),
+                                maxLines: 1, overflow: TextOverflow.ellipsis),
+                          ])),
+                          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                            Text(
+                              monto == 0 ? '—' : '${monto >= 0 ? '+' : ''}\$${monto.abs().toStringAsFixed(0)}',
+                              style: TextStyle(
+                                  color: monto == 0 ? Colors.white38 : color,
+                                  fontSize: 12, fontWeight: FontWeight.bold),
                             ),
-                            child: Padding(
-                              padding: const EdgeInsets.all(14),
-                              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                Row(children: [
-                                  Expanded(child: _statChip(
-                                    Icons.lock_rounded, '${bloqueados.length}', 'Bloqueados',
-                                    bloqueados.isEmpty ? Colors.white24 : Colors.redAccent,
-                                  )),
-                                  const SizedBox(width: 8),
-                                  Expanded(child: _statChip(
-                                    Icons.trending_down_rounded, '${conDeuda.length}', 'Con deuda/sin saldo',
-                                    conDeuda.isEmpty ? Colors.white24 : Colors.orange,
-                                  )),
-                                ]),
-                                const SizedBox(height: 8),
-                                Row(children: [
-                                  Expanded(child: _statChip(Icons.today_rounded,      '$cntPre',  'Prediario', const Color(0xFF818CF8))),
-                                  const SizedBox(width: 6),
-                                  Expanded(child: _statChip(Icons.event_rounded,      '$cntPost', 'Postdia',   Colors.teal)),
-                                  const SizedBox(width: 6),
-                                  Expanded(child: _statChip(Icons.date_range_rounded, '$cntSem',  'Semanal',   Colors.orange)),
-                                ]),
-                              ]),
-                            ),
-                          ),
-
-                          // ── FILTROS ─────────────────────────────────────
-                          SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: Row(children: [
-                              for (final entry in [
-                                ('', 'Todos'),
-                                ('prediario', 'Prediario'),
-                                ('postdia', 'Postdia'),
-                                ('semanal', 'Semanal'),
-                              ])
-                                Padding(
-                                  padding: const EdgeInsets.only(right: 6),
-                                  child: ChoiceChip(
-                                    label: Text(entry.$2,
-                                        style: TextStyle(
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.bold,
-                                            color: _planFiltroWallet == entry.$1
-                                                ? Colors.black
-                                                : Colors.white70)),
-                                    selected: _planFiltroWallet == entry.$1,
-                                    selectedColor: const Color(0xFF818CF8),
-                                    backgroundColor: const Color(0xFF1E1E1E),
-                                    side: BorderSide(
-                                        color: _planFiltroWallet == entry.$1
-                                            ? const Color(0xFF818CF8)
-                                            : Colors.white24),
-                                    onSelected: (_) => setState(() => _planFiltroWallet = entry.$1),
+                            Text(fechaStr, style: const TextStyle(color: Colors.white38, fontSize: 9)),
+                          ]),
+                        ]),
+                        if (comprUrlMv != null && comprUrlMv.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          GestureDetector(
+                            onTap: () => showDialog(
+                              context: context,
+                              builder: (_) => Dialog(
+                                backgroundColor: Colors.black,
+                                child: Image.network(comprUrlMv, fit: BoxFit.contain,
+                                  errorBuilder: (_, __, ___) => const Padding(
+                                    padding: EdgeInsets.all(32),
+                                    child: Icon(Icons.broken_image_rounded, color: Colors.white30, size: 48),
                                   ),
                                 ),
-                            ]),
+                              ),
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(6),
+                              child: Image.network(comprUrlMv,
+                                  height: 60, width: double.infinity, fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) => const SizedBox.shrink()),
+                            ),
                           ),
-                          const SizedBox(height: 10),
-
-                          // ── DATOS DE TRANSFERENCIA ──────────────────────
-                          _encabezadoSeccion('DATOS DE TRANSFERENCIA', Colors.white54),
-                          _cardInfoRecarga(infoRecarga),
-                          const SizedBox(height: 8),
-
-                          // ── SOLICITUDES PENDIENTES ──────────────────────
-                          () {
-                            final conMora = solicitudes
-                                .where((s) => (s as Map)['tipo_solicitud'] == 'pago_semanal_con_recargo')
-                                .toList();
-                            final semanales = solicitudes
-                                .where((s) => (s as Map)['tipo_solicitud'] == 'pago_semanal')
-                                .toList();
-                            final recargas = solicitudes.where((s) {
-                              final tipo = (s as Map)['tipo_solicitud']?.toString() ?? '';
-                              return tipo != 'pago_semanal' && tipo != 'pago_semanal_con_recargo';
-                            }).toList();
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                if (conMora.isNotEmpty) ...[
-                                  _encabezadoSeccion(
-                                      '⚠️ PAGOS CON MORA (${conMora.length})',
-                                      Colors.red[400]!),
-                                  ...conMora.map((s) =>
-                                      _cardSolicitudRecarga(s as Map<String, dynamic>)),
-                                  const SizedBox(height: 8),
-                                ],
-                                if (semanales.isNotEmpty) ...[
-                                  _encabezadoSeccion(
-                                      '🔒 SOPORTES DE PAGO (${semanales.length})',
-                                      Colors.orange[400]!),
-                                  ...semanales.map((s) =>
-                                      _cardSolicitudRecarga(s as Map<String, dynamic>)),
-                                  const SizedBox(height: 8),
-                                ],
-                                if (recargas.isNotEmpty) ...[
-                                  _encabezadoSeccion(
-                                      '💳 RECARGAS PENDIENTES (${recargas.length})',
-                                      Colors.amber[600]!),
-                                  ...recargas.map((s) =>
-                                      _cardSolicitudRecarga(s as Map<String, dynamic>)),
-                                  const SizedBox(height: 8),
-                                ],
-                              ],
-                            );
-                          }(),
-
-                          // ── MOVIMIENTOS RECIENTES ───────────────────────
-                          if (movimientos.isNotEmpty) ...[
-                            _encabezadoSeccion('MOVIMIENTOS RECIENTES', Colors.white38),
-                            ...movimientos.map((mv) {
-                              final m      = mv as Map<String, dynamic>;
-                              final monto  = (m['monto'] as num?)?.toDouble() ?? 0.0;
-                              final tipo   = m['tipo']?.toString() ?? '';
-                              final nombre = (m['usuarios'] as Map?)?['nombre']?.toString() ?? '—';
-                              final numMov = (m['usuarios'] as Map?)?['numero_movil'];
-                              final label  = numMov != null
-                                  ? 'Movil${numMov.toString().padLeft(2, '0')}'
-                                  : nombre;
-                              final esDescuento = monto < 0;
-                              final color  = esDescuento ? Colors.redAccent : const Color(0xFF22C55E);
-                              final icon   = switch (tipo) {
-                                'descuento_servicio'       => Icons.remove_circle_outline_rounded,
-                                'pago_semanal'             => Icons.lock_open_rounded,
-                                'pago_semanal_con_recargo' => Icons.lock_open_rounded,
-                                'bloqueo_semanal'          => Icons.lock_rounded,
-                                'recarga'                  => Icons.add_circle_outline_rounded,
-                                'desbloqueo_manual'        => Icons.admin_panel_settings_rounded,
-                                'activacion_manual'        => Icons.check_circle_outline_rounded,
-                                'exoneracion_recargo'      => Icons.remove_moderator_rounded,
-                                _                          => Icons.swap_horiz_rounded,
-                              };
-                              final fecha = m['created_at'] != null
-                                  ? DateTime.parse(m['created_at'].toString()).toLocal()
-                                  : null;
-                              final fechaStr = fecha != null
-                                  ? '${fecha.day}/${fecha.month} ${fecha.hour.toString().padLeft(2,'0')}:${fecha.minute.toString().padLeft(2,'0')}'
-                                  : '';
-                              final comprUrlMv = m['comprobante_url']?.toString();
-                              return Container(
-                                margin: const EdgeInsets.only(bottom: 6),
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF141414),
-                                  borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(color: Colors.white10),
-                                ),
-                                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                  Row(children: [
-                                    Icon(icon, color: color, size: 16),
-                                    const SizedBox(width: 10),
-                                    Expanded(child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(label,
-                                            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
-                                        Text(m['concepto']?.toString() ?? tipo,
-                                            style: const TextStyle(color: Colors.white54, fontSize: 10),
-                                            maxLines: 1, overflow: TextOverflow.ellipsis),
-                                      ],
-                                    )),
-                                    Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                                      Text(
-                                        monto == 0 ? '—' : '${monto >= 0 ? '+' : ''}\$${monto.abs().toStringAsFixed(0)}',
-                                        style: TextStyle(
-                                            color: monto == 0 ? Colors.white38 : color,
-                                            fontSize: 12, fontWeight: FontWeight.bold),
-                                      ),
-                                      Text(fechaStr, style: const TextStyle(color: Colors.white38, fontSize: 9)),
-                                    ]),
-                                  ]),
-                                  if (comprUrlMv != null && comprUrlMv.isNotEmpty) ...[
-                                    const SizedBox(height: 8),
-                                    GestureDetector(
-                                      onTap: () => showDialog(
-                                        context: context,
-                                        builder: (_) => Dialog(
-                                          backgroundColor: Colors.black,
-                                          child: Image.network(comprUrlMv, fit: BoxFit.contain,
-                                            errorBuilder: (_, __, ___) => const Padding(
-                                              padding: EdgeInsets.all(32),
-                                              child: Icon(Icons.broken_image_rounded, color: Colors.white30, size: 48),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                      child: ClipRRect(
-                                        borderRadius: BorderRadius.circular(6),
-                                        child: Image.network(comprUrlMv,
-                                            height: 60, width: double.infinity,
-                                            fit: BoxFit.cover,
-                                            errorBuilder: (_, __, ___) => const SizedBox.shrink()),
-                                      ),
-                                    ),
-                                  ],
-                                ]),
-                              );
-                            }),
-                            const SizedBox(height: 8),
-                          ],
-
-                          // ── PLANES DE PAGO ──────────────────────────────
-                          _encabezadoSeccion('PLANES DE PAGO', const Color(0xFF818CF8)),
-                          if (filtrados.isEmpty)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 24),
-                              child: _empty(Icons.account_balance_wallet_rounded,
-                                  'Sin móviles con billetera registrados'),
-                            )
-                          else
-                            ...filtrados.map((u) => _cardWallet(u)),
                         ],
-                      );
-                    },
-                  ),
-                ),
-              ]),
+                      ]),
+                    );
+                  }),
+                  const SizedBox(height: 8),
+                ],
+
+                // ── PLANES DE PAGO ───────────────────────────────────────
+                _encabezadoSeccion('PLANES DE PAGO', const Color(0xFF818CF8)),
+                if (filtrados.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 24),
+                    child: _empty(Icons.account_balance_wallet_rounded,
+                        'Sin móviles con billetera registrados'),
+                  )
+                else
+                  ...filtrados.map((u) => _cardWallet(u)),
+              ],
+            );
+          },
+        ),
+      ),
+    ]);
+  }
+
+  // ── Build principal ───────────────────────────────────────────────────────
+  @override
+  Widget build(BuildContext context) {
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        backgroundColor: const Color(0xFF0A0A0A),
+        appBar: AppBar(
+          backgroundColor: const Color(0xFF0A0A0A),
+          elevation: 0,
+          iconTheme: const IconThemeData(color: Colors.white),
+          title: const Row(children: [
+            Icon(Icons.account_balance_wallet_rounded, color: Color(0xFF818CF8), size: 18),
+            SizedBox(width: 8),
+            Text('Billetera', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
+          ]),
+          centerTitle: false,
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.refresh_rounded, color: Colors.white60),
+              onPressed: _cargar,
+            ),
+          ],
+          bottom: const TabBar(
+            labelColor: Color(0xFF818CF8),
+            unselectedLabelColor: Colors.white38,
+            indicatorColor: Color(0xFF818CF8),
+            dividerColor: Colors.white12,
+            labelStyle: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+            tabs: [
+              Tab(text: 'SOLICITUDES'),
+              Tab(text: 'CONTABILIDAD'),
+            ],
+          ),
+        ),
+        body: _cargando
+            ? const Center(child: CircularProgressIndicator(color: Color(0xFF818CF8)))
+            : TabBarView(
+                children: [
+                  _buildSolicitudesTab(),
+                  _buildContabilidadTab(),
+                ],
+              ),
       ),
     );
   }
