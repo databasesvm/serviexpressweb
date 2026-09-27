@@ -13,6 +13,8 @@ class _RankingScreenState extends State<RankingScreen> {
   List<Map<String, dynamic>> _ranking = [];
   bool _cargando = true;
   Map<int, int> _minutosHoyPorMovil = {}; // movil_id → minutos activos hoy
+  // id → posición de premio semanal (1=🏆, 2=🥈, 3=🥉) para móviles con ≥80 pts
+  Map<int, int> _premiosSemana = {};
 
   @override
   void initState() {
@@ -53,7 +55,7 @@ class _RankingScreenState extends State<RankingScreen> {
       // Solo móviles activos — no necesitamos central, locales ni clientes
       final usuariosResp = await Supabase.instance.client
           .from('usuarios')
-          .select('id, nombre, usuario, rol, rango_movil, puntuacion, foto_perfil_url')
+          .select('id, nombre, usuario, rol, rango_movil, puntuacion, foto_perfil_url, puntos_semana')
           .eq('activo', true)
           .eq('rol', 'movil');
       final List<dynamic> usuarios = usuariosResp;
@@ -183,8 +185,20 @@ class _RankingScreenState extends State<RankingScreen> {
             'puntuacion_actual': esMaster ? 5.0 : (u['puntuacion'] as num?)?.toDouble() ?? 0.0,
             'viajes': puntajes.length,
             'tiene_manual': esManual,
+            'puntos_semana': (u['puntos_semana'] as int?) ?? 0,
           });
         }
+      }
+
+      // Calcular premios semanales: top 3 con ≥80 puntos, ordenados desc
+      final elegibles = listaTemporal
+          .where((m) => (m['puntos_semana'] as int) >= 80)
+          .toList()
+        ..sort((a, b) =>
+            (b['puntos_semana'] as int).compareTo(a['puntos_semana'] as int));
+      final Map<int, int> premios = {};
+      for (int i = 0; i < elegibles.length && i < 3; i++) {
+        premios[elegibles[i]['id'] as int] = i + 1;
       }
 
       // Ordenar por número de MOVIL## ascendente
@@ -200,6 +214,7 @@ class _RankingScreenState extends State<RankingScreen> {
 
       setState(() {
         _ranking = listaTemporal;
+        _premiosSemana = premios;
         _cargando = false;
       });
     } catch (e) {
@@ -345,6 +360,31 @@ class _RankingScreenState extends State<RankingScreen> {
                                             : Colors.white54),
                                 ),
                               ),
+                              const SizedBox(height: 2),
+                              // Puntos semanales con badge de premio si aplica
+                              () {
+                                final int pts = item['puntos_semana'] as int? ?? 0;
+                                final int? pos = _premiosSemana[item['id'] as int?];
+                                final String medal = pos == 1 ? '🏆' : pos == 2 ? '🥈' : pos == 3 ? '🥉' : '';
+                                final Color ptsColor = pos != null
+                                    ? (pos == 1 ? Colors.amber[300]! : pos == 2 ? Colors.grey[300]! : Colors.orange[300]!)
+                                    : (pts >= 80 ? Colors.green[400]! : Colors.white38);
+                                return Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (medal.isNotEmpty) Text(medal, style: const TextStyle(fontSize: 11)),
+                                    if (medal.isNotEmpty) const SizedBox(width: 2),
+                                    Text(
+                                      '$pts pts',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: pos != null ? FontWeight.bold : FontWeight.normal,
+                                        color: ptsColor,
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              }(),
                               const SizedBox(height: 2),
                               Row(
                                 mainAxisSize: MainAxisSize.min,

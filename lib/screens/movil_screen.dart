@@ -1757,12 +1757,289 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     );
   }
 
+  // ── SOLO DOMICILIOS — reporte de problema con la moto ────────────────────
+  Widget _buildEstadoMotoCard(Map<String, dynamic> perfil) {
+    final bool activo    = perfil['solo_domicilios'] == true;
+    final bool pendiente = perfil['solicitud_solo_domicilios_pendiente'] == true;
+    final String? motivo = perfil['motivo_solo_domicilios']?.toString();
+    final bool esReactivacionPendiente =
+        pendiente && (motivo?.startsWith('REACTIVAR:') ?? false);
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: activo
+            ? Colors.red[900]!.withValues(alpha: 0.30)
+            : Colors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: activo
+              ? Colors.red.withValues(alpha: 0.5)
+              : Colors.white12,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Icon(
+              activo ? Icons.two_wheeler : Icons.build_outlined,
+              size: 16,
+              color: activo ? Colors.red[300] : Colors.white54,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                activo ? 'Solo domicilios activo' : 'Estado de la moto',
+                style: TextStyle(
+                  color: activo ? Colors.red[300] : Colors.white70,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+            if (activo)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.red.withValues(alpha: 0.25),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Text('NO MOTOTAXI',
+                    style: TextStyle(
+                        color: Colors.red,
+                        fontSize: 9,
+                        fontWeight: FontWeight.bold)),
+              ),
+          ]),
+          if (activo && motivo != null && motivo.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              'Motivo: ${motivo.replaceFirst('REACTIVAR: ', '')}',
+              style: const TextStyle(color: Colors.white38, fontSize: 11),
+            ),
+          ],
+          if (pendiente) ...[
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.orange.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                    color: Colors.orange.withValues(alpha: 0.4)),
+              ),
+              child: Text(
+                esReactivacionPendiente
+                    ? '⏳ Solicitud de reactivación pendiente — revisión de la central'
+                    : '⏳ Solicitud pendiente de revisión por la central',
+                style:
+                    const TextStyle(color: Colors.orange, fontSize: 11),
+              ),
+            ),
+          ],
+          if (!pendiente) ...[
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor:
+                      activo ? Colors.green[400] : Colors.orange[300],
+                  side: BorderSide(
+                      color: activo
+                          ? Colors.green.withValues(alpha: 0.5)
+                          : Colors.orange.withValues(alpha: 0.4)),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                ),
+                icon: Icon(
+                    activo
+                        ? Icons.check_circle_outline
+                        : Icons.report_problem_outlined,
+                    size: 16),
+                label: Text(
+                  activo
+                      ? 'Mi moto ya está lista'
+                      : 'Reportar problema con la moto',
+                  style: const TextStyle(
+                      fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+                onPressed: () =>
+                    _mostrarDialogoReporteMoto(esReactivacion: activo),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _mostrarDialogoReporteMoto(
+      {required bool esReactivacion}) async {
+    final ctrl = TextEditingController();
+
+    final enviado = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx2, setModal) {
+          bool enviando = false;
+          return Padding(
+            padding: EdgeInsets.only(
+                bottom: MediaQuery.of(ctx2).viewInsets.bottom),
+            child: Container(
+              decoration: const BoxDecoration(
+                color: Color(0xFF1A1A1A),
+                borderRadius:
+                    BorderRadius.vertical(top: Radius.circular(20)),
+              ),
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    esReactivacion
+                        ? '✅ Reportar moto lista'
+                        : '🔧 Reportar problema con la moto',
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    esReactivacion
+                        ? 'Explica qué arreglaste o por qué tu moto ya puede hacer mototaxi.'
+                        : 'Explica el problema que tiene tu moto para no poder hacer servicios de mototaxi.',
+                    style: const TextStyle(
+                        color: Colors.white54, fontSize: 12),
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: ctrl,
+                    maxLines: 3,
+                    maxLength: 200,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      hintText: esReactivacion
+                          ? 'Ej: Cambié la llanta, ya puedo hacer mototaxi'
+                          : 'Ej: Se dañó la llanta trasera',
+                      hintStyle:
+                          const TextStyle(color: Colors.white38),
+                      filled: true,
+                      fillColor: Colors.white10,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide.none,
+                      ),
+                      counterStyle:
+                          const TextStyle(color: Colors.white38),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    width: double.infinity,
+                    child: StatefulBuilder(
+                      builder: (ctx3, setBtn) => ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: esReactivacion
+                              ? Colors.green[700]
+                              : Colors.orange[700],
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                              vertical: 14),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
+                        ),
+                        onPressed: enviando
+                            ? null
+                            : () async {
+                                final texto = ctrl.text.trim();
+                                if (texto.isEmpty) {
+                                  ScaffoldMessenger.of(ctx2)
+                                      .showSnackBar(const SnackBar(
+                                    content:
+                                        Text('Debes escribir el motivo'),
+                                    backgroundColor: Colors.red,
+                                  ));
+                                  return;
+                                }
+                                setBtn(() => enviando = true);
+                                try {
+                                  await Supabase.instance.client
+                                      .from('usuarios')
+                                      .update({
+                                    'solicitud_solo_domicilios_pendiente':
+                                        true,
+                                    'motivo_solo_domicilios':
+                                        esReactivacion
+                                            ? 'REACTIVAR: $texto'
+                                            : texto,
+                                  }).eq('id', widget.usuario['id']);
+                                  if (ctx2.mounted) {
+                                    Navigator.pop(ctx2, true);
+                                  }
+                                } catch (e) {
+                                  setBtn(() => enviando = false);
+                                  if (ctx2.mounted) {
+                                    ScaffoldMessenger.of(ctx2)
+                                        .showSnackBar(SnackBar(
+                                      content: Text('Error: $e'),
+                                      backgroundColor: Colors.red,
+                                    ));
+                                  }
+                                }
+                              },
+                        child: enviando
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                    color: Colors.white,
+                                    strokeWidth: 2))
+                            : Text(
+                                esReactivacion
+                                    ? 'ENVIAR — MOTO LISTA'
+                                    : 'ENVIAR REPORTE',
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+
+    if (enviado == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(esReactivacion
+            ? 'Reporte enviado — la central lo revisará pronto'
+            : 'Solicitud enviada — la central validará tu reporte'),
+        backgroundColor:
+            esReactivacion ? Colors.green[700] : Colors.orange[700],
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
+    ctrl.dispose();
+  }
+
   Future<void> _recargarFila() async {
     try {
       final data = await Supabase.instance.client
           .from('usuarios')
           .select('id, nombre, en_linea, paradero_actual, ingreso_fila, '
-              'ticket_prioridad, rango_movil, numero_movil, tiene_fn, tiene_se')
+              'ticket_prioridad, rango_movil, numero_movil, tiene_fn, tiene_se, puntos_semana')
           .eq('rol', 'movil')
           .eq('en_linea', true);
       _actualizarFilaNotifier(List<Map<String, dynamic>>.from(data));
@@ -4808,11 +5085,109 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                         ],
                       ],
                     ),
+                    // Puntos semanales SE — solo visible si tiene SE
+                    if (miPerfil['tiene_se'] == true) ...[
+                      const SizedBox(height: 10),
+                      () {
+                        final int pts = (miPerfil['puntos_semana'] as int?) ?? 0;
+                        final bool elegible = pts >= 80;
+                        final bool cercano  = pts >= 50 && pts < 80;
+                        final int faltan    = 80 - pts;
+
+                        final Color badgeColor = elegible
+                            ? const Color(0xFF3AF500)
+                            : cercano
+                                ? Colors.orange[300]!
+                                : Colors.white60;
+                        final Color borderColor = elegible
+                            ? const Color(0xFF3AF500)
+                            : cercano
+                                ? Colors.orange.withValues(alpha: 0.6)
+                                : Colors.white24;
+                        final Color bgColor = elegible
+                            ? Colors.green[900]!.withValues(alpha: 0.50)
+                            : cercano
+                                ? Colors.orange[900]!.withValues(alpha: 0.25)
+                                : Colors.white.withValues(alpha: 0.07);
+
+                        return Column(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: bgColor,
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(color: borderColor, width: 1),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    elegible ? '⭐' : cercano ? '🔥' : '🎯',
+                                    style: const TextStyle(fontSize: 11),
+                                  ),
+                                  const SizedBox(width: 5),
+                                  Text(
+                                    '$pts pts esta semana',
+                                    style: TextStyle(
+                                      color: badgeColor,
+                                      fontSize: 11,
+                                      fontWeight: (elegible || cercano)
+                                          ? FontWeight.bold
+                                          : FontWeight.normal,
+                                    ),
+                                  ),
+                                  if (elegible) ...[
+                                    const SizedBox(width: 6),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF3AF500)
+                                            .withValues(alpha: 0.20),
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: const Text(
+                                        '¡Concursa!',
+                                        style: TextStyle(
+                                          color: Color(0xFF3AF500),
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                            // Mensaje incentivo cuando está cerca del premio
+                            if (cercano) ...[
+                              const SizedBox(height: 6),
+                              Text(
+                                '¡Te faltan $faltan pts para optar por el premio!',
+                                style: TextStyle(
+                                  color: Colors.orange[200],
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ],
+                        );
+                      }(),
+                    ],
                   ],
                 ),
               ),
 
               const SizedBox(height: 16),
+
+              // ── REPORTE DE MOTO / SOLO DOMICILIOS ─────────────────────────
+              if (miPerfil['tiene_se'] == true) ...[
+                _buildEstadoMotoCard(miPerfil),
+                const SizedBox(height: 16),
+              ],
 
               // ── ESTADÍSTICAS SEMANALES (#124) ─────────────────────────────
               FutureBuilder<List<dynamic>>(
@@ -8057,9 +8432,49 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                                         fontWeight:
                                                             FontWeight.bold)),
                                               ],
+                                              if (soyYo) ...[
+                                                const Text(' · ',
+                                                    style: TextStyle(
+                                                        fontSize: 10,
+                                                        color: Colors.black38)),
+                                                () {
+                                                  final int miPts = (movil['puntos_semana'] as int?) ?? 0;
+                                                  final Color ptsColor = miPts >= 80
+                                                      ? Colors.green[700]!
+                                                      : miPts >= 50
+                                                          ? Colors.orange[700]!
+                                                          : Colors.black54;
+                                                  return Text(
+                                                    '${miPts >= 80 ? "⭐" : miPts >= 50 ? "🔥" : ""}$miPts pts',
+                                                    style: TextStyle(
+                                                      fontSize: 10,
+                                                      fontWeight: FontWeight.bold,
+                                                      color: ptsColor,
+                                                    ),
+                                                  );
+                                                }(),
+                                              ],
                                             ],
                                           ),
                                         ),
+                                        // Incentivo cuando está en zona de 50-79 pts
+                                        if (soyYo) ...[
+                                          () {
+                                            final int miPts = (movil['puntos_semana'] as int?) ?? 0;
+                                            if (miPts < 50 || miPts >= 80) return const SizedBox.shrink();
+                                            return Padding(
+                                              padding: const EdgeInsets.only(left: 28, top: 2),
+                                              child: Text(
+                                                '¡Te faltan ${80 - miPts} pts para el premio de la semana!',
+                                                style: TextStyle(
+                                                  fontSize: 9,
+                                                  color: Colors.orange[700],
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                            );
+                                          }(),
+                                        ],
                                       ],
                                     ),
                                   ),

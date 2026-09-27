@@ -176,6 +176,16 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
     final esSemanal = tipoSolicitud == 'pago_semanal';
     final esConRecargo = tipoSolicitud == 'pago_semanal_con_recargo';
     final esPagoSemanal = esSemanal || esConRecargo;
+    // Descuento semanal (solo aplica a pago_semanal, no a pago_semanal_con_recargo)
+    final int descuentoPct = esSemanal
+        ? ((movilData?['descuento_semana_pct'] as int?) ?? 0)
+        : 0;
+    final int ptsSemana = (movilData?['puntos_semana'] as int?) ?? 0;
+    // Monto esperado con descuento sobre base $60.000
+    const double baseSemanal = 60000;
+    final double montoEsperado = descuentoPct == 100
+        ? 0
+        : baseSemanal * (1 - descuentoPct / 100);
     final fecha = s['created_at'] != null
         ? DateTime.tryParse(s['created_at'].toString())?.toLocal()
         : null;
@@ -259,6 +269,37 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                 'Pago con recargo por mora. Monto mínimo esperado: \$80.000 (\$60.000 semana + \$20.000 recargo).',
                 style: TextStyle(color: Colors.red, fontSize: 10),
               ),
+            ),
+          ],
+          // ── Aviso descuento semanal (premio puntos) ───────────────────────
+          if (esSemanal && descuentoPct > 0) ...[
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.green[900]!.withValues(alpha: 0.25),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.green.withValues(alpha: 0.5)),
+              ),
+              child: Row(children: [
+                Text(
+                  descuentoPct == 100 ? '🏆' : descuentoPct == 75 ? '🥈' : '🥉',
+                  style: const TextStyle(fontSize: 14),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    descuentoPct == 100
+                        ? '¡Premio #1! — $descuentoPct% de descuento ($ptsSemana pts). '
+                          'No debe pagar nada esta semana.'
+                        : 'Premio ($ptsSemana pts) — $descuentoPct% de descuento. '
+                          'Monto esperado: \$${montoEsperado.toStringAsFixed(0)} '
+                          '(\$${baseSemanal.toStringAsFixed(0)} × ${100 - descuentoPct}%).',
+                    style: const TextStyle(color: Color(0xFF4CAF50), fontSize: 10),
+                  ),
+                ),
+              ]),
             ),
           ],
           if (nota != null && nota.isNotEmpty) ...[
@@ -376,6 +417,8 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                       await _db.from('usuarios').update({
                         'wallet_bloqueado': false,
                         if (esConRecargo) 'recargo_mora_activo': false,
+                        // Limpiar descuento al aprobar — ya fue utilizado
+                        if (esSemanal && descuentoPct > 0) 'descuento_semana_pct': 0,
                       }).eq('id', s['movil_id']);
                       await _db.from('wallet_movimientos').insert({
                         'movil_id': s['movil_id'],
@@ -410,9 +453,13 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                       titulo: esPagoSemanal ? '🔓 Billetera desbloqueada' : '✅ Recarga aprobada',
                       mensaje: esConRecargo
                           ? 'Tu pago semanal con recargo fue aprobado. Tu billetera está activa nuevamente.'
-                          : esSemanal
-                              ? 'Tu pago semanal fue aprobado. Ya puedes usar tu billetera con normalidad.'
-                              : 'Se acreditaron \$${monto.toStringAsFixed(0)} en tu billetera.',
+                          : esSemanal && descuentoPct == 100
+                              ? '🏆 ¡Premio semanal! Tu semana fue GRATIS. Billetera desbloqueada.'
+                              : esSemanal && descuentoPct > 0
+                                  ? '🎉 Pago con $descuentoPct% de descuento aprobado. Billetera desbloqueada.'
+                                  : esSemanal
+                                      ? 'Tu pago semanal fue aprobado. Ya puedes usar tu billetera con normalidad.'
+                                      : 'Se acreditaron \$${monto.toStringAsFixed(0)} en tu billetera.',
                       urgente: false,
                     );
                     _cargar();
@@ -1020,7 +1067,7 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                     future: Future.wait([
                       _db
                           .from('solicitudes_recarga_wallet')
-                          .select('id, movil_id, monto_solicitado, nota, comprobante_url, estado, tipo_solicitud, created_at, usuarios(nombre, usuario, numero_movil, tipo_plan_movil)')
+                          .select('id, movil_id, monto_solicitado, nota, comprobante_url, estado, tipo_solicitud, created_at, usuarios(nombre, usuario, numero_movil, tipo_plan_movil, descuento_semana_pct, puntos_semana)')
                           .eq('estado', 'pendiente')
                           .order('created_at', ascending: false),
                       _db.from('config_sistema').select('info_recarga_wallet').eq('id', 1).maybeSingle(),

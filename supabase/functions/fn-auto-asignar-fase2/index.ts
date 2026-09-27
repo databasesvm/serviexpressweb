@@ -272,7 +272,7 @@ Deno.serve(async () => {
   {
     const { data: serviciosNormal } = await supabase
       .from('servicios')
-      .select('id, paradero_auto_movil_id, onesignal_2m, onesignal_5m, liberacion_at, created_at')
+      .select('id, paradero_auto_movil_id, onesignal_2m, onesignal_5m, liberacion_at, created_at, tipo_servicio')
       .eq('estado', 'pendiente')
       .is('tipo_fn', null)    // no-FN
       .not('paradero_auto_movil_id', 'is', null)
@@ -288,6 +288,16 @@ Deno.serve(async () => {
 
       const movilId = srv.paradero_auto_movil_id as string;
       if (await movilEstaOcupado(movilId)) continue;
+
+      // Si el servicio es MOTOTAXI, verificar que el móvil no tenga solo_domicilios activo
+      if (srv.tipo_servicio === 'MOTOTAXI') {
+        const { data: movilData } = await supabase
+          .from('usuarios')
+          .select('solo_domicilios')
+          .eq('id', parseInt(movilId))
+          .single();
+        if (movilData?.solo_domicilios === true) continue;
+      }
 
       const asignado = await autoAsignar(
         srv.id,
