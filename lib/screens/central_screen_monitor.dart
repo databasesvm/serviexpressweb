@@ -273,9 +273,10 @@ extension CentralScreenMonitor on _CentralScreenState {
     final String? telReceptor = servicio['telefono_receptor']?.toString();
     final String? numLocal    = servicio['numero_local']?.toString();
     final String? numCliente  = servicio['numero_cliente']?.toString();
-    final String tarifaTexto  = tarifaActual == 0.0
-        ? 'Sin fijar'
-        : _formatearMonedaCentral(tarifaActual);
+    final bool esPAP = servicio['es_punto_a_punto'] == true;
+    final String tarifaTexto  = esPAP
+        ? 'GRATIS (PAP)'
+        : (tarifaActual == 0.0 ? 'Sin fijar' : _formatearMonedaCentral(tarifaActual));
 
     showModalBottomSheet(
       context: context,
@@ -379,8 +380,8 @@ extension CentralScreenMonitor on _CentralScreenState {
                         runSpacing: 6,
                         children: [
                           _infoBadge('💵 Tarifa', tarifaTexto,
-                              tarifaActual == 0.0 ? Colors.orange.shade900 : const Color(0xFF1B5E20),
-                              tarifaActual == 0.0 ? Colors.orangeAccent : Colors.greenAccent),
+                              esPAP ? Colors.purple.shade900 : (tarifaActual == 0.0 ? Colors.orange.shade900 : const Color(0xFF1B5E20)),
+                              esPAP ? Colors.purpleAccent : (tarifaActual == 0.0 ? Colors.orangeAccent : Colors.greenAccent)),
                           if (fechaCreado.isNotEmpty)
                             _infoBadge('🕐 Creado', fechaCreado, const Color(0xFF0D1B2A), Colors.white70),
                           if (telReceptor != null)

@@ -4692,17 +4692,38 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       }
 
       if (!tieneProblema && servicio['es_punto_a_punto'] == true) {
-        await Supabase.instance.client
-            .from('usuarios')
-            .update({'ticket_prioridad': true}).eq('id', widget.usuario['id']);
+        // RPC atómica: ticket_prioridad=true, +2 puntos_semana, +0.2 puntuacion (cap 4.5)
+        try {
+          await Supabase.instance.client.rpc(
+            'otorgar_recompensa_pap',
+            params: {'p_movil_id': widget.usuario['id'].toString()},
+          );
+        } catch (_) {
+          // fallback: al menos marcar ticket_prioridad
+          await Supabase.instance.client
+              .from('usuarios')
+              .update({'ticket_prioridad': true}).eq('id', widget.usuario['id']);
+        }
+        // Push al propio móvil — queda en bandeja incluso si cierra la app
+        // urgente: false → canal de notificación normal (sin alarma)
+        // sonido: 'notification' → sonido predeterminado del sistema
+        try {
+          await MotorNotificaciones.dispararMisil(
+            idDestino: widget.usuario['id'].toString(),
+            titulo: '🎁 P.A.P completado',
+            mensaje: '+2 pts semana · +0.2 calificación · 🎟️ Prioridad en paradero activada',
+            urgente: false,
+            sonido: 'notification',
+          );
+        } catch (_) {}
         if (mounted)
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text(
-                '🎟️ ¡PUNTO A PUNTO COMPLETADO! Ganaste un Ticket de Prioridad.',
+                '🎟️ ¡P.A.P COMPLETADO! +2 pts semana · +0.2 calificación · Prioridad en paradero activada.',
               ),
               backgroundColor: Colors.purple,
-              duration: Duration(seconds: 4),
+              duration: Duration(seconds: 6),
             ),
           );
       }
@@ -8953,29 +8974,39 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
               ],
             ),
 
-            // Banner P.A.P
+            // Banner P.A.P — visible post-aceptar (todos los rangos)
             if (servicio['es_punto_a_punto'] == true) ...[
               const SizedBox(height: 8),
               Container(
                 width: double.infinity,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
-                  color: Colors.purple[50],
+                  color: Colors.purple[900],
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.purple[300]!),
                 ),
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.flash_on, size: 16, color: Colors.purple),
-                    SizedBox(width: 6),
-                    Text(
-                      'PUNTO A PUNTO — Tarifa gratuita',
+                    const Row(
+                      children: [
+                        Icon(Icons.flash_on, size: 15, color: Colors.purpleAccent),
+                        SizedBox(width: 6),
+                        Text(
+                          '⚡ PUNTO A PUNTO — Servicio gratuito',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.purpleAccent,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      '🎟️ Prioridad en paradero  ·  +2 pts semana  ·  +0.2 calificación',
                       style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.purple,
+                        fontSize: 11,
+                        color: Colors.white70,
                       ),
                     ),
                   ],
@@ -9307,7 +9338,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                         : () => _transferirServicio(servicio),
                     icon: const Icon(Icons.send, size: 18),
                     label: const Text(
-                      'TRANSFERIR',
+                      'TRANSFERIR A OTRO MÓVIL',
                       style:
                           TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
                     ),
@@ -9315,150 +9346,236 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                 ),
               ),
 
-            // ---> INYECCIÓN: PANEL DE CONTROL SÓLIDO Y COLORIDO <---
+            // ---> SECCIÓN DE COMUNICACIÓN (diferenciada por origen del servicio) <---
             if (!tieneProblema)
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: Builder(
                   builder: (context) {
-                    // --- LÓGICA TÁCTICA: ¿QUIÉN PIDIÓ EL SERVICIO? ---
-                    bool esCreadoPorCentral = servicio['creador'] == 'Central';
-                    bool esClienteApp = servicio['cliente_id'] != null;
+                    final bool esCreadoPorCentral =
+                        servicio['creador'] == 'Central';
+                    final bool esClienteApp =
+                        servicio['cliente_id'] != null;
+                    final int? localId =
+                        (servicio['local_id'] as num?)?.toInt();
+                    final bool tieneLocal =
+                        localId != null &&
+                        !esCreadoPorCentral &&
+                        !esClienteApp;
+                    final String numReceptor =
+                        servicio['telefono_receptor']?.toString().trim() ?? '';
+                    final String nombreNegocio = esCreadoPorCentral
+                        ? 'ServiExpress'
+                        : servicio['creador'].toString();
 
-                    // Solo mostramos el chat interno si NO lo despachó la Central
-                    bool mostrarChatInterno =
-                        !esCreadoPorCentral || esClienteApp;
+                    // ── Abre WhatsApp con el número dado ──────────────────
+                    void abrirWa(String numero) async {
+                      String num =
+                          numero.replaceAll(RegExp(r'[^0-9]'), '');
+                      if (num.length == 10) num = '57$num';
+                      final String textoWa = esClienteApp
+                          ? 'Hola, soy el Móvil de Serviexpress. Voy en camino hacia tu ubicación.'
+                          : 'Hola, soy el Móvil que te está haciendo el domicilio de $nombreNegocio. Voy en camino hacia tu dirección.';
+                      final Uri url = Uri.parse(
+                          'https://wa.me/$num?text=${Uri.encodeComponent(textoWa)}');
+                      if (!await launchUrl(
+                          url, mode: LaunchMode.externalApplication)) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                                content: Text('No se pudo abrir WhatsApp')),
+                          );
+                        }
+                      }
+                    }
 
-                    // Asignación de nombres e íconos dinámicos
-                    String textoChat = esClienteApp ? 'Cliente' : 'Local';
-                    IconData iconoChat =
+                    // ── Botón WA Local (verde oscuro) ──────────────────────
+                    Widget botonWaLocal(String tel) => Expanded(
+                          child: BotonTacticoAccion(
+                            icono: Icons.wechat,
+                            texto: 'WA Local',
+                            colorBase: const Color(0xFF1B5E20),
+                            colorFondo: const Color(0xFFE8F5E9),
+                            onTap: () { abrirWa(tel); },
+                          ),
+                        );
+
+                    // ── Botón WA Cliente compacto (teal, en fila) ──────────
+                    Widget botonWaClienteCompacto(String tel) => Expanded(
+                          child: BotonTacticoAccion(
+                            icono: Icons.wechat,
+                            texto: 'WA Cliente',
+                            colorBase: const Color(0xFF004D40),
+                            colorFondo: const Color(0xFFE0F2F1),
+                            onTap: () { abrirWa(tel); },
+                          ),
+                        );
+
+                    // ── Botón WA Cliente ancho completo (bajo fila de local) ─
+                    Widget botonWaClienteFull(String tel) => SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xFF004D40),
+                              backgroundColor: const Color(0xFFE0F2F1),
+                              side: const BorderSide(
+                                  color: Color(0xFF80CBC4), width: 1.5),
+                              padding: const EdgeInsets.symmetric(vertical: 13),
+                            ),
+                            onPressed: () { abrirWa(tel); },
+                            icon: const Icon(Icons.wechat, size: 20),
+                            label: const Text(
+                              'WhatsApp Cliente',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold, fontSize: 13),
+                            ),
+                          ),
+                        );
+
+                    // ── Botón Chat con Local / Chat con Cliente (azul) ─────
+                    final String textoChat =
+                        esClienteApp ? 'Chat Cliente' : 'Chat Local';
+                    final IconData iconoChat =
                         esClienteApp ? Icons.person : Icons.storefront;
-                    // -------------------------------------------------
-
-                    // FUNCIÓN CONSTRUCTORA DE LA FILA (Para evitar saltos de interfaz)
-                    Widget construirFilaBotones(String numeroWa) {
-                      bool mostrarWa = numeroWa.isNotEmpty;
-                      return Row(
-                        children: [
-                          // WHATSAPP
-                          if (mostrarWa) ...[
-                            Expanded(
-                              child: BotonTacticoAccion(
-                                icono: Icons.wechat,
-                                texto: 'WS Cliente',
-                                colorBase: const Color(0xff25D366),
-                                colorFondo: Colors.green[50]!,
-                                onTap: () async {
-                                  String numero = numeroWa.replaceAll(
-                                    RegExp(r'[^0-9]'),
-                                    '',
-                                  );
-                                  if (numero.length == 10) numero = '57$numero';
-
-                                  String nombreNegocio =
-                                      (servicio['creador'] == 'Central')
-                                          ? 'ServiExpress'
-                                          : servicio['creador'].toString();
-
-                                  // Mensaje inteligente: Diferencia si lo pidió el Local o el Cliente App
-                                  String textoWa = esClienteApp
-                                      ? 'Hola, soy el Móvil de Serviexpress. Voy en camino hacia tu ubicación.'
-                                      : 'Hola, soy el Móvil que te está haciendo el domicilio de $nombreNegocio. Voy en camino hacia tu dirección.';
-
-                                  final Uri url = Uri.parse(
-                                    'https://wa.me/$numero?text=${Uri.encodeComponent(textoWa)}',
-                                  );
-                                  if (!await launchUrl(
-                                    url,
-                                    mode: LaunchMode.externalApplication,
-                                  )) {
-                                    if (context.mounted) {
-                                      ScaffoldMessenger.of(
-                                        context,
-                                      ).showSnackBar(
-                                        const SnackBar(
-                                          content: Text(
-                                            'No se pudo abrir WhatsApp',
-                                          ),
-                                        ),
-                                      );
-                                    }
-                                  }
-                                },
+                    Widget botonChatLocalCliente() {
+                      final bool tieneMsg = servicio['chat_movil'] == true;
+                      if (tieneMsg) {
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          _sonidos.reproducirSuave(Sonidos.movilChatCliente);
+                        });
+                      }
+                      return Expanded(
+                        child: BotonTacticoAccion(
+                          icono: iconoChat,
+                          texto: textoChat,
+                          colorBase: Colors.blue[800]!,
+                          colorFondo: Colors.blue[50]!,
+                          tieneAlarma: tieneMsg,
+                          onTap: () {
+                            Supabase.instance.client
+                                .from('servicios')
+                                .update({'chat_movil': false}).eq(
+                                    'id', servicio['id']);
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => ChatScreen(
+                                  salaId: 'servicio_${servicio['id']}',
+                                  miId: widget.usuario['id'],
+                                  miNombre:
+                                      movilLabelConNombre(widget.usuario),
+                                  titulo: textoChat,
+                                  servicioId: servicio['id'],
+                                  alarmaLocal: 'chat_movil',
+                                  alarmaDestino: 'chat_cliente',
+                                  destinatarioId:
+                                      (servicio['cliente_id'] as num?)
+                                          ?.toInt(),
+                                  tipoFaq: TipoFaqChat.movil,
+                                ),
                               ),
-                            ),
-                            const SizedBox(width: 8),
-                          ],
-
-                          // CHAT INTERNO (DINÁMICO: LOCAL O CLIENTE APP)
-                          if (mostrarChatInterno) ...[
-                            Expanded(
-                              child: Builder(
-                                builder: (context) {
-                                  bool tieneMsg =
-                                      servicio['chat_movil'] == true;
-                                  if (tieneMsg) {
-                                    WidgetsBinding.instance
-                                        .addPostFrameCallback((_) {
-                                      _sonidos.reproducirSuave(
-                                        Sonidos.movilChatCliente,
-                                      );
-                                    });
-                                  }
-                                  return BotonTacticoAccion(
-                                    icono: iconoChat,
-                                    texto: textoChat,
-                                    colorBase: Colors.blue[800]!,
-                                    colorFondo: Colors.blue[50]!,
-                                    tieneAlarma: tieneMsg,
-                                    onTap: () {
-                                      Supabase.instance.client
-                                          .from('servicios')
-                                          .update({'chat_movil': false}).eq(
-                                              'id', servicio['id']);
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (context) => ChatScreen(
-                                            salaId:
-                                                'servicio_${servicio['id']}',
-                                            miId: widget.usuario['id'],
-                                            miNombre: movilLabelConNombre(
-                                                widget.usuario),
-                                            titulo: 'Chat $textoChat',
-                                            servicioId: servicio['id'],
-                                            alarmaLocal: 'chat_movil',
-                                            alarmaDestino: 'chat_cliente',
-                                            destinatarioId:
-                                                (servicio['cliente_id'] as num?)
-                                                    ?.toInt(),
-                                            tipoFaq: TipoFaqChat.movil,
-                                          ),
-                                        ),
-                                      );
-                                    },
-                                  );
-                                },
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                          ],
-
-                          // Chat con Central removido de la card:
-                          // el FAB pulsante maneja todos los mensajes de la central.
-                        ],
+                            );
+                          },
+                        ),
                       );
                     }
 
-                    // --- MOTOR DE EXTRACCIÓN DE NÚMERO ---
-                    String numReceptor =
-                        servicio['telefono_receptor']?.toString().trim() ?? '';
+                    // ── Botón Chat Central (morado) ────────────────────────
+                    Widget botonChatCentral() {
+                      final bool tieneMsg =
+                          servicio['chat_central_movil'] == true;
+                      return Expanded(
+                        child: BotonTacticoAccion(
+                          icono: Icons.headset_mic,
+                          texto: 'Chat Central',
+                          colorBase: const Color(0xFF6A1B9A),
+                          colorFondo: const Color(0xFFF3E5F5),
+                          tieneAlarma: tieneMsg,
+                          onTap: () {
+                            Supabase.instance.client
+                                .from('servicios')
+                                .update({'chat_central_movil': false}).eq(
+                                    'id', servicio['id']);
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => ChatScreen(
+                                  salaId: 'soporte_movil_${servicio['id']}',
+                                  miId: widget.usuario['id'],
+                                  miNombre:
+                                      movilLabelConNombre(widget.usuario),
+                                  titulo: 'Soporte Central',
+                                  servicioId: servicio['id'],
+                                  alarmaLocal: 'chat_central_movil',
+                                  alarmaDestino: 'chat_movil_central',
+                                  tipoFaq: TipoFaqChat.movil,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      );
+                    }
 
-                    // Si el Local digitó un número, o si NO es cliente app, dibujamos directo.
-                    if (numReceptor.isNotEmpty || !esClienteApp) {
-                      return construirFilaBotones(numReceptor);
-                    } else {
-                      // Si es Cliente App y no escribió número manual, jalamos el de su perfil.
+                    // ── CASO 1: Servicio creado por Local ──────────────────
+                    // Fila 1: [WA Local] [Chat Local] [Chat Central]
+                    // Fila 2: [WhatsApp Cliente — ancho completo]
+                    if (tieneLocal) {
+                      return FutureBuilder<Map<String, dynamic>?>(
+                        future: Supabase.instance.client
+                            .from('usuarios')
+                            .select('telefono_local')
+                            .eq('id', localId)
+                            .maybeSingle(),
+                        builder: (context, snap) {
+                          final String telLocal =
+                              snap.data?['telefono_local']
+                                      ?.toString()
+                                      .trim() ??
+                                  '';
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Row(
+                                children: [
+                                  if (telLocal.isNotEmpty) ...[
+                                    botonWaLocal(telLocal),
+                                    const SizedBox(width: 8),
+                                  ],
+                                  botonChatLocalCliente(),
+                                  const SizedBox(width: 8),
+                                  botonChatCentral(),
+                                ],
+                              ),
+                              if (numReceptor.isNotEmpty) ...[
+                                const SizedBox(height: 8),
+                                botonWaClienteFull(numReceptor),
+                              ],
+                            ],
+                          );
+                        },
+                      );
+                    }
+
+                    // ── CASO 2: Servicio creado por Cliente App ────────────
+                    // Fila: [Chat Cliente] [WA Cliente] [Chat Central]
+                    if (esClienteApp) {
+                      Row buildFilaCliente(String tel) => Row(
+                            children: [
+                              botonChatLocalCliente(),
+                              const SizedBox(width: 8),
+                              if (tel.isNotEmpty) ...[
+                                botonWaClienteCompacto(tel),
+                                const SizedBox(width: 8),
+                              ],
+                              botonChatCentral(),
+                            ],
+                          );
+
+                      if (numReceptor.isNotEmpty) {
+                        return buildFilaCliente(numReceptor);
+                      }
+                      // Si no hay número manual, consultar perfil del cliente
                       return FutureBuilder<Map<String, dynamic>?>(
                         future: Supabase.instance.client
                             .from('usuarios')
@@ -9466,16 +9583,27 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                             .eq('id', servicio['cliente_id'])
                             .maybeSingle(),
                         builder: (context, snap) {
-                          // Seguro para evitar saltos de pantalla mientras consulta a la base de datos
-                          if (snap.connectionState == ConnectionState.waiting) {
-                            return construirFilaBotones('');
+                          if (snap.connectionState ==
+                              ConnectionState.waiting) {
+                            return buildFilaCliente('');
                           }
-                          String numPerfil =
-                              snap.data?['telefono']?.toString().trim() ?? '';
-                          return construirFilaBotones(numPerfil);
+                          return buildFilaCliente(
+                              snap.data?['telefono']?.toString().trim() ?? '');
                         },
                       );
                     }
+
+                    // ── CASO 3: Servicio creado por Central ────────────────
+                    // Fila: [WA Cliente (si hay número)] [Chat Central]
+                    return Row(
+                      children: [
+                        if (numReceptor.isNotEmpty) ...[
+                          botonWaClienteCompacto(numReceptor),
+                          const SizedBox(width: 8),
+                        ],
+                        botonChatCentral(),
+                      ],
+                    );
                   },
                 ),
               ),
@@ -9533,21 +9661,23 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                       ),
                     );
                   }
-                  // Sin foto: botón opcional
+                  // Sin foto: botón visible — no dice "opcional" pero el móvil
+                  // puede continuar sin foto si el local no entrega comanda.
                   return SizedBox(
                     width: double.infinity,
                     child: OutlinedButton.icon(
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.brown[700],
-                        side: BorderSide(color: Colors.brown[300]!),
-                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        foregroundColor: Colors.brown[800],
+                        backgroundColor: Colors.brown[50],
+                        side: BorderSide(color: Colors.brown[600]!, width: 2),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
                       ),
                       onPressed: () => _subirFotoComanda(servicio),
-                      icon: const Text('📷', style: TextStyle(fontSize: 16)),
+                      icon: const Text('📷', style: TextStyle(fontSize: 20)),
                       label: const Text(
-                        'Foto comanda (opcional)',
+                        'FOTOGRAFÍA DE LA COMANDA',
                         style: TextStyle(
-                            fontWeight: FontWeight.w600, fontSize: 13),
+                            fontWeight: FontWeight.bold, fontSize: 13),
                       ),
                     ),
                   );
@@ -11458,7 +11588,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                       onPressed: _procesando
                           ? null
                           : () => _transferirServicio(servicio),
-                      child: const Text('TRANSFERIR',
+                      child: const Text('TRANSFERIR A OTRO MÓVIL',
                           style: TextStyle(
                               fontWeight: FontWeight.bold, fontSize: 11)),
                     ),
@@ -12071,6 +12201,35 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                 padding: EdgeInsets.symmetric(vertical: 10),
                 child: Divider(height: 1, color: Color(0xFFE040FB)),
               ),
+
+              // Badge PAP visible solo para Masters (motiva aceptar F1)
+              if (servicio['es_punto_a_punto'] == true) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  margin: const EdgeInsets.only(bottom: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.purple[900],
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.flash_on, size: 14, color: Colors.purpleAccent),
+                      SizedBox(width: 6),
+                      Text(
+                        '⚡ PUNTO A PUNTO — Servicio gratuito',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.purpleAccent,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -12114,27 +12273,49 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFE040FB).withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      servicio['tarifa'] != null &&
-                              (servicio['tarifa'] as num) > 0
-                          ? _formatearMoneda(servicio['tarifa'])
-                          : 'COTIZAR',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 15,
-                        color: Color(0xFFE040FB),
+                  // PAP: no mostrar tarifa — es gratis
+                  if (servicio['es_punto_a_punto'] == true)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.purple[900]!.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.purple[300]!),
+                      ),
+                      child: const Text(
+                        'GRATIS',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                          color: Colors.purpleAccent,
+                        ),
+                      ),
+                    )
+                  else
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFE040FB).withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        servicio['tarifa'] != null &&
+                                (servicio['tarifa'] as num) > 0
+                            ? _formatearMoneda(servicio['tarifa'])
+                            : 'COTIZAR',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                          color: Color(0xFFE040FB),
+                        ),
                       ),
                     ),
-                  ),
                 ],
               ),
               if ((servicio['creador'] ?? '').toString().isNotEmpty)
@@ -12149,6 +12330,12 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                   ),
                 ),
             ],
+            // ── Barra de cuenta regresiva SE (cascada de fases) ───────────
+            _BarraCascadaSE(
+              servicio: servicio,
+              miMovilId: widget.usuario['id'].toString(),
+              esMaster: esMaster,
+            ),
           ],
         ),
       ),
@@ -16332,3 +16519,157 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
 }
 
 // ===========================================================================
+// _BarraCascadaSE — Barra de cuenta regresiva de fases para servicios SE
+// ===========================================================================
+//
+// Muestra en la parte inferior de la tarjeta de servicio pendiente el estado
+// actual de la cascada y cuántos segundos quedan para la siguiente fase.
+//
+// Fases reconocidas:
+//  • F2-Oferta (paradero_ofrecido_id == miMovilId): rojo · urgente · sanción
+//  • F1 (0–seF2Seg desde se_cascade_t0): verde · "Sé el primero"
+//  • F2→F3 (seF2Seg–seF3Seg): naranja · "Se abre al radar en Xs"
+//  • F3→F4 (seF3Seg–seF4Seg): naranja oscuro · "Se abre a todos en Xs"
+//  • F4+ (> seF4Seg): gris · "En espera hace Xs"
+//
+class _BarraCascadaSE extends StatefulWidget {
+  final Map<String, dynamic> servicio;
+  final String miMovilId;
+  final bool esMaster;
+
+  const _BarraCascadaSE({
+    required this.servicio,
+    required this.miMovilId,
+    required this.esMaster,
+  });
+
+  @override
+  State<_BarraCascadaSE> createState() => _BarraCascadaSEState();
+}
+
+class _BarraCascadaSEState extends State<_BarraCascadaSE> {
+  Timer? _timer;
+  int _tick = 0; // fuerza rebuild cada segundo
+  int _f2Seg = 30, _f3Seg = 60, _f4Seg = 90;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() => _tick++);
+    });
+    _cargarConfig();
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _cargarConfig() async {
+    try {
+      final c = await CascadaConfig.cargar();
+      if (mounted) {
+        setState(() {
+          _f2Seg = c.seF2Seg;
+          _f3Seg = c.seF3Seg;
+          _f4Seg = c.seF4Seg;
+        });
+      }
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Necesitamos _tick para forzar rebuild sin usar su valor
+    // ignore: unused_local_variable
+    final _ = _tick;
+
+    final t0Str = widget.servicio['se_cascade_t0'];
+    if (t0Str == null) return const SizedBox.shrink();
+    final t0 = DateTime.tryParse(t0Str.toString());
+    if (t0 == null) return const SizedBox.shrink();
+
+    final int elapsed = DateTime.now().toUtc().difference(t0).inSeconds;
+
+    // ¿Hay oferta de paradero activa para ESTE móvil?
+    final String? ofrecidoId =
+        widget.servicio['paradero_ofrecido_id']?.toString();
+    final bool esOfertaMia =
+        ofrecidoId != null && ofrecidoId == widget.miMovilId;
+
+    Color barColor;
+    String mensaje;
+    double progreso;
+
+    if (esOfertaMia) {
+      // F2 especial: oferta de paradero dirigida a este móvil
+      final ofrecidoAtStr =
+          widget.servicio['paradero_ofrecido_at']?.toString();
+      final ofrecidoAt =
+          ofrecidoAtStr != null ? DateTime.tryParse(ofrecidoAtStr) : null;
+      final int elapsedOferta = ofrecidoAt != null
+          ? DateTime.now().toUtc().difference(ofrecidoAt).inSeconds
+          : 0;
+      final int restantes = (_f2Seg - elapsedOferta).clamp(0, _f2Seg);
+      progreso = restantes / _f2Seg;
+      barColor = Colors.red[700]!;
+      mensaje =
+          '⚠️ ¡Tu turno de paradero! Acepta en ${restantes}s o serás sancionado';
+    } else if (elapsed < _f2Seg) {
+      // F1: Masters exclusivos (0–seF2Seg)
+      final int r = _f2Seg - elapsed;
+      progreso = r / _f2Seg;
+      barColor = Colors.green[600]!;
+      mensaje =
+          widget.esMaster ? '👑 Sé el primero — ${r}s' : '⏱️ Disponible — ${r}s';
+    } else if (elapsed < _f3Seg) {
+      // Esperando apertura al radar (seF2Seg–seF3Seg)
+      final int r = _f3Seg - elapsed;
+      progreso = r / (_f3Seg - _f2Seg);
+      barColor = Colors.orange[600]!;
+      mensaje = 'Se abre al radar en ${r}s';
+    } else if (elapsed < _f4Seg) {
+      // Apertura global próxima (seF3Seg–seF4Seg)
+      final int r = _f4Seg - elapsed;
+      progreso = r / (_f4Seg - _f3Seg);
+      barColor = Colors.deepOrange[600]!;
+      mensaje = 'Se abre a todos en ${r}s';
+    } else {
+      // F4+: en espera general
+      final int transcurrido = elapsed - _f4Seg;
+      progreso = 0.0;
+      barColor = Colors.grey[500]!;
+      mensaje = 'En espera hace ${transcurrido}s';
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            mensaje,
+            style: TextStyle(
+              color: esOfertaMia ? Colors.red[700] : Colors.grey[600],
+              fontSize: esOfertaMia ? 14 : 12,
+              fontWeight:
+                  esOfertaMia ? FontWeight.bold : FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 5),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: progreso.clamp(0.0, 1.0),
+              backgroundColor: Colors.grey[300],
+              valueColor: AlwaysStoppedAnimation<Color>(barColor),
+              minHeight: 8,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

@@ -19,6 +19,8 @@ mixin _DialogsMixin on State<LocalScreen> {
     bool esPuntoAPunto = false,
     required Map<String, dynamic> perfilEnVivo,
     String? telefonoPrellenado,
+    String? movilPreselId,
+    String? movilPreselLabel,
   });
   Future<Map<String, double>?> _obtenerOSellarGPSLocal({bool forzar = false});
   String get _tipoServicioDefecto;

@@ -417,6 +417,8 @@ mixin _FormularioMixin on State<LocalScreen> {
     bool esPuntoAPunto = false,
     required Map<String, dynamic> perfilEnVivo,
     String? telefonoPrellenado, // Viene del botón "NUEVO PEDIDO" en el CRM
+    String? movilPreselId,      // ID del móvil activo — abre formulario completo directo a él
+    String? movilPreselLabel,   // Etiqueta legible: "MOVIL 03"
   }) async {
     // --- CONSULTA ESPEJO CON "MI LOCAL" ---
     List<Map<String, dynamic>> listaPrecios = [];
@@ -554,6 +556,35 @@ mixin _FormularioMixin on State<LocalScreen> {
                       ),
                     ),
                   ),
+
+                // Banner de móvil preseleccionado (viene de "Nuevo servicio con Móvil X")
+                if (movilPreselId != null) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.blue[700],
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.alt_route, color: Colors.white, size: 16),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '🎯 DIRECTO A ${movilPreselLabel?.toUpperCase() ?? movilPreselId}',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 16),
 
                 // 1. TICKET
@@ -1378,8 +1409,13 @@ mixin _FormularioMixin on State<LocalScreen> {
                         String? exclusivoIdCampo;
                         List<String> pilotosSeleccionadosIds = [];
 
-                        // --- ENRUTAR CON MÓVIL ACTIVO ---
-                        if (!_esCot &&
+                        // --- PRESEL DIRECTO: saltar ENRUTAR automático y paradero ---
+                        if (movilPreselId != null && !_esCot) {
+                          exclusivoIdCampo = movilPreselId;
+                          pilotosSeleccionadosIds = [movilPreselId];
+                        }
+                        // --- ENRUTAR CON MÓVIL ACTIVO (solo si NO hay presel) ---
+                        else if (!_esCot &&
                             !esPuntoAPunto &&
                             retardoProgramado == 0 &&
                             rutaGrupoIdParaNuevo == null) {
@@ -1481,16 +1517,27 @@ mixin _FormularioMixin on State<LocalScreen> {
                         // --- PARADERO AUTO-ASIGNACIÓN (espeja Ruta A de Central) ---
                         String? paraderoAutoMovilId;
                         if (!_esCot && !esPuntoAPunto && exclusivoIdCampo == null) {
-                          final serviciosPendientes = await Supabase.instance.client
+                          // Ocupados: con servicio activo + exclusivos pendientes + reservados F2 paradero
+                          final _svcActivosF = await Supabase.instance.client
                               .from('servicios')
-                              .select('exclusivo_id')
-                              .eq('estado', 'pendiente')
-                              .not('exclusivo_id', 'is', null);
+                              .select('movil_id')
+                              .inFilter('estado', ['en_ruta_origen', 'en_origen', 'en_ruta_destino', 'problema'])
+                              .not('movil_id', 'is', null);
+                          final _svcPendientesF = await Supabase.instance.client
+                              .from('servicios')
+                              .select('exclusivo_id, paradero_auto_movil_id')
+                              .eq('estado', 'pendiente');
                           List<String> ocupados = [];
-                          for (var s in serviciosPendientes) {
-                            ocupados.addAll(
-                              s['exclusivo_id'].toString().split(',').map((e) => e.trim()),
-                            );
+                          for (var s in _svcActivosF) {
+                            ocupados.add(s['movil_id'].toString());
+                          }
+                          for (var s in _svcPendientesF) {
+                            if (s['exclusivo_id'] != null) {
+                              ocupados.addAll(s['exclusivo_id'].toString().split(',').map((e) => e.trim()));
+                            }
+                            if (s['paradero_auto_movil_id'] != null) {
+                              ocupados.add(s['paradero_auto_movil_id'].toString());
+                            }
                           }
 
                           final movilesLibres = await Supabase.instance.client
@@ -1681,6 +1728,15 @@ mixin _FormularioMixin on State<LocalScreen> {
                             titulo: '❓ NUEVA COTIZACIÓN',
                             mensaje: 'Un local solicita cotización de tarifa',
                             urgente: true,
+                          );
+                        } else if (movilPreselId != null) {
+                          // Directo: un solo misil al móvil preseleccionado
+                          // (el service ya tiene exclusivo_id — no se dispara cascada)
+                          await _dispararMisilInmediato(
+                            externalIds: [movilPreselId],
+                            titulo: '🎯 PEDIDO DIRECTO',
+                            mensaje:
+                                '${widget.usuario["nombre"]} te asignó un nuevo pedido — revisa el radar',
                           );
                         } else if (esPuntoAPunto) {
                           // P.A.P: notificar SOLO al #1 del paradero del local

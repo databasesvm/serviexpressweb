@@ -5,6 +5,16 @@ part of 'local_screen.dart';
 // _CardsMixin — tarjetas de servicio, controles operativos y helpers de hub
 // ══════════════════════════════════════════════════════════════════════════════
 mixin _CardsMixin on State<LocalScreen> {
+  // ── Stubs de métodos implementados en otros mixins ────────────────────────
+  void _abrirFormularioPedido(
+    BuildContext context, {
+    bool esPuntoAPunto = false,
+    required Map<String, dynamic> perfilEnVivo,
+    String? telefonoPrellenado,
+    String? movilPreselId,
+    String? movilPreselLabel,
+  });
+
   // ── Campos propios ─────────────────────────────────────────────────────────
   final Set<int> _tarjetasColapsadasLocal = {};
   final Set<int> _tarjetasExpandidasLocal = {};
@@ -537,8 +547,10 @@ mixin _CardsMixin on State<LocalScreen> {
     String? ticketPOS = servicio['ticket_factura']?.toString();
     String? telCliente = servicio['telefono_receptor']?.toString();
 
-    // Tarifa compacta para el header colapsado
+    // Tarifa compacta para el header colapsado (no mostrar en PAP)
+    final bool _esPAP = servicio['es_punto_a_punto'] == true;
     final _tarifaDisplay = () {
+      if (_esPAP) return '';
       final t = servicio['tarifa'];
       if (t != null && (t as num) > 0) return fmtPeso(t);
       return '';
@@ -813,11 +825,9 @@ mixin _CardsMixin on State<LocalScreen> {
                               ),
                             ),
                           ),
-                        // ENRUTAR — siempre visible mientras el servicio
-                        // sigue activo, no solo cuando el sistema
-                        // detecta similitud o cercanía. Súmale otro
-                        // encargo al mismo moto sin esperar a que
-                        // termine el actual (sujeto a su cupo de rango).
+                        // NUEVO SERVICIO CON ESTE MÓVIL — abre el formulario
+                        // completo con el móvil activo pre-seleccionado.
+                        // El pedido se envía directo a él sin cascada.
                         if (data != null &&
                             ['en_ruta_origen', 'en_origen', 'en_ruta_destino']
                                 .contains(estado))
@@ -828,14 +838,21 @@ mixin _CardsMixin on State<LocalScreen> {
                               child: OutlinedButton.icon(
                                 style: OutlinedButton.styleFrom(
                                   foregroundColor: Colors.blue[700],
-                                  side: BorderSide(color: Colors.blue[300]!),
-                                  padding: const EdgeInsets.symmetric(vertical: 6),
+                                  backgroundColor: Colors.blue[50],
+                                  side: BorderSide(color: Colors.blue[300]!, width: 1.5),
+                                  padding: const EdgeInsets.symmetric(vertical: 8),
                                 ),
-                                onPressed: () => _abrirEnrutarAlMoto(context, servicio, data),
-                                icon: const Icon(Icons.alt_route, size: 14),
-                                label: const Text(
-                                  'ENRUTAR (sumar otro encargo)',
-                                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+                                onPressed: () => _abrirFormularioPedido(
+                                  context,
+                                  perfilEnVivo: widget.usuario,
+                                  movilPreselId: data['id'].toString(),
+                                  movilPreselLabel: movilLabel(data),
+                                ),
+                                icon: const Icon(Icons.add_circle_outline, size: 14),
+                                label: Text(
+                                  'NUEVO PEDIDO — ${movilLabel(data).toUpperCase()}',
+                                  style: const TextStyle(
+                                      fontSize: 10, fontWeight: FontWeight.bold),
                                 ),
                               ),
                             ),
@@ -999,23 +1016,54 @@ mixin _CardsMixin on State<LocalScreen> {
               const SizedBox(height: 12),
 
             // -------------------------------------------------------------------
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  estado == 'cotizacion'
-                      ? 'Tarifa: Calculando...'
-                      : 'Tarifa: ${fmtPeso(servicio['tarifa'])}',
-                  style: TextStyle(
-                    color: estado == 'cotizacion'
-                        ? Colors.orange[800]
-                        : Colors.green,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
+            // PAP: banner morado en lugar de tarifa
+            if (_esPAP) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.purple[900],
+                  borderRadius: BorderRadius.circular(8),
                 ),
-              ],
-            ),
+                child: const Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.flash_on, size: 15, color: Colors.purpleAccent),
+                        SizedBox(width: 6),
+                        Text(
+                          '⚡ PUNTO A PUNTO — Servicio gratuito',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.purpleAccent,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ] else ...[
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    estado == 'cotizacion'
+                        ? 'Tarifa: Calculando...'
+                        : 'Tarifa: ${fmtPeso(servicio['tarifa'])}',
+                    style: TextStyle(
+                      color: estado == 'cotizacion'
+                          ? Colors.orange[800]
+                          : Colors.green,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                ],
+              ),
+            ],
 
             if (servicio['observacion'] != null) ...[
               const SizedBox(height: 10),
@@ -1546,9 +1594,8 @@ mixin _CardsMixin on State<LocalScreen> {
   }
 
   // ─────────────────────────────────────────────────────────────
-  // ENRUTAR ENCARGO AL MÓVIL ACTIVO
-  // Abre un diálogo para crear un nuevo servicio asignado
-  // directamente al mismo móvil que ya está haciendo una entrega.
+  // ENRUTAR ENCARGO AL MÓVIL ACTIVO (LEGACY — reemplazado por botón en la card)
+  // Mantenido temporalmente por si algún otro punto del código lo llama.
   // ─────────────────────────────────────────────────────────────
   void _abrirEnrutarAlMoto(
     BuildContext context,

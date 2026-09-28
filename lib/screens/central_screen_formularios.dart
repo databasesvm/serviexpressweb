@@ -724,9 +724,15 @@ extension CentralScreenFormularios on _CentralScreenState {
                                     'en_ruta_destino', 'problema',
                                   ])
                                   .not('movil_id', 'is', null);
-                              final idsOcupados = (activosSvc as List)
-                                  .map((s) => s['movil_id'].toString())
-                                  .toSet();
+                              final reservadosSvc = await Supabase.instance.client
+                                  .from('servicios')
+                                  .select('paradero_auto_movil_id')
+                                  .eq('estado', 'pendiente')
+                                  .not('paradero_auto_movil_id', 'is', null);
+                              final idsOcupados = {
+                                ...(activosSvc as List).map((s) => s['movil_id'].toString()),
+                                ...(reservadosSvc as List).map((s) => s['paradero_auto_movil_id'].toString()),
+                              };
                               for (final m in filaParadero as List) {
                                 final mId = m['id'].toString();
                                 if (!idsOcupados.contains(mId)) {

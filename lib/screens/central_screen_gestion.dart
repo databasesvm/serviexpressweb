@@ -1769,7 +1769,7 @@ class _PanelGestorParaderosState extends State<_PanelGestorParaderos>
   @override
   void initState() {
     super.initState();
-    _tab = TabController(length: 3, vsync: this);
+    _tab = TabController(length: 4, vsync: this);
     _future = _cargar();
     _cargarParaderosBD();
   }
@@ -1783,7 +1783,7 @@ class _PanelGestorParaderosState extends State<_PanelGestorParaderos>
   Future<List<Map<String, dynamic>>> _cargar() =>
       Supabase.instance.client
           .from('usuarios')
-          .select('id, nombre, paradero_exclusivo, paradero_nocturno, recargo_nocturno_especial, zona_lluvia')
+          .select('id, nombre, paradero_exclusivo, paradero_nocturno, recargo_nocturno_especial, zona_lluvia, tiene_punto_a_punto')
           .eq('rol', 'local')
           .order('nombre', ascending: true);
 
@@ -1807,6 +1807,15 @@ class _PanelGestorParaderosState extends State<_PanelGestorParaderos>
     _recargar();
   }
 
+  /// Activa/desactiva el botón Punto a Punto para un local
+  Future<void> _togglePuntoAPunto(Map<String, dynamic> local, bool valor) async {
+    await Supabase.instance.client
+        .from('usuarios')
+        .update({'tiene_punto_a_punto': valor})
+        .eq('id', local['id']);
+    _recargar();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1826,6 +1835,7 @@ class _PanelGestorParaderosState extends State<_PanelGestorParaderos>
             Tab(icon: Icon(Icons.wb_sunny_outlined, size: 18), text: 'DÍA'),
             Tab(icon: Icon(Icons.nights_stay_outlined, size: 18), text: 'NOCTURNO'),
             Tab(icon: Icon(Icons.place_rounded, size: 18), text: 'PARADEROS'),
+            Tab(icon: Icon(Icons.flash_on, size: 18), text: 'P.A.P'),
           ],
         ),
       ),
@@ -1847,6 +1857,7 @@ class _PanelGestorParaderosState extends State<_PanelGestorParaderos>
               _buildTabDia(locales),
               _buildTabNocturno(locales),
               _buildTabParaderos(),
+              _buildTabPAP(locales),
             ],
           );
         },
@@ -2137,6 +2148,104 @@ class _PanelGestorParaderosState extends State<_PanelGestorParaderos>
         ),
       ),
     ]);
+  }
+
+  // ── TAB 3: P.A.P ────────────────────────────────────────────────────────────
+  Widget _buildTabPAP(List<Map<String, dynamic>> locales) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
+      children: [
+        _bannerInfo(
+          '⚡ Punto a Punto — activa 1 servicio gratuito/día por local seleccionado. '
+          'El móvil que lo complete recibe: 🎟️ Prioridad en paradero · +2 pts semana · +0.2 calificación.',
+        ),
+        const SizedBox(height: 12),
+        if (locales.isEmpty)
+          _emptyCard('Sin locales registrados')
+        else
+          ...locales.map((l) => _cardLocalPAP(l)),
+      ],
+    );
+  }
+
+  Widget _cardLocalPAP(Map<String, dynamic> local) {
+    final nombre = local['nombre']?.toString() ?? '—';
+    final activo = local['tiene_punto_a_punto'] == true;
+
+    return Card(
+      elevation: activo ? 2 : 0,
+      margin: const EdgeInsets.only(bottom: 10),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(
+          color: activo
+              ? const Color(0xFF7B1FA2).withValues(alpha: 0.5)
+              : Colors.grey[300]!,
+          width: activo ? 1.5 : 1,
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(children: [
+          // Icono PAP
+          Container(
+            width: 42, height: 42,
+            decoration: BoxDecoration(
+              color: activo
+                  ? const Color(0xFF7B1FA2).withValues(alpha: 0.12)
+                  : Colors.grey[100],
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: activo
+                    ? const Color(0xFF7B1FA2).withValues(alpha: 0.4)
+                    : Colors.grey[300]!,
+              ),
+            ),
+            child: Center(
+              child: Text(
+                activo ? '⚡' : '🏪',
+                style: const TextStyle(fontSize: 20),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          // Nombre + estado
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  nombre,
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                    color: activo ? Colors.black87 : Colors.black45,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  activo
+                      ? 'Punto a Punto habilitado — 1 gratis/día'
+                      : 'Punto a Punto desactivado',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: activo
+                        ? const Color(0xFF7B1FA2)
+                        : Colors.black38,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Toggle
+          Switch(
+            value: activo,
+            activeColor: const Color(0xFF7B1FA2),
+            onChanged: (v) => _togglePuntoAPunto(local, v),
+          ),
+        ]),
+      ),
+    );
   }
 
   Widget _cardParadero(Map<String, dynamic> p) {

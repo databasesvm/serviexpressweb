@@ -610,7 +610,9 @@ class _LocalScreenState extends State<LocalScreen>
                 }).length;
 
                 // Stats rápidos para el KPI bar del historial
-                final puedeVip = _puedeUsarPuntoAPunto();
+                // tiene_punto_a_punto: la central lo activa por local específico
+                final tienePAP = perfilEnVivo['tiene_punto_a_punto'] == true;
+                final puedeVip = tienePAP && _puedeUsarPuntoAPunto();
                 final histFinalizados = historial.where((s) => s['estado'] == 'finalizado').length;
                 final histCancelados = historial.where((s) => s['estado'] == 'cancelado').length;
 
@@ -652,46 +654,49 @@ class _LocalScreenState extends State<LocalScreen>
                                       style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
                                 ),
                               ),
-                              const SizedBox(height: 8),
                               // Fila 2: PUNTO A PUNTO + SOLICITAR MÓVIL (dos columnas)
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: ElevatedButton.icon(
+                              // El bloque PAP solo aparece si la central lo habilitó para este local
+                              if (tienePAP) ...[
+                                const SizedBox(height: 8),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: ElevatedButton.icon(
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: puedeVip ? Colors.purple[800] : Colors.grey[300],
+                                          foregroundColor: puedeVip ? Colors.white : Colors.grey[600],
+                                          padding: const EdgeInsets.symmetric(vertical: 10),
+                                          elevation: puedeVip ? 2 : 0,
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                        ),
+                                        onPressed: puedeVip
+                                            ? () => _abrirFormularioPedido(context,
+                                                esPuntoAPunto: true, perfilEnVivo: perfilEnVivo)
+                                            : null,
+                                        icon: const Icon(Icons.flash_on, size: 17),
+                                        label: Text(
+                                          puedeVip ? 'PUNTO A PUNTO' : 'P.A.P AGOTADO',
+                                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    // ── TEMPORAL: solicitud directa al radar ──
+                                    ElevatedButton.icon(
                                       style: ElevatedButton.styleFrom(
-                                        backgroundColor: puedeVip ? Colors.purple[800] : Colors.grey[300],
-                                        foregroundColor: puedeVip ? Colors.white : Colors.grey[600],
-                                        padding: const EdgeInsets.symmetric(vertical: 10),
-                                        elevation: puedeVip ? 2 : 0,
+                                        backgroundColor: Colors.orange[800],
+                                        foregroundColor: Colors.white,
+                                        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
                                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                       ),
-                                      onPressed: puedeVip
-                                          ? () => _abrirFormularioPedido(context,
-                                              esPuntoAPunto: true, perfilEnVivo: perfilEnVivo)
-                                          : null,
-                                      icon: const Icon(Icons.flash_on, size: 17),
-                                      label: Text(
-                                        puedeVip ? 'PUNTO A PUNTO' : 'P.A.P AGOTADO',
-                                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
-                                      ),
+                                      onPressed: () => _solicitarMovilDirecto(context),
+                                      icon: const Icon(Icons.store, size: 16),
+                                      label: const Text('SOLICITAR MÓVIL',
+                                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                                     ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  // ── TEMPORAL: solicitud directa al radar ──
-                                  ElevatedButton.icon(
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.orange[800],
-                                      foregroundColor: Colors.white,
-                                      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                    ),
-                                    onPressed: () => _solicitarMovilDirecto(context),
-                                    icon: const Icon(Icons.store, size: 16),
-                                    label: const Text('SOLICITAR MÓVIL',
-                                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-                                  ),
-                                ],
-                              ),
+                                  ],
+                                ),
+                              ],
                             ],
                           ),
                         ),

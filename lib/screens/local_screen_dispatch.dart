@@ -351,14 +351,27 @@ mixin _DispatchMixin on State<LocalScreen> {
       // 2. Buscar #1 libre del paradero objetivo (misma lógica de _solicitarMovilAprobado)
       String? paraderoAutoMovilId;
 
-      final serviciosPendientes = await Supabase.instance.client
+      // Ocupados: con servicio activo + exclusivos pendientes + reservados F2 paradero
+      final _svcActivos1 = await Supabase.instance.client
           .from('servicios')
-          .select('exclusivo_id')
-          .eq('estado', 'pendiente')
-          .not('exclusivo_id', 'is', null);
+          .select('movil_id')
+          .inFilter('estado', ['en_ruta_origen', 'en_origen', 'en_ruta_destino', 'problema'])
+          .not('movil_id', 'is', null);
+      final _svcPendientes1 = await Supabase.instance.client
+          .from('servicios')
+          .select('exclusivo_id, paradero_auto_movil_id')
+          .eq('estado', 'pendiente');
       final List<String> ocupados = [];
-      for (var s in serviciosPendientes) {
-        ocupados.addAll(s['exclusivo_id'].toString().split(',').map((e) => e.trim()));
+      for (var s in _svcActivos1) {
+        ocupados.add(s['movil_id'].toString());
+      }
+      for (var s in _svcPendientes1) {
+        if (s['exclusivo_id'] != null) {
+          ocupados.addAll(s['exclusivo_id'].toString().split(',').map((e) => e.trim()));
+        }
+        if (s['paradero_auto_movil_id'] != null) {
+          ocupados.add(s['paradero_auto_movil_id'].toString());
+        }
       }
 
       final movilesLibres = await Supabase.instance.client
@@ -859,16 +872,27 @@ mixin _DispatchMixin on State<LocalScreen> {
 
       if (!esPuntoAPunto) {
         // --- Buscar #1 libre del paradero objetivo (espeja Ruta A de Central) ---
-        final serviciosPendientes = await Supabase.instance.client
+        // Ocupados: con servicio activo + exclusivos pendientes + reservados F2 paradero
+        final _svcActivos2 = await Supabase.instance.client
             .from('servicios')
-            .select('exclusivo_id')
-            .eq('estado', 'pendiente')
-            .not('exclusivo_id', 'is', null);
+            .select('movil_id')
+            .inFilter('estado', ['en_ruta_origen', 'en_origen', 'en_ruta_destino', 'problema'])
+            .not('movil_id', 'is', null);
+        final _svcPendientes2 = await Supabase.instance.client
+            .from('servicios')
+            .select('exclusivo_id, paradero_auto_movil_id')
+            .eq('estado', 'pendiente');
         List<String> ocupados = [];
-        for (var s in serviciosPendientes) {
-          ocupados.addAll(
-            s['exclusivo_id'].toString().split(',').map((e) => e.trim()),
-          );
+        for (var s in _svcActivos2) {
+          ocupados.add(s['movil_id'].toString());
+        }
+        for (var s in _svcPendientes2) {
+          if (s['exclusivo_id'] != null) {
+            ocupados.addAll(s['exclusivo_id'].toString().split(',').map((e) => e.trim()));
+          }
+          if (s['paradero_auto_movil_id'] != null) {
+            ocupados.add(s['paradero_auto_movil_id'].toString());
+          }
         }
 
         final movilesLibres = await Supabase.instance.client
