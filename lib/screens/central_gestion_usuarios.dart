@@ -75,7 +75,7 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
         _db.from('usuarios')
             .select('id, nombre, usuario, correo, telefono, direccion_local, tipo_negocio, zona_cobertura, activo, created_at')
             .eq('rol', 'local')
-            .eq('estado_local', 'activo')
+            .eq('estado_local', 'aprobado')
             .order('nombre', ascending: true),
         _db.from('usuarios')
             .select('id, nombre, usuario, correo, telefono, created_at')
@@ -617,10 +617,21 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
       ),
     );
     if (nuevoPlan == null || !mounted) return;
+    final planAnterior    = u['tipo_plan_movil']?.toString() ?? '';
+    final saleDeSemanal   = planAnterior == 'semanal' && nuevoPlan != 'semanal';
     try {
-      await _db.from('usuarios').update({'tipo_plan_movil': nuevoPlan}).eq('id', u['id']);
+      await _db.from('usuarios').update({
+        'tipo_plan_movil': nuevoPlan,
+        if (saleDeSemanal) 'wallet_bloqueado'    : false,
+        if (saleDeSemanal) 'recargo_mora_activo' : false,
+      }).eq('id', u['id']);
       final idx = _moviles.indexWhere((m) => m['id'] == u['id']);
-      if (idx != -1) setState(() => _moviles[idx] = {..._moviles[idx], 'tipo_plan_movil': nuevoPlan});
+      if (idx != -1) setState(() => _moviles[idx] = {
+        ..._moviles[idx],
+        'tipo_plan_movil'    : nuevoPlan,
+        if (saleDeSemanal) 'wallet_bloqueado'    : false,
+        if (saleDeSemanal) 'recargo_mora_activo' : false,
+      });
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('✅ Plan actualizado a $nuevoPlan'), backgroundColor: Colors.lightBlue[700]),
       );

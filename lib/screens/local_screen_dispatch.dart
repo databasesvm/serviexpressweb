@@ -376,7 +376,7 @@ mixin _DispatchMixin on State<LocalScreen> {
 
       final movilesLibres = await Supabase.instance.client
           .from('usuarios')
-          .select('id, paradero_actual, ingreso_fila')
+          .select('id, paradero_actual, ingreso_fila, ticket_prioridad')
           .eq('rol', 'movil')
           .eq('en_linea', true)
           .eq('tiene_se', true)
@@ -388,11 +388,16 @@ mixin _DispatchMixin on State<LocalScreen> {
         gruposParaderos.putIfAbsent(pName, () => []).add(m);
       }
       gruposParaderos.forEach((_, lista) {
-        lista.sort((a, b) => DateTime.parse(
-          a['ingreso_fila'] ?? DateTime.now().toIso8601String(),
-        ).compareTo(DateTime.parse(
-          b['ingreso_fila'] ?? DateTime.now().toIso8601String(),
-        )));
+        lista.sort((a, b) {
+          final tA = (a['ticket_prioridad'] == true) ? 0 : 1;
+          final tB = (b['ticket_prioridad'] == true) ? 0 : 1;
+          if (tA != tB) return tA.compareTo(tB);
+          return DateTime.parse(
+            a['ingreso_fila'] ?? DateTime.now().toIso8601String(),
+          ).compareTo(DateTime.parse(
+            b['ingreso_fila'] ?? DateTime.now().toIso8601String(),
+          ));
+        });
       });
 
       // Paradero objetivo: exclusivo del local → más cercano si no tiene
@@ -462,11 +467,19 @@ mixin _DispatchMixin on State<LocalScreen> {
         }
       }
 
-      // 3. Guardar paradero_auto_movil_id (pg_cron lo auto-asigna a T+30s)
+      // 3. Guardar paradero_ofrecido_id inmediato + misil F2 a T+30s
       if (paraderoAutoMovilId != null) {
         await Supabase.instance.client.from('servicios').update({
           'paradero_auto_movil_id': paraderoAutoMovilId,
+          'paradero_ofrecido_id': paraderoAutoMovilId,
+          'paradero_ofrecido_at': DateTime.now().toUtc().toIso8601String(),
         }).eq('id', svcId);
+        await _programarMisilRetardado(
+          externalIds: [paraderoAutoMovilId],
+          titulo: '⚠️ ¡TU TURNO DE PARADERO!',
+          mensaje: 'Tienes 30 segundos para aceptar el servicio.',
+          segundosRetardo: 30,
+        );
       }
 
       final String msg = 'Recogida Local en $localNombre — revisa el radar';
@@ -486,7 +499,7 @@ mixin _DispatchMixin on State<LocalScreen> {
         );
       }
 
-      // Fase 2: pg_cron auto-asigna al #1 del paradero a T+30s
+      // Fase 2 (T+30s): misil al #1 del paradero ya programado arriba.
 
       // F3/F4 — pg_cron consulta en_linea en tiempo real
       await Supabase.instance.client.from('servicios').update({
@@ -897,7 +910,7 @@ mixin _DispatchMixin on State<LocalScreen> {
 
         final movilesLibres = await Supabase.instance.client
             .from('usuarios')
-            .select('id, paradero_actual, ingreso_fila')
+            .select('id, paradero_actual, ingreso_fila, ticket_prioridad')
             .eq('rol', 'movil')
             .eq('en_linea', true)
             .eq('tiene_se', true)
@@ -909,11 +922,16 @@ mixin _DispatchMixin on State<LocalScreen> {
           gruposParaderos.putIfAbsent(pName, () => []).add(m);
         }
         gruposParaderos.forEach((_, lista) {
-          lista.sort((a, b) => DateTime.parse(
-            a['ingreso_fila'] ?? DateTime.now().toIso8601String(),
-          ).compareTo(DateTime.parse(
-            b['ingreso_fila'] ?? DateTime.now().toIso8601String(),
-          )));
+          lista.sort((a, b) {
+            final tA = (a['ticket_prioridad'] == true) ? 0 : 1;
+            final tB = (b['ticket_prioridad'] == true) ? 0 : 1;
+            if (tA != tB) return tA.compareTo(tB);
+            return DateTime.parse(
+              a['ingreso_fila'] ?? DateTime.now().toIso8601String(),
+            ).compareTo(DateTime.parse(
+              b['ingreso_fila'] ?? DateTime.now().toIso8601String(),
+            ));
+          });
         });
 
         // Determinar paradero objetivo
@@ -1009,8 +1027,21 @@ mixin _DispatchMixin on State<LocalScreen> {
             'estado': nuevoEstado,
             if (paraderoAutoMovilId != null)
               'paradero_auto_movil_id': paraderoAutoMovilId,
+            if (paraderoAutoMovilId != null)
+              'paradero_ofrecido_id': paraderoAutoMovilId,
+            if (paraderoAutoMovilId != null)
+              'paradero_ofrecido_at': DateTime.now().toUtc().toIso8601String(),
           })
           .eq('id', nuevoServicioId);
+
+      if (paraderoAutoMovilId != null) {
+        await _programarMisilRetardado(
+          externalIds: [paraderoAutoMovilId],
+          titulo: '⚠️ ¡TU TURNO DE PARADERO!',
+          mensaje: 'Tienes 30 segundos para aceptar el servicio.',
+          segundosRetardo: 30,
+        );
+      }
 
       String mensajeAlarma =
           '📍 ${widget.usuario['nombre']} solicitó un móvil para $destinoNuevo.';
@@ -1029,7 +1060,7 @@ mixin _DispatchMixin on State<LocalScreen> {
           mensaje: mensajeAlarma,
         );
       }
-      // Fase 2: fn-auto-asignar-fase2 maneja push + auto-asignación al #1 del paradero a T+30s
+      // Fase 2 (T+30s): misil al #1 del paradero ya programado arriba.
 
       // T=+60s (zonal 1km) y T=+90s (todos) — nuevas olas del embudo de 2 min
       if (!esPuntoAPunto) {

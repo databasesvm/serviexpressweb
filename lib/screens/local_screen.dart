@@ -126,13 +126,20 @@ class _LocalScreenState extends State<LocalScreen>
       if (!kIsWeb && mounted) await OtaUpdater.verificar(context);
     });
 
-    // Canal: detecta cambios de estado en los servicios de este local
+    // Canal: detecta cambios de estado en los servicios de este local.
+    // OPTIMIZACIÓN: filtro server-side por local_id — antes llegaban UPDATEs
+    // de servicios de TODOS los locales del sistema a TODOS los dispositivos.
     _canalEstados = Supabase.instance.client
         .channel('local_estados_${widget.usuario['id']}')
         .onPostgresChanges(
           event: PostgresChangeEvent.update,
           schema: 'public',
           table: 'servicios',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'local_id',
+            value: widget.usuario['id'],
+          ),
           callback: (payload) {
             if (!mounted) return;
             final nuevo = payload.newRecord;
@@ -208,7 +215,13 @@ class _LocalScreenState extends State<LocalScreen>
         .eq('local_id', widget.usuario['id']) // FIX #4: ID único, no nombre
         // NOTA: stream() solo admite 1 .eq(). No se puede añadir
         // .eq('oculto_local', false) — rompe el SDK. Se filtra abajo.
-        .order('id', ascending: false);
+        .order('id', ascending: false)
+        // OPTIMIZACIÓN: 200 registros cubren cualquier día operativo holgado.
+        // El HISTORIAL solo muestra servicios de HOY (filtro created_at en Dart)
+        // → nunca se necesita historial de semanas anteriores en tiempo real.
+        // Sin este límite, el stream descargaba TODO el historial del local
+        // desde siempre en cada reconexión (cada 30s).
+        .limit(200);
 
     _subPerfilPropio = crudoPerfil.listen(
       (data) {

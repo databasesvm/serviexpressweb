@@ -602,7 +602,6 @@ extension CentralScreenFormularios on _CentralScreenState {
 
                       try {
                         // ---> UNIFICACIÓN: ESCÁNER MULTI-PARADERO DESDE CENTRAL <---
-                        String? exclusivoIdCampo;
 
                         // FALLBACK DE UBICACIÓN — si el autocompletado no
                         // encontró un local con base sellada, usamos las
@@ -616,11 +615,9 @@ extension CentralScreenFormularios on _CentralScreenState {
                           origenLngCapturada = -72.479256;
                         }
 
-                        // Si hay asignación directa, el exclusivo_id
-                        // es solo ese móvil (nadie más lo ve en el radar)
-                        if (movilDirectoServimotoId != null) {
-                          exclusivoIdCampo = movilDirectoServimotoId;
-                        }
+                        // exclusivoIdCampo ya contiene el/los ids de paradero
+                        // (calculado arriba). La asignación directa SE ya NO
+                        // usa exclusivo_id — nace en en_ruta_origen con movil_id.
 
                         // INSERCIÓN EN BD CON MULTI-ID DE PARADERO
                         final insertedSvc = await Supabase.instance.client
@@ -642,12 +639,19 @@ extension CentralScreenFormularios on _CentralScreenState {
                                     {'total': tarifaFinal, 'fuente': 'central'},
                               },
                               'observacion': observacionFinal,
-                              'estado': 'pendiente',
+                              // Asignación directa: nace en_ruta_origen con movil_id,
+                              // igual que FN. Radar normal: pendiente con exclusivo_id.
+                              'estado': movilDirectoServimotoId != null
+                                  ? 'en_ruta_origen'
+                                  : 'pendiente',
                               'creador': 'Central',
                               'tipo_servicio': tipoServicio,
                               'metodo_pago': 'Efectivo',
                               'archivado': false,
-                              'exclusivo_id': exclusivoIdCampo,
+                              if (movilDirectoServimotoId != null)
+                                'movil_id': int.tryParse(movilDirectoServimotoId!),
+                              if (movilDirectoServimotoId != null)
+                                'accepted_at': DateTime.now().toUtc().toIso8601String(),
                               if (origenLatCapturada != null)
                                 'origen_lat': origenLatCapturada,
                               if (origenLngCapturada != null)
@@ -702,11 +706,17 @@ extension CentralScreenFormularios on _CentralScreenState {
                           //  FASE 4 (90s+)   → Todos disponibles
                           // ══════════════════════════════════════════════════
 
-                          // --- Encontrar #1 del paraderoOrigen para pg_cron ---
+                          // --- F2: Encontrar #1 del paradero para el misil a T+30s ---
+                          // • Paradero explícito → busca el #1 de ese paradero.
+                          // • Sin paradero seleccionado → busca el #1 global de
+                          //   cualquier paradero, ordenado por ticket_prioridad y
+                          //   antigüedad en cola (no usa coordenadas: la central
+                          //   no siempre las captura con precisión).
                           String? paraderoAutoMovilId;
-                          if (paraderoOrigen != null) {
-                            try {
-                              final filaParadero = await Supabase.instance.client
+                          try {
+                            final List fila;
+                            if (paraderoOrigen != null) {
+                              fila = await Supabase.instance.client
                                   .from('usuarios')
                                   .select('id')
                                   .eq('rol', 'movil')
@@ -715,39 +725,64 @@ extension CentralScreenFormularios on _CentralScreenState {
                                   .eq('tiene_se', true)
                                   .eq('paradero_actual', paraderoOrigen!)
                                   .not('suspendido', 'is', true)
-                                  .order('ingreso_fila', ascending: true);
-                              final activosSvc = await Supabase.instance.client
-                                  .from('servicios')
-                                  .select('movil_id')
-                                  .inFilter('estado', [
-                                    'en_ruta_origen', 'en_origen',
-                                    'en_ruta_destino', 'problema',
-                                  ])
-                                  .not('movil_id', 'is', null);
-                              final reservadosSvc = await Supabase.instance.client
-                                  .from('servicios')
-                                  .select('paradero_auto_movil_id')
-                                  .eq('estado', 'pendiente')
-                                  .not('paradero_auto_movil_id', 'is', null);
-                              final idsOcupados = {
-                                ...(activosSvc as List).map((s) => s['movil_id'].toString()),
-                                ...(reservadosSvc as List).map((s) => s['paradero_auto_movil_id'].toString()),
-                              };
-                              for (final m in filaParadero as List) {
-                                final mId = m['id'].toString();
-                                if (!idsOcupados.contains(mId)) {
-                                  paraderoAutoMovilId = mId;
-                                  break;
-                                }
+                                  .order('ticket_prioridad', ascending: false, nullsFirst: false)
+                                  .order('ingreso_fila', ascending: true, nullsFirst: true);
+                            } else {
+                              // #1 global de cualquier paradero
+                              fila = await Supabase.instance.client
+                                  .from('usuarios')
+                                  .select('id')
+                                  .eq('rol', 'movil')
+                                  .eq('en_linea', true)
+                                  .eq('activo', true)
+                                  .eq('tiene_se', true)
+                                  .not('paradero_actual', 'is', null)
+                                  .not('suspendido', 'is', true)
+                                  .order('ticket_prioridad', ascending: false, nullsFirst: false)
+                                  .order('ingreso_fila', ascending: true, nullsFirst: true);
+                            }
+                            final activosSvc = await Supabase.instance.client
+                                .from('servicios')
+                                .select('movil_id')
+                                .inFilter('estado', [
+                                  'en_ruta_origen', 'en_origen',
+                                  'en_ruta_destino', 'problema',
+                                ])
+                                .not('movil_id', 'is', null);
+                            final reservadosSvc = await Supabase.instance.client
+                                .from('servicios')
+                                .select('paradero_auto_movil_id')
+                                .eq('estado', 'pendiente')
+                                .not('paradero_auto_movil_id', 'is', null);
+                            final idsOcupados = {
+                              ...(activosSvc as List).map((s) => s['movil_id'].toString()),
+                              ...(reservadosSvc as List).map((s) => s['paradero_auto_movil_id'].toString()),
+                            };
+                            for (final m in fila) {
+                              final mId = m['id'].toString();
+                              if (!idsOcupados.contains(mId)) {
+                                paraderoAutoMovilId = mId;
+                                break;
                               }
-                              if (paraderoAutoMovilId != null) {
-                                await Supabase.instance.client
-                                    .from('servicios')
-                                    .update({'paradero_auto_movil_id': paraderoAutoMovilId})
-                                    .eq('id', nuevoServicioId);
-                              }
-                            } catch (_) {}
-                          }
+                            }
+                            if (paraderoAutoMovilId != null) {
+                              await Supabase.instance.client
+                                  .from('servicios')
+                                  .update({
+                                    'paradero_auto_movil_id': paraderoAutoMovilId,
+                                    'paradero_ofrecido_id': paraderoAutoMovilId,
+                                    'paradero_ofrecido_at': DateTime.now().toUtc().toIso8601String(),
+                                  })
+                                  .eq('id', nuevoServicioId);
+                              await MotorNotificaciones.programarMisilRetardado(
+                                externalIds: [paraderoAutoMovilId],
+                                titulo: '⚠️ ¡TU TURNO DE PARADERO!',
+                                mensaje: 'Tienes 30 segundos para aceptar el servicio.',
+                                segundosRetardo: 30,
+                                sonido: 'movil_paradero',
+                              );
+                            }
+                          } catch (_) {}
 
                           // --- FASE 1 (T=0): MASTERS ---
                           // Solo suscripción. Master no tiene tope de servicios activos
@@ -779,10 +814,10 @@ extension CentralScreenFormularios on _CentralScreenState {
                             }
                           } catch (_) {}
 
-                          // FASE 2 (T+30s): pg_cron auto-asigna al #1 del paradero.
-                          // No se programa notificación aquí — el cron envía el
-                          // headsup tras asignar. paradero_auto_movil_id ya fue
-                          // guardado arriba.
+                          // FASE 2 (T+30s): misil OneSignal al #1 del paradero.
+                          // paradero_ofrecido_id + misil ya fueron programados
+                          // arriba al encontrar paraderoAutoMovilId. El móvil
+                          // acepta voluntariamente en app (tomar_servicio_candado).
 
                           // F3/F4 — pg_cron consulta en_linea en tiempo real
                           await Supabase.instance.client.from('servicios').update({

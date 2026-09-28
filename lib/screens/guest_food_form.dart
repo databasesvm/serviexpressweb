@@ -114,6 +114,7 @@ class _GuestFoodFormState extends State<GuestFoodForm> {
             .select('id, paradero_actual, ingreso_fila')
             .eq('rol', 'movil')
             .eq('en_linea', true)
+            .eq('tiene_se', true)
             .not('paradero_actual', 'is', null);
 
         final filaGeneral = movilesLibres.toList();

@@ -165,7 +165,8 @@ class _CentralScreenState extends State<CentralScreen>
   StreamSubscription<List<Map<String, dynamic>>>? _subUsuariosMoviles;
   StreamSubscription<List<Map<String, dynamic>>>? _subServiciosMonitor;
   Timer? _reconexionTimer;
-  Timer? _debounceUbicaciones; // Limita el REST fetch de ubicaciones a 1 por segundo
+  Timer? _debounceUbicaciones;   // Limita el REST fetch de ubicaciones a 1 por segundo
+  Timer? _debounceActivaciones;  // Evita refetch de pendientes en cada GPS PATCH
 
   // Caché de motos — se actualiza en el listener de _subUsuariosMoviles
   // para que _construirBloqueServicios pueda resolver movil_id → #numero real.
@@ -234,9 +235,10 @@ class _CentralScreenState extends State<CentralScreen>
             // Suprimimos el display del OS para evitar doble sonido.
             // (La notif en bandeja es innecesaria si la app está abierta.)
             event.preventDefault();
-            return;
           }
-          event.notification.display();
+          // Las demás notificaciones las muestra OneSignal por defecto.
+          // NO llamar display() explícitamente — el SDK ya lo hace,
+          // y llamarlo dos veces genera doble sonido + doble banner.
         };
         OneSignal.Notifications.addForegroundWillDisplayListener(
             _listenerActivacion!);
@@ -388,12 +390,29 @@ class _CentralScreenState extends State<CentralScreen>
             _debounceUbicaciones?.cancel();
             _debounceUbicaciones = Timer(const Duration(milliseconds: 800), () {
               if (!mounted) return;
+              // Solo traemos los campos de ubicación — el cache completo ya lo
+              // mantiene el .stream() de usuarios. Hacemos MERGE para no perder
+              // nombre, rango, wallet, etc. que el stream ya cargó.
               Supabase.instance.client
                   .from('usuarios')
-                  .select()
+                  .select('id, en_linea, latitud, longitud, paradero_actual, ingreso_fila, ticket_prioridad')
                   .or('rol.eq.movil,es_dual.eq.true')
                   .then((data) {
-                    _movilesCache = List.from(data);
+                    for (final upd in data) {
+                      final idx = _movilesCache
+                          .indexWhere((m) => m['id'] == upd['id']);
+                      if (idx >= 0) {
+                        _movilesCache[idx] = {
+                          ..._movilesCache[idx],
+                          'en_linea':        upd['en_linea'],
+                          'latitud':         upd['latitud'],
+                          'longitud':        upd['longitud'],
+                          'paradero_actual': upd['paradero_actual'],
+                          'ingreso_fila':    upd['ingreso_fila'],
+                          'ticket_prioridad':upd['ticket_prioridad'],
+                        };
+                      }
+                    }
                     if (!_ctrlUsuariosMoviles.isClosed) {
                       _ctrlUsuariosMoviles.add(_movilesCache);
                     }
@@ -549,23 +568,28 @@ class _CentralScreenState extends State<CentralScreen>
                 OneSignal.Notifications.removeNotification(nid);
               }
             }
-            // Refetch del count real desde la BD — más confiable que
-            // decrementar manualmente (evita desincronizaciones).
-            try {
-              final pendientes = await Supabase.instance.client
-                  .from('usuarios')
-                  .select('id')
-                  .eq('activo', false)
-                  .not('rol', 'in', '("cliente")');
-              if (mounted) {
-                setState(() => _usuariosPendientes = pendientes.length);
+            // Refetch del count real desde la BD con debounce de 15s.
+            // Sin debounce, cada GPS PATCH de un móvil activo (activo=true)
+            // disparaba este GET ~25 veces/min — 36k requests/día innecesarios.
+            // Las activaciones de usuarios son raras; 15s de lag es imperceptible.
+            _debounceActivaciones?.cancel();
+            _debounceActivaciones = Timer(const Duration(seconds: 15), () async {
+              try {
+                final pendientes = await Supabase.instance.client
+                    .from('usuarios')
+                    .select('id')
+                    .eq('activo', false)
+                    .not('rol', 'in', '("cliente")');
+                if (mounted) {
+                  setState(() => _usuariosPendientes = pendientes.length);
+                }
+              } catch (_) {
+                if (mounted) {
+                  setState(() =>
+                      _usuariosPendientes = (_usuariosPendientes - 1).clamp(0, 9999));
+                }
               }
-            } catch (_) {
-              if (mounted) {
-                setState(() =>
-                    _usuariosPendientes = (_usuariosPendientes - 1).clamp(0, 9999));
-              }
-            }
+            });
           },
         )
         .subscribe();
@@ -876,6 +900,7 @@ class _CentralScreenState extends State<CentralScreen>
     _canalPanico?.unsubscribe();
     _canalUbicacionesMoviles?.unsubscribe();
     _debounceUbicaciones?.cancel();
+    _debounceActivaciones?.cancel();
     _canalActivaciones?.unsubscribe();
     _canalFn?.unsubscribe();
     _canalBilletera?.unsubscribe();

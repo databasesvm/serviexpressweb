@@ -60,6 +60,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       _heartbeatTimer; // Opción A: ping cada 60s → cron Supabase limpia zombis
   Timer?
       _ubicacionHeartbeatTimer; // Fallback: envía ubicación cada 20s aunque GPS stream esté silencioso
+  Timer?
+      _produccionTimer; // Refresca _producidoHoy cada 3 min → sincroniza radar con pestaña SE y maneja reinicio a medianoche
   bool _enviandoUbicacion =
       false; // Mutex: evita writes de ubicación simultáneos
   Position?
@@ -147,6 +149,14 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
   // re-queries en cada rebuild. Se refresca al abrir la pestaña de Perfil.
   Future<List<dynamic>>? _futureEstadisticasSemana;
 
+  // Cache del teléfono del LOCAL y del CLIENTE para la tarjeta de servicio activo.
+  // Keyed por ID: el local_id y cliente_id no cambian durante un servicio,
+  // pero el StreamBuilder reconstruye en cada GPS emit (~2s). Sin cache,
+  // dispararía una query nueva a 'usuarios' cada 2 segundos mientras el
+  // móvil tiene un servicio en ruta.
+  final Map<dynamic, Future<Map<String, dynamic>?>> _futureLocalTel = {};
+  final Map<dynamic, Future<Map<String, dynamic>?>> _futureClienteTel = {};
+
   // PRODUCCIÓN — cargados una vez al abrir la pantalla para evitar el
   // parpadeo "Cargando..." de FutureBuilder dentro de StreamBuilder.
   int _serviciosHoy = 0;
@@ -218,6 +228,9 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
   List<Map<String, dynamic>>? _cacheServicios;
   // #91: true cuando el stream falló pero tenemos caché — muestra overlay suave
   bool _conexionPerdida = false;
+  // Debounce: espera 5s desde el error antes de mostrar el overlay.
+  // Micro-cortes de red no llegan al usuario.
+  Timer? _timerOverlayDesconexion;
   StreamSubscription<List<Map<String, dynamic>>>? _subUsuarios;
   StreamSubscription<List<Map<String, dynamic>>>? _subServicios;
   RealtimeChannel? _canalUpdateServicios; // refresh inmediato al cambiar estado
@@ -364,6 +377,11 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     // Fix #3: escalonar operaciones de red del arranque para no saturar
     // la conexión en el primer segundo (causa de ANR / pantalla congelada).
     Future.delayed(const Duration(milliseconds: 600), _cargarProduccion);
+    // Refresca producción cada 3 min → captura servicios finalizados durante
+    // el día y reinicia automáticamente el contador al pasar medianoche.
+    _produccionTimer = Timer.periodic(const Duration(minutes: 3), (_) {
+      if (mounted) _cargarProduccion();
+    });
     Future.delayed(const Duration(milliseconds: 800), _cargarMinutosActivosHoy);
     Future.delayed(
         const Duration(milliseconds: 1000), _verificarPanicoUsadoHoy);
@@ -471,10 +489,26 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
 
   void _suscribirAlertasDomicilio() {
     final miId = widget.usuario['id'] as int;
+
+    // ANTES: un canal con PostgresChangeEvent.all → TODOS los cambios de TODOS
+    // los pedidos (de todos los locales y móviles) llegaban a TODOS los
+    // dispositivos. El filtrado se hacía en Dart, no en el servidor.
+    //
+    // AHORA: dos suscripciones en el mismo canal WebSocket:
+    //  1. INSERT (sin filtro): solo pedidos nuevos — poco tráfico, necesario
+    //     para mostrar la alerta "¡NUEVO DOMICILIO!" a tiempo.
+    //  2. UPDATE filtrado movil_id = miId: solo cambios de MI pedido activo.
+    //     Los updates de pedidos de otros móviles ya NO llegan a este dispositivo.
+    //
+    // Case 3 (cerrar alerta cuando otro móvil tomó el pedido): se maneja con
+    // un timeout de 90s en el diálogo — ver _mostrarAlertaPedido().
+
     _canalPedidosMovil = Supabase.instance.client
         .channel('pedidos_movil_$miId')
+
+        // ── Suscripción 1: INSERTs de pedidos nuevos ─────────────────────────
         .onPostgresChanges(
-          event: PostgresChangeEvent.all,
+          event: PostgresChangeEvent.insert,
           schema: 'public',
           table: 'pedidos',
           callback: (payload) async {
@@ -483,37 +517,46 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
             final estado = rec['estado']?.toString() ?? '';
             final movilId = (rec['movil_id'] as num?)?.toInt();
             final pedidoId = rec['id']?.toString() ?? '';
-
-            // Pedido sin asignar que acaba de entrar — mostrar alerta
             if (estado == 'pendiente_confirmacion' && movilId == null) {
               if (!_alertaPedidoMostrada && mounted) {
                 _alertaPedidoMostrada = true;
                 await _cargarYMostrarAlertaPedido(pedidoId);
                 _alertaPedidoMostrada = false;
               }
-              return;
-            }
-
-            // Pedido asignado a este móvil — actualizar tarjeta activa
-            if (movilId == miId) {
-              final pedido = await Supabase.instance.client
-                  .from('pedidos')
-                  .select('*, items_pedido(nombre_snapshot, cantidad), local:local_id(nombre, telefono_local)')
-                  .eq('id', pedidoId)
-                  .maybeSingle();
-              if (pedido == null) return;
-              if (!mounted) return;
-              final esTerminal = ['entregado', 'cancelado'].contains(estado);
-              setState(
-                  () => _pedidoDomicilioActivo = esTerminal ? null : pedido);
-            }
-
-            // Pedido ya asignado a otro — cerrar alerta si estaba abierta
-            if (movilId != null && movilId != miId && _alertaPedidoMostrada) {
-              if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);
             }
           },
         )
+
+        // ── Suscripción 2: UPDATEs solo de MI pedido ─────────────────────────
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'pedidos',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'movil_id',
+            value: miId,
+          ),
+          callback: (payload) async {
+            final rec = payload.newRecord;
+            if (rec.isEmpty || !mounted) return;
+            final estado = rec['estado']?.toString() ?? '';
+            final pedidoId = rec['id']?.toString() ?? '';
+            final esTerminal = ['entregado', 'cancelado'].contains(estado);
+            if (esTerminal) {
+              setState(() => _pedidoDomicilioActivo = null);
+              return;
+            }
+            final pedido = await Supabase.instance.client
+                .from('pedidos')
+                .select('*, items_pedido(nombre_snapshot, cantidad), local:local_id(nombre, telefono_local)')
+                .eq('id', pedidoId)
+                .maybeSingle();
+            if (pedido == null || !mounted) return;
+            setState(() => _pedidoDomicilioActivo = pedido);
+          },
+        )
+
         .subscribe();
     // Verificar si ya hay un pedido asignado a este movil
     _cargarPedidoActivoPropio();
@@ -572,6 +615,13 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       }
       return '\$ ${buf.toString()}';
     }
+
+    // Timeout de 90s: cierra el diálogo si el pedido fue tomado por otro móvil
+    // (antes lo hacía el canal Realtime; ahora el canal solo escucha UPDATEs
+    // de MI movil_id, así que usamos un timer como respaldo).
+    final timeoutTimer = Timer(const Duration(seconds: 90), () {
+      if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);
+    });
 
     final aceptado = await showDialog<bool>(
       context: context,
@@ -679,6 +729,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         ],
       ),
     );
+    timeoutTimer.cancel(); // el usuario respondió antes del timeout
 
     if (aceptado != true) return;
     // Intentar tomar el pedido
@@ -1119,89 +1170,6 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     return false;
   }
 
-  // ── Banner informativo de pago semanal (solo visible cuando NO está bloqueado) ──
-  Widget _bannerPagoSemanal(dynamic movilId) {
-    // Inicio de semana: último lunes 12pm Colombia = último lunes 17:00 UTC
-    final nowCol = DateTime.now().toUtc().subtract(const Duration(hours: 5));
-    final daysSinceMon = (nowCol.weekday - DateTime.monday) % 7;
-    final lastMonCol = nowCol.subtract(Duration(days: daysSinceMon));
-    final inicioSemanaUtc = DateTime.utc(
-        lastMonCol.year, lastMonCol.month, lastMonCol.day, 17, 0, 0);
-
-    return Positioned(
-      top: 0,
-      left: 0,
-      right: 0,
-      child: SafeArea(
-        child: FutureBuilder<List<dynamic>>(
-          future: Supabase.instance.client
-              .from('solicitudes_recarga_wallet')
-              .select('id, estado')
-              .eq('movil_id', movilId)
-              .inFilter('tipo_solicitud', ['pago_semanal', 'pago_semanal_con_recargo'])
-              .inFilter('estado', ['pendiente', 'aprobada'])
-              .gte('created_at', inicioSemanaUtc.toIso8601String())
-              .limit(1),
-          builder: (_, snap) {
-            if (!snap.hasData) return const SizedBox.shrink();
-            final lista = snap.data!;
-
-            Color bgColor;
-            Color borderColor;
-            Color textColor;
-            IconData icono;
-            String mensaje;
-
-            if (lista.isEmpty) {
-              bgColor = Colors.amber[900]!.withValues(alpha: 0.15);
-              borderColor = Colors.amber[700]!.withValues(alpha: 0.5);
-              textColor = Colors.amber[300]!;
-              icono = Icons.warning_amber_rounded;
-              mensaje = 'Recuerda pagar tu semana antes del lunes a las 12:00pm.';
-            } else {
-              final estado = lista.first['estado']?.toString() ?? '';
-              if (estado == 'pendiente') {
-                bgColor = const Color(0xFF818CF8).withValues(alpha: 0.12);
-                borderColor = const Color(0xFF818CF8).withValues(alpha: 0.4);
-                textColor = const Color(0xFF818CF8);
-                icono = Icons.hourglass_top_rounded;
-                mensaje = 'Tu comprobante está en revisión. Central lo aprobará pronto.';
-              } else {
-                // aprobada
-                bgColor = Colors.green[900]!.withValues(alpha: 0.2);
-                borderColor = Colors.green[700]!.withValues(alpha: 0.5);
-                textColor = Colors.green[300]!;
-                icono = Icons.check_circle_outline_rounded;
-                mensaje = '¡Tu pago de esta semana fue aprobado!';
-              }
-            }
-
-            return Container(
-              margin: const EdgeInsets.fromLTRB(12, 4, 12, 0),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: bgColor,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: borderColor),
-              ),
-              child: Row(children: [
-                Icon(icono, color: textColor, size: 16),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(mensaje,
-                      style: TextStyle(
-                          color: textColor,
-                          fontSize: 12,
-                          height: 1.4,
-                          fontWeight: FontWeight.w500)),
-                ),
-              ]),
-            );
-          },
-        ),
-      ),
-    );
-  }
 
   // ── Overlay de bloqueo semanal: cubre TODA la pantalla cuando wallet_bloqueado=true ──
   Widget _overlayBilleteraBlockeada(dynamic movilId, {bool recargo = false}) => Positioned.fill(
@@ -1651,9 +1619,11 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
 
     _supervisionTimer?.cancel();
     _reconexionTimer?.cancel();
+    _timerOverlayDesconexion?.cancel();
     _gpsTimer?.cancel();
     _heartbeatTimer?.cancel(); // ← Opción A
     _ubicacionHeartbeatTimer?.cancel(); // Fallback GPS
+    _produccionTimer?.cancel();
     _subMiPerfil?.cancel();
     _ctrlMiPerfil.close();
     _filaNotifier.dispose();
@@ -2198,7 +2168,32 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
             column: 'en_linea',
             value: true,
           ),
-          callback: (_) => _recargarFila(),
+          callback: (payload) {
+            // Solo recargamos si cambió algo relevante para la fila:
+            // paradero_actual, ingreso_fila o ticket_prioridad.
+            // GPS PATCHes (lat/lng) llegan cada ~2s pero no afectan
+            // el orden de la fila → los ignoramos sin REST GET.
+            final rec = payload.newRecord;
+            final id = rec['id'];
+            final cached = _filaNotifier.value
+                .firstWhere((m) => m['id'] == id, orElse: () => const {});
+
+            if (cached.isEmpty) {
+              // No estaba en fila cacheada.
+              // Sin paradero → es solo GPS → ignorar.
+              if (rec['paradero_actual'] == null ||
+                  rec['ingreso_fila'] == null) return;
+              // Con paradero → entró a la fila → recargar.
+            } else {
+              // Ya estaba en fila. ¿Cambió algo que afecte el orden?
+              if (cached['paradero_actual'] == rec['paradero_actual'] &&
+                  cached['ingreso_fila'] == rec['ingreso_fila'] &&
+                  cached['ticket_prioridad'] == rec['ticket_prioridad']) {
+                return; // Solo GPS u otro campo irrelevante → ignorar.
+              }
+            }
+            _recargarFila();
+          },
         )
         .subscribe();
 
@@ -2231,6 +2226,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       (data) {
         _cacheServicios = data;
         _ultimaEmisionServicios = DateTime.now(); // Fix #2
+        // Llegaron datos: cancelar debounce y quitar overlay si estaba activo
+        _timerOverlayDesconexion?.cancel();
         if (_conexionPerdida && mounted)
           setState(() => _conexionPerdida = false);
         if (!_ctrlServicios.isClosed) _ctrlServicios.add(data);
@@ -2247,14 +2244,23 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       },
       onError: (e) {
         // #91: si hay caché, mantenerlo visible; no propagar el error al StreamBuilder.
-        // Activamos el overlay suave para que el usuario sepa que hay problema de señal.
         if (_cacheServicios != null && !_ctrlServicios.isClosed) {
           _ctrlServicios.add(_cacheServicios!);
-          if (!_conexionPerdida && mounted)
-            setState(() => _conexionPerdida = true);
         } else if (!_ctrlServicios.isClosed) {
           _ctrlServicios.addError(e);
         }
+        // Debounce: intentar reconectar en 3s antes de mostrar overlay.
+        // Si los datos vuelven dentro de 5s, el overlay nunca aparece.
+        // Esto elimina falsos positivos por micro-cortes de red.
+        _timerOverlayDesconexion?.cancel();
+        _timerOverlayDesconexion = Timer(const Duration(seconds: 5), () {
+          if (mounted && !_conexionPerdida)
+            setState(() => _conexionPerdida = true);
+        });
+        // Reconectar inmediatamente en 3s (no esperar el tick de 30s)
+        Future.delayed(const Duration(seconds: 3), () {
+          if (mounted) _construirStreams();
+        });
       },
     );
 
@@ -3323,67 +3329,82 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     }
   }
 
-  void _iniciarRelojSupervisionMultitarea() {
-    _supervisionTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      // OPTIMIZADO: solo notificamos al radar (ValueListenableBuilder),
-      // sin reconstruir toda la pantalla con setState(() {}).
-      // El ban check se movió al timer de 30s para no hacer 12 queries/min.
-      if (mounted) _radarTick.value++;
+  // Timer de supervisión auto-reprogramable con intervalo adaptativo:
+  // • 5s  cuando hay servicios activos con timer corriendo (en_ruta_*)
+  //       → alertas de tiempo, rebuild del radar para countdown visible.
+  // • 15s cuando el moto está en espera o desconectado
+  //       → sin servicios que supervisar, no tiene sentido 12 rebuilds/min.
+  // _BarraCascadaSE gestiona su propio Timer(1s) interno — no depende de aquí.
+  void _tickSupervision() {
+    if (!mounted) return;
+    _radarTick.value++;
 
-      // 4. Supervisión estricta de demoras en pedidos activos
-      // Umbral: 30 min desde picked_up_at para en_ruta_destino
-      //         20 min desde accepted_at  para en_ruta_origen
-      if (_serviciosActivosData.isNotEmpty) {
-        for (var servicio in _serviciosActivosData) {
-          final String est = servicio['estado']?.toString() ?? '';
-          final int id = servicio['id'];
+    // Supervisión de demoras en pedidos activos
+    // Umbral: 30 min desde picked_up_at para en_ruta_destino
+    //         20 min desde accepted_at  para en_ruta_origen
+    if (_serviciosActivosData.isNotEmpty) {
+      for (var servicio in _serviciosActivosData) {
+        final String est = servicio['estado']?.toString() ?? '';
+        final int id = servicio['id'];
 
-          if (est == 'en_ruta_destino' && servicio['picked_up_at'] != null) {
-            const int metaDestino = 30;
-            final pickedUpUtc =
-                DateTime.parse(servicio['picked_up_at']).toUtc();
-            final elapsed =
-                DateTime.now().toUtc().difference(pickedUpUtc).inMinutes;
-            final extension = servicio['extension_minutes'] as int? ?? 0;
-            final efectivos = elapsed - extension;
+        if (est == 'en_ruta_destino' && servicio['picked_up_at'] != null) {
+          const int metaDestino = 30;
+          final pickedUpUtc =
+              DateTime.parse(servicio['picked_up_at']).toUtc();
+          final elapsed =
+              DateTime.now().toUtc().difference(pickedUpUtc).inMinutes;
+          final extension = servicio['extension_minutes'] as int? ?? 0;
+          final efectivos = elapsed - extension;
 
-            // Aviso 2 min antes del límite
-            if (efectivos >= metaDestino - 2 &&
-                efectivos < metaDestino &&
-                !(_alertasPrecaucion[id] ?? false)) {
-              _alertasPrecaucion[id] = true;
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  content: Text(
-                      '⚠️ Tiempo de entrega casi expirado — Orden #${servicio['numero_movil'] ?? id}.'),
-                  backgroundColor: Colors.orange[800],
-                ));
-              }
+          if (efectivos >= metaDestino - 2 &&
+              efectivos < metaDestino &&
+              !(_alertasPrecaucion[id] ?? false)) {
+            _alertasPrecaucion[id] = true;
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(
+                    '⚠️ Tiempo de entrega casi expirado — Orden #${servicio['numero_movil'] ?? id}.'),
+                backgroundColor: Colors.orange[800],
+              ));
             }
-          } else if (est == 'en_ruta_origen' &&
-              servicio['accepted_at'] != null) {
-            const int metaOrigen = 20;
-            final acceptedUtc = DateTime.parse(servicio['accepted_at']).toUtc();
-            final elapsed =
-                DateTime.now().toUtc().difference(acceptedUtc).inMinutes;
+          }
+        } else if (est == 'en_ruta_origen' &&
+            servicio['accepted_at'] != null) {
+          const int metaOrigen = 20;
+          final acceptedUtc = DateTime.parse(servicio['accepted_at']).toUtc();
+          final elapsed =
+              DateTime.now().toUtc().difference(acceptedUtc).inMinutes;
 
-            // Aviso 2 min antes del límite
-            if (elapsed >= metaOrigen - 2 &&
-                elapsed < metaOrigen &&
-                !(_alertasPrecaucion[id] ?? false)) {
-              _alertasPrecaucion[id] = true;
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  content: Text(
-                      '⚠️ Casi en retraso — aún no llegaste a la sede. Orden #${servicio['numero_movil'] ?? id}.'),
-                  backgroundColor: Colors.orange[800],
-                ));
-              }
+          if (elapsed >= metaOrigen - 2 &&
+              elapsed < metaOrigen &&
+              !(_alertasPrecaucion[id] ?? false)) {
+            _alertasPrecaucion[id] = true;
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(
+                    '⚠️ Casi en retraso — aún no llegaste a la sede. Orden #${servicio['numero_movil'] ?? id}.'),
+                backgroundColor: Colors.orange[800],
+              ));
             }
           }
         }
       }
+    }
+
+    // Reprogramar con intervalo adaptativo
+    final tieneServicioActivo = _serviciosActivosData.any((s) {
+      final est = s['estado']?.toString() ?? '';
+      return est == 'en_ruta_origen' || est == 'en_ruta_destino';
     });
+    _supervisionTimer = Timer(
+      Duration(seconds: tieneServicioActivo ? 5 : 15),
+      _tickSupervision,
+    );
+  }
+
+  void _iniciarRelojSupervisionMultitarea() {
+    _supervisionTimer?.cancel();
+    _tickSupervision();
   }
 
   void _ejecutarSuspensionInmediata() {
@@ -6849,71 +6870,27 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
 
   Future<void> _cargarProduccion() async {
     try {
-      final hoy = DateTime.now();
-      final inicioHoy =
-          DateTime(hoy.year, hoy.month, hoy.day).toUtc().toIso8601String();
-      final miId = widget.usuario['id'];
+      final miId = widget.usuario['id'] as int;
 
-      // Producción general (Serviexpress + FN, todas finalizadas)
-      final totalData = await Supabase.instance.client
-          .from('servicios')
-          .select('id, tarifa, tipo_fn')
-          .eq('movil_id', miId)
-          .eq('estado', 'finalizado');
-
-      final hoyData = await Supabase.instance.client
-          .from('servicios')
-          .select('id, tarifa, tipo_fn')
-          .eq('movil_id', miId)
-          .eq('estado', 'finalizado')
-          .gte('created_at', inicioHoy);
+      // RPC de agregación server-side: un solo round-trip, sin descargar filas.
+      // Antes: 2 queries que descargaban TODO el historial sin límite (~5k filas
+      // en motos veteranos). Ahora: SUM/COUNT en Postgres, devuelve 8 números.
+      final raw = await Supabase.instance.client
+          .rpc('calcular_produccion_movil', params: {'p_movil_id': miId});
 
       if (!mounted) return;
+      if (raw == null) return;
 
-      final totalList = totalData;
-      final hoyList = hoyData;
-
-      // Totales generales
-      int srvTotal = 0;
-      double producidoTotal = 0;
-      // Hoy general
-      int srvHoy = 0;
-      double producidoHoy = 0;
-      // FN totales
-      int fnTotal = 0;
-      double fnProdTotal = 0;
-      // FN hoy
-      int fnHoy = 0;
-      double fnProdHoy = 0;
-
-      for (final s in totalList) {
-        srvTotal++;
-        final tarifa = (s['tarifa'] as num? ?? 0).toDouble();
-        producidoTotal += tarifa;
-        if (s['tipo_fn'] == true) {
-          fnTotal++;
-          fnProdTotal += tarifa;
-        }
-      }
-      for (final s in hoyList) {
-        srvHoy++;
-        final tarifa = (s['tarifa'] as num? ?? 0).toDouble();
-        producidoHoy += tarifa;
-        if (s['tipo_fn'] == true) {
-          fnHoy++;
-          fnProdHoy += tarifa;
-        }
-      }
-
+      final Map<String, dynamic> r = Map<String, dynamic>.from(raw as Map);
       setState(() {
-        _serviciosTotal = srvTotal;
-        _serviciosHoy = srvHoy;
-        _producidoHoy = producidoHoy;
-        _producidoTotal = producidoTotal;
-        _serviciosFnTotal = fnTotal;
-        _producidoFnTotal = fnProdTotal;
-        _serviciosFnHoy = fnHoy;
-        _producidoFnHoy = fnProdHoy;
+        _serviciosTotal   = (r['total_servicios'] as num? ?? 0).toInt();
+        _producidoTotal   = (r['total_producido'] as num? ?? 0).toDouble();
+        _serviciosHoy     = (r['hoy_servicios'] as num? ?? 0).toInt();
+        _producidoHoy     = (r['hoy_producido'] as num? ?? 0).toDouble();
+        _serviciosFnTotal = (r['fn_total_servicios'] as num? ?? 0).toInt();
+        _producidoFnTotal = (r['fn_total_producido'] as num? ?? 0).toDouble();
+        _serviciosFnHoy   = (r['fn_hoy_servicios'] as num? ?? 0).toInt();
+        _producidoFnHoy   = (r['fn_hoy_producido'] as num? ?? 0).toDouble();
       });
     } catch (e) {
       debugPrint(
@@ -8938,9 +8915,55 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       }
     }
 
+    // ── Paso actual y textos del header ───────────────────────────────────────
+    final bool esMoto = _esMototaxi(servicio['tipo_servicio']);
+    final int pasoNum =
+        estado == 'en_ruta_origen' ? 1 : estado == 'en_origen' ? 2 : 3;
+
+    String tituloPaso;
+    String subtituloPaso;
+    if (tieneProblema) {
+      tituloPaso = 'Servicio en revisión';
+      subtituloPaso = 'Central está atendiendo la novedad.';
+    } else if (estado == 'en_ruta_origen') {
+      tituloPaso = esMoto ? 'Ve al punto de recogida' : 'Ve al local';
+      subtituloPaso = esMoto
+          ? 'Dirígete al punto de recogida. Avisa al llegar.'
+          : 'Dirígete al local. Avisa al llegar.';
+    } else if (estado == 'en_origen') {
+      tituloPaso = esMoto ? 'Pasajero a bordo' : 'Recoge el pedido';
+      subtituloPaso = esMoto
+          ? 'Confirma cuando el pasajero esté listo.'
+          : 'Espera que alisten el pedido. Confirma al tener todo.';
+    } else {
+      tituloPaso = esMoto ? 'Lleva al pasajero' : 'Entrega al cliente';
+      subtituloPaso = esMoto
+          ? 'Ve al destino. Mantén presionado al llegar.'
+          : 'Ve al destino. Mantén presionado para finalizar.';
+    }
+
+    // Helper local: botón copiar al portapapeles
+    Widget btnCopiar(String? texto, String snackMsg) => IconButton(
+          icon: const Icon(Icons.copy, size: 16, color: Colors.black38),
+          tooltip: 'Copiar',
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(),
+          onPressed: () {
+            final s = texto?.trim() ?? '';
+            if (s.isEmpty) return;
+            Clipboard.setData(ClipboardData(text: s));
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(snackMsg),
+              duration: const Duration(seconds: 2),
+              behavior: SnackBarBehavior.floating,
+            ));
+          },
+        );
+
     return Card(
       elevation: 4,
       margin: const EdgeInsets.only(bottom: 16),
+      clipBehavior: Clip.antiAlias,
       color: Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
@@ -8949,811 +8972,1000 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
           width: 2,
         ),
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // ── HEADER OSCURO ──────────────────────────────────────────────────────
+          Container(
+            decoration: BoxDecoration(
+              color: tieneProblema ? const Color(0xFF7B0000) : Colors.black,
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(10)),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Fila: PASO X DE 3 + dots + #num + colapsar
+                Row(
+                  children: [
+                    if (!tieneProblema) ...[
+                      Text(
+                        'PASO $pasoNum DE 3',
+                        style: const TextStyle(
+                          color: Color(0xff3AF500),
+                          fontWeight: FontWeight.bold,
+                          fontSize: 11,
+                          letterSpacing: 0.8,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ...List.generate(
+                        3,
+                        (i) => Container(
+                          margin: const EdgeInsets.only(right: 4),
+                          width: 7,
+                          height: 7,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: i < pasoNum
+                                ? const Color(0xff3AF500)
+                                : Colors.white30,
+                          ),
+                        ),
+                      ),
+                    ] else
+                      const Text(
+                        '⚠️ NOVEDAD',
+                        style: TextStyle(
+                          color: Colors.orangeAccent,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                        ),
+                      ),
+                    const Spacer(),
+                    Text(
+                      '#${servicio['numero_movil'] ?? servicio['id']}',
+                      style: const TextStyle(
+                          color: Colors.white54, fontSize: 12),
+                    ),
+                    const SizedBox(width: 4),
+                    GestureDetector(
+                      onTap: () => setState(() =>
+                          _serviciosExpandidos.remove(servicio['id'] as int)),
+                      child: const Icon(Icons.expand_less,
+                          color: Colors.white54, size: 22),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                // Título y subtítulo
                 Text(
-                  tieneProblema
-                      ? '⚠️ NOVEDAD (#${servicio['numero_movil'] ?? servicio['id']})'
-                      : 'SERVICIO ACTIVO (#${servicio['numero_movil'] ?? servicio['id']})',
-                  style: TextStyle(
-                    fontSize: 17,
+                  tituloPaso,
+                  style: const TextStyle(
+                    color: Colors.white,
                     fontWeight: FontWeight.bold,
-                    color: tieneProblema ? Colors.red[800] : Colors.black,
+                    fontSize: 16,
                   ),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.expand_less, color: Colors.black54),
-                  onPressed: () => setState(
-                      () => _serviciosExpandidos.remove(servicio['id'] as int)),
+                const SizedBox(height: 2),
+                Text(
+                  subtituloPaso,
+                  style:
+                      const TextStyle(color: Colors.white60, fontSize: 12),
                 ),
               ],
             ),
+          ),
 
-            // Banner P.A.P — visible post-aceptar (todos los rangos)
-            if (servicio['es_punto_a_punto'] == true) ...[
-              const SizedBox(height: 8),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                decoration: BoxDecoration(
-                  color: Colors.purple[900],
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Row(
-                      children: [
-                        Icon(Icons.flash_on, size: 15, color: Colors.purpleAccent),
-                        SizedBox(width: 6),
-                        Text(
-                          '⚡ PUNTO A PUNTO — Servicio gratuito',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.purpleAccent,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    const Text(
-                      '🎟️ Prioridad en paradero  ·  +2 pts semana  ·  +0.2 calificación',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Colors.white70,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-
-            // ---> INYECCIÓN: RELOJ BIFURCADO Y FASE DE ESPERA <---
-            AnimatedSwitcher(
-              duration: Duration.zero,
-              transitionBuilder: (child, anim) => FadeTransition(
-                opacity: anim,
-                child: SizeTransition(sizeFactor: anim, child: child),
-              ),
-              child: mostrarReloj
-                  ? Container(
-                      key: ValueKey(
-                          'badge_reloj_$estado${estaDemorado ? '_d' : ''}'),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: estaDemorado ? Colors.red[50] : Colors.blue[50],
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        estado == 'en_ruta_origen'
-                            ? 'Tiempo hacia el ${_textoOrigenSegunTipo(servicio['tipo_servicio'])}: $efectivos / $tiempoMeta min'
-                            : (_esMototaxi(servicio['tipo_servicio'])
-                                ? 'Tiempo hacia el destino: $efectivos / $tiempoMeta min'
-                                : 'Tiempo hacia el Cliente: $efectivos / $tiempoMeta min'),
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                          color:
-                              estaDemorado ? Colors.red[800] : Colors.blue[800],
-                        ),
-                      ),
-                    )
-                  : estado == 'en_origen'
-                      ? Container(
-                          key: const ValueKey('badge_en_origen'),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: Colors.orange[50],
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Text(
-                            '⌛ ESPERANDO EL PEDIDO...',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                              color: Colors.orange[900],
-                            ),
-                          ),
-                        )
-                      : const SizedBox.shrink(key: ValueKey('badge_none')),
-            ),
-
-            // --------------------------------------------------------
-            const SizedBox(height: 12),
-            if (servicio['observacion'] != null)
-              Container(
-                padding: const EdgeInsets.all(10),
-                color: Colors.yellow[100],
-                child: Text(
-                  '📌 NOTA: ${servicio['observacion']}',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                  ),
-                ),
-              ),
-            // Origen siempre visible
-            const SizedBox(height: 12),
-            Text(
-              '📍 Origen: ${servicio['origen']}',
-              style: const TextStyle(fontSize: 16),
-            ),
-            // Destino: solo visible después de llegar al local/pasajero
-            if ([
-              'en_ruta_destino',
-              'problema',
-              'finalizado',
-              'finalizado_con_problema'
-            ].contains(estado))
-              Text(
-                '🏁 Destino: ${servicio['destino']}',
-                style:
-                    const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              )
-            else
-              Container(
-                margin: const EdgeInsets.only(top: 4),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: Colors.grey[200],
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.lock_outline, size: 14, color: Colors.black38),
-                    SizedBox(width: 6),
-                    Text(
-                      'Destino visible al llegar al local',
-                      style: TextStyle(fontSize: 13, color: Colors.black45),
-                    ),
-                  ],
-                ),
-              ),
-            if ([
-              'en_ruta_destino',
-              'problema',
-              'finalizado',
-              'finalizado_con_problema'
-            ].contains(estado))
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('⚠ ',
-                        style: TextStyle(fontSize: 11, color: Colors.orange)),
-                    const Expanded(
-                      child: Text(
-                        'Las ubicaciones GPS no son exactas. Verifica bien el destino y pide la dirección exacta al cliente.',
-                        style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.orange,
-                            fontStyle: FontStyle.italic),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            // ---> INYECCIÓN VISUAL DEL NÚMERO <---
-            if (servicio['telefono_receptor'] != null &&
-                servicio['telefono_receptor'].toString().trim().isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: GestureDetector(
-                  onTap: () async {
-                    String num = servicio['telefono_receptor']
-                        .toString()
-                        .replaceAll(RegExp(r'[^0-9]'), '');
-                    if (num.length == 10) num = '57$num';
-                    final uri = Uri.parse(
-                        'https://wa.me/$num?text=${Uri.encodeComponent('Hola, soy el móvil de Serviexpress que lleva tu servicio.')}');
-                    await launchUrl(uri, mode: LaunchMode.externalApplication);
-                  },
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF25D366),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Text('📱', style: TextStyle(fontSize: 13)),
-                            const SizedBox(width: 4),
-                            Text(
-                              'WA ${servicio['telefono_receptor']}',
-                              style: const TextStyle(
-                                fontSize: 13,
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
+          // ── CUERPO ─────────────────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Badge de tiempo o espera
+                if (mostrarReloj || estado == 'en_origen')
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: AnimatedSwitcher(
+                      duration: Duration.zero,
+                      transitionBuilder: (child, anim) =>
+                          FadeTransition(opacity: anim, child: child),
+                      child: mostrarReloj
+                          ? Container(
+                              key: ValueKey(
+                                  'badge_reloj_$estado${estaDemorado ? '_d' : ''}'),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: estaDemorado
+                                    ? Colors.red[50]
+                                    : Colors.blue[50],
+                                borderRadius: BorderRadius.circular(20),
                               ),
+                              child: Text(
+                                estado == 'en_ruta_origen'
+                                    ? 'Tiempo hacia el ${_textoOrigenSegunTipo(servicio['tipo_servicio'])}: $efectivos / $tiempoMeta min'
+                                    : (esMoto
+                                        ? 'Tiempo hacia el destino: $efectivos / $tiempoMeta min'
+                                        : 'Tiempo hacia el Cliente: $efectivos / $tiempoMeta min'),
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                  color: estaDemorado
+                                      ? Colors.red[800]
+                                      : Colors.blue[800],
+                                ),
+                              ),
+                            )
+                          : Container(
+                              key: const ValueKey('badge_en_origen'),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: Colors.orange[50],
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Text(
+                                '⌛ ESPERANDO EL PEDIDO...',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                  color: Colors.orange[900],
+                                ),
+                              ),
+                            ),
+                    ),
+                  ),
+
+                // Nota / observación
+                if (servicio['observacion'] != null)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.all(10),
+                    color: Colors.yellow[100],
+                    child: Text(
+                      '📌 NOTA: ${servicio['observacion']}',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 14),
+                    ),
+                  ),
+
+                // Banner P.A.P.
+                if (servicio['es_punto_a_punto'] == true)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.purple[900],
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.flash_on,
+                                size: 15, color: Colors.purpleAccent),
+                            SizedBox(width: 6),
+                            Text(
+                              '⚡ PUNTO A PUNTO — Servicio gratuito',
+                              style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.purpleAccent),
                             ),
                           ],
                         ),
+                        SizedBox(height: 6),
+                        Text(
+                          '🎟️ Prioridad en paradero  ·  +2 pts semana  ·  +0.2 calificación',
+                          style:
+                              TextStyle(fontSize: 11, color: Colors.white70),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                // ── DATOS DEL SERVICIO ──────────────────────────────────────────
+                Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[100],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.grey[300]!),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Encabezado
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[200],
+                          borderRadius: const BorderRadius.vertical(
+                              top: Radius.circular(8)),
+                        ),
+                        child: const Text(
+                          'DATOS DEL SERVICIO',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black45,
+                            letterSpacing: 1,
+                          ),
+                        ),
                       ),
+                      // Origen
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 8, 4, 4),
+                        child: Row(
+                          children: [
+                            const Text('📍 ',
+                                style: TextStyle(fontSize: 14)),
+                            Expanded(
+                              child: Text(
+                                servicio['origen'] ?? '',
+                                style: const TextStyle(fontSize: 14),
+                              ),
+                            ),
+                            btnCopiar(servicio['origen']?.toString(),
+                                'Dirección de origen copiada'),
+                          ],
+                        ),
+                      ),
+                      const Divider(height: 1, indent: 12, endIndent: 12),
+                      // Destino: visible desde en_origen
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 4, 4, 8),
+                        child: [
+                          'en_origen',
+                          'en_ruta_destino',
+                          'problema',
+                          'finalizado',
+                          'finalizado_con_problema',
+                        ].contains(estado)
+                            ? Row(
+                                children: [
+                                  const Text('🏁 ',
+                                      style: TextStyle(fontSize: 14)),
+                                  Expanded(
+                                    child: Text(
+                                      servicio['destino'] ?? '',
+                                      style: const TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
+                                  btnCopiar(
+                                      servicio['destino']?.toString(),
+                                      'Dirección de destino copiada'),
+                                ],
+                              )
+                            : const Row(
+                                children: [
+                                  Icon(Icons.lock_outline,
+                                      size: 13, color: Colors.black38),
+                                  SizedBox(width: 6),
+                                  Text(
+                                    '🚩 visible al iniciar viaje',
+                                    style: TextStyle(
+                                        fontSize: 13,
+                                        color: Colors.black45),
+                                  ),
+                                ],
+                              ),
+                      ),
+                      // Advertencia GPS cuando destino está visible
+                      if ([
+                        'en_origen',
+                        'en_ruta_destino',
+                        'problema',
+                        'finalizado',
+                        'finalizado_con_problema',
+                      ].contains(estado))
+                        Padding(
+                          padding:
+                              const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: const [
+                              Text('⚠ ',
+                                  style: TextStyle(
+                                      fontSize: 10, color: Colors.orange)),
+                              Expanded(
+                                child: Text(
+                                  'Las ubicaciones GPS no son exactas. Verifica bien el destino y pide la dirección exacta al cliente.',
+                                  style: TextStyle(
+                                      fontSize: 10,
+                                      color: Colors.orange,
+                                      fontStyle: FontStyle.italic),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                     ],
                   ),
                 ),
-              ),
-            // -------------------------------------
-            const SizedBox(height: 10),
-            Text(
-              'Cobrar: $textoTarifa',
-              style: TextStyle(
-                color: textoTarifa == 'SIN TARIFA'
-                    ? Colors.orange[800]
-                    : Colors.green,
-                fontWeight: FontWeight.bold,
-                fontSize: 22,
-              ),
-            ),
-            // Desglose del precio si viene con tarifa_detalle
-            Builder(builder: (_) {
-              final detalle =
-                  servicio['tarifa_detalle'] as Map<String, dynamic>?;
-              if (detalle == null) return const SizedBox.shrink();
-              final int recargo = (detalle['recargo'] as num?)?.toInt() ?? 0;
-              final bool lluvia = detalle['lluvia'] == true;
-              final bool nocturno = detalle['nocturno'] == true;
-              final bool sobrecarga = detalle['sobrecarga'] == true;
-              final String fuente = detalle['fuente']?.toString() ?? '';
-              final bool tieneDesglose =
-                  recargo > 0 || lluvia || nocturno || sobrecarga;
-              if (!tieneDesglose && fuente.isEmpty)
-                return const SizedBox.shrink();
-              return Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Wrap(
-                  spacing: 4,
-                  runSpacing: 4,
-                  children: [
-                    if (lluvia) _chipDetalle('🌧 lluvia', Colors.blue[100]!),
-                    if (nocturno)
-                      _chipDetalle('🌙 nocturno', Colors.indigo[100]!),
-                    if (sobrecarga)
-                      _chipDetalle('⚡ sobrecarga', Colors.amber[100]!),
-                    if (recargo > 0)
-                      _chipDetalle(
-                        '+${_formatearMoneda(recargo.toDouble())} recargo',
-                        Colors.orange[100]!,
-                      ),
-                    if (fuente.startsWith('motor'))
-                      _chipDetalle('motor IA', Colors.green[100]!),
-                    if (fuente == 'manual' || fuente == 'central_manual')
-                      _chipDetalle('precio manual', Colors.grey[200]!),
-                  ],
-                ),
-              );
-            }),
-            const SizedBox(height: 20),
 
-            if (mostrarBotonNavegar && !tieneProblema)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.indigo[600],
-                      foregroundColor: Colors.white,
-                      elevation: 2,
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                    ),
-                    onPressed: _procesando
-                        ? null
-                        : () => _abrirNavegadorSatelital(
-                              servicio,
-                              estado == 'en_ruta_origen',
-                            ),
-                    icon: const Icon(Icons.explore, size: 18),
-                    label: const Text(
-                      'Navegar en Google Maps',
-                      style:
-                          TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                    ),
+                // Cobrar
+                Text(
+                  'Cobrar: $textoTarifa',
+                  style: TextStyle(
+                    color: textoTarifa == 'SIN TARIFA'
+                        ? Colors.orange[800]
+                        : Colors.green,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 22,
                   ),
                 ),
-              ),
-
-            // BOTÓN LIBERAR — exclusivo Master, solo antes de comprometerse
-            // físicamente (en_ruta_origen). El servicio vuelve a nacer
-            // desde cero: Master lo ve primero de nuevo, 30s después pasa
-            // al paradero, y sigue el resto del embudo normal — como si
-            // jamás lo hubiera tomado nadie.
-            if (esMaster && estado == 'en_ruta_origen' && !tieneProblema)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFFE040FB),
-                      side: const BorderSide(color: Color(0xFFE040FB)),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                    ),
-                    onPressed:
-                        _procesando ? null : () => _liberarServicio(servicio),
-                    icon: const Icon(Icons.replay, size: 18),
-                    label: const Text(
-                      'LIBERAR',
-                      style:
-                          TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                    ),
-                  ),
-                ),
-              ),
-
-            // BOTÓN REASIGNAR — solo Masters, asignación instantánea sin confirmación.
-            if (esMaster && !tieneProblema)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFFFFB300),
-                      side: const BorderSide(color: Color(0xFFFFB300)),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                    ),
-                    onPressed:
-                        _procesando ? null : () => _reasignarServicio(servicio),
-                    icon: const Icon(Icons.swap_horiz, size: 18),
-                    label: const Text(
-                      'REASIGNAR',
-                      style:
-                          TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                    ),
-                  ),
-                ),
-              ),
-
-            // BOTÓN TRANSFERIR — no-Masters. Envía solicitud; el receptor debe aceptar.
-            if (!esMaster && !tieneProblema)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.teal,
-                      side: const BorderSide(color: Colors.teal),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                    ),
-                    onPressed: _procesando
-                        ? null
-                        : () => _transferirServicio(servicio),
-                    icon: const Icon(Icons.send, size: 18),
-                    label: const Text(
-                      'TRANSFERIR A OTRO MÓVIL',
-                      style:
-                          TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                    ),
-                  ),
-                ),
-              ),
-
-            // ---> SECCIÓN DE COMUNICACIÓN (diferenciada por origen del servicio) <---
-            if (!tieneProblema)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Builder(
-                  builder: (context) {
-                    final bool esCreadoPorCentral =
-                        servicio['creador'] == 'Central';
-                    final bool esClienteApp =
-                        servicio['cliente_id'] != null;
-                    final int? localId =
-                        (servicio['local_id'] as num?)?.toInt();
-                    final bool tieneLocal =
-                        localId != null &&
-                        !esCreadoPorCentral &&
-                        !esClienteApp;
-                    final String numReceptor =
-                        servicio['telefono_receptor']?.toString().trim() ?? '';
-                    final String nombreNegocio = esCreadoPorCentral
-                        ? 'ServiExpress'
-                        : servicio['creador'].toString();
-
-                    // ── Abre WhatsApp con el número dado ──────────────────
-                    void abrirWa(String numero) async {
-                      String num =
-                          numero.replaceAll(RegExp(r'[^0-9]'), '');
-                      if (num.length == 10) num = '57$num';
-                      final String textoWa = esClienteApp
-                          ? 'Hola, soy el Móvil de Serviexpress. Voy en camino hacia tu ubicación.'
-                          : 'Hola, soy el Móvil que te está haciendo el domicilio de $nombreNegocio. Voy en camino hacia tu dirección.';
-                      final Uri url = Uri.parse(
-                          'https://wa.me/$num?text=${Uri.encodeComponent(textoWa)}');
-                      if (!await launchUrl(
-                          url, mode: LaunchMode.externalApplication)) {
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                                content: Text('No se pudo abrir WhatsApp')),
-                          );
-                        }
-                      }
-                    }
-
-                    // ── Botón WA Local (verde oscuro) ──────────────────────
-                    Widget botonWaLocal(String tel) => Expanded(
-                          child: BotonTacticoAccion(
-                            icono: Icons.wechat,
-                            texto: 'WA Local',
-                            colorBase: const Color(0xFF1B5E20),
-                            colorFondo: const Color(0xFFE8F5E9),
-                            onTap: () { abrirWa(tel); },
-                          ),
-                        );
-
-                    // ── Botón WA Cliente compacto (teal, en fila) ──────────
-                    Widget botonWaClienteCompacto(String tel) => Expanded(
-                          child: BotonTacticoAccion(
-                            icono: Icons.wechat,
-                            texto: 'WA Cliente',
-                            colorBase: const Color(0xFF004D40),
-                            colorFondo: const Color(0xFFE0F2F1),
-                            onTap: () { abrirWa(tel); },
-                          ),
-                        );
-
-                    // ── Botón WA Cliente ancho completo (bajo fila de local) ─
-                    Widget botonWaClienteFull(String tel) => SizedBox(
-                          width: double.infinity,
-                          child: OutlinedButton.icon(
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: const Color(0xFF004D40),
-                              backgroundColor: const Color(0xFFE0F2F1),
-                              side: const BorderSide(
-                                  color: Color(0xFF80CBC4), width: 1.5),
-                              padding: const EdgeInsets.symmetric(vertical: 13),
-                            ),
-                            onPressed: () { abrirWa(tel); },
-                            icon: const Icon(Icons.wechat, size: 20),
-                            label: const Text(
-                              'WhatsApp Cliente',
-                              style: TextStyle(
-                                  fontWeight: FontWeight.bold, fontSize: 13),
-                            ),
-                          ),
-                        );
-
-                    // ── Botón Chat con Local / Chat con Cliente (azul) ─────
-                    final String textoChat =
-                        esClienteApp ? 'Chat Cliente' : 'Chat Local';
-                    final IconData iconoChat =
-                        esClienteApp ? Icons.person : Icons.storefront;
-                    Widget botonChatLocalCliente() {
-                      final bool tieneMsg = servicio['chat_movil'] == true;
-                      if (tieneMsg) {
-                        WidgetsBinding.instance.addPostFrameCallback((_) {
-                          _sonidos.reproducirSuave(Sonidos.movilChatCliente);
-                        });
-                      }
-                      return Expanded(
-                        child: BotonTacticoAccion(
-                          icono: iconoChat,
-                          texto: textoChat,
-                          colorBase: Colors.blue[800]!,
-                          colorFondo: Colors.blue[50]!,
-                          tieneAlarma: tieneMsg,
-                          onTap: () {
-                            Supabase.instance.client
-                                .from('servicios')
-                                .update({'chat_movil': false}).eq(
-                                    'id', servicio['id']);
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => ChatScreen(
-                                  salaId: 'servicio_${servicio['id']}',
-                                  miId: widget.usuario['id'],
-                                  miNombre:
-                                      movilLabelConNombre(widget.usuario),
-                                  titulo: textoChat,
-                                  servicioId: servicio['id'],
-                                  alarmaLocal: 'chat_movil',
-                                  alarmaDestino: 'chat_cliente',
-                                  destinatarioId:
-                                      (servicio['cliente_id'] as num?)
-                                          ?.toInt(),
-                                  tipoFaq: TipoFaqChat.movil,
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                      );
-                    }
-
-                    // ── Botón Chat Central (morado) ────────────────────────
-                    Widget botonChatCentral() {
-                      final bool tieneMsg =
-                          servicio['chat_central_movil'] == true;
-                      return Expanded(
-                        child: BotonTacticoAccion(
-                          icono: Icons.headset_mic,
-                          texto: 'Chat Central',
-                          colorBase: const Color(0xFF6A1B9A),
-                          colorFondo: const Color(0xFFF3E5F5),
-                          tieneAlarma: tieneMsg,
-                          onTap: () {
-                            Supabase.instance.client
-                                .from('servicios')
-                                .update({'chat_central_movil': false}).eq(
-                                    'id', servicio['id']);
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => ChatScreen(
-                                  salaId: 'soporte_movil_${servicio['id']}',
-                                  miId: widget.usuario['id'],
-                                  miNombre:
-                                      movilLabelConNombre(widget.usuario),
-                                  titulo: 'Soporte Central',
-                                  servicioId: servicio['id'],
-                                  alarmaLocal: 'chat_central_movil',
-                                  alarmaDestino: 'chat_movil_central',
-                                  tipoFaq: TipoFaqChat.movil,
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                      );
-                    }
-
-                    // ── CASO 1: Servicio creado por Local ──────────────────
-                    // Fila 1: [WA Local] [Chat Local] [Chat Central]
-                    // Fila 2: [WhatsApp Cliente — ancho completo]
-                    if (tieneLocal) {
-                      return FutureBuilder<Map<String, dynamic>?>(
-                        future: Supabase.instance.client
-                            .from('usuarios')
-                            .select('telefono_local')
-                            .eq('id', localId)
-                            .maybeSingle(),
-                        builder: (context, snap) {
-                          final String telLocal =
-                              snap.data?['telefono_local']
-                                      ?.toString()
-                                      .trim() ??
-                                  '';
-                          return Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Row(
-                                children: [
-                                  if (telLocal.isNotEmpty) ...[
-                                    botonWaLocal(telLocal),
-                                    const SizedBox(width: 8),
-                                  ],
-                                  botonChatLocalCliente(),
-                                  const SizedBox(width: 8),
-                                  botonChatCentral(),
-                                ],
-                              ),
-                              if (numReceptor.isNotEmpty) ...[
-                                const SizedBox(height: 8),
-                                botonWaClienteFull(numReceptor),
-                              ],
-                            ],
-                          );
-                        },
-                      );
-                    }
-
-                    // ── CASO 2: Servicio creado por Cliente App ────────────
-                    // Fila: [Chat Cliente] [WA Cliente] [Chat Central]
-                    if (esClienteApp) {
-                      Row buildFilaCliente(String tel) => Row(
-                            children: [
-                              botonChatLocalCliente(),
-                              const SizedBox(width: 8),
-                              if (tel.isNotEmpty) ...[
-                                botonWaClienteCompacto(tel),
-                                const SizedBox(width: 8),
-                              ],
-                              botonChatCentral(),
-                            ],
-                          );
-
-                      if (numReceptor.isNotEmpty) {
-                        return buildFilaCliente(numReceptor);
-                      }
-                      // Si no hay número manual, consultar perfil del cliente
-                      return FutureBuilder<Map<String, dynamic>?>(
-                        future: Supabase.instance.client
-                            .from('usuarios')
-                            .select('telefono')
-                            .eq('id', servicio['cliente_id'])
-                            .maybeSingle(),
-                        builder: (context, snap) {
-                          if (snap.connectionState ==
-                              ConnectionState.waiting) {
-                            return buildFilaCliente('');
-                          }
-                          return buildFilaCliente(
-                              snap.data?['telefono']?.toString().trim() ?? '');
-                        },
-                      );
-                    }
-
-                    // ── CASO 3: Servicio creado por Central ────────────────
-                    // Fila: [WA Cliente (si hay número)] [Chat Central]
-                    return Row(
+                // Chips de desglose
+                Builder(builder: (_) {
+                  final detalle =
+                      servicio['tarifa_detalle'] as Map<String, dynamic>?;
+                  if (detalle == null) return const SizedBox.shrink();
+                  final int recargo =
+                      (detalle['recargo'] as num?)?.toInt() ?? 0;
+                  final bool lluvia = detalle['lluvia'] == true;
+                  final bool nocturno = detalle['nocturno'] == true;
+                  final bool sobrecarga = detalle['sobrecarga'] == true;
+                  final String fuente =
+                      detalle['fuente']?.toString() ?? '';
+                  final bool tieneDesglose =
+                      recargo > 0 || lluvia || nocturno || sobrecarga;
+                  if (!tieneDesglose && fuente.isEmpty)
+                    return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Wrap(
+                      spacing: 4,
+                      runSpacing: 4,
                       children: [
-                        if (numReceptor.isNotEmpty) ...[
-                          botonWaClienteCompacto(numReceptor),
-                          const SizedBox(width: 8),
-                        ],
-                        botonChatCentral(),
-                      ],
-                    );
-                  },
-                ),
-              ),
-            // ── FOTO DE COMANDA (solo en_origen, solo SE) ──────────────────────────
-            if (estado == 'en_origen' &&
-                !_esMototaxi(servicio['tipo_servicio']))
-              Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: Builder(builder: (_) {
-                  final fotoUrl = servicio['foto_comanda_url']?.toString();
-                  if (fotoUrl != null && fotoUrl.isNotEmpty) {
-                    // Ya tiene foto: mostrar miniatura con opción de reemplazar
-                    return GestureDetector(
-                      onTap: () => _subirFotoComanda(servicio),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          border: Border.all(color: Colors.green[300]!),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(7),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Image.network(
-                                fotoUrl,
-                                height: 120,
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => const SizedBox(
-                                    height: 60,
-                                    child: Center(
-                                        child: Icon(Icons.broken_image,
-                                            color: Colors.grey))),
-                              ),
-                              Container(
-                                color: Colors.green[50],
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 10, vertical: 4),
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.check_circle,
-                                        size: 14, color: Colors.green[700]),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                        'Foto de comanda cargada — toca para reemplazar',
-                                        style: TextStyle(
-                                            fontSize: 11,
-                                            color: Colors.green[800])),
-                                  ],
-                                ),
-                              ),
-                            ],
+                        if (lluvia)
+                          _chipDetalle('🌧 lluvia', Colors.blue[100]!),
+                        if (nocturno)
+                          _chipDetalle(
+                              '🌙 nocturno', Colors.indigo[100]!),
+                        if (sobrecarga)
+                          _chipDetalle(
+                              '⚡ sobrecarga', Colors.amber[100]!),
+                        if (recargo > 0)
+                          _chipDetalle(
+                            '+${_formatearMoneda(recargo.toDouble())} recargo',
+                            Colors.orange[100]!,
                           ),
-                        ),
-                      ),
-                    );
-                  }
-                  // Sin foto: botón visible — no dice "opcional" pero el móvil
-                  // puede continuar sin foto si el local no entrega comanda.
-                  return SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.brown[800],
-                        backgroundColor: Colors.brown[50],
-                        side: BorderSide(color: Colors.brown[600]!, width: 2),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
-                      onPressed: () => _subirFotoComanda(servicio),
-                      icon: const Text('📷', style: TextStyle(fontSize: 20)),
-                      label: const Text(
-                        'FOTOGRAFÍA DE LA COMANDA',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 13),
-                      ),
+                        if (fuente.startsWith('motor'))
+                          _chipDetalle('motor IA', Colors.green[100]!),
+                        if (fuente == 'manual' ||
+                            fuente == 'central_manual')
+                          _chipDetalle(
+                              'precio manual', Colors.grey[200]!),
+                      ],
                     ),
                   );
                 }),
-              ),
-            // --------------------------------------------------------------------------
-            AnimatedSwitcher(
-              duration: Duration.zero,
-              transitionBuilder: (child, anim) => FadeTransition(
-                opacity: anim,
-                child: ScaleTransition(
-                    scale: Tween(begin: 0.92, end: 1.0).animate(anim),
-                    child: child),
-              ),
-              child: SizedBox(
-                key: ValueKey('btn_$estado${estaDemorado ? '_d' : ''}'),
-                width: double.infinity,
-                height: 56,
-                child: botonAccion,
-              ),
-            ),
+                const SizedBox(height: 10),
 
-            if (!tieneProblema &&
-                estado == 'en_ruta_destino' &&
-                efectivos >= (tiempoMeta * 0.7).floor())
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      side: BorderSide(color: Colors.blue[600]!, width: 1.5),
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                    ),
-                    onPressed: () => _abrirMenuProrroga(
-                      context,
-                      servicio['id'],
-                      servicio['extension_minutes'] as int? ?? 0,
-                    ),
-                    icon: Icon(Icons.timer, color: Colors.blue[600], size: 16),
-                    label: const Text(
-                      'Justificar (+15 min)',
-                      style: TextStyle(
-                          color: Colors.blue,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 12),
+                // Chip WA receptor (teléfono manual)
+                if (servicio['telefono_receptor'] != null &&
+                    servicio['telefono_receptor']
+                        .toString()
+                        .trim()
+                        .isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: GestureDetector(
+                      onTap: () async {
+                        String num = servicio['telefono_receptor']
+                            .toString()
+                            .replaceAll(RegExp(r'[^0-9]'), '');
+                        if (num.length == 10) num = '57$num';
+                        final uri = Uri.parse(
+                            'https://wa.me/$num?text=${Uri.encodeComponent('Hola, soy el móvil de Serviexpress que lleva tu servicio.')}');
+                        await launchUrl(uri,
+                            mode: LaunchMode.externalApplication);
+                      },
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF25D366),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Text('📱',
+                                    style: TextStyle(fontSize: 13)),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'WA ${servicio['telefono_receptor']}',
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              ),
-            if (!tieneProblema)
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      side: BorderSide(color: Colors.red[400]!, width: 1),
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                    ),
-                    onPressed: () =>
-                        _mostrarMenuProblema(context, servicio['id']),
-                    icon: Icon(Icons.flag_outlined,
-                        color: Colors.red[500], size: 15),
-                    label: Text(
-                      'Reportar problema',
-                      style: TextStyle(
-                          color: Colors.red[500],
-                          fontWeight: FontWeight.w600,
-                          fontSize: 12),
-                    ),
+
+                // Foto de comanda (solo en_origen y no mototaxi)
+                if (estado == 'en_origen' && !esMoto)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: Builder(builder: (_) {
+                      final fotoUrl =
+                          servicio['foto_comanda_url']?.toString();
+                      if (fotoUrl != null && fotoUrl.isNotEmpty) {
+                        return GestureDetector(
+                          onTap: () => _subirFotoComanda(servicio),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              border:
+                                  Border.all(color: Colors.green[300]!),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(7),
+                              child: Column(
+                                crossAxisAlignment:
+                                    CrossAxisAlignment.stretch,
+                                children: [
+                                  Image.network(
+                                    fotoUrl,
+                                    height: 120,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) =>
+                                        const SizedBox(
+                                            height: 60,
+                                            child: Center(
+                                                child: Icon(
+                                                    Icons.broken_image,
+                                                    color: Colors.grey))),
+                                  ),
+                                  Container(
+                                    color: Colors.green[50],
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 10, vertical: 4),
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.check_circle,
+                                            size: 14,
+                                            color: Colors.green[700]),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                            'Foto de comanda cargada — toca para reemplazar',
+                                            style: TextStyle(
+                                                fontSize: 11,
+                                                color: Colors.green[800])),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      }
+                      return SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.brown[800],
+                            backgroundColor: Colors.brown[50],
+                            side: BorderSide(
+                                color: Colors.brown[600]!, width: 2),
+                            padding:
+                                const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                          onPressed: () => _subirFotoComanda(servicio),
+                          icon: const Text('📷',
+                              style: TextStyle(fontSize: 20)),
+                          label: const Text(
+                            'FOTOGRAFÍA DE LA COMANDA',
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 13),
+                          ),
+                        ),
+                      );
+                    }),
+                  ),
+
+                // Botón acción principal
+                AnimatedSwitcher(
+                  duration: Duration.zero,
+                  transitionBuilder: (child, anim) => FadeTransition(
+                    opacity: anim,
+                    child: ScaleTransition(
+                        scale:
+                            Tween(begin: 0.92, end: 1.0).animate(anim),
+                        child: child),
+                  ),
+                  child: SizedBox(
+                    key: ValueKey(
+                        'btn_$estado${estaDemorado ? '_d' : ''}'),
+                    width: double.infinity,
+                    height: 56,
+                    child: botonAccion,
                   ),
                 ),
-              ),
-          ],
-        ),
+
+                // Justificar demora (en_ruta_destino, ≥70% del tiempo)
+                if (!tieneProblema &&
+                    estado == 'en_ruta_destino' &&
+                    efectivos >= (tiempoMeta * 0.7).floor())
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          side: BorderSide(
+                              color: Colors.blue[600]!, width: 1.5),
+                          padding:
+                              const EdgeInsets.symmetric(vertical: 8),
+                        ),
+                        onPressed: () => _abrirMenuProrroga(
+                          context,
+                          servicio['id'],
+                          servicio['extension_minutes'] as int? ?? 0,
+                        ),
+                        icon: Icon(Icons.timer,
+                            color: Colors.blue[600], size: 16),
+                        label: const Text(
+                          'Justificar (+15 min)',
+                          style: TextStyle(
+                              color: Colors.blue,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 12),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                // Navegar
+                if (mostrarBotonNavegar && !tieneProblema)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8, bottom: 4),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.indigo[600],
+                          foregroundColor: Colors.white,
+                          elevation: 2,
+                          padding:
+                              const EdgeInsets.symmetric(vertical: 10),
+                        ),
+                        onPressed: _procesando
+                            ? null
+                            : () => _abrirNavegadorSatelital(
+                                  servicio,
+                                  estado == 'en_ruta_origen',
+                                ),
+                        icon: const Icon(Icons.explore, size: 18),
+                        label: const Text(
+                          'Navegar en Google Maps',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 13),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                // LIBERAR (solo Master, solo en_ruta_origen)
+                if (esMaster &&
+                    estado == 'en_ruta_origen' &&
+                    !tieneProblema)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFFE040FB),
+                          side: const BorderSide(
+                              color: Color(0xFFE040FB)),
+                          padding:
+                              const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                        onPressed: _procesando
+                            ? null
+                            : () => _liberarServicio(servicio),
+                        icon: const Icon(Icons.replay, size: 18),
+                        label: const Text(
+                          'LIBERAR',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 12),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                // REASIGNAR (solo Master)
+                if (esMaster && !tieneProblema)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFFFFB300),
+                          side: const BorderSide(
+                              color: Color(0xFFFFB300)),
+                          padding:
+                              const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                        onPressed: _procesando
+                            ? null
+                            : () => _reasignarServicio(servicio),
+                        icon: const Icon(Icons.swap_horiz, size: 18),
+                        label: const Text(
+                          'REASIGNAR',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 12),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                // TRANSFERIR (no-Master)
+                if (!esMaster && !tieneProblema)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.teal,
+                          side: const BorderSide(color: Colors.teal),
+                          padding:
+                              const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                        onPressed: _procesando
+                            ? null
+                            : () => _transferirServicio(servicio),
+                        icon: const Icon(Icons.send, size: 18),
+                        label: const Text(
+                          'TRANSFERIR A OTRO MÓVIL',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 12),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                // ── SECCIÓN DE COMUNICACIÓN ─────────────────────────────────────
+                if (!tieneProblema)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12, bottom: 4),
+                    child: Builder(
+                      builder: (context) {
+                        final bool esCreadoPorCentral =
+                            servicio['creador'] == 'Central';
+                        final bool esClienteApp =
+                            servicio['cliente_id'] != null;
+                        final int? localId =
+                            (servicio['local_id'] as num?)?.toInt();
+                        final bool tieneLocal = localId != null &&
+                            !esCreadoPorCentral &&
+                            !esClienteApp;
+                        final String numReceptor =
+                            servicio['telefono_receptor']
+                                    ?.toString()
+                                    .trim() ??
+                                '';
+                        final String nombreNegocio = esCreadoPorCentral
+                            ? 'ServiExpress'
+                            : servicio['creador'].toString();
+
+                        void abrirWa(String numero) async {
+                          String num =
+                              numero.replaceAll(RegExp(r'[^0-9]'), '');
+                          if (num.length == 10) num = '57$num';
+                          final String textoWa = esClienteApp
+                              ? 'Hola, soy el Móvil de Serviexpress. Voy en camino hacia tu ubicación.'
+                              : 'Hola, soy el Móvil que te está haciendo el domicilio de $nombreNegocio. Voy en camino hacia tu dirección.';
+                          final Uri url = Uri.parse(
+                              'https://wa.me/$num?text=${Uri.encodeComponent(textoWa)}');
+                          if (!await launchUrl(url,
+                              mode: LaunchMode.externalApplication)) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                    content: Text(
+                                        'No se pudo abrir WhatsApp')),
+                              );
+                            }
+                          }
+                        }
+
+                        Widget botonWaLocal(String tel) => Expanded(
+                              child: BotonTacticoAccion(
+                                icono: Icons.wechat,
+                                texto: 'WA Local',
+                                colorBase: const Color(0xFF1B5E20),
+                                colorFondo: const Color(0xFFE8F5E9),
+                                onTap: () {
+                                  abrirWa(tel);
+                                },
+                              ),
+                            );
+
+                        Widget botonWaClienteCompacto(String tel) =>
+                            Expanded(
+                              child: BotonTacticoAccion(
+                                icono: Icons.wechat,
+                                texto: 'WA Cliente',
+                                colorBase: const Color(0xFF004D40),
+                                colorFondo: const Color(0xFFE0F2F1),
+                                onTap: () {
+                                  abrirWa(tel);
+                                },
+                              ),
+                            );
+
+                        Widget botonWaClienteFull(String tel) => SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton.icon(
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor:
+                                      const Color(0xFF004D40),
+                                  backgroundColor:
+                                      const Color(0xFFE0F2F1),
+                                  side: const BorderSide(
+                                      color: Color(0xFF80CBC4),
+                                      width: 1.5),
+                                  padding: const EdgeInsets.symmetric(
+                                      vertical: 13),
+                                ),
+                                onPressed: () {
+                                  abrirWa(tel);
+                                },
+                                icon:
+                                    const Icon(Icons.wechat, size: 20),
+                                label: const Text(
+                                  'WhatsApp Cliente',
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13),
+                                ),
+                              ),
+                            );
+
+                        Widget botonChatLocalCliente() {
+                          final bool tieneMsg =
+                              servicio['chat_movil'] == true;
+                          if (tieneMsg) {
+                            WidgetsBinding.instance
+                                .addPostFrameCallback((_) {
+                              _sonidos.reproducirSuave(
+                                  Sonidos.movilChatCliente);
+                            });
+                          }
+                          return Expanded(
+                            child: BotonTacticoAccion(
+                              icono: esClienteApp
+                                  ? Icons.person
+                                  : Icons.storefront,
+                              texto: esClienteApp
+                                  ? 'Chat Cliente'
+                                  : 'Chat Local',
+                              colorBase: Colors.blue[800]!,
+                              colorFondo: Colors.blue[50]!,
+                              tieneAlarma: tieneMsg,
+                              onTap: () {
+                                Supabase.instance.client
+                                    .from('servicios')
+                                    .update({
+                                  'chat_movil': false
+                                }).eq('id', servicio['id']);
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => ChatScreen(
+                                      salaId:
+                                          'servicio_${servicio['id']}',
+                                      miId: widget.usuario['id'],
+                                      miNombre: movilLabelConNombre(
+                                          widget.usuario),
+                                      titulo: esClienteApp
+                                          ? 'Chat Cliente'
+                                          : 'Chat Local',
+                                      servicioId: servicio['id'],
+                                      alarmaLocal: 'chat_movil',
+                                      alarmaDestino: 'chat_cliente',
+                                      destinatarioId:
+                                          (servicio['cliente_id'] as num?)
+                                              ?.toInt(),
+                                      tipoFaq: TipoFaqChat.movil,
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          );
+                        }
+
+                        Widget botonChatCentral() {
+                          final bool tieneMsg =
+                              servicio['chat_central_movil'] == true;
+                          return Expanded(
+                            child: BotonTacticoAccion(
+                              icono: Icons.headset_mic,
+                              texto: 'Chat Central',
+                              colorBase: const Color(0xFF6A1B9A),
+                              colorFondo: const Color(0xFFF3E5F5),
+                              tieneAlarma: tieneMsg,
+                              onTap: () {
+                                Supabase.instance.client
+                                    .from('servicios')
+                                    .update({
+                                  'chat_central_movil': false
+                                }).eq('id', servicio['id']);
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => ChatScreen(
+                                      salaId:
+                                          'soporte_movil_${servicio['id']}',
+                                      miId: widget.usuario['id'],
+                                      miNombre: movilLabelConNombre(
+                                          widget.usuario),
+                                      titulo: 'Soporte Central',
+                                      servicioId: servicio['id'],
+                                      alarmaLocal: 'chat_central_movil',
+                                      alarmaDestino: 'chat_movil_central',
+                                      tipoFaq: TipoFaqChat.movil,
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          );
+                        }
+
+                        // CASO 1: servicio con local (no central, no app)
+                        if (tieneLocal) {
+                          return FutureBuilder<Map<String, dynamic>?>(
+                            // ??= cachea por local_id: el teléfono del local
+                            // no cambia durante el servicio y el StreamBuilder
+                            // reconstruye en cada GPS emit (~2s).
+                            future: _futureLocalTel[localId] ??=
+                                Supabase.instance.client
+                                    .from('usuarios')
+                                    .select('telefono_local')
+                                    .eq('id', localId)
+                                    .maybeSingle(),
+                            builder: (context, snap) {
+                              final String telLocal =
+                                  snap.data?['telefono_local']
+                                          ?.toString()
+                                          .trim() ??
+                                      '';
+                              return Column(
+                                crossAxisAlignment:
+                                    CrossAxisAlignment.stretch,
+                                children: [
+                                  Row(
+                                    children: [
+                                      if (telLocal.isNotEmpty) ...[
+                                        botonWaLocal(telLocal),
+                                        const SizedBox(width: 8),
+                                      ],
+                                      botonChatLocalCliente(),
+                                      const SizedBox(width: 8),
+                                      botonChatCentral(),
+                                    ],
+                                  ),
+                                  if (numReceptor.isNotEmpty) ...[
+                                    const SizedBox(height: 8),
+                                    botonWaClienteFull(numReceptor),
+                                  ],
+                                ],
+                              );
+                            },
+                          );
+                        }
+
+                        // CASO 2: servicio creado por cliente app
+                        if (esClienteApp) {
+                          Row buildFilaCliente(String tel) => Row(
+                                children: [
+                                  botonChatLocalCliente(),
+                                  const SizedBox(width: 8),
+                                  if (tel.isNotEmpty) ...[
+                                    botonWaClienteCompacto(tel),
+                                    const SizedBox(width: 8),
+                                  ],
+                                  botonChatCentral(),
+                                ],
+                              );
+
+                          if (numReceptor.isNotEmpty) {
+                            return buildFilaCliente(numReceptor);
+                          }
+                          return FutureBuilder<Map<String, dynamic>?>(
+                            // ??= cachea por cliente_id: el teléfono del
+                            // cliente no cambia durante el servicio.
+                            future: _futureClienteTel[servicio['cliente_id']] ??=
+                                Supabase.instance.client
+                                    .from('usuarios')
+                                    .select('telefono')
+                                    .eq('id', servicio['cliente_id'])
+                                    .maybeSingle(),
+                            builder: (context, snap) {
+                              if (snap.connectionState ==
+                                  ConnectionState.waiting) {
+                                return buildFilaCliente('');
+                              }
+                              return buildFilaCliente(
+                                  snap.data?['telefono']
+                                          ?.toString()
+                                          .trim() ??
+                                      '');
+                            },
+                          );
+                        }
+
+                        // CASO 3: creado por central
+                        return Row(
+                          children: [
+                            if (numReceptor.isNotEmpty) ...[
+                              botonWaClienteCompacto(numReceptor),
+                              const SizedBox(width: 8),
+                            ],
+                            botonChatCentral(),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
+
+                // Reportar problema
+                if (!tieneProblema)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          side: BorderSide(
+                              color: Colors.red[400]!, width: 1),
+                          padding:
+                              const EdgeInsets.symmetric(vertical: 6),
+                        ),
+                        onPressed: () =>
+                            _mostrarMenuProblema(context, servicio['id']),
+                        icon: Icon(Icons.flag_outlined,
+                            color: Colors.red[500], size: 15),
+                        label: Text(
+                          'Reportar problema',
+                          style: TextStyle(
+                              color: Colors.red[500],
+                              fontWeight: FontWeight.w600,
+                              fontSize: 12),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -15607,7 +15819,27 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                                           continue; // salta embudo estándar
                                                         }
 
-                                                        // 3. CÁLCULO DE DISTANCIA OPERATIVA DESDE EL LOCAL
+                                                        // 3. ASIGNACIÓN DIRECTA SE — si central eligió un móvil
+                                                        // específico (exclusivo_id), solo ese móvil lo ve.
+                                                        // Las fases de tiempo no aplican — el servicio es suyo.
+                                                        final String exclStr =
+                                                            (s['exclusivo_id']
+                                                                        ?.toString() ??
+                                                                    '')
+                                                                .trim();
+                                                        if (exclStr
+                                                            .isNotEmpty) {
+                                                          final miId = widget
+                                                              .usuario['id']
+                                                              .toString();
+                                                          if (exclStr == miId) {
+                                                            pendientes.add(
+                                                                s); // soy el asignado
+                                                          }
+                                                          continue; // invisible para todos los demás
+                                                        }
+
+                                                        // 4. CÁLCULO DE DISTANCIA OPERATIVA DESDE EL LOCAL
                                                         double distMetros =
                                                             999999;
                                                         if (_ultimaPosicionConocida !=
@@ -15649,11 +15881,23 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                                             puedeVer = false;
                                                           } else if (segundos <
                                                               60) {
-                                                            // FASE 2 (30–59s): pg_cron auto-asigna al #1 del
-                                                            // paradero (paradero_auto_movil_id). Los no-masters
-                                                            // no deben ver la card — el #1 será asignado sin
-                                                            // necesidad de aceptar. Masters siguen como fallback.
-                                                            puedeVer = false;
+                                                            // FASE 2 (30–59s): Solo el #1 del paradero ve la card.
+                                                            // fn-auto-asignar-fase2 ya guardó su ID en
+                                                            // paradero_ofrecido_id. Acepta voluntariamente
+                                                            // (tomar_servicio_candado) — NO es auto-asignación.
+                                                            final String
+                                                                ofrecidoId =
+                                                                (s['paradero_ofrecido_id']
+                                                                            ?.toString() ??
+                                                                        '')
+                                                                    .trim();
+                                                            puedeVer = ofrecidoId
+                                                                    .isNotEmpty &&
+                                                                ofrecidoId ==
+                                                                    widget
+                                                                        .usuario[
+                                                                            'id']
+                                                                        .toString();
                                                           } else if (segundos <
                                                               90) {
                                                             // FASE 3 (60–89s): Zona 2km desde el origen.
@@ -15877,41 +16121,11 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                                         }
                                                       });
 
-                                                      // ---> INYECCIÓN: CÁLCULO DE CAJA EN VIVO <---
-                                                      double producidoHoy = 0.0;
-                                                      final hoyLocal =
-                                                          DateTime.now()
-                                                              .toLocal();
-                                                      for (var s in todos) {
-                                                        if (s['estado'] ==
-                                                                'finalizado' &&
-                                                            s['movil_id'] ==
-                                                                widget.usuario[
-                                                                    'id'] &&
-                                                            s['created_at'] !=
-                                                                null) {
-                                                          final fechaSvc =
-                                                              DateTime.parse(
-                                                            s['created_at'],
-                                                          ).toLocal();
-                                                          if (fechaSvc.year ==
-                                                                  hoyLocal
-                                                                      .year &&
-                                                              fechaSvc.month ==
-                                                                  hoyLocal
-                                                                      .month &&
-                                                              fechaSvc.day ==
-                                                                  hoyLocal
-                                                                      .day) {
-                                                            producidoHoy += (s[
-                                                                            'tarifa']
-                                                                        as num?)
-                                                                    ?.toDouble() ??
-                                                                0.0;
-                                                          }
-                                                        }
-                                                      }
-                                                      // --------------------------------------------
+                                                      // Usa la misma fuente que la pestaña ServiExpress
+                                                      // (_cargarProduccion) para garantizar sincronía.
+                                                      final double producidoHoy =
+                                                          _producidoHoy -
+                                                              _producidoFnHoy;
 
                                                       return ListView(
                                                         padding:
@@ -16459,20 +16673,9 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
             ), // Column
             // #91: overlay "Has perdido la conexión" — solo cuando stream falla con caché disponible
             if (_conexionPerdida) _overlayDesconexion(),
-            // Banner informativo pago semanal (ventana domingo-lunes, sin bloqueo)
-            StreamBuilder<Map<String, dynamic>?>(
-              stream: _streamMiPerfil,
-              initialData: _cacheMiPerfil,
-              builder: (_, snap) {
-                final perfil = snap.data ?? _cacheMiPerfil ?? widget.usuario;
-                final esMaster = perfil['rango_movil']?.toString().toUpperCase() == 'MASTER';
-                final esSemanal = perfil['tipo_plan_movil']?.toString() == 'semanal';
-                final bloqueado = perfil['wallet_bloqueado'] == true;
-                if (esMaster || !esSemanal || bloqueado || !_enVentanaPago())
-                  return const SizedBox.shrink();
-                return _bannerPagoSemanal(perfil['id']);
-              },
-            ),
+            // Banner pago semanal eliminado — el inline del radar (línea ~15484)
+            // ya muestra el aviso. El Positioned(top:0) generaba doble banner
+            // solapado sobre el botón de conectar/desconectar.
             // Overlay bloqueo billetera semanal (Masters exentos)
             StreamBuilder<Map<String, dynamic>?>(
               stream: _streamMiPerfil,

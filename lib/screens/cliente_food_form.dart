@@ -189,11 +189,11 @@ class _ClienteFoodFormState extends State<ClienteFoodForm> {
       try {
         final serviciosPendientes = await Supabase.instance.client
             .from('servicios')
-            .select('exclusivo_id')
+            .select('paradero_auto_movil_id')
             .eq('estado', 'pendiente')
-            .not('exclusivo_id', 'is', null);
+            .not('paradero_auto_movil_id', 'is', null);
         List<String> ocupados = serviciosPendientes
-            .map((s) => s['exclusivo_id'].toString())
+            .map((s) => s['paradero_auto_movil_id'].toString())
             .toList();
 
         final movilesLibres = await Supabase.instance.client
@@ -241,7 +241,10 @@ class _ClienteFoodFormState extends State<ClienteFoodForm> {
         },
         'observacion': notaFinal,
         'estado': _requiereCotizacion ? 'cotizacion' : 'pendiente',
-        'exclusivo_id': idPilotoExclusivo,
+        if (idPilotoExclusivo != null) 'paradero_auto_movil_id': idPilotoExclusivo,
+        if (idPilotoExclusivo != null) 'paradero_ofrecido_id': idPilotoExclusivo,
+        if (idPilotoExclusivo != null) 'paradero_ofrecido_at': DateTime.now().toUtc().toIso8601String(),
+        'se_cascade_t0': DateTime.now().toUtc().toIso8601String(),
       });
 
       // ---> GUARDAR ORIGEN/DESTINO PARA PRÓXIMOS PEDIDOS <---
@@ -252,59 +255,36 @@ class _ClienteFoodFormState extends State<ClienteFoodForm> {
         'ultimo_destino_lng': _destinoLng,
       }).eq('id', widget.usuario['id']).then((_) {}).catchError((_) {});
 
-      // ---> CASCADA 4 FASES (T=0 Masters, T+1min todos, T+2min todos) <---
+      // ---> CASCADA SE (F1 Masters T=0, F2 paradero T+30s; F3/F4 vía Edge Function) <---
       if (!_requiereCotizacion) {
         try {
           final String origenNotif = _restauranteCtrl.text.trim().toUpperCase();
-          if (idPilotoExclusivo != null) {
-            await MotorNotificaciones.dispararMisil(
-              idDestino: idPilotoExclusivo,
-              titulo: '🎯 TU TURNO EXCLUSIVO',
-              mensaje: 'Nuevo pedido de COMIDA en $origenNotif',
+          // F1 (T=0): notificar a todos los Masters
+          final masters = await Supabase.instance.client
+              .from('usuarios').select('id')
+              .or('rol.eq.central,rol.eq.master,rango_movil.eq.MASTER')
+              .neq('suspendido', true);
+          final masterIds = masters.map((u) => u['id'].toString()).toList();
+          if (masterIds.isNotEmpty) {
+            await MotorNotificaciones.dispararRafa(
+              idsDestinos: masterIds,
+              titulo: '👑 NUEVO PEDIDO COMIDA',
+              mensaje: 'Cliente solicita COMIDA en $origenNotif',
               urgente: true,
             );
-          } else {
-            // T=0: Masters
-            final masters = await Supabase.instance.client
-                .from('usuarios').select('id')
-                .or('rol.eq.central,rol.eq.master,rango_movil.eq.MASTER')
-                .neq('suspendido', true);
-            final masterIds = masters.map((u) => u['id'].toString()).toList();
-            if (masterIds.isNotEmpty) {
-              await MotorNotificaciones.dispararRafa(
-                idsDestinos: masterIds,
-                titulo: '👑 NUEVO PEDIDO COMIDA',
-                mensaje: 'Cliente solicita COMIDA en $origenNotif',
-                urgente: true,
-              );
-            }
-            // T+1min: todos los no-Masters disponibles
-            final movilesData = await Supabase.instance.client
-                .from('usuarios').select('id')
-                .eq('rol', 'movil').eq('en_linea', true).neq('suspendido', true)
-                .or('rango_movil.is.null,rango_movil.neq.MASTER');
-            final idsMoviles = movilesData
-                .map((u) => u['id'].toString())
-                .where((id) => !masterIds.contains(id))
-                .toList();
-            if (idsMoviles.isNotEmpty) {
-              await MotorNotificaciones.programarMisilRetardado(
-                externalIds: idsMoviles,
-                titulo: '📡 PEDIDO COMIDA EN RADAR',
-                mensaje: 'COMIDA en $origenNotif — revisa el radar.',
-                minutosRetardo: 1,
-              );
-            }
-            // T+2min: todos (ola final)
-            if (idsMoviles.isNotEmpty) {
-              await MotorNotificaciones.programarMisilRetardado(
-                externalIds: idsMoviles,
-                titulo: '🚨 SERVICIO SIN TOMAR',
-                mensaje: 'Pedido de COMIDA sin asignar en $origenNotif.',
-                minutosRetardo: 2,
-              );
-            }
           }
+          // F2 (T+30s): misil al #1 del paradero (si no es ya Master)
+          if (idPilotoExclusivo != null &&
+              !masterIds.contains(idPilotoExclusivo)) {
+            await MotorNotificaciones.programarMisilRetardado(
+              externalIds: [idPilotoExclusivo],
+              titulo: '⚠️ ¡TU TURNO DE PARADERO!',
+              mensaje: 'Tienes 30 segundos para aceptar el servicio.',
+              segundosRetardo: 30,
+              sonido: 'movil_paradero',
+            );
+          }
+          // F3 y F4 gestionados por se-notif-fase3/se-notif-fase4 vía se_cascade_t0
         } catch (e) {
           debugPrint('Error OneSignal: $e');
         }

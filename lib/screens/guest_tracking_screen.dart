@@ -21,6 +21,11 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
   // suscripción WebSocket en cada rebuild del widget.
   Stream<List<Map<String, dynamic>>>? _streamServicio;
 
+  // Cache del perfil del móvil: se crea una sola vez cuando el estado
+  // pasa a en_ruta_origen/en_origen/en_ruta_destino y se reutiliza en
+  // cada emit posterior del stream (GPS, chat, etc.).
+  Future<List<Map<String, dynamic>>>? _futureMovilGst;
+
   @override
   void initState() {
     super.initState();
@@ -537,7 +542,9 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
 
     if (['en_ruta_origen', 'en_origen', 'en_ruta_destino'].contains(estado)) {
       acciones = FutureBuilder<List<Map<String, dynamic>>>(
-        future: Supabase.instance.client
+        // ??= evita re-consultar el perfil del móvil en cada emit del
+        // stream de servicios (GPS, chat, cambios de estado, etc.).
+        future: _futureMovilGst ??= Supabase.instance.client
             .from('usuarios')
             .select(
               'nombre, usuario, telefono, pago_nequi, pago_daviplata, '

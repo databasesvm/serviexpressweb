@@ -42,7 +42,7 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
       final results = await Future.wait([
         _db
             .from('usuarios')
-            .select('id, auth_id, nombre, usuario, rango_movil, puntuacion, activo, tipo_plan_movil, numero_movil, saldo_wallet, comision_pct, wallet_bloqueado, recargo_mora_activo, tiene_fn, tiene_se')
+            .select('id, auth_id, nombre, usuario, rango_movil, puntuacion, activo, tipo_plan_movil, numero_movil, saldo_wallet, comision_pct, wallet_bloqueado, recargo_mora_activo, tiene_fn, tiene_se, pago_semana_exonerado')
             .eq('rol', 'movil')
             .order('usuario', ascending: true),
         _db
@@ -519,9 +519,10 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
     final plan = u['tipo_plan_movil']?.toString() ?? '';
     final saldo = (u['saldo_wallet'] as num?)?.toDouble() ?? 0.0;
     final comPct = (u['comision_pct'] as num?)?.toDouble() ?? 10.0;
-    final bloqueado = u['wallet_bloqueado'] == true;
-    final recargo = u['recargo_mora_activo'] == true;
-    final esSemanal = plan == 'semanal';
+    final bloqueado  = u['wallet_bloqueado'] == true;
+    final recargo    = u['recargo_mora_activo'] == true;
+    final esSemanal  = plan == 'semanal';
+    final exonerado  = u['pago_semana_exonerado'] == true;
 
     final positivo = esSemanal ? !bloqueado : (plan == 'postdia' ? saldo >= 0 : saldo > 0);
     final colorSaldo = positivo ? const Color(0xFF22C55E) : Colors.redAccent;
@@ -725,12 +726,17 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                   '\$${saldo.toStringAsFixed(0)}',
                   style: TextStyle(color: colorSaldo, fontWeight: FontWeight.bold, fontSize: 16),
                 )
-              else
+              else ...[
                 Icon(
                   bloqueado ? Icons.lock_rounded : Icons.lock_open_rounded,
                   color: bloqueado ? Colors.orange : const Color(0xFF22C55E),
                   size: 20,
                 ),
+                if (exonerado) ...[
+                  const SizedBox(height: 3),
+                  _chip('EXONERADO', Colors.green[600]!),
+                ],
+              ],
             ]),
           ]),
           const SizedBox(height: 12),
@@ -761,6 +767,83 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
                   onPressed: () => _abrirDialogWallet(u, soloLectura: false),
+                ),
+              ),
+            ] else ...[
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  icon: Icon(
+                    exonerado ? Icons.shield_rounded : Icons.shield_outlined,
+                    size: 14,
+                  ),
+                  label: Text(
+                    exonerado ? 'Exonerado' : 'Exonerar',
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: exonerado ? Colors.green[400] : Colors.green[700],
+                    side: BorderSide(
+                        color: exonerado ? Colors.green[400]! : Colors.green[700]!),
+                    backgroundColor:
+                        exonerado ? Colors.green.withValues(alpha: 0.1) : null,
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onPressed: () async {
+                    final nuevoEstado = !exonerado;
+                    final ok = await showDialog<bool>(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        backgroundColor: const Color(0xFF1A1A1A),
+                        title: Text(
+                          nuevoEstado
+                              ? 'Exonerar pago semanal'
+                              : 'Quitar exoneración',
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold),
+                        ),
+                        content: Text(
+                          nuevoEstado
+                              ? '¿Exonerar a $nombre del cobro semanal del próximo lunes?\n\nEl cron no lo bloqueará.'
+                              : '¿Quitar la exoneración de $nombre?\n\nVolverá a estar sujeto al cobro del lunes.',
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 13),
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx, false),
+                            child: const Text('CANCELAR',
+                                style: TextStyle(color: Colors.grey)),
+                          ),
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: nuevoEstado
+                                  ? Colors.green[700]
+                                  : Colors.orange,
+                              foregroundColor: Colors.white,
+                            ),
+                            onPressed: () => Navigator.pop(ctx, true),
+                            child: Text(
+                              nuevoEstado ? 'EXONERAR' : 'QUITAR',
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (ok == true) {
+                      await _db
+                          .from('usuarios')
+                          .update({'pago_semana_exonerado': nuevoEstado})
+                          .eq('id', u['id']);
+                      _cargar();
+                    }
+                  },
                 ),
               ),
             ],

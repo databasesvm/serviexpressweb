@@ -1693,6 +1693,10 @@ mixin _FormularioMixin on State<LocalScreen> {
                               'exclusivo_id': exclusivoIdCampo,
                               if (paraderoAutoMovilId != null)
                                 'paradero_auto_movil_id': paraderoAutoMovilId,
+                              if (paraderoAutoMovilId != null)
+                                'paradero_ofrecido_id': paraderoAutoMovilId,
+                              if (paraderoAutoMovilId != null)
+                                'paradero_ofrecido_at': DateTime.now().toUtc().toIso8601String(),
                               'ticket_factura': ticketNum.isEmpty
                                   ? null
                                   : ticketNum,
@@ -1846,6 +1850,24 @@ mixin _FormularioMixin on State<LocalScreen> {
                                     .eq('id', nuevoServicioId);
                               }
                             }
+                          }
+
+                          // F2 (T+30s): misil al #1 del paradero
+                          // Solo si hay paradero asignado y no está
+                          // ya cubierto por pilotosSeleccionadosIds.
+                          if (paraderoAutoMovilId != null &&
+                              !pilotosSeleccionadosIds
+                                  .contains(paraderoAutoMovilId)) {
+                            final int secsF2 = retardoProgramado > 0
+                                ? retardoProgramado * 60 + 30
+                                : 30;
+                            await _programarMisilRetardado(
+                              externalIds: [paraderoAutoMovilId],
+                              titulo: '⚠️ ¡TU TURNO DE PARADERO!',
+                              mensaje:
+                                  'Tienes 30 segundos para aceptar el servicio.',
+                              segundosRetardo: secsF2,
+                            );
                           }
 
                           // Olas T=+60s y T=+90s

@@ -49,6 +49,15 @@ class _ClienteScreenState extends State<ClienteScreen>
   List<Map<String, dynamic>>? _cacheServiciosActivos;
   final ValueNotifier<int> _chatClienteCount = ValueNotifier(0);
 
+  // Cache para evitar re-disparar la query del perfil del móvil en cada
+  // emit del stream de servicios activos (GPS updates, cambios de chat, etc.).
+  // Keyed por movil_id — nunca reconsulta el mismo móvil en la misma sesión.
+  final Map<dynamic, Future<Map<String, dynamic>?>> _futureMovilData = {};
+
+  // Cache del historial: se crea la primera vez que se abre el tab y se
+  // reutiliza en reconstrucciones posteriores.
+  Future<List<Map<String, dynamic>>>? _futureHistorial;
+
   final Set<int> _dialogosDeCalificacionMostrados = {};
   int _tabActual = 0;
 
@@ -473,12 +482,24 @@ class _ClienteScreenState extends State<ClienteScreen>
           }
         }
       }
-      // Guardar: fn-auto-asignar-fase2 (pg_cron) lo asigna a T+seF2Seg
+      // F2 (T+30s): guardar #1 del paradero y marcar como ofrecido de inmediato.
+      // El misil a T+30s lleva el push exacto al #1 (acepta voluntariamente).
       if (paraderoAutoMovilIdCli != null) {
         await Supabase.instance.client
             .from('servicios')
-            .update({'paradero_auto_movil_id': paraderoAutoMovilIdCli})
+            .update({
+              'paradero_auto_movil_id': paraderoAutoMovilIdCli,
+              'paradero_ofrecido_id': paraderoAutoMovilIdCli,
+              'paradero_ofrecido_at': DateTime.now().toUtc().toIso8601String(),
+            })
             .eq('id', id);
+        await MotorNotificaciones.programarMisilRetardado(
+          externalIds: [paraderoAutoMovilIdCli],
+          titulo: '⚠️ ¡TU TURNO DE PARADERO!',
+          mensaje: 'Tienes 30 segundos para aceptar el servicio.',
+          segundosRetardo: 30,
+          sonido: 'movil_paradero',
+        );
       }
 
       // F3/F4 — pg_cron consulta en_linea en tiempo real (se_cascade_t0 = ahora)
@@ -673,14 +694,18 @@ class _ClienteScreenState extends State<ClienteScreen>
 
       if (servicio['movil_id'] != null) {
         acciones = FutureBuilder<Map<String, dynamic>?>(
-          future: Supabase.instance.client
-              .from('usuarios')
-              .select(
-                'nombre, telefono, usuario, rol, foto_perfil_url, '
-                'pago_nequi, pago_daviplata, pago_bancolombia',
-              )
-              .eq('id', servicio['movil_id'])
-              .maybeSingle(),
+          // ??= evita una nueva query en cada rebuild del StreamBuilder padre
+          // (emit por GPS, chat, etc.). El perfil del móvil no cambia durante
+          // el servicio, así que cachear por movil_id es seguro.
+          future: _futureMovilData[servicio['movil_id']] ??=
+              Supabase.instance.client
+                  .from('usuarios')
+                  .select(
+                    'nombre, telefono, usuario, rol, foto_perfil_url, '
+                    'pago_nequi, pago_daviplata, pago_bancolombia',
+                  )
+                  .eq('id', servicio['movil_id'])
+                  .maybeSingle(),
           builder: (context, snapshot) {
             final movil = snapshot.data;
             String nombreMovil = '...';
@@ -1865,9 +1890,12 @@ class _ClienteScreenState extends State<ClienteScreen>
           ),
           Expanded(
             child: FutureBuilder<List<Map<String, dynamic>>>(
-              future: Supabase.instance.client
+              // ??= previene re-disparar la query cada vez que build() llama
+              // a _buildTabHistorial(). Solo consultamos las columnas que el
+              // tab realmente muestra (ahorro notable vs. select() sin args).
+              future: _futureHistorial ??= Supabase.instance.client
                   .from('servicios')
-                  .select()
+                  .select('id, numero_cliente, origen, destino, estado, tarifa, observacion, movil_id, calificacion')
                   .eq('cliente_id', widget.usuario['id'])
                   .inFilter('estado', ['finalizado', 'cancelado', 'caducado', 'finalizado_por_demora', 'finalizado_con_problema'])
                   .order('id', ascending: false)
