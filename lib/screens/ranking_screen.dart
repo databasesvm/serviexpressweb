@@ -150,9 +150,10 @@ class _RankingScreenState extends State<RankingScreen> {
           } else {
             if (puntajes.isEmpty) {
               rangoNombre = 'NOVATO';
-            } else if (promedio >= 4.8) {
-              rangoNombre = 'LEYENDA';
             } else if (promedio >= 4.3) {
+              // LEYENDA (≥4.8) requiere autorización manual de la central.
+              // Sin rango_movil = 'LEYENDA' en BD el móvil se mantiene en ÉLITE
+              // aunque supere el umbral, hasta que la central lo autorice.
               rangoNombre = 'ÉLITE';
             } else if (promedio >= 3.8) {
               rangoNombre = 'PRO';

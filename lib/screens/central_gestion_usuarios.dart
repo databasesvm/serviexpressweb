@@ -1469,6 +1469,10 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
         final u = lista[i];
         final rangoActual = u['rango_movil']?.toString();
         final rc = _colorRango(rangoActual);
+        final bool aptoLeyenda =
+            ((u['puntuacion'] as num?)?.toDouble() ?? 0.0) >= 4.8 &&
+            rangoActual?.toUpperCase() != 'LEYENDA' &&
+            rangoActual?.toUpperCase() != 'MASTER';
         final numMovil = _numMovil(u['usuario']?.toString());
         return Container(
           margin: const EdgeInsets.only(bottom: 10),
@@ -1545,6 +1549,13 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                     ),
                   if (rangoActual != null && rangoActual.isNotEmpty)
                     _chip(rangoActual, rc),
+                  if (aptoLeyenda)
+                    Container(
+                      margin: const EdgeInsets.only(left: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                      decoration: BoxDecoration(color: Colors.amber[800], borderRadius: BorderRadius.circular(6)),
+                      child: const Text('👑 APTO', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
+                    ),
                 ],
               ]);
 
@@ -1566,6 +1577,13 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                   ),
                 if (rangoActual != null && rangoActual.isNotEmpty)
                   _chip(rangoActual, rc),
+                if (aptoLeyenda)
+                  Container(
+                    margin: const EdgeInsets.only(left: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                    decoration: BoxDecoration(color: Colors.amber[800], borderRadius: BorderRadius.circular(6)),
+                    child: const Text('👑 APTO', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
+                  ),
               ]);
 
               // ── Botones de acción ─────────────────────────────────────────
