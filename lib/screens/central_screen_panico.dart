@@ -33,26 +33,29 @@ extension CentralScreenPanico on _CentralScreenState {
 
   // Detecta servicios activos con +30 min y suena UNA sola vez por servicio.
   // Se llama desde el timer cada 5 minutos.
+  // Usa _cacheSvcMonitor (mismo filtro archivado=false que el stream) para
+  // garantizar que solo suenan servicios visibles para el operador y evitar
+  // "alarmas fantasma" de servicios ocultos/colapsados o fuera del límite
+  // de 500 del stream. El banner "DEMORAS ACTIVAS" en el monitor muestra
+  // el detalle en tiempo real — aquí solo sonamos.
   Future<void> _detectarDemorasYSonar() async {
     try {
       final corte = DateTime.now()
           .toUtc()
-          .subtract(const Duration(minutes: 30))
-          .toIso8601String();
-
-      final demorados = await Supabase.instance.client
-          .from('servicios')
-          .select('id')
-          .inFilter('estado', [
-            'en_ruta_origen',
-            'en_origen',
-            'en_ruta_destino',
-            'problema',
-          ])
-          .lt('updated_at', corte);
+          .subtract(const Duration(minutes: 30));
 
       bool sonoEnEsteCiclo = false;
-      for (var s in demorados) {
+
+      for (final s in _cacheSvcMonitor) {
+        final estado = s['estado']?.toString() ?? '';
+        if (!['en_ruta_origen', 'en_origen', 'en_ruta_destino', 'problema']
+            .contains(estado)) continue;
+
+        final String? updStr = s['updated_at']?.toString();
+        if (updStr == null) continue;
+        final updatedAt = DateTime.parse(updStr).toUtc();
+        if (updatedAt.isAfter(corte)) continue; // aún no lleva 30 min
+
         final int id = s['id'] as int;
         if (!_demorasAlertadas.contains(id)) {
           _demorasAlertadas.add(id);

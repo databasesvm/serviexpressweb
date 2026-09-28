@@ -1783,6 +1783,22 @@ extension CentralScreenPanelControl on _CentralScreenState {
                 final finalizados = _asc(todos.where((s) => s['estado'] == 'finalizado'));
                 final cancelados = _asc(todos.where((s) => s['estado'] == 'cancelado'));
                 final caducados = _asc(todos.where((s) => s['estado'] == 'caducado'));
+
+                // Servicios con +30 min sin resolverse (en curso activo)
+                final _corte30 = DateTime.now()
+                    .toUtc()
+                    .subtract(const Duration(minutes: 30));
+                final demoradosActivos = todos.where((s) {
+                  final estado = s['estado']?.toString() ?? '';
+                  if (!['en_ruta_origen', 'en_origen', 'en_ruta_destino']
+                      .contains(estado)) return false;
+                  final updStr = s['updated_at']?.toString();
+                  if (updStr == null) return false;
+                  return DateTime.parse(updStr).toUtc().isBefore(_corte30);
+                }).toList()
+                  ..sort((a, b) =>
+                      ((a['id'] as int?) ?? 0).compareTo((b['id'] as int?) ?? 0));
+
                 // Contadores para chips toggle
                 final kpiFinalizados = finalizados.length +
                     finalizadosProblema.length +
@@ -1904,6 +1920,145 @@ extension CentralScreenPanelControl on _CentralScreenState {
                             padding: const EdgeInsets.only(bottom: 10),
                             physics: const AlwaysScrollableScrollPhysics(),
                             children: [
+                              // ── BANNER DE DEMORAS ACTIVAS (siempre visible) ──
+                              if (demoradosActivos.isNotEmpty)
+                                Container(
+                                  margin: const EdgeInsets.fromLTRB(6, 8, 6, 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.red[50],
+                                    border: Border.all(
+                                        color: Colors.red[700]!, width: 1.5),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Container(
+                                        width: double.infinity,
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 10, vertical: 6),
+                                        decoration: BoxDecoration(
+                                          color: Colors.red[700],
+                                          borderRadius: const BorderRadius.only(
+                                            topLeft: Radius.circular(6),
+                                            topRight: Radius.circular(6),
+                                          ),
+                                        ),
+                                        child: Row(children: [
+                                          const Icon(Icons.timer_off,
+                                              color: Colors.white, size: 14),
+                                          const SizedBox(width: 6),
+                                          Text(
+                                            '🔴 DEMORAS ACTIVAS (${demoradosActivos.length})',
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 11,
+                                              letterSpacing: 0.8,
+                                            ),
+                                          ),
+                                        ]),
+                                      ),
+                                      ...demoradosActivos.map((s) {
+                                        final int id =
+                                            (s['id'] as int?) ?? 0;
+                                        final String estado =
+                                            s['estado']?.toString() ?? '';
+                                        final String etiqueta =
+                                            switch (estado) {
+                                          'en_ruta_origen' =>
+                                            'yendo al local',
+                                          'en_origen' => 'en el local',
+                                          'en_ruta_destino' =>
+                                            'en ruta al destino',
+                                          _ => estado,
+                                        };
+                                        final String? updStr =
+                                            s['updated_at']?.toString();
+                                        final int mins = updStr != null
+                                            ? DateTime.now()
+                                                .toUtc()
+                                                .difference(DateTime.parse(
+                                                    updStr).toUtc())
+                                                .inMinutes
+                                            : 0;
+                                        // Resolver número de móvil
+                                        final movEntry =
+                                            _movilesCache.firstWhere(
+                                          (m) => m['id'] == s['movil_id'],
+                                          orElse: () =>
+                                              <String, dynamic>{},
+                                        );
+                                        final movUsuario = movEntry[
+                                                'usuario']
+                                            ?.toString() ??
+                                            '';
+                                        final movNum = RegExp(r'\d+')
+                                                .firstMatch(movUsuario)
+                                                ?.group(0) ??
+                                            '?';
+                                        return Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 10, vertical: 5),
+                                          child: Row(children: [
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 6,
+                                                      vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: Colors.red[700],
+                                                borderRadius:
+                                                    BorderRadius.circular(4),
+                                              ),
+                                              child: Text(
+                                                '#$id',
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 11,
+                                                ),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Text(
+                                                '$etiqueta · Moto $movNum',
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  color: Colors.red[900],
+                                                ),
+                                                overflow:
+                                                    TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 6,
+                                                      vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: Colors.red[100],
+                                                borderRadius:
+                                                    BorderRadius.circular(4),
+                                              ),
+                                              child: Text(
+                                                '${mins}min',
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Colors.red[800],
+                                                ),
+                                              ),
+                                            ),
+                                          ]),
+                                        );
+                                      }),
+                                      const SizedBox(height: 4),
+                                    ],
+                                  ),
+                                ),
                               _construirBloqueServicios(
                                 context,
                                 '⚠️ REPORTES DE PROBLEMA',
