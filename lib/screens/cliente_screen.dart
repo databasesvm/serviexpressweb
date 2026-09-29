@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:serviexpress_app/utils/widgets_compartidos.dart';
+import 'package:onesignal_flutter/onesignal_flutter.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:serviexpress_app/utils/onesignal_api.dart';
 import 'package:serviexpress_app/utils/permisos_criticos.dart';
 import 'package:serviexpress_app/screens/cliente_mototaxi_form.dart';
@@ -1232,6 +1234,7 @@ class _ClienteScreenState extends State<ClienteScreen>
         await prefs.remove('saved_password');
         await prefs.setBool('auto_login', false);
 
+        if (!kIsWeb) OneSignal.logout();
         try {
           await Supabase.instance.client.auth.signOut();
         } catch (_) {}

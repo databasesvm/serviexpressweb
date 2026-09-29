@@ -216,6 +216,7 @@ class _ClienteDeliveryFormState extends State<ClienteDeliveryForm> {
             .select('id, latitud, longitud, paradero_actual, ingreso_fila')
             .eq('rol', 'movil')
             .eq('en_linea', true)
+            .eq('tiene_se', true)
             .not('latitud', 'is', null);
 
         final Distance medidorDistancia = const Distance();

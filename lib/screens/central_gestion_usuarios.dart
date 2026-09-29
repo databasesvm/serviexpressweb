@@ -1542,7 +1542,9 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                     ],
                   ]),
                 ])),
-                // Badges en móvil (en PC van a la columna derecha)
+                // Badges en móvil (en PC van a la columna derecha).
+                // El rango NO se repite aquí — wrapRangos abajo ya lo muestra
+                // con el activo resaltado; duplicarlo causaba "NOVATO" x2.
                 if (conBadges) ...[
                   if (u['tiene_se'] == true)
                     Container(
@@ -1558,8 +1560,6 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                       decoration: BoxDecoration(color: const Color(0xFF002DA2), borderRadius: BorderRadius.circular(6)),
                       child: const Text('FN', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.8)),
                     ),
-                  if (rangoActual != null && rangoActual.isNotEmpty)
-                    _chip(rangoActual, rc),
                   if (aptoLeyenda)
                     Container(
                       margin: const EdgeInsets.only(left: 4),

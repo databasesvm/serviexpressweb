@@ -1660,6 +1660,7 @@ mixin _DialogsMixin on State<LocalScreen> {
         await prefs.remove('sesion_usuario_json'); // evita auto-login con cuenta eliminada
         await prefs.setBool('auto_login', false);
 
+        if (!kIsWeb) OneSignal.logout();
         try {
           await Supabase.instance.client.auth.signOut();
         } catch (_) {}

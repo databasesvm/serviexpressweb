@@ -397,18 +397,48 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
           schema: 'public',
           table: 'servicios',
           callback: (payload) {
-            // Solo dejamos la lógica de sincronización si es necesaria,
-            // pero sin declarar variables que no usamos.
             if (!_estaEnLinea) return;
 
-            // AUTO-RETORNO AL PARADERO: si Central canceló MI servicio
-            // activo, vuelvo a intentar registrarme en la fila sin
-            // necesidad de tocar el botón manualmente. No usamos
-            // payload.oldRecord para esto — Realtime no siempre trae
-            // el valor anterior completo salvo REPLICA IDENTITY FULL,
-            // así que basta con leer el estado NUEVO directamente.
-            // El registro al paradero es decisión del móvil — no se auto-registra.
-            // Si quiere volver a la fila debe pulsar el botón manualmente.
+            // FIX #90: Cuando Central cancela un servicio, RLS bloquea
+            // el SELECT del row cancelado → Supabase entrega el evento
+            // con newRecord vacío (sanitizado) o con estado fuera de los
+            // activos. En ese caso quitamos el servicio del cache aquí,
+            // de forma inmediata, sin esperar el REST fetch de
+            // _canalUpdateServicios (que puede no llegar si RLS silencia
+            // también ese canal).
+            const _estadosActivos = {
+              'pendiente',
+              'en_ruta_origen',
+              'en_origen',
+              'en_ruta_destino',
+              'problema',
+            };
+            if (_cacheServicios != null) {
+              final newRec = payload.newRecord;
+              final oldRec = payload.oldRecord;
+              final nuevoEstado = newRec['estado']?.toString() ?? '';
+              final fueraDeActivos = newRec.isEmpty ||
+                  (nuevoEstado.isNotEmpty &&
+                      !_estadosActivos.contains(nuevoEstado));
+              if (fueraDeActivos) {
+                final rawId = oldRec['id'] ?? newRec['id'];
+                if (rawId != null) {
+                  final idInt = (rawId is num)
+                      ? rawId.toInt()
+                      : int.tryParse(rawId.toString());
+                  if (idInt != null) {
+                    final antes = _cacheServicios!.length;
+                    _cacheServicios = _cacheServicios!
+                        .where((s) => s['id'] != idInt)
+                        .toList();
+                    if (_cacheServicios!.length < antes &&
+                        !_ctrlServicios.isClosed) {
+                      _ctrlServicios.add(_cacheServicios!);
+                    }
+                  }
+                }
+              }
+            }
 
             // Notifica solo al ValueListenableBuilder del radar, sin
             // reconstruir todo el árbol (AppBar, perfil, etc.).
@@ -2276,7 +2306,40 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
           event: PostgresChangeEvent.update,
           schema: 'public',
           table: 'servicios',
-          callback: (_) {
+          callback: (payload) {
+            // FIX #90: Filtrado inmediato antes del REST fetch,
+            // para los casos donde el evento sí llega con datos de estado.
+            const _estadosActivos2 = {
+              'pendiente',
+              'en_ruta_origen',
+              'en_origen',
+              'en_ruta_destino',
+              'problema',
+            };
+            if (_cacheServicios != null) {
+              final newRec2 = payload.newRecord;
+              final oldRec2 = payload.oldRecord;
+              final nuevoEstado2 = newRec2['estado']?.toString() ?? '';
+              final fueraDeActivos2 = newRec2.isEmpty ||
+                  (nuevoEstado2.isNotEmpty &&
+                      !_estadosActivos2.contains(nuevoEstado2));
+              if (fueraDeActivos2) {
+                final rawId2 = oldRec2['id'] ?? newRec2['id'];
+                if (rawId2 != null) {
+                  final idInt2 = (rawId2 is num)
+                      ? rawId2.toInt()
+                      : int.tryParse(rawId2.toString());
+                  if (idInt2 != null) {
+                    _cacheServicios = _cacheServicios!
+                        .where((s) => s['id'] != idInt2)
+                        .toList();
+                    if (!_ctrlServicios.isClosed) {
+                      _ctrlServicios.add(_cacheServicios!);
+                    }
+                  }
+                }
+              }
+            }
             Supabase.instance.client
                 .from('servicios')
                 .select()
@@ -2766,12 +2829,16 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       await prefs.remove('sesion_usuario_json');
       await prefs.setBool('auto_login', false);
 
-      // 3. Cierre de sesión forzoso en el servidor de Supabase
+      // 3. Desvincular OneSignal — sin esto el dispositivo sigue recibiendo
+      //    push aunque el usuario haya cerrado sesión.
+      if (!kIsWeb) OneSignal.logout();
+
+      // 4. Cierre de sesión forzoso en el servidor de Supabase
       try {
         await Supabase.instance.client.auth.signOut();
       } catch (_) {}
 
-      // 4. Redirección absoluta (Mata el historial para que no vuelva a entrar)
+      // 5. Redirección absoluta (Mata el historial para que no vuelva a entrar)
       if (mounted) {
         Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
       }
@@ -14864,6 +14931,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         await prefs.remove('saved_password');
         await prefs.setBool('auto_login', false);
 
+        if (!kIsWeb) OneSignal.logout();
         try {
           await Supabase.instance.client.auth.signOut();
         } catch (_) {}

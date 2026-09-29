@@ -951,12 +951,17 @@ class _CentralScreenState extends State<CentralScreen>
     await prefs.remove('sesion_usuario_json');
     await prefs.setBool('auto_login', false);
 
-    // 2. Cierre forzoso en Supabase
+    // 2. Desvincular OneSignal para que no lleguen push al dispositivo
+    //    después de cerrar sesión. Sin esto, el dispositivo queda ligado
+    //    al external user ID y sigue recibiendo notificaciones.
+    if (!kIsWeb) OneSignal.logout();
+
+    // 3. Cierre forzoso en Supabase
     try {
       await Supabase.instance.client.auth.signOut();
     } catch (_) {}
 
-    // 3. Redirección absoluta
+    // 4. Redirección absoluta
     if (mounted) {
       Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
     }
