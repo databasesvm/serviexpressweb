@@ -9,12 +9,12 @@
 //   2. Por cada registro → dispara a OneSignal según destinatario_id o destinatario_rol
 //   3. Marca como procesado = true, procesado_at = now()
 //
-// Sonidos por tipo (actualizar cuando llegue tarea #6):
-//   inactividad_bloqueo    → 'alerta'   (central)
-//   inactividad_eliminacion→ 'alerta'   (móvil)
-//   descanso_aprobado      → 'mensaje'  (móvil)
-//   descanso_rechazado     → 'alerta'   (móvil)
-//   descanso_solicitud     → 'alerta'   (central)
+// Sonidos por tipo:
+//   inactividad_bloqueo    → 'central_caducado'  (central)
+//   inactividad_eliminacion→ 'central_caducado'  (móvil)
+//   descanso_aprobado      → 'movil_confirmar'   (móvil)
+//   descanso_rechazado     → 'movil_confirmar'   (móvil)
+//   descanso_solicitud     → 'central_cotizacion'(central)
 
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 
@@ -25,18 +25,32 @@ const CANAL_ALARMA_ID  = 'serviexpress_alerta_v2';
 // Sonido según tipo de notificación
 function sonidoPorTipo(tipo: string): string {
   switch (tipo) {
-    case 'descanso_aprobado':  return 'mensaje';
-    case 'descanso_rechazado': return 'alerta';
-    case 'descanso_solicitud': return 'alerta';
-    case 'inactividad_bloqueo':     return 'alerta';
-    case 'inactividad_eliminacion': return 'alerta';
+    case 'descanso_aprobado':       return 'movil_confirmar';
+    case 'descanso_rechazado':      return 'movil_confirmar';
+    case 'descanso_solicitud':      return 'central_cotizacion';
+    case 'inactividad_bloqueo':     return 'central_caducado';
+    case 'inactividad_eliminacion': return 'central_caducado';
     default: return 'alerta';
   }
 }
 
 // ¿Requiere canal urgente en Android?
+// urgente=true añade existing_android_channel_id=CANAL_ALARMA_ID,
+// que en Android 8+ sobrescribe android_sound con alerta.mp3.
+// Los tipos con sonido propio deben ser NO urgentes para respetar su sonido.
 function esUrgente(tipo: string): boolean {
-  return tipo !== 'descanso_aprobado';
+  // Solo los servicios nuevos y el default merecen el canal de alarma.
+  // Los tipos administrativos usan su propio sonido sin canal.
+  switch (tipo) {
+    case 'descanso_aprobado':
+    case 'descanso_rechazado':
+    case 'descanso_solicitud':
+    case 'inactividad_bloqueo':
+    case 'inactividad_eliminacion':
+      return false;
+    default:
+      return true;
+  }
 }
 
 Deno.serve(async (_req: Request) => {

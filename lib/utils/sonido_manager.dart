@@ -35,7 +35,7 @@
 // │ Sonidos.movilChatCentral    │ Sonidos.movilChatCliente     │
 // │ Sonidos.alerta              │ Sonidos.movilParadero        │
 // │ Sonidos.panico              │ Sonidos.movilCarga           │
-// │ Sonidos.fnCotizacion        │                              │
+// │ Sonidos.fnCotizacion        │ Sonidos.adios                │
 // └─────────────────────────────┴──────────────────────────────┘
 
 import 'package:audioplayers/audioplayers.dart';
@@ -84,6 +84,10 @@ class Sonidos {
 
   // COMPARTIDO
   static const String panico = 'panico';
+
+  // TRANSFERENCIAS Y SESIÓN
+  static const String transferenciaMovil = 'transferencia_movil'; // Push transferencia entre móviles
+  static const String adios = 'adios';                            // Botón desconectar / cerrar sesión
 }
 
 class SonidoManager {

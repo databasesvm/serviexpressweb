@@ -329,8 +329,16 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
             case 'chat_movil':
               _sonidos.reproducirSuave(Sonidos.movilChatCentral);
               break;
+            case 'transferencia_movil':
+              // Transferencia aceptada o rechazada entre móviles — suave
+              _sonidos.reproducirSuave(Sonidos.movilConfirmar);
+              break;
+            case 'billetera':
+              // Billetera desbloqueada, recarga aprobada, etc. — suave
+              _sonidos.reproducirSuave(Sonidos.movilConfirmar);
+              break;
             default:
-              // Nuevo servicio, asignación directa, suspensión, rehabilitación, etc.
+              // Nuevo servicio SE/FN, asignación directa, etc.
               // Solo si está conectado y no suspendido.
               if (_estaEnLinea && !_estabaSuspendido) {
                 // Activar el mutex para que el StreamBuilder no reproduzca
@@ -1018,8 +1026,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
           titulo: '⚠️ Domicilio cancelado — $localNombre',
           mensaje:
               'El móvil canceló tu pedido. Motivo: $motivo. Buscamos otro.',
-          urgente: true,
-          sonido: 'alerta',
+          urgente: false,
+          sonido: Sonidos.centralCancelado,
         );
       }
 
@@ -2808,6 +2816,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     );
     if (confirmar != true) return;
 
+    _sonidos.reproducirSuave(Sonidos.adios);
     setState(() => _procesando = true);
     try {
       // 1. Reportar baja en la base de datos (Apagar el radar)
@@ -3518,7 +3527,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
   // nuevo por su cuenta, sin que nadie le avisara que ya podía.
   void _notificarSuspensionLevantada() {
     if (!mounted) return;
-    _sonidos.reproducir(Sonidos.alerta);
+    _sonidos.reproducir(Sonidos.movilConectado);
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -4401,9 +4410,13 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         }
       }
 
-      // Sonido de conexión — se reproduce justo antes del setState para
+      // Sonido de conexión/desconexión — justo antes del setState para
       // que el feedback auditivo coincida con el cambio visual.
-      if (nuevoEstado) _sonidos.reproducirSuave(Sonidos.movilConectado);
+      if (nuevoEstado) {
+        _sonidos.reproducirSuave(Sonidos.movilConectado);
+      } else {
+        _sonidos.reproducirSuave(Sonidos.adios);
+      }
 
       // Registro de sesión de tiempo activo
       if (nuevoEstado) {
@@ -13275,7 +13288,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
           mensaje:
               '${movilLabel(widget.usuario)} aceptó tu servicio #${servicio['id']}',
           urgente: false,
-          sonido: 'alerta',
+          sonido: Sonidos.transferenciaMovil,
+          data: {'tipo': 'transferencia_movil'},
         );
       }
     } else {
@@ -13294,7 +13308,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
           titulo: '❌ Transferencia rechazada',
           mensaje: '${movilLabel(widget.usuario)} rechazó tu solicitud',
           urgente: false,
-          sonido: 'alerta',
+          sonido: Sonidos.transferenciaMovil,
+          data: {'tipo': 'transferencia_movil'},
         );
       }
     }

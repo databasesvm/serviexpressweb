@@ -675,7 +675,7 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
             mensaje: info.$2,
             urgente:
                 siguiente == 'entregado' || siguiente == 'en_camino',
-            sonido: 'alerta',
+            sonido: Sonidos.localCotizacion,
           );
         }
       }
@@ -717,7 +717,7 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
           mensaje:
               'Tu pedido fue cancelado por el local. Disculpa los inconvenientes.',
           urgente: false,
-          sonido: 'alerta',
+          sonido: Sonidos.localCotizacion,
         );
       }
     } catch (e) {

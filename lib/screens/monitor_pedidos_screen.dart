@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart';
+import 'package:serviexpress_app/utils/sonido_manager.dart';
 import 'package:serviexpress_app/utils/deeplink_service.dart';
 import 'package:serviexpress_app/screens/pedidos_cliente_screen.dart';
 
@@ -137,7 +138,7 @@ class _MonitorPedidosScreenState extends State<MonitorPedidosScreen>
             titulo: info.$1,
             mensaje: info.$2,
             urgente: nuevoEstado == 'entregado' || nuevoEstado == 'en_camino',
-            sonido: 'alerta',
+            sonido: Sonidos.centralRadar,
           );
         }
       }
@@ -176,7 +177,7 @@ class _MonitorPedidosScreenState extends State<MonitorPedidosScreen>
         titulo: '❌ Pedido cancelado',
         mensaje: 'Tu pedido fue cancelado por la central. Disculpa los inconvenientes.',
         urgente: false,
-        sonido: 'alerta',
+        sonido: Sonidos.centralRadar,
       );
     }
   }

@@ -481,6 +481,8 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                                       ? 'Tu pago semanal fue aprobado. Ya puedes usar tu billetera con normalidad.'
                                       : 'Se acreditaron \$${monto.toStringAsFixed(0)} en tu billetera.',
                       urgente: false,
+                      sonido: Sonidos.movilConfirmar,
+                      data: {'tipo': 'billetera'},
                     );
                     _cargar();
                     if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(

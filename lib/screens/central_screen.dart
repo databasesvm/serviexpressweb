@@ -1042,7 +1042,7 @@ class _CentralScreenState extends State<CentralScreen>
     final sufijo = rango;
     if (m['suspendido'] == true) return '⛔ SUSPENDIDO · $sufijo';
     if (m['en_linea'] != true) return '🔴 DESCONECTADO · $sufijo';
-    if (enServicioIds.contains(m['id'])) return '🚴 EN SERVICIO · $sufijo';
+    if (enServicioIds.contains(m['id'])) return '🏍️ EN SERVICIO · $sufijo';
     final paradero = m['paradero_actual'];
     if (paradero != null) return '📍 FILA $paradero · $sufijo';
     return '🟢 LIBRE · $sufijo';

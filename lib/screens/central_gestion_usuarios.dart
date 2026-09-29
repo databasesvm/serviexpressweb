@@ -226,10 +226,14 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
   }
 
   void _pushLocal(String id, String nombre, String titulo, String cuerpo, String tipo) {
-    Supabase.instance.client.functions.invoke('enviar-push', body: {
-      'filtros': {'external_id': id},
-      'titulo': titulo, 'cuerpo': cuerpo, 'data': {'tipo': tipo},
-    }).ignore();
+    MotorNotificaciones.dispararMisil(
+      idDestino: id,
+      titulo: titulo,
+      mensaje: cuerpo,
+      urgente: false,
+      sonido: Sonidos.movilConfirmar,
+      data: {'tipo': tipo},
+    ).ignore();
   }
 
   Future<void> _activarUsuario(Map<String, dynamic> u) async {
@@ -383,6 +387,21 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
       if (esMovil) 'tiene_se': selSE,
       if (esMovil) 'tiene_fn': selFN,
     }).eq('id', u['id']);
+
+    // Push al usuario recién activado
+    final nombreUsuario = u['nombre']?.toString() ?? '';
+    final cuerpoActivacion = esMovil
+        ? '¡Bienvenido${nombreUsuario.isNotEmpty ? ', $nombreUsuario' : ''}! Ya puedes abrir la app y conectarte.'
+        : '¡Tu cuenta ya está activa en ServiExpress. Puedes iniciar sesión!';
+    MotorNotificaciones.dispararMisil(
+      idDestino: u['id'].toString(),
+      titulo: '✅ ¡Cuenta activada!',
+      mensaje: cuerpoActivacion,
+      urgente: false,
+      sonido: Sonidos.movilConfirmar,
+      data: {'tipo': 'cuenta_activada'},
+    ).ignore();
+
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('✅ $identificador activado'), backgroundColor: Colors.green[700]),
