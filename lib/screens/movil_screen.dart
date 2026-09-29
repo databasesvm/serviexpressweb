@@ -2990,16 +2990,15 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     if (defaultTargetPlatform == TargetPlatform.android) {
       locationSettings = AndroidSettings(
         accuracy: LocationAccuracy.high,
-        // distanceFilter: 0 → emite en CUALQUIER cambio de posición.
-        // Antes era 10m: un móvil parado esperando servicio nunca actualizaba.
-        // Con 0 el stream emite cada ~1-3s cuando hay señal — el mutex
-        // _enviandoUbicacion evita que los writes se acumulen.
-        distanceFilter: 0,
-        // intervalDuration: fuerza al LocationManager de Android a enviar
-        // actualizaciones al menos cada 2s aunque el dispositivo esté en
-        // background o el fabricante intente agrupar los eventos.
-        // Sin este parámetro, Android puede reducir la frecuencia a 1/min.
-        intervalDuration: const Duration(seconds: 2),
+        // distanceFilter: 8m → solo emite si el móvil se movió más de 8m.
+        // Reduce drásticamente el consumo de CPU/batería cuando está estático
+        // esperando servicio. 8m es suficiente precisión para el radar.
+        distanceFilter: 8,
+        // intervalDuration: 10s — prioriza batería sobre fluidez.
+        // El distanceFilter: 8m ya garantiza actualizaciones frecuentes
+        // cuando el móvil está en movimiento. 10s beneficia teléfonos
+        // de bajos recursos y baterías defectuosas.
+        intervalDuration: const Duration(seconds: 10),
         foregroundNotificationConfig: const ForegroundNotificationConfig(
           notificationText: "ServiExpress está ejecutándose en segundo plano.",
           notificationTitle: "Radar ServiExpress Activo",

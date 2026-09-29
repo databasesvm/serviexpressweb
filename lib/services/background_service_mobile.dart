@@ -147,11 +147,32 @@ class _ServiMotoTaskHandler extends TaskHandler {
       // ── 2. GPS de respaldo ───────────────────────────────────────────────
       // El stream GPS principal vive en el isolate UI. Este bloque actúa
       // solo cuando ese stream está muerto o bloqueado por el fabricante.
+      // Si ultima_ubicacion_at tiene menos de 25s, el stream UI está activo
+      // y enviando posición → omitimos getCurrentPosition para no duplicar
+      // el consumo del chip GPS.
       if (!_gpsEnProceso) {
         _gpsEnProceso = true;
         try {
+          // Guard: skip GPS si el stream UI ya actualizó en los últimos 25s
+          bool streamUiActivo = false;
+          try {
+            final perfilPing = await Supabase.instance.client
+                .from('usuarios')
+                .select('ultima_ubicacion_at')
+                .eq('id', userId)
+                .maybeSingle();
+            final ubiStr = perfilPing?['ultima_ubicacion_at'] as String?;
+            if (ubiStr != null) {
+              final ubiAt = DateTime.tryParse(ubiStr);
+              if (ubiAt != null &&
+                  DateTime.now().toUtc().difference(ubiAt).inSeconds < 25) {
+                streamUiActivo = true;
+              }
+            }
+          } catch (_) {}
+
           final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-          if (serviceEnabled) {
+          if (!streamUiActivo && serviceEnabled) {
             final permission = await Geolocator.checkPermission();
             if (permission == LocationPermission.always ||
                 permission == LocationPermission.whileInUse) {
