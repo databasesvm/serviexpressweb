@@ -3463,8 +3463,14 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       final est = s['estado']?.toString() ?? '';
       return est == 'en_ruta_origen' || est == 'en_ruta_destino';
     });
+    // Si hay servicios SE pendientes en el radar, reducir el tick a 2s
+    // para que las transiciones de fase (F1→F2→F3) sean visibles en ≤2s.
+    // Sin pendientes, volvemos al intervalo de 15s para no desperdiciar batería.
+    final hayPendientesSE = (_cacheServicios ?? []).any(
+      (s) => s['estado'] == 'pendiente',
+    );
     _supervisionTimer = Timer(
-      Duration(seconds: tieneServicioActivo ? 5 : 15),
+      Duration(seconds: tieneServicioActivo ? 5 : (hayPendientesSE ? 2 : 15)),
       _tickSupervision,
     );
   }
@@ -16875,19 +16881,26 @@ class _BarraCascadaSEState extends State<_BarraCascadaSE> {
     double progreso;
 
     if (esOfertaMia) {
-      // F2 especial: oferta de paradero dirigida a este móvil
-      final ofrecidoAtStr =
-          widget.servicio['paradero_ofrecido_at']?.toString();
-      final ofrecidoAt =
-          ofrecidoAtStr != null ? DateTime.tryParse(ofrecidoAtStr) : null;
-      final int elapsedOferta = ofrecidoAt != null
-          ? DateTime.now().toUtc().difference(ofrecidoAt).inSeconds
-          : 0;
-      final int restantes = (_f2Seg - elapsedOferta).clamp(0, _f2Seg);
-      progreso = restantes / _f2Seg;
-      barColor = Colors.red[700]!;
-      mensaje =
-          '⚠️ ¡Tu turno de paradero! Acepta en ${restantes}s o serás sancionado';
+      // F2 especial: oferta de paradero dirigida a este móvil.
+      // El push F2 llega a T0 + _f2Seg. La ventana activa es T0+_f2Seg → T0+_f3Seg.
+      // Antes de T0+_f2Seg: el push aún no llegó → mostramos countdown normal.
+      // Desde T0+_f2Seg: countdown urgente de (_f3Seg - elapsed) segundos.
+      if (elapsed < _f2Seg) {
+        // Push todavía no llegó — mostrar como F1 normal
+        final int r = _f2Seg - elapsed;
+        progreso = r / _f2Seg;
+        barColor = Colors.green[600]!;
+        mensaje = widget.esMaster
+            ? '👑 Sé el primero — ${r}s'
+            : '⏱️ Disponible — ${r}s';
+      } else {
+        // Push ya llegó (o está llegando) — countdown de tu turno en paradero
+        final int restantes = (_f3Seg - elapsed).clamp(0, _f2Seg);
+        progreso = _f2Seg > 0 ? restantes / _f2Seg : 0.0;
+        barColor = Colors.red[700]!;
+        mensaje =
+            '⚠️ ¡Tu turno de paradero! Acepta en ${restantes}s o serás sancionado';
+      }
     } else if (elapsed < _f2Seg) {
       // F1: Masters exclusivos (0–seF2Seg)
       final int r = _f2Seg - elapsed;

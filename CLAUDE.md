@@ -16,7 +16,7 @@ Con los servicios SE Debe funcionar asi:
 
 Fase 1: T=0: Push a Masters (aceptan voluntariamente).
 Fase 2: T+30s: #1 Paradero. Si acepta, se acaba la cascada. Si no lo acepta, este movil de #1 pasa a ultimo de la cola y pasa a Fase 3/4 Si no hay moviles en paradero lo salta — el servicio queda para FASE 3/4
-Fase 3: T+60s: Push a no-Masters dentro de 2km Si nadie lo acepta pasa a F4
+Fase 3: T+60s: Push a no-Masters dentro de 1km Si nadie lo acepta pasa a F4
 Fase 4: T+90s: Push al resto global
 
 Esto ocurre con todos los servicios creados de SE bien sea por la central en todos sus opciones, local en todas sus opciones, cliente en todas sus opciones.
