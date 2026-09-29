@@ -327,10 +327,12 @@ class _ClienteMototaxiFormState extends State<ClienteMototaxiForm> {
       if (!_requiereCotizacion) {
         try {
           final String origenNotif = _origenCtrl.text.trim().toUpperCase();
-          // F1 (T=0): notificar a todos los Masters
+          // F1 (T=0): notificar a Masters SE
           final masters = await Supabase.instance.client
               .from('usuarios').select('id')
-              .or('rol.eq.central,rol.eq.master,rango_movil.eq.MASTER')
+              .eq('rango_movil', 'MASTER')
+              .eq('tiene_se', true)
+              .eq('en_linea', true)
               .neq('suspendido', true);
           final masterIds = masters.map((u) => u['id'].toString()).toList();
           if (masterIds.isNotEmpty) {
@@ -339,6 +341,8 @@ class _ClienteMototaxiFormState extends State<ClienteMototaxiForm> {
               titulo: '👑 NUEVO MOTOTAXI',
               mensaje: 'Cliente solicita MOTOTAXI desde $origenNotif',
               urgente: true,
+              sonido: 'master',
+              canalAndroidId: MotorNotificaciones.canalMasterId,
             );
           }
           // F2 (T+30s): misil al #1 del paradero (si no es ya Master)

@@ -27,11 +27,15 @@ mixin _DispatchMixin on State<LocalScreen> {
     required List<String> externalIds,
     required String titulo,
     required String mensaje,
+    String? sonido,
+    String? canalAndroidId,
   }) => MotorNotificaciones.dispararRafa(
         idsDestinos: externalIds,
         titulo: titulo,
         mensaje: mensaje,
         urgente: true,
+        sonido: sonido ?? 'alerta',
+        canalAndroidId: canalAndroidId,
       );
 
   // ─── VIP: verificación periódica + diálogo de fallback ───────────────────
@@ -231,7 +235,9 @@ mixin _DispatchMixin on State<LocalScreen> {
               final mastersStd = await Supabase.instance.client
                   .from('usuarios')
                   .select('id')
-                  .or('rol.eq.central,rol.eq.master,rango_movil.eq.MASTER')
+                  .eq('rango_movil', 'MASTER')
+                  .eq('tiene_se', true)
+                  .eq('en_linea', true)
                   .neq('suspendido', true);
               final List<String> masterStdIds =
                   mastersStd.map((u) => u['id'].toString()).toList();
@@ -241,6 +247,8 @@ mixin _DispatchMixin on State<LocalScreen> {
                   externalIds: masterStdIds,
                   titulo: '👑 NUEVO SERVICIO',
                   mensaje: msgStd,
+                  sonido: 'master',
+                  canalAndroidId: MotorNotificaciones.canalMasterId,
                 );
               }
 
@@ -484,11 +492,13 @@ mixin _DispatchMixin on State<LocalScreen> {
 
       final String msg = 'Recogida Local en $localNombre — revisa el radar';
 
-      // Fase 1 (T=0): Masters
+      // Fase 1 (T=0): Masters SE
       final mastersData = await Supabase.instance.client
           .from('usuarios')
           .select('id')
-          .or('rol.eq.master,rango_movil.eq.MASTER')
+          .eq('rango_movil', 'MASTER')
+          .eq('tiene_se', true)
+          .eq('en_linea', true)
           .neq('suspendido', true);
       final List<String> masterIds = mastersData.map((u) => u['id'].toString()).toList();
       if (masterIds.isNotEmpty) {
@@ -496,6 +506,8 @@ mixin _DispatchMixin on State<LocalScreen> {
           externalIds: masterIds,
           titulo: '🏪 RECOGIDA LOCAL',
           mensaje: msg,
+          sonido: 'master',
+          canalAndroidId: MotorNotificaciones.canalMasterId,
         );
       }
 
@@ -1048,7 +1060,9 @@ mixin _DispatchMixin on State<LocalScreen> {
       final mastersData = await Supabase.instance.client
           .from('usuarios')
           .select('id')
-          .or('rol.eq.master,rango_movil.eq.MASTER')
+          .eq('rango_movil', 'MASTER')
+          .eq('tiene_se', true)
+          .eq('en_linea', true)
           .neq('suspendido', true);
       List<String> masterIds =
           mastersData.map((u) => u['id'].toString()).toList();
@@ -1058,6 +1072,8 @@ mixin _DispatchMixin on State<LocalScreen> {
           externalIds: masterIds,
           titulo: retardoProgramado > 0 ? '👑 SERVICIO PROGRAMADO' : '👑 NUEVO SERVICIO',
           mensaje: mensajeAlarma,
+          sonido: 'master',
+          canalAndroidId: MotorNotificaciones.canalMasterId,
         );
       }
       // Fase 2 (T+30s): misil al #1 del paradero ya programado arriba.

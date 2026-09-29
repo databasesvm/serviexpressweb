@@ -21,6 +21,8 @@ mixin _FormularioMixin on State<LocalScreen> {
     required List<String> externalIds,
     required String titulo,
     required String mensaje,
+    String? sonido,
+    String? canalAndroidId,
   });
 
   // ── HELPER: busca o crea un sector por nombre+municipio ───────────────────
@@ -1805,7 +1807,9 @@ mixin _FormularioMixin on State<LocalScreen> {
                           final mastersData = await Supabase.instance.client
                               .from('usuarios')
                               .select('id')
-                              .or('rol.eq.central,rol.eq.master,rango_movil.eq.MASTER')
+                              .eq('rango_movil', 'MASTER')
+                              .eq('tiene_se', true)
+                              .eq('en_linea', true)
                               .neq('suspendido', true);
                           List<String> masterIds = mastersData
                               .map((u) => u['id'].toString())
@@ -1818,6 +1822,8 @@ mixin _FormularioMixin on State<LocalScreen> {
                                   ? '👑 SERVICIO PROGRAMADO'
                                   : '👑 NUEVO SERVICIO',
                               mensaje: mensajeAlarma,
+                              sonido: 'master',
+                              canalAndroidId: MotorNotificaciones.canalMasterId,
                             );
                           }
 
@@ -1925,7 +1931,11 @@ mixin _FormularioMixin on State<LocalScreen> {
                               // F3/F4 — pg_cron consulta en_linea en tiempo real
                               await Supabase.instance.client
                                   .from('servicios')
-                                  .update({'se_cascade_t0': DateTime.now().toUtc().toIso8601String()})
+                                  .update({
+                                    'se_cascade_t0': DateTime.now().toUtc().toIso8601String(),
+                                    'se_f3_enviado': false,
+                                    'se_f4_enviado': false,
+                                  })
                                   .eq('id', _svcId2);
                             }
                           }
