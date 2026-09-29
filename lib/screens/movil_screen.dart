@@ -13552,6 +13552,12 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         if (esFnLiberar) 'fn_notif_fase3': null,
         if (esFnLiberar) 'fn_notif_fase4': null,
         if (esFnLiberar) 'fn_notificados_fase1': <String>[],
+        // SE: limpiar oferta F2 activa para que se-sancion-paradero
+        // no sancione al #1 del ciclo anterior y paradero_auto_movil_id
+        // quede libre para el nuevo ciclo
+        if (!esFnLiberar) 'paradero_ofrecido_id': null,
+        if (!esFnLiberar) 'paradero_ofrecido_at': null,
+        if (!esFnLiberar) 'paradero_auto_movil_id': null,
       }).eq('id', servicio['id']);
 
       // El registro al paradero es decisión del móvil — no se auto-registra al liberar.
@@ -15943,9 +15949,32 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                                           );
                                                         }
 
-                                                        // 4. REGLA SUPREMA: MASTERS VEN todo (T=0)
+                                                        // 4. MASTERS: visible en F1 y F4 únicamente.
+                                                        // F2 = turno del #1 paradero (exclusivo).
+                                                        // F3 = turno de no-Masters en 1km (exclusivo).
                                                         if (esMaster) {
-                                                          puedeVer = true;
+                                                          if (segundos < 30) {
+                                                            // F1: Masters ven y reciben push
+                                                            puedeVer = true;
+                                                          } else if (segundos <
+                                                              60) {
+                                                            // F2: solo el #1 del paradero ve la tarjeta.
+                                                            // Master no ve a menos que no haya paradero activo.
+                                                            final String ofrecidoF2 =
+                                                                (s['paradero_ofrecido_id']
+                                                                            ?.toString() ??
+                                                                        '')
+                                                                    .trim();
+                                                            puedeVer =
+                                                                ofrecidoF2.isEmpty;
+                                                          } else if (segundos <
+                                                              90) {
+                                                            // F3: exclusivo de no-Masters en 1km. Master no ve.
+                                                            puedeVer = false;
+                                                          } else {
+                                                            // F4: todos incluyendo Masters
+                                                            puedeVer = true;
+                                                          }
                                                         }
                                                         // 5. EMBUDO DE TIEMPO — 4 FASES DE 30s (total 2 min)
                                                         else {
@@ -15974,11 +16003,27 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                                                         .toString();
                                                           } else if (segundos <
                                                               90) {
-                                                            // FASE 3 (60–89s): Zona 2km desde el origen.
-                                                            // No-masters con capacidad dentro del radio ven la card.
+                                                            // FASE 3 (60–89s): Zona 1km desde el origen.
+                                                            // Excluye al #1 penalizado (paradero_auto_movil_id).
+                                                            final String
+                                                                autoMovilId =
+                                                                (s['paradero_auto_movil_id']
+                                                                            ?.toString() ??
+                                                                        '')
+                                                                    .trim();
+                                                            final bool
+                                                                esEl1Penalizado =
+                                                                autoMovilId
+                                                                        .isNotEmpty &&
+                                                                    autoMovilId ==
+                                                                        widget
+                                                                            .usuario[
+                                                                                'id']
+                                                                            .toString();
                                                             if (tieneCapacidad &&
                                                                 distMetros <=
-                                                                    2000) {
+                                                                    1000 &&
+                                                                !esEl1Penalizado) {
                                                               puedeVer = true;
                                                             }
                                                           } else {
