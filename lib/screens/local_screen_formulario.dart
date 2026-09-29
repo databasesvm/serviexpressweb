@@ -1867,6 +1867,13 @@ mixin _FormularioMixin on State<LocalScreen> {
                             final int secsF2 = retardoProgramado > 0
                                 ? retardoProgramado * 60 + 30
                                 : 30;
+                            // Marcar expiración de oferta en el usuario para que
+                            // se-sancion-paradero pueda sancionarlo aunque el
+                            // servicio sea cancelado/tomado antes del cron.
+                            await Supabase.instance.client.from('usuarios').update({
+                              'paradero_oferta_expira_at': DateTime.now().toUtc()
+                                  .add(Duration(seconds: secsF2 + 30)).toIso8601String(),
+                            }).eq('id', int.parse(paraderoAutoMovilId));
                             await _programarMisilRetardado(
                               externalIds: [paraderoAutoMovilId],
                               titulo: '⚠️ ¡TU TURNO DE PARADERO!',
@@ -1886,11 +1893,14 @@ mixin _FormularioMixin on State<LocalScreen> {
                               final medidor = const Distance();
                               final movilesActivos = await Supabase
                                   .instance.client.from('usuarios')
-                                  .select('id, latitud, longitud')
+                                  .select('id, latitud, longitud, rango_movil')
                                   .eq('rol', 'movil').eq('en_linea', true).eq('tiene_se', true);
                               for (var m in movilesActivos) {
                                 final idStr = m['id'].toString();
                                 todosIds.add(idStr);
+                                // F3 excluye Masters (#1 ya rechazó F2 → va a F4 como todos)
+                                final esMaster = (m['rango_movil'] as String?) == 'MASTER';
+                                final esRechazadoF2 = idStr == paraderoAutoMovilId;
                                 double dist = 999999;
                                 if (m['latitud'] != null && m['longitud'] != null &&
                                     coords['lat'] != null && coords['lng'] != null) {
@@ -1902,7 +1912,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                                            (coords['lng'] as num).toDouble()),
                                   );
                                 }
-                                if (dist <= 1000) zona1kmIds.add(idStr);
+                                if (dist <= 1000 && !esMaster && !esRechazadoF2) zona1kmIds.add(idStr);
                               }
                               String? id1m;
                               String? id2m;

@@ -3034,7 +3034,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
               _pendingPosition = null;
               await Supabase.instance.client.from('usuarios').update({
                 'latitud': toWrite.latitude,
-                'longitud': toWrite.longitude
+                'longitud': toWrite.longitude,
+                'ultima_ubicacion_at': DateTime.now().toUtc().toIso8601String(),
               }).eq('id', widget.usuario['id']);
               _ultimoEnvioUbicacion = DateTime.now();
             }
@@ -3650,8 +3651,11 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         _ultimaPosicionConocida = pos;
         await Supabase.instance.client
             .from('usuarios')
-            .update({'latitud': pos.latitude, 'longitud': pos.longitude}).eq(
-                'id', widget.usuario['id']);
+            .update({
+              'latitud': pos.latitude,
+              'longitud': pos.longitude,
+              'ultima_ubicacion_at': DateTime.now().toUtc().toIso8601String(),
+            }).eq('id', widget.usuario['id']);
         _ultimoEnvioUbicacion = DateTime.now();
       } catch (_) {
         // Si falla (sin red), el próximo tick lo reintenta
@@ -3718,8 +3722,11 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         try {
           await Supabase.instance.client
               .from('usuarios')
-              .update({'latitud': pos.latitude, 'longitud': pos.longitude}).eq(
-                  'id', widget.usuario['id']);
+              .update({
+                'latitud': pos.latitude,
+                'longitud': pos.longitude,
+                'ultima_ubicacion_at': DateTime.now().toUtc().toIso8601String(),
+              }).eq('id', widget.usuario['id']);
         } catch (_) {}
       }
     } catch (_) {}
@@ -12847,10 +12854,13 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                     return;
                   }
 
-                  // Solo sale del paradero si ganó el servicio
+                  // Solo sale del paradero si ganó el servicio.
+                  // También se limpia paradero_oferta_expira_at para que el
+                  // cron no lo sancione — aceptó voluntariamente.
                   await Supabase.instance.client.from('usuarios').update({
                     'paradero_actual': null,
-                    'ingreso_fila': null
+                    'ingreso_fila': null,
+                    'paradero_oferta_expira_at': null,
                   }).eq('id', widget.usuario['id']);
                   _miParaderoCache = null; // sincroniza caché local con la BD
 
@@ -12981,11 +12991,16 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         return;
       }
 
-      // Solo sale del paradero si ganó el servicio
+      // Solo sale del paradero si ganó el servicio.
+      // También se limpia paradero_oferta_expira_at para que el
+      // cron no lo sancione — aceptó voluntariamente.
       await Supabase.instance.client
           .from('usuarios')
-          .update({'paradero_actual': null, 'ingreso_fila': null}).eq(
-              'id', widget.usuario['id']);
+          .update({
+            'paradero_actual': null,
+            'ingreso_fila': null,
+            'paradero_oferta_expira_at': null,
+          }).eq('id', widget.usuario['id']);
       _miParaderoCache = null; // sincroniza caché local con la BD
 
       // AUTO-CIERRE DE PÁNICO: aceptar un servicio con normalidad es

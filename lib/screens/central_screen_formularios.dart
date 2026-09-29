@@ -774,6 +774,13 @@ extension CentralScreenFormularios on _CentralScreenState {
                                     'paradero_ofrecido_at': DateTime.now().toUtc().toIso8601String(),
                                   })
                                   .eq('id', nuevoServicioId);
+                              // Marcar expiración de oferta en el usuario para que
+                              // se-sancion-paradero pueda sancionarlo aunque el
+                              // servicio sea cancelado/tomado antes del cron.
+                              await Supabase.instance.client.from('usuarios').update({
+                                'paradero_oferta_expira_at': DateTime.now().toUtc()
+                                    .add(const Duration(seconds: 60)).toIso8601String(),
+                              }).eq('id', int.parse(paraderoAutoMovilId));
                               await MotorNotificaciones.programarMisilRetardado(
                                 externalIds: [paraderoAutoMovilId],
                                 titulo: '⚠️ ¡TU TURNO DE PARADERO!',

@@ -482,6 +482,12 @@ mixin _DispatchMixin on State<LocalScreen> {
           'paradero_ofrecido_id': paraderoAutoMovilId,
           'paradero_ofrecido_at': DateTime.now().toUtc().toIso8601String(),
         }).eq('id', svcId);
+        // Marcar expiración de oferta en el usuario para que se-sancion-paradero
+        // pueda sancionarlo aunque el servicio sea cancelado/tomado antes de correr el cron.
+        await Supabase.instance.client.from('usuarios').update({
+          'paradero_oferta_expira_at': DateTime.now().toUtc()
+              .add(const Duration(seconds: 60)).toIso8601String(),
+        }).eq('id', int.parse(paraderoAutoMovilId));
         await _programarMisilRetardado(
           externalIds: [paraderoAutoMovilId],
           titulo: '⚠️ ¡TU TURNO DE PARADERO!',
@@ -1047,6 +1053,12 @@ mixin _DispatchMixin on State<LocalScreen> {
           .eq('id', nuevoServicioId);
 
       if (paraderoAutoMovilId != null) {
+        // Marcar expiración de oferta en el usuario para que se-sancion-paradero
+        // pueda sancionarlo aunque el servicio sea cancelado/tomado antes de correr el cron.
+        await Supabase.instance.client.from('usuarios').update({
+          'paradero_oferta_expira_at': DateTime.now().toUtc()
+              .add(const Duration(seconds: 60)).toIso8601String(),
+        }).eq('id', int.parse(paraderoAutoMovilId));
         await _programarMisilRetardado(
           externalIds: [paraderoAutoMovilId],
           titulo: '⚠️ ¡TU TURNO DE PARADERO!',
@@ -1087,11 +1099,14 @@ mixin _DispatchMixin on State<LocalScreen> {
           List<String> zona1kmIds = [];
           List<String> todosIds = [];
           final movilesActivos = await Supabase.instance.client
-              .from('usuarios').select('id, latitud, longitud')
+              .from('usuarios').select('id, latitud, longitud, rango_movil')
               .eq('rol', 'movil').eq('en_linea', true).eq('tiene_se', true);
           for (var m in movilesActivos) {
             final idStr = m['id'].toString();
             todosIds.add(idStr);
+            // F3 excluye Masters y al #1 del paradero que rechazó F2 (van a F4 como todos)
+            final esMaster = (m['rango_movil'] as String?) == 'MASTER';
+            final esRechazadoF2 = idStr == paraderoAutoMovilId;
             double dist = 999999;
             if (m['latitud'] != null && m['longitud'] != null &&
                 servicio['origen_lat'] != null && servicio['origen_lng'] != null) {
@@ -1101,7 +1116,7 @@ mixin _DispatchMixin on State<LocalScreen> {
                 LatLng((servicio['origen_lat'] as num).toDouble(), (servicio['origen_lng'] as num).toDouble()),
               );
             }
-            if (dist <= 1000) zona1kmIds.add(idStr);
+            if (dist <= 1000 && !esMaster && !esRechazadoF2) zona1kmIds.add(idStr);
           }
           String? id1m;
           String? id2m;

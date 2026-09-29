@@ -311,7 +311,8 @@ class _CentralScreenState extends State<CentralScreen>
             // UPDATE: cambio de estado o de cualquier campo
             else if (payload.eventType == PostgresChangeEvent.update) {
               // Sonidos solo cuando cambia el estado
-              if (estadoNuevo != estadoAnterior) {
+              // estadoAnterior vacío = replica identity DEFAULT (oldRecord sin estado) → ignorar
+              if (estadoAnterior.isNotEmpty && estadoNuevo != estadoAnterior) {
                 switch (estadoNuevo) {
                   case 'pendiente':
                     _sonidos.reproducir(Sonidos.centralRadar);

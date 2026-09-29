@@ -165,7 +165,43 @@ class _ServiMotoTaskHandler extends TaskHandler {
               await Supabase.instance.client.from('usuarios').update({
                 'latitud': pos.latitude,
                 'longitud': pos.longitude,
+                'ultima_ubicacion_at': ahora.toUtc().toIso8601String(),
               }).eq('id', userId);
+
+              // ── 3. Geofence de paradero en background ────────────────────
+              // Si el móvil está registrado en un paradero, verificar si
+              // sigue dentro del radio. Si salió, limpiar la fila desde
+              // el foreground service — sin depender del isolate UI.
+              try {
+                final perfil = await Supabase.instance.client
+                    .from('usuarios')
+                    .select('paradero_actual')
+                    .eq('id', userId)
+                    .maybeSingle();
+                final paraderoActual = perfil?['paradero_actual'] as String?;
+                if (paraderoActual != null && paraderoActual.isNotEmpty) {
+                  final paraderoData = await Supabase.instance.client
+                      .from('paraderos')
+                      .select('latitud, longitud, radio_metros')
+                      .eq('nombre', paraderoActual)
+                      .eq('activo', true)
+                      .maybeSingle();
+                  if (paraderoData != null) {
+                    final pLat = (paraderoData['latitud'] as num).toDouble();
+                    final pLng = (paraderoData['longitud'] as num).toDouble();
+                    final radio = ((paraderoData['radio_metros'] as num?) ?? 150).toDouble();
+                    final dist = Geolocator.distanceBetween(
+                      pos.latitude, pos.longitude, pLat, pLng,
+                    );
+                    if (dist > radio + 50) {
+                      await Supabase.instance.client
+                          .from('usuarios')
+                          .update({'paradero_actual': null, 'ingreso_fila': null})
+                          .eq('id', userId);
+                    }
+                  }
+                }
+              } catch (_) {}
             }
           }
         } catch (_) {

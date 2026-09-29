@@ -651,7 +651,28 @@ extension CentralScreenPanelControl on _CentralScreenState {
                                                 fontSize: 12,
                                               ),
                                             ),
-                                            subtitle: _subtituloMovilFlota(m),
+                                            subtitle: Builder(builder: (_) {
+                                              final ubiStr = m['ultima_ubicacion_at'] as String?;
+                                              final ubi = ubiStr != null ? DateTime.tryParse(ubiStr)?.toLocal() : null;
+                                              final mins = ubi != null ? DateTime.now().difference(ubi).inMinutes : null;
+                                              final stale = mins != null && mins >= 2;
+                                              final gpsColor = (mins ?? 0) >= 5 ? Colors.red[400]! : Colors.orange[600]!;
+                                              return Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  _subtituloMovilFlota(m),
+                                                  if (stale) Row(children: [
+                                                    Icon(Icons.gps_off, size: 10, color: gpsColor),
+                                                    const SizedBox(width: 3),
+                                                    Text(
+                                                      'GPS hace ${mins < 60 ? '${mins}m' : '${mins ~/ 60}h${mins % 60}m'}',
+                                                      style: TextStyle(fontSize: 9, color: gpsColor, fontWeight: FontWeight.w600),
+                                                    ),
+                                                  ]),
+                                                ],
+                                              );
+                                            }),
                                             trailing: _movilTrailing(m),
                                             onTap: () => _abrirMenuAccionesMovil(context, m),
                                           ),
