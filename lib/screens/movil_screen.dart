@@ -314,6 +314,11 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
           if (mounted && _estaEnLinea) _iniciarRastreoGps();
           return;
         }
+        if (tipo == 'force_gps_update') {
+          event.preventDefault();
+          if (mounted && _estaEnLinea) _forzarActualizacionGps();
+          return;
+        }
 
         // Suprimimos el banner del sistema en todos los casos y reproducimos
         // el sonido correcto según el tipo de push.
@@ -3731,6 +3736,34 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     } catch (_) {}
   }
 
+  // ── FORZAR ACTUALIZACIÓN GPS INMEDIATA ──────────────────────────────────────
+  // Llamado cuando se recibe un push silencioso con tipo='force_gps_update'.
+  // Obtiene la posición actual y la escribe en BD inmediatamente, sin esperar
+  // al próximo tick del stream ni del foreground service.
+  Future<void> _forzarActualizacionGps() async {
+    if (!_estaEnLinea) return;
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) return;
+      final permission = await Geolocator.checkPermission();
+      if (permission != LocationPermission.always &&
+          permission != LocationPermission.whileInUse) return;
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 10),
+        ),
+      );
+      if (!mounted || !_estaEnLinea) return;
+      await Supabase.instance.client.from('usuarios').update({
+        'latitud': pos.latitude,
+        'longitud': pos.longitude,
+        'ultima_ubicacion_at': DateTime.now().toUtc().toIso8601String(),
+      }).eq('id', widget.usuario['id']);
+      _ultimaPosicionConocida = pos;
+    } catch (_) {}
+  }
+
   // ── REPORTAR MÓVIL AUSENTE DEL PARADERO ─────────────────────────────────────
   // Flujo al reportar:
   //   1. Confirma el reporte
@@ -3776,6 +3809,18 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     if (confirmar != true || !mounted) return;
 
     try {
+      // Pedir al fantasma que actualice su GPS ahora mismo (si tiene app abierta)
+      MotorNotificaciones.dispararMisil(
+        idDestino: movilReportado['id'].toString(),
+        titulo: '📍',
+        mensaje: '',
+        urgente: false,
+        data: {'tipo': 'force_gps_update'},
+      );
+
+      // Pequeña espera para dar tiempo al fantasma de responder si está activo
+      await Future.delayed(const Duration(milliseconds: 800));
+
       // Consultar última posición del reportado directamente en BD
       final datosReportado = await Supabase.instance.client
           .from('usuarios')

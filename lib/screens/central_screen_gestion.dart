@@ -183,6 +183,32 @@ extension CentralScreenGestion on _CentralScreenState {
                 },
               ),
 
+            // FORZAR ACTUALIZACIÓN DE GPS — solo si está en línea
+            if (m['en_linea'] == true)
+              _opcionMenuAccion(
+                icono: Icons.gps_fixed,
+                color: Colors.teal[700]!,
+                titulo: 'Forzar actualización GPS',
+                subtitulo: 'Ordena al móvil que envíe su posición ahora mismo',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  MotorNotificaciones.dispararMisil(
+                    idDestino: m['id'].toString(),
+                    titulo: '📍',
+                    mensaje: '',
+                    urgente: false,
+                    data: {'tipo': 'force_gps_update'},
+                  );
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('📡 GPS solicitado a ${_formatearNombreCentral(m)}'),
+                      duration: const Duration(seconds: 2),
+                      backgroundColor: Colors.teal[700],
+                    ),
+                  );
+                },
+              ),
+
             // ACCIÓN DESTRUCTIVA — separada visualmente de las demás.
             // Solo aplica si el moto realmente está en una fila — no
             // tiene sentido mostrarlo para alguien En Servicio, Libre,

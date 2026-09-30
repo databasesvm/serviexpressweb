@@ -20,13 +20,58 @@ extension CentralScreenPanelControl on _CentralScreenState {
               color: Colors.black87,
               borderRadius: BorderRadius.vertical(top: Radius.circular(8)),
             ),
-            child: const Text(
-              'CONTROL OPERATIVO',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 1,
-              ),
+            child: Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'CONTROL OPERATIVO',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                ),
+                // Forzar GPS a TODOS los móviles en línea
+                Tooltip(
+                  message: 'Forzar GPS a todos los conectados',
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(16),
+                    onTap: () async {
+                      try {
+                        final enLinea = await Supabase.instance.client
+                            .from('usuarios')
+                            .select('id')
+                            .eq('rol', 'movil')
+                            .eq('en_linea', true)
+                            .neq('suspendido', true);
+                        final ids = enLinea
+                            .map((m) => m['id'].toString())
+                            .toList();
+                        if (ids.isNotEmpty) {
+                          await MotorNotificaciones.dispararSilencioso(
+                            idsDestinos: ids,
+                            data: {'tipo': 'force_gps_update'},
+                          );
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('📡 GPS solicitado a ${ids.length} móvil${ids.length == 1 ? "" : "es"}'),
+                                duration: const Duration(seconds: 2),
+                                backgroundColor: Colors.teal[700],
+                              ),
+                            );
+                          }
+                        }
+                      } catch (_) {}
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.all(4),
+                      child: Icon(Icons.gps_fixed, color: Colors.teal[300], size: 18),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
           Expanded(

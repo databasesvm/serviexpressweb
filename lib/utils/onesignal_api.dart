@@ -123,7 +123,7 @@ class MotorNotificaciones {
         'priority': 10,
         'android_sound': sonido,
         'ios_sound': '$sonido.mp3',
-        if (urgente) 'existing_android_channel_id': canalAndroidId ?? _canalAlarmaId,
+        'existing_android_channel_id': canalAndroidId ?? _canalAlarmaId,
         if (data != null) 'data': data,
       },
     );
