@@ -10,13 +10,6 @@ mixin _FormularioMixin on State<LocalScreen> {
   Future<double?> _confirmarRecargoObligatorio(double precioBase);
   Future<Map<String, double>?> _obtenerOSellarGPSLocal({bool forzar = false});
   SonidoManager get _sonidos;
-  Future<String?> _programarMisilRetardado({
-    required List<String> externalIds,
-    required String titulo,
-    required String mensaje,
-    int minutosRetardo = 0,
-    int segundosRetardo = 0,
-  });
   Future<void> _dispararMisilInmediato({
     required List<String> externalIds,
     required String titulo,
@@ -1516,137 +1509,18 @@ mixin _FormularioMixin on State<LocalScreen> {
                           }
                         }
 
-                        // --- PARADERO AUTO-ASIGNACIÓN (espeja Ruta A de Central) ---
-                        String? paraderoAutoMovilId;
+                        // --- F2 SE: la resuelve el SERVIDOR (se_f2_huecos) ---
+                        // A T+30s ofrece al #1 de este paradero o, si está vacío,
+                        // al móvil más cercano (con todos los filtros) y solo si el
+                        // servicio sigue pendiente. Aquí solo se indica el paradero
+                        // objetivo del local. Programados: los libera el servidor.
+                        String? paraderoObjetivoF2;
                         if (!_esCot && !esPuntoAPunto && exclusivoIdCampo == null) {
-                          // Ocupados: con servicio activo + exclusivos pendientes + reservados F2 paradero
-                          final _svcActivosF = await Supabase.instance.client
-                              .from('servicios')
-                              .select('movil_id')
-                              .inFilter('estado', ['en_ruta_origen', 'en_origen', 'en_ruta_destino', 'problema'])
-                              .not('movil_id', 'is', null);
-                          final _svcPendientesF = await Supabase.instance.client
-                              .from('servicios')
-                              .select('exclusivo_id, paradero_auto_movil_id')
-                              .eq('estado', 'pendiente');
-                          List<String> ocupados = [];
-                          for (var s in _svcActivosF) {
-                            ocupados.add(s['movil_id'].toString());
-                          }
-                          for (var s in _svcPendientesF) {
-                            if (s['exclusivo_id'] != null) {
-                              ocupados.addAll(s['exclusivo_id'].toString().split(',').map((e) => e.trim()));
-                            }
-                            if (s['paradero_auto_movil_id'] != null) {
-                              ocupados.add(s['paradero_auto_movil_id'].toString());
-                            }
-                          }
-
-                          final movilesLibres = await Supabase.instance.client
-                              .from('usuarios')
-                              .select('id, paradero_actual, ingreso_fila')
-                              .eq('rol', 'movil')
-                              .eq('en_linea', true)
-                              .eq('tiene_se', true)
-                              .not('paradero_actual', 'is', null);
-
-                          Map<String, List<Map<String, dynamic>>> gruposParaderos = {};
-                          for (var m in movilesLibres) {
-                            String pName = m['paradero_actual'].toString().trim().toLowerCase();
-                            gruposParaderos.putIfAbsent(pName, () => []).add(m);
-                          }
-                          gruposParaderos.forEach((_, lista) {
-                            lista.sort((a, b) => DateTime.parse(
-                              a['ingreso_fila'] ?? DateTime.now().toIso8601String(),
-                            ).compareTo(DateTime.parse(
-                              b['ingreso_fila'] ?? DateTime.now().toIso8601String(),
-                            )));
-                          });
-
-                          // Determinar paradero objetivo
-                          String paraderosLocalRaw =
-                              widget.usuario['paradero_exclusivo']?.toString() ?? '';
-                          List<String> paraderosDelLocal = paraderosLocalRaw
-                              .split(',')
-                              .map((e) => e.trim().toLowerCase())
-                              .where((e) => e.isNotEmpty)
-                              .toList();
-
-                          String? paraderoObjetivo;
-                          if (paraderosDelLocal.isNotEmpty) {
-                            // Local con paradero exclusivo → usar el primero
-                            paraderoObjetivo = paraderosDelLocal.first;
-                          } else {
-                            // Sin paradero → paradero más cercano al origen
-                            final double? origLat = (coords['lat'] as num?)?.toDouble();
-                            final double? origLng = (coords['lng'] as num?)?.toDouble();
-                            if (origLat != null && origLng != null) {
-                              final paraderosList = await Supabase.instance.client
-                                  .from('paraderos')
-                                  .select('nombre, latitud, longitud');
-                              double menorDist = double.infinity;
-                              for (var p in paraderosList) {
-                                final pLat = (p['latitud'] as num?)?.toDouble();
-                                final pLng = (p['longitud'] as num?)?.toDouble();
-                                if (pLat == null || pLng == null) continue;
-                                final dist = const Distance().as(
-                                  LengthUnit.Meter,
-                                  LatLng(origLat, origLng),
-                                  LatLng(pLat, pLng),
-                                );
-                                if (dist < menorDist) {
-                                  menorDist = dist;
-                                  paraderoObjetivo = p['nombre'].toString().trim().toLowerCase();
-                                }
-                              }
-                            }
-                          }
-
-                          // Encontrar #1 libre del paradero objetivo
-                          if (paraderoObjetivo != null &&
-                              gruposParaderos.containsKey(paraderoObjetivo)) {
-                            for (var candidato in gruposParaderos[paraderoObjetivo]!) {
-                              final candId = candidato['id'].toString();
-                              if (!ocupados.contains(candId)) {
-                                paraderoAutoMovilId = candId;
-                                break;
-                              }
-                            }
-                          }
-                          // Fallback (solo si no tiene paradero exclusivo): si el paradero más cercano
-                          // estaba vacío, buscar el móvil SE más cercano al origen del servicio
-                          if (paraderoAutoMovilId == null && paraderosDelLocal.isEmpty) {
-                            final double? fbLat = (coords['lat'] as num?)?.toDouble();
-                            final double? fbLng = (coords['lng'] as num?)?.toDouble();
-                            if (fbLat != null && fbLng != null) {
-                              final todosMov = await Supabase.instance.client
-                                  .from('usuarios')
-                                  .select('id, latitud, longitud')
-                                  .eq('rol', 'movil')
-                                  .eq('en_linea', true)
-                                  .eq('tiene_se', true)
-                                  .not('latitud', 'is', null)
-                                  .not('longitud', 'is', null);
-                              double menorDistMov = double.infinity;
-                              for (var m in todosMov) {
-                                final mId = m['id'].toString();
-                                if (ocupados.contains(mId)) continue;
-                                final mLat = (m['latitud'] as num?)?.toDouble();
-                                final mLng = (m['longitud'] as num?)?.toDouble();
-                                if (mLat == null || mLng == null) continue;
-                                final dist = const Distance().as(
-                                  LengthUnit.Meter,
-                                  LatLng(fbLat, fbLng),
-                                  LatLng(mLat, mLng),
-                                );
-                                if (dist < menorDistMov) {
-                                  menorDistMov = dist;
-                                  paraderoAutoMovilId = mId;
-                                }
-                              }
-                            }
-                          }
-                          // Si aún sin móvil → Fase 3/4 disparan solos
+                          paraderoObjetivoF2 = await _paraderoObjetivoDeLocal(
+                            widget.usuario,
+                            (coords['lat'] as num?)?.toDouble(),
+                            (coords['lng'] as num?)?.toDouble(),
+                          );
                         }
 
                         // REGISTRO EN BD
@@ -1693,12 +1567,8 @@ mixin _FormularioMixin on State<LocalScreen> {
                               'es_punto_a_punto': esPuntoAPunto,
                               'es_vip': false,
                               'exclusivo_id': exclusivoIdCampo,
-                              if (paraderoAutoMovilId != null)
-                                'paradero_auto_movil_id': paraderoAutoMovilId,
-                              if (paraderoAutoMovilId != null)
-                                'paradero_ofrecido_id': paraderoAutoMovilId,
-                              if (paraderoAutoMovilId != null)
-                                'paradero_ofrecido_at': DateTime.now().toUtc().toIso8601String(),
+                              if (paraderoObjetivoF2 != null)
+                                'paradero_origen': paraderoObjetivoF2,
                               'ticket_factura': ticketNum.isEmpty
                                   ? null
                                   : ticketNum,
@@ -1740,9 +1610,12 @@ mixin _FormularioMixin on State<LocalScreen> {
                           // (el service ya tiene exclusivo_id — no se dispara cascada)
                           await _dispararMisilInmediato(
                             externalIds: [movilPreselId],
-                            titulo: '🎯 PEDIDO DIRECTO',
-                            mensaje:
-                                '${widget.usuario["nombre"]} te asignó un nuevo pedido — revisa el radar',
+                            titulo: TextosPush.asignadoTitulo,
+                            mensaje: TextosPush.asignadoMensaje(
+                              widget.usuario['nombre']?.toString() ?? 'El local',
+                              TextosPush.ruta(
+                                  widget.usuario['nombre']?.toString(), destinoNuevo),
+                            ),
                           );
                         } else if (esPuntoAPunto) {
                           // P.A.P: notificar SOLO al #1 del paradero del local
@@ -1802,143 +1675,54 @@ mixin _FormularioMixin on State<LocalScreen> {
                             }
                           }
                         } else {
-                          const String mensajeAlarma =
-                              'Nuevo servicio disponible — revisa el radar';
+                          final String rutaPush = TextosPush.ruta(
+                              widget.usuario['nombre']?.toString(), destinoNuevo);
                           final mastersData = await Supabase.instance.client
                               .from('usuarios')
                               .select('id')
                               .eq('rango_movil', 'MASTER')
                               .eq('tiene_se', true)
                               .eq('en_linea', true)
-                              .neq('suspendido', true);
+                              .neq('suspendido', true)
+                              .or('wallet_bloqueado.is.null,wallet_bloqueado.eq.false');
                           List<String> masterIds = mastersData
                               .map((u) => u['id'].toString())
                               .toList();
 
-                          if (masterIds.isNotEmpty) {
-                            await _dispararMisilInmediato(
-                              externalIds: masterIds,
-                              titulo: retardoProgramado > 0
-                                  ? '👑 SERVICIO PROGRAMADO'
-                                  : '👑 NUEVO SERVICIO',
-                              mensaje: mensajeAlarma,
-                              sonido: 'master',
-                              canalAndroidId: MotorNotificaciones.canalMasterId,
-                            );
-                          }
+                          // Programado: todavía no está en el radar. El servidor
+                          // (se_liberar_programados) lo libera a su hora y en ese
+                          // momento envía F1 y arranca F2/F3/F4.
+                          if (retardoProgramado == 0) {
+                            // F1 (T=0): Masters
+                            if (masterIds.isNotEmpty) {
+                              await _dispararMisilInmediato(
+                                externalIds: masterIds,
+                                titulo: TextosPush.f1Titulo,
+                                mensaje: TextosPush.f1Mensaje(rutaPush),
+                                sonido: 'master',
+                                canalAndroidId: MotorNotificaciones.canalMasterId,
+                              );
+                            }
 
-                          if (pilotosSeleccionadosIds.isNotEmpty) {
-                            List<String> targetPilotos = pilotosSeleccionadosIds
+                            // Enrutado a un móvil que ya viene en camino (exclusivo):
+                            // aviso solo a ese móvil.
+                            final List<String> targetPilotos = pilotosSeleccionadosIds
                                 .where((id) => !masterIds.contains(id))
                                 .toList();
                             if (targetPilotos.isNotEmpty) {
-                              String? id30s;
-                              if (retardoProgramado > 0) {
-                                id30s = await _programarMisilRetardado(
-                                  externalIds: targetPilotos,
-                                  titulo: 'TU TURNO DE PARADERO',
-                                  mensaje: mensajeAlarma,
-                                  minutosRetardo: retardoProgramado,
-                                );
-                              } else {
-                                final cascadaForm = await CascadaConfig.cargar(); // CONFIG-CASCADA-EXT
-                                id30s = await _programarMisilRetardado(
-                                  externalIds: targetPilotos,
-                                  titulo: 'TU TURNO DE PARADERO',
-                                  mensaje: mensajeAlarma,
-                                  segundosRetardo: cascadaForm.seF2Seg,
-                                );
-                              }
-                              if (id30s != null) {
-                                await Supabase.instance.client
-                                    .from('servicios')
-                                    .update({'onesignal_30s': id30s})
-                                    .eq('id', nuevoServicioId);
-                              }
+                              await _dispararMisilInmediato(
+                                externalIds: targetPilotos,
+                                titulo: TextosPush.asignadoTitulo,
+                                mensaje: TextosPush.asignadoMensaje(
+                                  widget.usuario['nombre']?.toString() ?? 'El local',
+                                  rutaPush,
+                                ),
+                              );
                             }
-                          }
 
-                          // F2 (T+30s): misil al #1 del paradero
-                          // Solo si hay paradero asignado y no está
-                          // ya cubierto por pilotosSeleccionadosIds.
-                          if (paraderoAutoMovilId != null &&
-                              !pilotosSeleccionadosIds
-                                  .contains(paraderoAutoMovilId)) {
-                            final int secsF2 = retardoProgramado > 0
-                                ? retardoProgramado * 60 + 30
-                                : 30;
-                            // Marcar expiración de oferta en el usuario para que
-                            // se-sancion-paradero pueda sancionarlo aunque el
-                            // servicio sea cancelado/tomado antes del cron.
-                            await Supabase.instance.client.from('usuarios').update({
-                              'paradero_oferta_expira_at': DateTime.now().toUtc()
-                                  .add(Duration(seconds: secsF2 + 30)).toIso8601String(),
-                            }).eq('id', int.parse(paraderoAutoMovilId));
-                            await _programarMisilRetardado(
-                              externalIds: [paraderoAutoMovilId],
-                              titulo: '⚠️ ¡TU TURNO DE PARADERO!',
-                              mensaje:
-                                  'Tienes 30 segundos para aceptar el servicio.',
-                              segundosRetardo: secsF2,
-                            );
-                          }
-
-                          // Olas T=+60s y T=+90s
-                          if (!esPuntoAPunto) {
-                            final int _svcId2 = nuevoServicioId;
-
-                            if (retardoProgramado > 0) {
-                              List<String> zona1kmIds = [];
-                              List<String> todosIds = [];
-                              final medidor = const Distance();
-                              final movilesActivos = await Supabase
-                                  .instance.client.from('usuarios')
-                                  .select('id, latitud, longitud, rango_movil')
-                                  .eq('rol', 'movil').eq('en_linea', true).eq('tiene_se', true);
-                              for (var m in movilesActivos) {
-                                final idStr = m['id'].toString();
-                                todosIds.add(idStr);
-                                // F3 excluye Masters (#1 ya rechazó F2 → va a F4 como todos)
-                                final esMaster = (m['rango_movil'] as String?) == 'MASTER';
-                                final esRechazadoF2 = idStr == paraderoAutoMovilId;
-                                double dist = 999999;
-                                if (m['latitud'] != null && m['longitud'] != null &&
-                                    coords['lat'] != null && coords['lng'] != null) {
-                                  dist = medidor.as(
-                                    LengthUnit.Meter,
-                                    LatLng((m['latitud'] as num).toDouble(),
-                                           (m['longitud'] as num).toDouble()),
-                                    LatLng((coords['lat'] as num).toDouble(),
-                                           (coords['lng'] as num).toDouble()),
-                                  );
-                                }
-                                if (dist <= 1000 && !esMaster && !esRechazadoF2) zona1kmIds.add(idStr);
-                              }
-                              String? id1m;
-                              String? id2m;
-                              if (zona1kmIds.isNotEmpty)
-                                id1m = await _programarMisilRetardado(
-                                  externalIds: zona1kmIds,
-                                  titulo: '📡 SERVICIO CERCA',
-                                  mensaje: 'Servicio a menos de 1km — revisa el radar.',
-                                  minutosRetardo: retardoProgramado + 1,
-                                );
-                              if (todosIds.isNotEmpty)
-                                id2m = await _programarMisilRetardado(
-                                  externalIds: todosIds,
-                                  titulo: '🚨 SERVICIO SIN TOMAR',
-                                  mensaje: '¡Revisa el Radar!',
-                                  minutosRetardo: retardoProgramado + 2,
-                                );
-                              if (id1m != null || id2m != null) {
-                                await Supabase.instance.client
-                                    .from('servicios').update({
-                                      if (id1m != null) 'onesignal_2m': id1m,
-                                      if (id2m != null) 'onesignal_5m': id2m,
-                                    }).eq('id', _svcId2);
-                              }
-                            } else {
-                              // F3/F4 — pg_cron consulta en_linea en tiempo real
+                            // F2 la hace el servidor (se_f2_huecos).
+                            // F3/F4 — pg_cron consulta en_linea en tiempo real
+                            if (!esPuntoAPunto) {
                               await Supabase.instance.client
                                   .from('servicios')
                                   .update({
@@ -1946,7 +1730,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                                     'se_f3_enviado': false,
                                     'se_f4_enviado': false,
                                   })
-                                  .eq('id', _svcId2);
+                                  .eq('id', nuevoServicioId);
                             }
                           }
                         }

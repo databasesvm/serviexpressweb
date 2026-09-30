@@ -103,6 +103,8 @@ void _startCallback() {
 
 class _ServiMotoTaskHandler extends TaskHandler {
   bool _gpsEnProceso = false;
+  // Geocerca anti-falsos: 2 lecturas confiables seguidas fuera del paradero.
+  int _lecturasFueraParadero = 0;
 
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
@@ -200,6 +202,9 @@ class _ServiMotoTaskHandler extends TaskHandler {
                     .eq('id', userId)
                     .maybeSingle();
                 final paraderoActual = perfil?['paradero_actual'] as String?;
+                if (paraderoActual == null || paraderoActual.isEmpty) {
+                  _lecturasFueraParadero = 0; // fuera de fila → conteo limpio
+                }
                 if (paraderoActual != null && paraderoActual.isNotEmpty) {
                   final paraderoData = await Supabase.instance.client
                       .from('paraderos')
@@ -214,11 +219,21 @@ class _ServiMotoTaskHandler extends TaskHandler {
                     final dist = Geolocator.distanceBetween(
                       pos.latitude, pos.longitude, pLat, pLng,
                     );
-                    if (dist > radio + 50) {
-                      await Supabase.instance.client
-                          .from('usuarios')
-                          .update({'paradero_actual': null, 'ingreso_fila': null})
-                          .eq('id', userId);
+                    // Precisión ≤ 50 m y 2 lecturas seguidas fuera — una sola
+                    // lectura mala de GPS ya no saca al móvil de la fila.
+                    if (pos.accuracy <= 50) {
+                      if (dist > radio + 50) {
+                        _lecturasFueraParadero++;
+                        if (_lecturasFueraParadero >= 2) {
+                          _lecturasFueraParadero = 0;
+                          await Supabase.instance.client
+                              .from('usuarios')
+                              .update({'paradero_actual': null, 'ingreso_fila': null})
+                              .eq('id', userId);
+                        }
+                      } else {
+                        _lecturasFueraParadero = 0;
+                      }
                     }
                   }
                 }

@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:latlong2/latlong.dart';
+import 'package:serviexpress_app/utils/paradero_objetivo.dart';
+import 'package:serviexpress_app/utils/textos_push.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart'; // <-- RUTA CORREGIDA
 
 class ClienteDeliveryForm extends StatefulWidget {
@@ -199,81 +200,10 @@ class _ClienteDeliveryFormState extends State<ClienteDeliveryForm> {
       String notaFinal =
           '[ PAQUETERÍA ] - PAGO: $_metodoPago | 📞 Envía: ${_telOrigenCtrl.text} | 📞 Recibe: ${_telDestinoCtrl.text}';
 
-      // ---> ESCÁNER DE FILA INTELIGENTE Y PARADEROS <---
-      String? idPilotoExclusivo;
-      try {
-        final serviciosPendientes = await Supabase.instance.client
-            .from('servicios')
-            .select('paradero_auto_movil_id')
-            .eq('estado', 'pendiente')
-            .not('paradero_auto_movil_id', 'is', null);
-        List<String> ocupados = serviciosPendientes
-            .map((s) => s['paradero_auto_movil_id'].toString())
-            .toList();
-
-        final movilesLibres = await Supabase.instance.client
-            .from('usuarios')
-            .select('id, latitud, longitud, paradero_actual, ingreso_fila')
-            .eq('rol', 'movil')
-            .eq('en_linea', true)
-            .eq('tiene_se', true)
-            .not('latitud', 'is', null);
-
-        final Distance medidorDistancia = const Distance();
-        Map<String, dynamic>? movilMasCercano;
-        double distanciaMinima = 999999;
-        String? paraderoCercano;
-
-        for (var movil in movilesLibres) {
-          if (movil['latitud'] == null ||
-              movil['longitud'] == null ||
-              _origenLat == null ||
-              _origenLng == null)
-            continue;
-          double dist = medidorDistancia.as(
-            LengthUnit.Meter,
-            LatLng(_origenLat!, _origenLng!),
-            LatLng(movil['latitud'], movil['longitud']),
-          );
-          if (dist < distanciaMinima) {
-            distanciaMinima = dist;
-            paraderoCercano = movil['paradero_actual'];
-            if (!ocupados.contains(movil['id'].toString())) {
-              movilMasCercano = movil;
-            }
-          }
-        }
-
-        if (paraderoCercano != null && paraderoCercano.isNotEmpty) {
-          final fila = movilesLibres
-              .where((m) => m['paradero_actual'] == paraderoCercano)
-              .toList();
-          fila.sort(
-            (a, b) =>
-                DateTime.parse(
-                  a['ingreso_fila'] ?? DateTime.now().toIso8601String(),
-                ).compareTo(
-                  DateTime.parse(
-                    b['ingreso_fila'] ?? DateTime.now().toIso8601String(),
-                  ),
-                ),
-          );
-          for (var candidato in fila) {
-            if (!ocupados.contains(candidato['id'].toString())) {
-              idPilotoExclusivo = candidato['id'].toString();
-              break;
-            }
-          }
-        }
-
-        if (idPilotoExclusivo == null &&
-            movilMasCercano != null &&
-            distanciaMinima <= 1000) {
-          idPilotoExclusivo = movilMasCercano['id'].toString();
-        }
-      } catch (e) {
-        debugPrint('Error en el escáner táctico de paquetería: $e');
-      }
+      // F2 SE: la resuelve el SERVIDOR (se_f2_huecos) → #1 del paradero más
+      // cercano al origen o, si está vacío, el móvil más cercano (con filtros).
+      final String? paraderoObjetivo =
+          await paraderoMasCercano(_origenLat, _origenLng);
 
       // ---> INSERCIÓN EN BASE DE DATOS CON CANDADO VIP <---
       await Supabase.instance.client.from('servicios').insert({
@@ -293,9 +223,7 @@ class _ClienteDeliveryFormState extends State<ClienteDeliveryForm> {
         },
         'observacion': notaFinal,
         'estado': _requiereCotizacion ? 'cotizacion' : 'pendiente',
-        if (idPilotoExclusivo != null) 'paradero_auto_movil_id': idPilotoExclusivo,
-        if (idPilotoExclusivo != null) 'paradero_ofrecido_id': idPilotoExclusivo,
-        if (idPilotoExclusivo != null) 'paradero_ofrecido_at': DateTime.now().toUtc().toIso8601String(),
+        if (paraderoObjetivo != null) 'paradero_origen': paraderoObjetivo,
         'se_cascade_t0': DateTime.now().toUtc().toIso8601String(),
       });
 
@@ -319,29 +247,21 @@ class _ClienteDeliveryFormState extends State<ClienteDeliveryForm> {
               .eq('rango_movil', 'MASTER')
               .eq('tiene_se', true)
               .eq('en_linea', true)
-              .neq('suspendido', true);
+              .neq('suspendido', true)
+              .or('wallet_bloqueado.is.null,wallet_bloqueado.eq.false');
           final masterIds = masters.map((u) => u['id'].toString()).toList();
           if (masterIds.isNotEmpty) {
             await MotorNotificaciones.dispararRafa(
               idsDestinos: masterIds,
-              titulo: '👑 NUEVA PAQUETERÍA',
-              mensaje: 'Cliente solicita PAQUETERÍA desde $origenNotif',
+              titulo: TextosPush.f1Titulo,
+              mensaje: TextosPush.f1Mensaje(
+                  'Paquetería: ${TextosPush.ruta(origenNotif, _dirDestinoCtrl.text)}'),
               urgente: true,
               sonido: 'master',
               canalAndroidId: MotorNotificaciones.canalMasterId,
             );
           }
-          // F2 (T+30s): misil al #1 del paradero (si no es ya Master)
-          if (idPilotoExclusivo != null &&
-              !masterIds.contains(idPilotoExclusivo)) {
-            await MotorNotificaciones.programarMisilRetardado(
-              externalIds: [idPilotoExclusivo],
-              titulo: '⚠️ ¡TU TURNO DE PARADERO!',
-              mensaje: 'Tienes 30 segundos para aceptar el servicio.',
-              segundosRetardo: 30,
-              sonido: 'movil_paradero',
-            );
-          }
+          // F2 (T+30s): servidor (se_f2_huecos).
           // F3 y F4 gestionados por se-notif-fase3/se-notif-fase4 vía se_cascade_t0
         } catch (e) {
           debugPrint('Error OneSignal: $e');

@@ -39,12 +39,51 @@ class _DualModeScreenState extends State<DualModeScreen> {
   // Contador liviano de servicios SE pendientes (para el badge del FAB)
   int _pendientesSE = 0;
   StreamSubscription? _subPendientes;
+  StreamSubscription? _subPerfil;
+  bool _saliendoDeDual = false;
 
   @override
   void initState() {
     super.initState();
     _modoActual = widget.modoInicial == 'movil' ? 1 : 0;
     _suscribirPendientesSE();
+    _vigilarAccesoDual();
+  }
+
+  /// Si la Central le quita el DUAL (o el rango Master, que también quita el
+  /// DUAL) mientras la app está abierta, se cierra el modo dual al instante:
+  /// la Central oculta deja de sonar y el usuario queda solo en su rol.
+  void _vigilarAccesoDual() {
+    _subPerfil = Supabase.instance.client
+        .from('usuarios')
+        .stream(primaryKey: ['id'])
+        .eq('id', widget.usuario['id'])
+        .listen((rows) {
+      if (!mounted || _saliendoDeDual || rows.isEmpty) return;
+      final perfil = rows.first;
+      if (perfil['es_dual'] == true) return;
+      _saliendoDeDual = true;
+      final usuarioActualizado = {...widget.usuario, ...perfil};
+      final esMovil = perfil['rol']?.toString() == 'movil';
+      final messenger = ScaffoldMessenger.of(context);
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(
+          builder: (_) => esMovil
+              ? MovilScreen(usuario: usuarioActualizado)
+              : CentralScreen(usuario: usuarioActualizado),
+        ),
+        (_) => false,
+      );
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(esMovil
+              ? 'La Central quitó tu acceso dual. Ahora operas solo como móvil.'
+              : 'Se quitó el modo dual de esta cuenta.'),
+          backgroundColor: Colors.orange[800],
+          duration: const Duration(seconds: 5),
+        ),
+      );
+    }, onError: (_) {});
   }
 
   /// Stream liviano: servicios SE pendientes sin asignar.
@@ -65,6 +104,7 @@ class _DualModeScreenState extends State<DualModeScreen> {
   @override
   void dispose() {
     _subPendientes?.cancel();
+    _subPerfil?.cancel();
     super.dispose();
   }
 

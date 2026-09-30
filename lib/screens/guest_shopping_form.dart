@@ -4,6 +4,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart'; // <-- RUTA CORREGIDA DE ONESIGNAL
 import 'package:serviexpress_app/screens/guest_tracking_screen.dart';
+import 'package:serviexpress_app/utils/paradero_objetivo.dart';
+import 'package:serviexpress_app/utils/textos_push.dart';
 
 class GuestShoppingForm extends StatefulWidget {
   const GuestShoppingForm({super.key});
@@ -99,47 +101,9 @@ class _GuestShoppingFormState extends State<GuestShoppingForm> {
       if (_requiereCotizacion)
         notaFinal = '⚠️ SOLICITA COTIZACIÓN | $notaFinal';
 
-      // ---> ESCÁNER DE FILA INTELIGENTE (INVITADOS - COMPRAS: POR ANTIGÜEDAD) <---
-      String? idPilotoExclusivo;
-      try {
-        final serviciosPendientes = await Supabase.instance.client
-            .from('servicios')
-            .select('exclusivo_id')
-            .eq('estado', 'pendiente')
-            .not('exclusivo_id', 'is', null);
-        List<String> ocupados = serviciosPendientes
-            .map((s) => s['exclusivo_id'].toString())
-            .toList();
-
-        final movilesLibres = await Supabase.instance.client
-            .from('usuarios')
-            .select('id, paradero_actual, ingreso_fila')
-            .eq('rol', 'movil')
-            .eq('en_linea', true)
-            .eq('tiene_se', true)
-            .not('paradero_actual', 'is', null);
-
-        final filaGeneral = movilesLibres.toList();
-        filaGeneral.sort(
-          (a, b) =>
-              DateTime.parse(
-                a['ingreso_fila'] ?? DateTime.now().toIso8601String(),
-              ).compareTo(
-                DateTime.parse(
-                  b['ingreso_fila'] ?? DateTime.now().toIso8601String(),
-                ),
-              ),
-        );
-
-        for (var candidato in filaGeneral) {
-          if (!ocupados.contains(candidato['id'].toString())) {
-            idPilotoExclusivo = candidato['id'].toString();
-            break;
-          }
-        }
-      } catch (e) {
-        debugPrint('Error en el escáner táctico de compras invitado: $e');
-      }
+      // Cascada SE completa: F1 Masters aquí, F2 la resuelve el SERVIDOR
+      // (se_f2_huecos) y F3/F4 los edge functions desde se_cascade_t0.
+      // (Antes el #1 quedaba como exclusivo y el pedido nunca hacía cascada.)
 
       // ---> INSERCIÓN EN BASE DE DATOS CON CANDADO VIP <---
       final response = await Supabase.instance.client
@@ -154,7 +118,8 @@ class _GuestShoppingFormState extends State<GuestShoppingForm> {
             'tarifa_detalle': {'total': 0.0, 'fuente': 'invitado'},
             'observacion': notaFinal,
             'estado': _requiereCotizacion ? 'cotizacion' : 'pendiente',
-            'exclusivo_id': idPilotoExclusivo,
+            if (!_requiereCotizacion)
+              'se_cascade_t0': DateTime.now().toUtc().toIso8601String(),
           })
           .select()
           .single();
@@ -176,6 +141,13 @@ class _GuestShoppingFormState extends State<GuestShoppingForm> {
         );
       } catch (e) {
         debugPrint('Error OneSignal: $e');
+      }
+
+      // F1 (T=0): Masters en línea con SE
+      if (!_requiereCotizacion) {
+        await notificarMastersF1Invitado(
+          'Compras (invitado): ${TextosPush.ruta(_tiendaCtrl.text, _destinoCtrl.text)}',
+        );
       }
 
       if (mounted) {

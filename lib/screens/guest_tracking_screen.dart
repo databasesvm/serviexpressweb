@@ -5,7 +5,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart';
 import 'package:serviexpress_app/utils/widgets_compartidos.dart';
-import 'package:latlong2/latlong.dart';
+import 'package:serviexpress_app/utils/paradero_objetivo.dart';
+import 'package:serviexpress_app/utils/textos_push.dart';
 
 class GuestTrackingScreen extends StatefulWidget {
   const GuestTrackingScreen({super.key});
@@ -57,6 +58,8 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
 
       await Supabase.instance.client.from('servicios').update({
         'estado': aprobada ? 'pendiente' : 'cancelado',
+        // Al aprobar, el reloj de fases arranca AHORA (tarjetas y servidor).
+        if (aprobada) 'liberacion_at': DateTime.now().toUtc().toIso8601String(),
         'observacion': aprobada
             ? '$notaAnterior\n[ ✔️ APROBADA POR INVITADO ]'
             : '$notaAnterior\n[ ❌ RECHAZADA POR INVITADO ]',
@@ -66,138 +69,49 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
         // --- CASCADA 4 FASES — igual que el resto de la app ---
         final int svcId = servicio['id'] as int;
 
-        // T=0: Masters
+        // T=0: Masters en línea con SE (sin suspensión) + aviso a la Central
         final mastersData = await Supabase.instance.client
             .from('usuarios')
             .select('id')
-            .or('rol.eq.central,rol.eq.master,and(rango_movil.eq.MASTER,tiene_se.eq.true)')
-            .neq('suspendido', true);
+            .eq('rol', 'movil')
+            .eq('rango_movil', 'MASTER')
+            .eq('tiene_se', true)
+            .eq('en_linea', true)
+            .neq('suspendido', true)
+            .or('wallet_bloqueado.is.null,wallet_bloqueado.eq.false');
         final masterIds = mastersData.map((u) => u['id'].toString()).toList();
         if (masterIds.isNotEmpty) {
           await MotorNotificaciones.dispararRafa(
             idsDestinos: masterIds,
-            titulo: '👑 NUEVO SERVICIO',
-            mensaje: 'Invitado aprobó cotización — revisa el radar.',
+            titulo: TextosPush.f1Titulo,
+            mensaje: TextosPush.f1Mensaje(TextosPush.ruta(
+                servicio['origen']?.toString(), servicio['destino']?.toString())),
             urgente: true,
+            sonido: 'master',
+            canalAndroidId: MotorNotificaciones.canalMasterId,
           );
         }
+        await MotorNotificaciones.dispararACentral(
+          titulo: '✅ COTIZACIÓN APROBADA (INVITADO)',
+          mensaje: 'Invitado aprobó cotización — revisa el radar.',
+        );
 
-        // T+30s: #1 del paradero — calculado dinámicamente (triple capa)
-        final double? origLatGst = (servicio['origen_lat'] as num?)?.toDouble();
-        final double? origLngGst = (servicio['origen_lng'] as num?)?.toDouble();
-
-        final _svcActivosGst = await Supabase.instance.client
-            .from('servicios')
-            .select('movil_id')
-            .inFilter('estado', ['en_ruta_origen', 'en_origen', 'en_ruta_destino', 'problema'])
-            .not('movil_id', 'is', null);
-        final _svcPendientesGst = await Supabase.instance.client
-            .from('servicios')
-            .select('exclusivo_id, paradero_auto_movil_id')
-            .eq('estado', 'pendiente');
-        final List<String> ocupadosGst = [];
-        for (var s in _svcActivosGst) {
-          ocupadosGst.add(s['movil_id'].toString());
-        }
-        for (var s in _svcPendientesGst) {
-          if (s['exclusivo_id'] != null) {
-            ocupadosGst.addAll(
-              s['exclusivo_id'].toString().split(',').map((e) => e.trim()).where((e) => e.isNotEmpty),
-            );
-          }
-          if (s['paradero_auto_movil_id'] != null) {
-            ocupadosGst.add(s['paradero_auto_movil_id'].toString());
-          }
-        }
-
-        final movilesLibresGst = await Supabase.instance.client
-            .from('usuarios')
-            .select('id, paradero_actual, ingreso_fila')
-            .eq('rol', 'movil')
-            .eq('en_linea', true)
-            .eq('tiene_se', true)
-            .not('paradero_actual', 'is', null);
-        final Map<String, List<Map<String, dynamic>>> gruposParaderosGst = {};
-        for (var m in movilesLibresGst) {
-          final String pName = m['paradero_actual'].toString().trim().toLowerCase();
-          gruposParaderosGst.putIfAbsent(pName, () => []).add(m);
-        }
-        gruposParaderosGst.forEach((_, lista) {
-          lista.sort((a, b) => DateTime.parse(
-            a['ingreso_fila'] ?? DateTime.now().toIso8601String(),
-          ).compareTo(DateTime.parse(
-            b['ingreso_fila'] ?? DateTime.now().toIso8601String(),
-          )));
-        });
-
-        String? paraderoObjetivoGst;
-        if (origLatGst != null && origLngGst != null) {
-          final paraderosList = await Supabase.instance.client
-              .from('paraderos')
-              .select('nombre, latitud, longitud');
-          double menorDist = double.infinity;
-          for (var p in paraderosList) {
-            final pLat = (p['latitud'] as num?)?.toDouble();
-            final pLng = (p['longitud'] as num?)?.toDouble();
-            if (pLat == null || pLng == null) continue;
-            final dist = const Distance().as(
-              LengthUnit.Meter, LatLng(origLatGst, origLngGst), LatLng(pLat, pLng),
-            );
-            if (dist < menorDist) {
-              menorDist = dist;
-              paraderoObjetivoGst = p['nombre'].toString().trim().toLowerCase();
-            }
-          }
-        }
-
-        String? paraderoAutoMovilIdGst;
-        if (paraderoObjetivoGst != null && gruposParaderosGst.containsKey(paraderoObjetivoGst)) {
-          for (var candidato in gruposParaderosGst[paraderoObjetivoGst]!) {
-            final candId = candidato['id'].toString();
-            if (!ocupadosGst.contains(candId)) {
-              paraderoAutoMovilIdGst = candId;
-              break;
-            }
-          }
-        }
-        // Fallback: móvil SE más cercano al origen si no hay paradero
-        if (paraderoAutoMovilIdGst == null && origLatGst != null && origLngGst != null) {
-          final todosMov = await Supabase.instance.client
-              .from('usuarios')
-              .select('id, latitud, longitud')
-              .eq('rol', 'movil')
-              .eq('en_linea', true)
-              .eq('tiene_se', true)
-              .not('latitud', 'is', null)
-              .not('longitud', 'is', null);
-          double menorDistMov = double.infinity;
-          for (var m in todosMov) {
-            final mId = m['id'].toString();
-            if (ocupadosGst.contains(mId)) continue;
-            final mLat = (m['latitud'] as num?)?.toDouble();
-            final mLng = (m['longitud'] as num?)?.toDouble();
-            if (mLat == null || mLng == null) continue;
-            final dist = const Distance().as(
-              LengthUnit.Meter, LatLng(origLatGst, origLngGst), LatLng(mLat, mLng),
-            );
-            if (dist < menorDistMov) {
-              menorDistMov = dist;
-              paraderoAutoMovilIdGst = mId;
-            }
-          }
-        }
-        // Guardar: fn-auto-asignar-fase2 (pg_cron) lo asigna a T+seF2Seg
-        if (paraderoAutoMovilIdGst != null) {
-          await Supabase.instance.client
-              .from('servicios')
-              .update({'paradero_auto_movil_id': paraderoAutoMovilIdGst})
-              .eq('id', svcId);
-        }
+        // F2 (T+30s): la resuelve el SERVIDOR (se_f2_huecos): #1 del paradero
+        // más cercano al origen o, si está vacío, el móvil más cercano (con filtros).
+        final String? paraderoObjGst = await paraderoMasCercano(
+          (servicio['origen_lat'] as num?)?.toDouble(),
+          (servicio['origen_lng'] as num?)?.toDouble(),
+        );
 
         // F3/F4 — pg_cron consulta en_linea en tiempo real (se_cascade_t0 = ahora)
         await Supabase.instance.client
             .from('servicios')
-            .update({'se_cascade_t0': DateTime.now().toUtc().toIso8601String()})
+            .update({
+              if (paraderoObjGst != null) 'paradero_origen': paraderoObjGst,
+              'se_cascade_t0': DateTime.now().toUtc().toIso8601String(),
+              'se_f3_enviado': false,
+              'se_f4_enviado': false,
+            })
             .eq('id', svcId);
       }
     } catch (e) {}

@@ -8,6 +8,7 @@ import 'package:serviexpress_app/screens/ranking_screen.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:serviexpress_app/utils/motor_rutas.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart'; // MotorNotificaciones — necesario para el botón de pánico
+import 'package:serviexpress_app/utils/textos_push.dart'; // Textos únicos de push SE
 import 'package:serviexpress_app/utils/sonido_manager.dart'; // Motor de audio in-app
 import 'package:serviexpress_app/utils/panico_widgets.dart'; // Botón de pánico
 import 'package:serviexpress_app/utils/permisos_criticos.dart'; // Permisos críticos en segundo plano
@@ -120,6 +121,137 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
   // Cada entrada: [latitud, longitud, radio_metros].
   // Se inicializa vacío y se llena en _cargarZonasParadero() al arrancar.
   Map<String, List<double>> _kZonasParadero = {};
+  // Geocerca anti-falsos: cuántas lecturas GPS confiables seguidas han caído
+  // fuera del paradero. Solo se expulsa con 2 seguidas (una sola lectura mala
+  // de GPS ya no saca al móvil de la fila).
+  int _lecturasFueraParadero = 0;
+  String? _paraderoDelConteo; // el conteo se reinicia si cambia de paradero
+
+  // ── BANNER DE SANCIÓN DE PARADERO (30 s) ────────────────────────────────
+  // Se muestra al llegar el push 'sancion_paradero' o, como respaldo, cuando
+  // el vigilante de 30 s detecta que subió rechazos_paradero_hoy.
+  int? _rechazosParaderoVistos;
+  Timer? _bannerSancionTimer;
+  DateTime? _ultimoBannerSancion;
+
+  String _horaCorta(DateTime d) {
+    final l = d.toLocal();
+    final h12 = l.hour % 12 == 0 ? 12 : l.hour % 12;
+    final mm = l.minute.toString().padLeft(2, '0');
+    return '$h12:$mm ${l.hour < 12 ? 'a. m.' : 'p. m.'}';
+  }
+
+  /// Textos locales (respaldo si el push no llegó) — mismos que el servidor.
+  (String, String) _textoSancionLocal(int vez, DateTime? hasta) {
+    if (vez <= 1) {
+      return (
+        '⚠️ Expulsado del paradero (1ª vez hoy)',
+        'No aceptaste tu turno en 30 s. Regístrate de nuevo cuando estés listo. '
+            'Si vuelve a pasar hoy: 2ª vez → suspendido 1 hora; 3ª vez → suspendido 24 horas.',
+      );
+    }
+    if (vez == 2) {
+      return (
+        '❌ Suspendido 1 hora (2ª vez hoy)',
+        'No aceptaste tu turno por segunda vez. '
+            '${hasta != null ? 'Puedes volver al paradero a las ${_horaCorta(hasta)}. ' : ''}'
+            'Si pasa una 3ª vez hoy quedarás suspendido 24 horas.',
+      );
+    }
+    return (
+      '🚫 Suspendido 24 horas (${vez}ª vez hoy)',
+      'No aceptaste tu turno por ${vez == 3 ? 'tercera' : '${vez}ª'} vez hoy. '
+          '${hasta != null ? 'Puedes volver al paradero mañana a las ${_horaCorta(hasta)}.' : ''}',
+    );
+  }
+
+  void _mostrarBannerSancion({
+    required String titulo,
+    required String mensaje,
+    int nivel = 1,
+  }) {
+    if (!mounted) return;
+    // Evita doble banner (push + respaldo del vigilante) por la misma sanción
+    if (_ultimoBannerSancion != null &&
+        DateTime.now().difference(_ultimoBannerSancion!).inSeconds < 60) {
+      return;
+    }
+    _ultimoBannerSancion = DateTime.now();
+    _miParaderoCache = null; // ya no está en la fila
+    _sonidos.reproducir(Sonidos.movilInactividad); // sonido de aviso, no de servicio
+
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentMaterialBanner();
+    final Color fondo = nivel >= 3
+        ? Colors.red[900]!
+        : nivel == 2
+            ? Colors.red[700]!
+            : Colors.orange[800]!;
+    messenger.showMaterialBanner(
+      MaterialBanner(
+        backgroundColor: fondo,
+        padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
+        leading: Icon(
+          nivel >= 2 ? Icons.block : Icons.warning_amber_rounded,
+          color: Colors.white,
+          size: 32,
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(titulo,
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15)),
+            const SizedBox(height: 4),
+            Text(mensaje,
+                style: const TextStyle(color: Colors.white, fontSize: 13)),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              _bannerSancionTimer?.cancel();
+              messenger.hideCurrentMaterialBanner();
+            },
+            child: const Text('ENTENDIDO',
+                style: TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+    _bannerSancionTimer?.cancel();
+    _bannerSancionTimer = Timer(const Duration(seconds: 30), () {
+      if (mounted) messenger.hideCurrentMaterialBanner();
+    });
+    if (mounted) setState(() {});
+  }
+
+  /// Devuelve true solo si la lectura es confiable (precisión ≤ 50 m) y es la
+  /// 2ª lectura seguida fuera del radio + 50 m. Lecturas imprecisas se ignoran;
+  /// una lectura dentro del radio reinicia el conteo.
+  bool _confirmarSalidaParadero(Position pos, List<double> zona) {
+    if (_paraderoDelConteo != _miParaderoCache) {
+      _paraderoDelConteo = _miParaderoCache;
+      _lecturasFueraParadero = 0;
+    }
+    if (pos.accuracy > 50) return false; // lectura poco confiable → no cuenta
+    final dist = Geolocator.distanceBetween(
+        pos.latitude, pos.longitude, zona[0], zona[1]);
+    if (dist <= zona[2] + 50) {
+      _lecturasFueraParadero = 0;
+      return false;
+    }
+    _lecturasFueraParadero++;
+    if (_lecturasFueraParadero >= 2) {
+      _lecturasFueraParadero = 0;
+      return true;
+    }
+    return false;
+  }
   // Mapa auxiliar: nombre -> es_nocturno (controla qué paraderos son de horario nocturno)
   Map<String, bool> _zonasParaderoNocturno = {};
 
@@ -296,7 +428,15 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     });
 
     Future.microtask(() async {
-      OneSignal.login(widget.usuario['id'].toString());
+      try {
+        await OneSignal.login(widget.usuario['id'].toString());
+        // Etiqueta de rol: un móvil que NO es DUAL nunca debe quedar marcado
+        // como "central" (si el teléfono tuvo la Central abierta, la marca
+        // podía quedar pegada y le llegaban cotizaciones y avisos de la Central).
+        if (widget.usuario['es_dual'] != true) {
+          OneSignal.User.addTagWithKey('rol', 'movil');
+        }
+      } catch (_) {}
       // Obligamos a Android/iOS a pedirle permiso al piloto para la barra de notificaciones
       await OneSignal.Notifications.requestPermission(true);
 
@@ -309,6 +449,13 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         // y reiniciar el stream GPS si fue matado por el fabricante.
         // No suena, no se muestra — es puramente técnico.
         final tipo = event.notification.additionalData?['tipo']?.toString();
+        // Avisos de la Central (cotizaciones, radar, cancelaciones…): no son
+        // para el móvil → sin alerta de servicio ni recarga (evita el sonido y
+        // el parpadeo). En cuentas DUAL los muestra la pantalla de la Central.
+        if (event.notification.additionalData?['destino']?.toString() ==
+            'central') {
+          return;
+        }
         if (tipo == 'heartbeat') {
           event.preventDefault();
           if (mounted && _estaEnLinea) _iniciarRastreoGps();
@@ -317,6 +464,20 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         if (tipo == 'force_gps_update') {
           event.preventDefault();
           if (mounted && _estaEnLinea) _forzarActualizacionGps();
+          return;
+        }
+        // Sanción de paradero: banner de 30 s con su propio sonido de aviso
+        // (no el sonido de "servicio nuevo").
+        if (tipo == 'sancion_paradero') {
+          event.preventDefault();
+          final d = event.notification.additionalData ?? const {};
+          _mostrarBannerSancion(
+            titulo: d['titulo']?.toString() ??
+                event.notification.title ??
+                'Sanción de paradero',
+            mensaje: d['mensaje']?.toString() ?? event.notification.body ?? '',
+            nivel: int.tryParse('${d['nivel']}') ?? 1,
+          );
           return;
         }
 
@@ -351,8 +512,15 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                 _reproduciendoAudio = true;
                 _sonidos.reproducir(Sonidos.alerta);
                 _verificarGeocercaUnaVez();
+                // Recalcular las tarjetas: las fases dependen del tiempo y
+                // la lista solo se reconstruye con eventos. Sin esto, el push
+                // de F2 sonaba pero la tarjeta no aparecía.
+                setState(() {});
                 Future.delayed(const Duration(seconds: 2), () {
-                  if (mounted) _reproduciendoAudio = false;
+                  if (mounted) {
+                    _reproduciendoAudio = false;
+                    setState(() {});
+                  }
                 });
               }
           }
@@ -399,8 +567,12 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     Future.delayed(
         const Duration(milliseconds: 1000), _verificarPanicoUsadoHoy);
 
-    // ---- DOMICILIOS: suscripción a pedidos sin asignar ----
-    _suscribirAlertasDomicilio();
+    // ---- DOMICILIOS DE LA CARTA ----
+    // Ya NO se escucha la tabla `pedidos` (antes a TODOS los móviles les salía
+    // la ventana "¡NUEVO DOMICILIO!" a la vez, sin fases ni rangos). Cuando el
+    // local confirma el pedido, la base de datos crea un servicio SE enlazado
+    // (trigger fn_pedido_a_servicio) que llega por la cascada F1–F4 normal, con
+    // su tarjeta, push, transferir y liberar. El estado se refleja en el pedido.
 
     // ---> INYECCIÓN: RADAR EN SEGUNDO PLANO (OÍDO SATELITAL) <---
     _canalRadarBg = Supabase.instance.client
@@ -530,6 +702,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
   // DOMICILIOS — Suscripción, alerta y tarjeta de pedido activo
   // =========================================================================
 
+  // Sin uso desde que los domicilios de la carta van por la cascada SE.
+  // ignore: unused_element
   void _suscribirAlertasDomicilio() {
     final miId = widget.usuario['id'] as int;
 
@@ -1648,6 +1822,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _bannerSancionTimer?.cancel();
     _canalRadarBg?.unsubscribe();
     _canalPanico?.unsubscribe();
     _canalFila?.unsubscribe();
@@ -1800,282 +1975,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     );
   }
 
-  // ── SOLO DOMICILIOS — reporte de problema con la moto ────────────────────
-  Widget _buildEstadoMotoCard(Map<String, dynamic> perfil) {
-    final bool activo    = perfil['solo_domicilios'] == true;
-    final bool pendiente = perfil['solicitud_solo_domicilios_pendiente'] == true;
-    final String? motivo = perfil['motivo_solo_domicilios']?.toString();
-    final bool esReactivacionPendiente =
-        pendiente && (motivo?.startsWith('REACTIVAR:') ?? false);
-
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: activo
-            ? Colors.red[900]!.withValues(alpha: 0.30)
-            : Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: activo
-              ? Colors.red.withValues(alpha: 0.5)
-              : Colors.white12,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(children: [
-            Icon(
-              activo ? Icons.two_wheeler : Icons.build_outlined,
-              size: 16,
-              color: activo ? Colors.red[300] : Colors.white54,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                activo ? 'Solo domicilios activo' : 'Estado de la moto',
-                style: TextStyle(
-                  color: activo ? Colors.red[300] : Colors.white70,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 13,
-                ),
-              ),
-            ),
-            if (activo)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.red.withValues(alpha: 0.25),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: const Text('NO MOTOTAXI',
-                    style: TextStyle(
-                        color: Colors.red,
-                        fontSize: 9,
-                        fontWeight: FontWeight.bold)),
-              ),
-          ]),
-          if (activo && motivo != null && motivo.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Text(
-              'Motivo: ${motivo.replaceFirst('REACTIVAR: ', '')}',
-              style: const TextStyle(color: Colors.white38, fontSize: 11),
-            ),
-          ],
-          if (pendiente) ...[
-            const SizedBox(height: 8),
-            Container(
-              width: double.infinity,
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: Colors.orange.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                    color: Colors.orange.withValues(alpha: 0.4)),
-              ),
-              child: Text(
-                esReactivacionPendiente
-                    ? '⏳ Solicitud de reactivación pendiente — revisión de la central'
-                    : '⏳ Solicitud pendiente de revisión por la central',
-                style:
-                    const TextStyle(color: Colors.orange, fontSize: 11),
-              ),
-            ),
-          ],
-          if (!pendiente) ...[
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  foregroundColor:
-                      activo ? Colors.green[400] : Colors.orange[300],
-                  side: BorderSide(
-                      color: activo
-                          ? Colors.green.withValues(alpha: 0.5)
-                          : Colors.orange.withValues(alpha: 0.4)),
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8)),
-                ),
-                icon: Icon(
-                    activo
-                        ? Icons.check_circle_outline
-                        : Icons.report_problem_outlined,
-                    size: 16),
-                label: Text(
-                  activo
-                      ? 'Mi moto ya está lista'
-                      : 'Reportar problema con la moto',
-                  style: const TextStyle(
-                      fontSize: 12, fontWeight: FontWeight.bold),
-                ),
-                onPressed: () =>
-                    _mostrarDialogoReporteMoto(esReactivacion: activo),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Future<void> _mostrarDialogoReporteMoto(
-      {required bool esReactivacion}) async {
-    final ctrl = TextEditingController();
-
-    final enviado = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx2, setModal) {
-          bool enviando = false;
-          return Padding(
-            padding: EdgeInsets.only(
-                bottom: MediaQuery.of(ctx2).viewInsets.bottom),
-            child: Container(
-              decoration: const BoxDecoration(
-                color: Color(0xFF1A1A1A),
-                borderRadius:
-                    BorderRadius.vertical(top: Radius.circular(20)),
-              ),
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    esReactivacion
-                        ? '✅ Reportar moto lista'
-                        : '🔧 Reportar problema con la moto',
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    esReactivacion
-                        ? 'Explica qué arreglaste o por qué tu moto ya puede hacer mototaxi.'
-                        : 'Explica el problema que tiene tu moto para no poder hacer servicios de mototaxi.',
-                    style: const TextStyle(
-                        color: Colors.white54, fontSize: 12),
-                  ),
-                  const SizedBox(height: 14),
-                  TextField(
-                    controller: ctrl,
-                    maxLines: 3,
-                    maxLength: 200,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: InputDecoration(
-                      hintText: esReactivacion
-                          ? 'Ej: Cambié la llanta, ya puedo hacer mototaxi'
-                          : 'Ej: Se dañó la llanta trasera',
-                      hintStyle:
-                          const TextStyle(color: Colors.white38),
-                      filled: true,
-                      fillColor: Colors.white10,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: BorderSide.none,
-                      ),
-                      counterStyle:
-                          const TextStyle(color: Colors.white38),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  SizedBox(
-                    width: double.infinity,
-                    child: StatefulBuilder(
-                      builder: (ctx3, setBtn) => ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: esReactivacion
-                              ? Colors.green[700]
-                              : Colors.orange[700],
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                              vertical: 14),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10)),
-                        ),
-                        onPressed: enviando
-                            ? null
-                            : () async {
-                                final texto = ctrl.text.trim();
-                                if (texto.isEmpty) {
-                                  ScaffoldMessenger.of(ctx2)
-                                      .showSnackBar(const SnackBar(
-                                    content:
-                                        Text('Debes escribir el motivo'),
-                                    backgroundColor: Colors.red,
-                                  ));
-                                  return;
-                                }
-                                setBtn(() => enviando = true);
-                                try {
-                                  await Supabase.instance.client
-                                      .from('usuarios')
-                                      .update({
-                                    'solicitud_solo_domicilios_pendiente':
-                                        true,
-                                    'motivo_solo_domicilios':
-                                        esReactivacion
-                                            ? 'REACTIVAR: $texto'
-                                            : texto,
-                                  }).eq('id', widget.usuario['id']);
-                                  if (ctx2.mounted) {
-                                    Navigator.pop(ctx2, true);
-                                  }
-                                } catch (e) {
-                                  setBtn(() => enviando = false);
-                                  if (ctx2.mounted) {
-                                    ScaffoldMessenger.of(ctx2)
-                                        .showSnackBar(SnackBar(
-                                      content: Text('Error: $e'),
-                                      backgroundColor: Colors.red,
-                                    ));
-                                  }
-                                }
-                              },
-                        child: enviando
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                    color: Colors.white,
-                                    strokeWidth: 2))
-                            : Text(
-                                esReactivacion
-                                    ? 'ENVIAR — MOTO LISTA'
-                                    : 'ENVIAR REPORTE',
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold)),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-
-    if (enviado == true && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(esReactivacion
-            ? 'Reporte enviado — la central lo revisará pronto'
-            : 'Solicitud enviada — la central validará tu reporte'),
-        backgroundColor:
-            esReactivacion ? Colors.green[700] : Colors.orange[700],
-        behavior: SnackBarBehavior.floating,
-      ));
-    }
-    ctrl.dispose();
-  }
+  // ("Solo domicilios" eliminado: todo móvil recibe todo tipo de servicio y,
+  // si no puede atenderlo, usa la opción de transferir.)
 
   Future<void> _recargarFila() async {
     try {
@@ -2436,11 +2337,37 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         try {
           final myUser = await Supabase.instance.client
               .from('usuarios')
-              .select('suspendido, en_linea')
+              .select('suspendido, en_linea, rechazos_paradero_hoy, '
+                  'fecha_rechazos, suspendido_hasta')
               .eq('id', widget.usuario['id'])
               .maybeSingle()
               .timeout(const Duration(seconds: 5));
           if (!mounted || myUser == null) return;
+
+          // Respaldo del banner de sanción: si subió el contador de rechazos
+          // de hoy (hora Colombia) y el push no llegó, mostrar el banner igual.
+          final String hoyCo = DateTime.now()
+              .toUtc()
+              .subtract(const Duration(hours: 5))
+              .toIso8601String()
+              .substring(0, 10);
+          final int rechRaw =
+              (myUser['rechazos_paradero_hoy'] as num?)?.toInt() ?? 0;
+          final int rechHoy =
+              myUser['fecha_rechazos']?.toString() == hoyCo ? rechRaw : 0;
+          if (_rechazosParaderoVistos != null &&
+              rechHoy > _rechazosParaderoVistos!) {
+            final t = _textoSancionLocal(
+              rechHoy,
+              DateTime.tryParse(myUser['suspendido_hasta']?.toString() ?? ''),
+            );
+            _mostrarBannerSancion(
+              titulo: t.$1,
+              mensaje: t.$2,
+              nivel: rechHoy.clamp(1, 3),
+            );
+          }
+          _rechazosParaderoVistos = rechHoy;
           final bool suspendidoAhora = myUser['suspendido'] == true;
           if (suspendidoAhora && _estaEnLinea) {
             _ejecutarSuspensionInmediata();
@@ -3056,16 +2983,10 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
           if (_miParaderoCache != null &&
               _kZonasParadero.containsKey(_miParaderoCache)) {
             final zona = _kZonasParadero[_miParaderoCache]!;
-            final distancia = Geolocator.distanceBetween(
-              pos.latitude,
-              pos.longitude,
-              zona[0],
-              zona[1],
-            );
-            // Margen de 50m extra sobre el radio de entrada — evita
-            // que el GPS oscilando justo en el borde expulse y
-            // re-registre en bucle.
-            if (distancia > zona[2] + 50) {
+            // Margen de 50m extra sobre el radio de entrada, lectura con
+            // precisión ≤ 50 m y 2 lecturas seguidas fuera — evita que un
+            // salto del GPS expulse al móvil de la fila.
+            if (_confirmarSalidaParadero(pos, zona)) {
               final paraderoQueDejo = _miParaderoCache!;
               _miParaderoCache = null;
               try {
@@ -3693,13 +3614,9 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       _ultimaPosicionConocida = pos;
       final zona = _kZonasParadero[_miParaderoCache];
       if (zona == null) return;
-      final dist = Geolocator.distanceBetween(
-        pos.latitude,
-        pos.longitude,
-        zona[0],
-        zona[1],
-      );
-      if (dist > zona[2] + 50) {
+      // Misma regla anti-falsos que el stream: precisión ≤ 50 m y
+      // 2 lecturas seguidas fuera del radio + 50 m.
+      if (_confirmarSalidaParadero(pos, zona)) {
         final paraderoQueDejo = _miParaderoCache!;
         _miParaderoCache = null;
         try {
@@ -4436,15 +4353,13 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                 .eq('estado', 'pendiente')
                 .eq('se_f4_enviado', true);
             for (final svc in svcsPendientes) {
-              final origen = svc['origen']?.toString() ?? 'Origen';
-              final destino = svc['destino']?.toString() ?? '';
-              final msg = destino.isNotEmpty
-                  ? '$origen → $destino'
-                  : origen;
+              final msg = 'Ya está abierto para todos. '
+                  '${TextosPush.ruta(svc['origen']?.toString(), svc['destino']?.toString())}. '
+                  'Abre el radar para aceptarlo.';
               if (esMasterConex) {
                 await MotorNotificaciones.dispararMisil(
                   idDestino: widget.usuario['id'].toString(),
-                  titulo: '👑 SERVICIO SIN TOMAR',
+                  titulo: '🚨 F4 · Servicio sin tomar',
                   mensaje: msg,
                   sonido: 'master',
                   canalAndroidId: MotorNotificaciones.canalMasterId,
@@ -4452,7 +4367,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
               } else {
                 await MotorNotificaciones.dispararMisil(
                   idDestino: widget.usuario['id'].toString(),
-                  titulo: '🚨 SERVICIO SIN TOMAR',
+                  titulo: '🚨 F4 · Servicio sin tomar',
                   mensaje: msg,
                 );
               }
@@ -5391,12 +5306,6 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
               ),
 
               const SizedBox(height: 16),
-
-              // ── REPORTE DE MOTO / SOLO DOMICILIOS ─────────────────────────
-              if (miPerfil['tiene_se'] == true) ...[
-                _buildEstadoMotoCard(miPerfil),
-                const SizedBox(height: 16),
-              ],
 
               // ── ESTADÍSTICAS SEMANALES (#124) ─────────────────────────────
               FutureBuilder<List<dynamic>>(
@@ -13819,15 +13728,18 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         // CASCADA SERVIEXPRESS NORMAL — sin cambios
         // T=0: Masters, T=30s: paradero #1, T=60s: zona 1km, T=90s: todos
         // ══════════════════════════════════════════════════════════════════
-        final destino = servicio['destino']?.toString() ?? 'destino';
-        final msgAlerta = '📍 Servicio liberado — disponible para: $destino';
+        final String rutaLib = TextosPush.ruta(
+            servicio['origen']?.toString(), servicio['destino']?.toString());
+        final msgAlerta = TextosPush.liberadoMensaje(rutaLib);
 
         final mastersData = await Supabase.instance.client
             .from('usuarios')
-            .select('id, rol, rango_movil')
+            .select('id, rol, rango_movil, en_linea, wallet_bloqueado')
             .or('rol.eq.central,rol.eq.master,and(rango_movil.eq.MASTER,tiene_se.eq.true)')
             .eq('activo', true)
             .neq('suspendido', true);
+        // F2 al liberar: la resuelve el servidor (se_f2_huecos) porque aquí
+        // se limpió paradero_ofrecido_id y liberacion_at reinicia el reloj.
         final centralIds2 = mastersData
             .where((u) => u['rol'] == 'central' || u['rol'] == 'master')
             .map<String>((u) => u['id'].toString())
@@ -13835,6 +13747,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         final masterMobileIds2 = mastersData
             .where((u) =>
                 u['rango_movil'] == 'MASTER' &&
+                u['en_linea'] == true && // F1 solo a Masters conectados
+                u['wallet_bloqueado'] != true && // y con la Billetera al día
                 u['rol'] != 'central' &&
                 u['rol'] != 'master')
             .map<String>((u) => u['id'].toString())
@@ -13842,15 +13756,15 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         if (centralIds2.isNotEmpty) {
           await MotorNotificaciones.dispararRafa(
             idsDestinos: centralIds2,
-            titulo: '👑 SERVICIO LIBERADO',
-            mensaje: msgAlerta,
+            titulo: '🔄 Servicio liberado',
+            mensaje: 'Un móvil soltó este servicio y la cascada vuelve a empezar. $rutaLib.',
             urgente: true,
           );
         }
         if (masterMobileIds2.isNotEmpty) {
           await MotorNotificaciones.dispararRafa(
             idsDestinos: masterMobileIds2,
-            titulo: '👑 SERVICIO LIBERADO',
+            titulo: TextosPush.liberadoTitulo,
             mensaje: msgAlerta,
             urgente: true,
             sonido: 'master',
@@ -13871,8 +13785,9 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         if (paraderoIds.isNotEmpty) {
           final id30s = await MotorNotificaciones.programarMisilRetardado(
             externalIds: paraderoIds,
-            titulo: 'TU TURNO DE PARADERO',
-            mensaje: msgAlerta,
+            titulo: TextosPush.asignadoTitulo,
+            mensaje: 'Un móvil soltó $rutaLib, que está asignado directamente a ti. '
+                'Solo tú lo ves. Abre el radar.',
             segundosRetardo: cascadaMovil3.seF2Seg,
           );
           if (id30s != null) {
@@ -15996,12 +15911,29 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                                         // 4. CÁLCULO DE DISTANCIA OPERATIVA DESDE EL LOCAL
                                                         double distMetros =
                                                             999999;
+                                                        // Referencia: origen del servicio; si no
+                                                        // tiene coordenadas, el paradero MEMOS
+                                                        // (mismo criterio que se-notif-fase3).
+                                                        double? refLat = (s['origen_lat']
+                                                                as num?)
+                                                            ?.toDouble();
+                                                        double? refLng = (s['origen_lng']
+                                                                as num?)
+                                                            ?.toDouble();
+                                                        if ((refLat == null ||
+                                                                refLng == null) &&
+                                                            _kZonasParadero
+                                                                .containsKey(
+                                                                    'MEMOS')) {
+                                                          refLat = _kZonasParadero[
+                                                              'MEMOS']![0];
+                                                          refLng = _kZonasParadero[
+                                                              'MEMOS']![1];
+                                                        }
                                                         if (_ultimaPosicionConocida !=
                                                                 null &&
-                                                            s['origen_lat'] !=
-                                                                null &&
-                                                            s['origen_lng'] !=
-                                                                null) {
+                                                            refLat != null &&
+                                                            refLng != null) {
                                                           distMetros =
                                                               medidorDistancia
                                                                   .as(
@@ -16013,13 +15945,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                                                   .longitude,
                                                             ),
                                                             LatLng(
-                                                              (s['origen_lat']
-                                                                      as num)
-                                                                  .toDouble(),
-                                                              (s['origen_lng']
-                                                                      as num)
-                                                                  .toDouble(),
-                                                            ),
+                                                                refLat, refLng),
                                                           );
                                                         }
 

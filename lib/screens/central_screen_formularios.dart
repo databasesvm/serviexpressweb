@@ -691,8 +691,11 @@ extension CentralScreenFormularios on _CentralScreenState {
                           final String origenSnap = origenController.text.trim();
                           await MotorNotificaciones.dispararMisil(
                             idDestino: movilDirectoServimotoId!,
-                            titulo: '📌 SERVICIO ASIGNADO',
-                            mensaje: 'Central te asignó un servicio en $origenSnap',
+                            titulo: TextosPush.asignadoTitulo,
+                            mensaje: TextosPush.asignadoMensaje(
+                              'La Central',
+                              TextosPush.ruta(origenSnap, destinoController.text),
+                            ),
                             urgente: true,
                             sonido: Sonidos.movilParadero,
                           );
@@ -706,90 +709,11 @@ extension CentralScreenFormularios on _CentralScreenState {
                           //  FASE 4 (90s+)   → Todos disponibles
                           // ══════════════════════════════════════════════════
 
-                          // --- F2: Encontrar #1 del paradero para el misil a T+30s ---
-                          // • Paradero explícito → busca el #1 de ese paradero.
-                          // • Sin paradero seleccionado → busca el #1 global de
-                          //   cualquier paradero, ordenado por ticket_prioridad y
-                          //   antigüedad en cola (no usa coordenadas: la central
-                          //   no siempre las captura con precisión).
-                          String? paraderoAutoMovilId;
-                          try {
-                            final List fila;
-                            if (paraderoOrigen != null) {
-                              fila = await Supabase.instance.client
-                                  .from('usuarios')
-                                  .select('id')
-                                  .eq('rol', 'movil')
-                                  .eq('en_linea', true)
-                                  .eq('activo', true)
-                                  .eq('tiene_se', true)
-                                  .eq('paradero_actual', paraderoOrigen!)
-                                  .not('suspendido', 'is', true)
-                                  .order('ticket_prioridad', ascending: false, nullsFirst: false)
-                                  .order('ingreso_fila', ascending: true, nullsFirst: true);
-                            } else {
-                              // #1 global de cualquier paradero
-                              fila = await Supabase.instance.client
-                                  .from('usuarios')
-                                  .select('id')
-                                  .eq('rol', 'movil')
-                                  .eq('en_linea', true)
-                                  .eq('activo', true)
-                                  .eq('tiene_se', true)
-                                  .not('paradero_actual', 'is', null)
-                                  .not('suspendido', 'is', true)
-                                  .order('ticket_prioridad', ascending: false, nullsFirst: false)
-                                  .order('ingreso_fila', ascending: true, nullsFirst: true);
-                            }
-                            final activosSvc = await Supabase.instance.client
-                                .from('servicios')
-                                .select('movil_id')
-                                .inFilter('estado', [
-                                  'en_ruta_origen', 'en_origen',
-                                  'en_ruta_destino', 'problema',
-                                ])
-                                .not('movil_id', 'is', null);
-                            final reservadosSvc = await Supabase.instance.client
-                                .from('servicios')
-                                .select('paradero_auto_movil_id')
-                                .eq('estado', 'pendiente')
-                                .not('paradero_auto_movil_id', 'is', null);
-                            final idsOcupados = {
-                              ...(activosSvc as List).map((s) => s['movil_id'].toString()),
-                              ...(reservadosSvc as List).map((s) => s['paradero_auto_movil_id'].toString()),
-                            };
-                            for (final m in fila) {
-                              final mId = m['id'].toString();
-                              if (!idsOcupados.contains(mId)) {
-                                paraderoAutoMovilId = mId;
-                                break;
-                              }
-                            }
-                            if (paraderoAutoMovilId != null) {
-                              await Supabase.instance.client
-                                  .from('servicios')
-                                  .update({
-                                    'paradero_auto_movil_id': paraderoAutoMovilId,
-                                    'paradero_ofrecido_id': paraderoAutoMovilId,
-                                    'paradero_ofrecido_at': DateTime.now().toUtc().toIso8601String(),
-                                  })
-                                  .eq('id', nuevoServicioId);
-                              // Marcar expiración de oferta en el usuario para que
-                              // se-sancion-paradero pueda sancionarlo aunque el
-                              // servicio sea cancelado/tomado antes del cron.
-                              await Supabase.instance.client.from('usuarios').update({
-                                'paradero_oferta_expira_at': DateTime.now().toUtc()
-                                    .add(const Duration(seconds: 60)).toIso8601String(),
-                              }).eq('id', int.parse(paraderoAutoMovilId));
-                              await MotorNotificaciones.programarMisilRetardado(
-                                externalIds: [paraderoAutoMovilId],
-                                titulo: '⚠️ ¡TU TURNO DE PARADERO!',
-                                mensaje: 'Tienes 30 segundos para aceptar el servicio.',
-                                segundosRetardo: 30,
-                                sonido: 'movil_paradero',
-                              );
-                            }
-                          } catch (_) {}
+                          // --- F2: la resuelve el SERVIDOR (se_f2_huecos) ---
+                          // A T+30s ofrece al #1 del paradero (paradero_origen si
+                          // se eligió; si no, #1 global) o, si no hay #1 libre, al
+                          // móvil más cercano (origen o, sin coordenadas, MEMOS).
+                          // Solo manda el push si el servicio sigue pendiente.
 
                           // --- FASE 1 (T=0): MASTERS ---
                           // Solo suscripción. Master no tiene tope de servicios activos
@@ -809,11 +733,28 @@ extension CentralScreenFormularios on _CentralScreenState {
                             idsMasters = (mastersResp as List)
                                 .map((m) => m['id'].toString())
                                 .toList();
+                            // Excluir Masters con la Billetera bloqueada
+                            if (idsMasters.isNotEmpty) {
+                              final bloqueados = await Supabase.instance.client
+                                  .from('usuarios')
+                                  .select('id')
+                                  .inFilter('id', idsMasters)
+                                  .eq('wallet_bloqueado', true);
+                              final setBloq = (bloqueados as List)
+                                  .map((u) => u['id'].toString())
+                                  .toSet();
+                              idsMasters = idsMasters
+                                  .where((id) => !setBloq.contains(id))
+                                  .toList();
+                            }
                             if (idsMasters.isNotEmpty) {
                               await MotorNotificaciones.dispararRafa(
                                 idsDestinos: idsMasters,
-                                titulo: '⚡ TURNO DE MASTER',
-                                mensaje: 'Nuevo servicio disponible en el radar',
+                                titulo: TextosPush.f1Titulo,
+                                mensaje: TextosPush.f1Mensaje(TextosPush.ruta(
+                                  origenController.text,
+                                  destinoController.text,
+                                )),
                                 urgente: true,
                                 sonido: 'master',
                                 canalAndroidId: MotorNotificaciones.canalMasterId,
@@ -821,9 +762,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                             }
                           } catch (_) {}
 
-                          // FASE 2 (T+30s): misil OneSignal al #1 del paradero.
-                          // paradero_ofrecido_id + misil ya fueron programados
-                          // arriba al encontrar paraderoAutoMovilId. El móvil
+                          // FASE 2 (T+30s): servidor (se_f2_huecos). El móvil
                           // acepta voluntariamente en app (tomar_servicio_candado).
 
                           // F3/F4 — pg_cron consulta en_linea en tiempo real

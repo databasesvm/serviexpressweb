@@ -1,20 +1,24 @@
 // supabase/functions/se-sancion-paradero/index.ts
 //
-// Corre cada minuto via pg_cron — SANC-D/E
-// Detecta ofertas F2 paradero SE vencidas sin respuesta y aplica sanciones escalonadas.
+// Invocado por public.se_sancion_paradero_check() (pg_cron cada 10s),
+// solo cuando hay ofertas vencidas — SANC-D/E
+// Detecta móviles con oferta F2 paradero SE vencida y aplica sanciones.
 //
-// El umbral de expiración es seF2Seg * 2 desde paradero_ofrecido_at (que se graba en T=0).
-// Esto equivale a 60s desde que se creó el servicio = el #1 recibe el push a T+30s
-// y tiene 30s reales para aceptar antes de que este cron lo sancione a T+60s.
+// IMPORTANTE: desplegar con verify_jwt = false (el pg_cron no envía Authorization).
 //
-// Sanciones:
-//   0 rechazos hoy  → movido al último de la fila (permanece en paradero)
-//   1 rechazo hoy   → suspendido 1 hora + sacado de fila
-//   2+ rechazos hoy → suspendido 24 horas + sacado de fila
+// Fuente: usuarios.paradero_oferta_expira_at (sobrevive aunque el servicio
+// sea aceptado/cancelado). Solo se sanciona si:
+//   - el #1 tuvo sus 30s completos de F2 y no aceptó (v10), y
+//   - el móvil está en un paradero (el "más cercano" nunca se sanciona) (v11).
 //
-// IMPORTANTE: NO se limpia paradero_auto_movil_id — ese campo queda para
-// que la visibilidad F3 en Flutter pueda excluir al #1 penalizado.
-// Solo se limpian paradero_ofrecido_id y paradero_ofrecido_at.
+// Sanciones escalonadas (por rechazos del mismo día Colombia, se reinicia a medianoche):
+//   1ª vez hoy  → expulsado del paradero (regístrate de nuevo manualmente)
+//   2ª vez hoy  → suspendido 1 hora del paradero
+//   3ª+ vez hoy → suspendido 24 horas del paradero
+//
+// v12: el push lleva data.tipo = 'sancion_paradero' (+ nivel, titulo, mensaje,
+//      hasta) para que la app muestre un banner de 30 s con su propio sonido,
+//      y textos que explican qué pasa si vuelve a ocurrir hoy.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -22,18 +26,20 @@ const SEND_NOTIF_URL   = 'https://oukiofdtargjrclualgm.supabase.co/functions/v1/
 const ONESIGNAL_APP_ID = '207d1d0a-0218-46e0-9f35-7d8d88f6765a';
 const CANAL_ALARMA     = 'serviexpress_alerta_v2';
 
-// Fecha máxima compatible con Dart DateTime.parse para poner al móvil de último en la fila.
-// NO usar new Date(8640000000000000).toISOString() — produce "+275760-09-13T..." (año > 9999
-// con prefijo "+") que Dart lanza FormatException, rompiendo el sort client-side en Flutter.
-// '9999-12-31T23:59:59.000Z' es el máximo que DateTime.parse() de Dart puede manejar.
-const FECHA_MAX_FILA = '9999-12-31T23:59:59.000Z';
-
 const supabase = createClient(
   Deno.env.get('SUPABASE_URL')!,
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
 );
 
-async function enviarPush(movilId: string, titulo: string, mensaje: string) {
+function horaBogota(d: Date): string {
+  return d.toLocaleTimeString('es-CO', {
+    timeZone: 'America/Bogota', hour: 'numeric', minute: '2-digit', hour12: true,
+  });
+}
+
+async function enviarPush(
+  movilId: string, titulo: string, mensaje: string, data: Record<string, unknown>,
+) {
   try {
     await fetch(SEND_NOTIF_URL, {
       method: 'POST',
@@ -48,6 +54,7 @@ async function enviarPush(movilId: string, titulo: string, mensaje: string) {
         android_sound: 'movil_paradero',
         ios_sound: 'movil_paradero.mp3',
         existing_android_channel_id: CANAL_ALARMA,
+        data,
       }),
     });
   } catch (e) {
@@ -56,125 +63,133 @@ async function enviarPush(movilId: string, titulo: string, mensaje: string) {
 }
 
 Deno.serve(async () => {
-  // Leer timeout F2 de config_sistema
-  const { data: cfg } = await supabase
-    .from('config_sistema')
-    .select('cascada_se_f2_seg')
-    .single();
-  const seF2Seg = cfg?.cascada_se_f2_seg ?? 30;
-
-  // paradero_ofrecido_at se graba en T=0 (creación del servicio).
-  // Usamos seF2Seg * 2 para que el #1 tenga sus 30s reales:
-  //   T=0: ofrecido_at grabado, push F2 programado con send_after=30s
-  //   T+30s: push llega al #1
-  //   T+60s: este cron detecta la oferta como vencida y sanciona
-  const umbralOferta = new Date(Date.now() - seF2Seg * 2 * 1000).toISOString();
-
-  // Servicios pendientes con oferta vencida
-  const { data: expirados } = await supabase
-    .from('servicios')
-    .select('id, paradero_ofrecido_id')
-    .eq('estado', 'pendiente')
-    .not('paradero_ofrecido_id', 'is', null)
-    .lte('paradero_ofrecido_at', umbralOferta);
-
-  if (!expirados || expirados.length === 0) {
-    return new Response('ok-noop', { status: 200 });
-  }
+  const ahora = new Date().toISOString();
 
   // "Hoy" en hora Colombia (UTC-5, sin DST)
   const bogotaNow = new Date(Date.now() - 5 * 60 * 60 * 1000);
   const hoy = bogotaNow.toISOString().split('T')[0]; // YYYY-MM-DD
 
-  for (const srv of expirados) {
-    const movilId = srv.paradero_ofrecido_id as string;
-    const srvId   = srv.id as number;
+  const { data: pendientes, error: fetchErr } = await supabase
+    .from('usuarios')
+    .select('id, rechazos_paradero_hoy, fecha_rechazos, paradero_actual')
+    .not('paradero_oferta_expira_at', 'is', null)
+    .lte('paradero_oferta_expira_at', ahora);
 
-    // Limpiar oferta — NO tocamos paradero_auto_movil_id
-    // (Flutter lo usa para excluir al #1 de la visibilidad F3)
-    const { error: clearErr } = await supabase
-      .from('servicios')
-      .update({
-        paradero_ofrecido_id: null,
-        paradero_ofrecido_at: null,
-      })
-      .eq('id', srvId)
-      .eq('paradero_ofrecido_id', movilId); // guard idempotente
+  if (fetchErr) {
+    console.error('[sancion-paradero] Error consultando usuarios:', fetchErr.message);
+    return new Response('error', { status: 500 });
+  }
 
-    if (clearErr) {
-      console.error(`[sancion-paradero] Error limpiando srv ${srvId}:`, clearErr.message);
-      continue;
-    }
+  if (!pendientes || pendientes.length === 0) {
+    return new Response('ok-noop', { status: 200 });
+  }
 
-    // Leer datos actuales del móvil
-    const { data: movil } = await supabase
+  for (const movil of pendientes) {
+    const movilId    = movil.id.toString();
+    const movilIdInt = movil.id as number;
+
+    // Reclamar la oferta de forma atómica (evita doble sanción)
+    const { data: reclamado } = await supabase
       .from('usuarios')
-      .select('rechazos_paradero_hoy, fecha_rechazos, paradero_actual')
-      .eq('id', parseInt(movilId))
-      .maybeSingle();
+      .update({ paradero_oferta_expira_at: null })
+      .eq('id', movilIdInt)
+      .not('paradero_oferta_expira_at', 'is', null)
+      .lte('paradero_oferta_expira_at', ahora)
+      .select('id');
+    if (!reclamado || reclamado.length === 0) continue;
 
-    if (!movil) {
-      console.error(`[sancion-paradero] Móvil ${movilId} no encontrado`);
+    // Limpiar paradero_ofrecido_id/at en servicios pendientes (desbloquea F4)
+    await supabase
+      .from('servicios')
+      .update({ paradero_ofrecido_id: null, paradero_ofrecido_at: null })
+      .eq('paradero_ofrecido_id', movilId)
+      .eq('estado', 'pendiente');
+
+    // Validar que el #1 realmente tuvo sus 30s de F2 y no aceptó.
+    const { data: srvs } = await supabase
+      .from('servicios')
+      .select('id, estado, movil_id, created_at, liberacion_at, accepted_at, updated_at')
+      .eq('paradero_auto_movil_id', movilId)
+      .gte('created_at', new Date(Date.now() - 20 * 60 * 1000).toISOString())
+      .order('id', { ascending: false })
+      .limit(1);
+    const srv = srvs?.[0];
+    let sancionValida = false;
+    if (srv && srv.movil_id?.toString() !== movilId) {
+      const creado = new Date(srv.created_at).getTime();
+      const liber  = srv.liberacion_at ? new Date(srv.liberacion_at).getTime() : 0;
+      const finF2  = Math.max(creado, liber) + 55 * 1000;
+      if (srv.estado === 'pendiente') {
+        sancionValida = true;
+      } else if (srv.estado === 'cancelado') {
+        sancionValida = new Date(srv.updated_at).getTime() >= finF2;
+      } else if (srv.accepted_at) {
+        sancionValida = new Date(srv.accepted_at).getTime() >= finF2;
+      }
+    }
+    if (!sancionValida) {
+      console.log(`[sancion-paradero] Móvil ${movilId}: srv ${srv?.id ?? '-'} tomado/cancelado antes de cerrar F2 → sin sanción`);
       continue;
     }
 
-    // Calcular rechazos del día (resetear si es un nuevo día)
-    let rechazosHoy = (movil.rechazos_paradero_hoy ?? 0) as number;
-    if (movil.fecha_rechazos !== hoy) {
-      rechazosHoy = 0;
+    // La sanción es SOLO para el #1 del paradero.
+    if (!movil.paradero_actual) {
+      console.log(`[sancion-paradero] Móvil ${movilId}: no está en paradero → sin sanción`);
+      continue;
     }
 
-    // Preparar actualización del móvil
+    let rechazosHoy = (movil.rechazos_paradero_hoy ?? 0) as number;
+    if (movil.fecha_rechazos !== hoy) rechazosHoy = 0;
+    const vez = rechazosHoy + 1;
+
     const updateMovil: Record<string, unknown> = {
-      rechazos_paradero_hoy: rechazosHoy + 1,
-      fecha_rechazos: hoy,
+      rechazos_paradero_hoy:     vez,
+      fecha_rechazos:            hoy,
+      paradero_oferta_expira_at: null,
+      paradero_actual:           null,
+      ingreso_fila:              null,
     };
     let titulo: string;
     let mensaje: string;
+    let hasta: string | null = null;
+    let nivel: number;
 
-    if (rechazosHoy === 0) {
-      // 1er rechazo → mover al último de la fila
-      // CRÍTICO: usar FECHA_MAX_FILA en vez de new Date(8640000000000000).toISOString()
-      // porque el máximo de JS produce año 275760 con prefijo "+" que Dart no puede parsear.
-      updateMovil.ingreso_fila = FECHA_MAX_FILA;
-      titulo  = '⚠️ Movido al último puesto';
-      mensaje = 'No aceptaste tu turno de paradero a tiempo. Fuiste movido al último puesto de la fila.';
-      console.log(`[sancion-paradero] Srv ${srvId}: móvil ${movilId} → 1er rechazo, al último de la fila (${FECHA_MAX_FILA})`);
-
-    } else if (rechazosHoy === 1) {
-      // 2do rechazo → suspender 1 hora + sacar de fila
+    if (vez === 1) {
+      nivel   = 1;
+      titulo  = '⚠️ Expulsado del paradero (1ª vez hoy)';
+      mensaje = 'No aceptaste tu turno en 30 s. Regístrate de nuevo cuando estés listo. ' +
+                'Si vuelve a pasar hoy: 2ª vez → suspendido 1 hora; 3ª vez → suspendido 24 horas.';
+    } else if (vez === 2) {
+      nivel = 2;
       const suspHasta = new Date(Date.now() + 60 * 60 * 1000);
-      const horaStr   = suspHasta.toLocaleTimeString('es-CO', { timeZone: 'America/Bogota', hour: '2-digit', minute: '2-digit' });
-      updateMovil.suspendido_hasta = suspHasta.toISOString();
-      updateMovil.paradero_actual  = null;
-      updateMovil.ingreso_fila     = null;
-      titulo  = '❌ Suspendido 1 hora del paradero';
-      mensaje = `Segunda vez hoy que no aceptas tu turno. Suspendido del paradero por 1 hora (hasta las ${horaStr}).`;
-      console.log(`[sancion-paradero] Srv ${srvId}: móvil ${movilId} → 2do rechazo, suspendido 1h`);
-
+      hasta = suspHasta.toISOString();
+      updateMovil.suspendido_hasta = hasta;
+      titulo  = '❌ Suspendido 1 hora (2ª vez hoy)';
+      mensaje = `No aceptaste tu turno por segunda vez. Puedes volver al paradero a las ${horaBogota(suspHasta)}. ` +
+                'Si pasa una 3ª vez hoy quedarás suspendido 24 horas.';
     } else {
-      // 3er rechazo o más → suspender 24 horas + sacar de fila
+      nivel = 3;
       const suspHasta = new Date(Date.now() + 24 * 60 * 60 * 1000);
-      const horaStr   = suspHasta.toLocaleTimeString('es-CO', { timeZone: 'America/Bogota', hour: '2-digit', minute: '2-digit' });
-      updateMovil.suspendido_hasta = suspHasta.toISOString();
-      updateMovil.paradero_actual  = null;
-      updateMovil.ingreso_fila     = null;
-      titulo  = '🚫 Suspendido 24 horas del paradero';
-      mensaje = `${rechazosHoy + 1}ª vez hoy que no aceptas tu turno. Suspendido del paradero por 24 horas (hasta mañana a las ${horaStr}).`;
-      console.log(`[sancion-paradero] Srv ${srvId}: móvil ${movilId} → ${rechazosHoy + 1}o rechazo, suspendido 24h`);
+      hasta = suspHasta.toISOString();
+      updateMovil.suspendido_hasta = hasta;
+      titulo  = `🚫 Suspendido 24 horas (${vez}ª vez hoy)`;
+      mensaje = `No aceptaste tu turno por ${vez === 3 ? 'tercera' : `${vez}ª`} vez hoy. ` +
+                `Puedes volver al paradero mañana a las ${horaBogota(suspHasta)}.`;
     }
 
     const { error: updateErr } = await supabase
       .from('usuarios')
       .update(updateMovil)
-      .eq('id', parseInt(movilId));
-
+      .eq('id', movilIdInt);
     if (updateErr) {
       console.error(`[sancion-paradero] Error sancionando móvil ${movilId}:`, updateErr.message);
+      continue;
     }
 
-    await enviarPush(movilId, titulo, mensaje);
-    console.log(`[sancion-paradero] Srv ${srvId} — oferta limpiada. Móvil ${movilId} sancionado. paradero_auto_movil_id conservado para excluir de F3.`);
+    await enviarPush(movilId, titulo, mensaje, {
+      tipo: 'sancion_paradero', nivel, vez, titulo, mensaje, hasta,
+    });
+    console.log(`[sancion-paradero] Móvil ${movilId} sancionado (${vez}ª vez hoy).`);
   }
 
   return new Response('ok', { status: 200 });

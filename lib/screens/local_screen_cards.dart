@@ -19,7 +19,6 @@ mixin _CardsMixin on State<LocalScreen> {
   final Set<int> _tarjetasColapsadasLocal = {};
   final Set<int> _tarjetasExpandidasLocal = {};
   final ValueNotifier<int> _expansionTick = ValueNotifier(0);
-  final Set<int> _liberandoEnProceso = {};
   /// IDs de servicios que acaban de pasar a 'cotizada' (highlight animado)
   final Set<int> _cotizadasRecientes = {};
 
@@ -59,18 +58,6 @@ mixin _CardsMixin on State<LocalScreen> {
   }
 
   // ── Abstract stubs (implementados en otros mixins) ─────────────────────────
-  Future<String?> _programarMisilRetardado({
-    required List<String> externalIds,
-    required String titulo,
-    required String mensaje,
-    int minutosRetardo = 0,
-    int segundosRetardo = 0,
-  });
-  Future<void> _dispararMisilInmediato({
-    required List<String> externalIds,
-    required String titulo,
-    required String mensaje,
-  });
   void _completarDatosYAprobar(BuildContext ctx, Map<String, dynamic> svc);
   Future<void> _solicitarMovilAprobado(BuildContext ctx, Map<String, dynamic> svc);
 
@@ -355,99 +342,9 @@ mixin _CardsMixin on State<LocalScreen> {
           textoEstado = 'PROGRAMADO (EN $diff MIN)';
         } else {
           textoEstado = 'LIBERANDO AL RADAR...';
-
-          // ---> GATILLO AUTOMÁTICO: Libera el servicio + reinicia cascada con pilotos actuales <---
-          // Guard: se ejecuta una sola vez aunque el widget se reconstruya varias veces
-          if (!_liberandoEnProceso.contains(svcId)) {
-            _liberandoEnProceso.add(svcId);
-            Future.microtask(() async {
-              try {
-                final db = Supabase.instance.client;
-                final cascada = await CascadaConfig.cargar();
-
-                // 1. Cancelar misiles viejos del snapshot de creación
-                final svcOld = await db.from('servicios')
-                    .select('onesignal_30s, onesignal_2m, onesignal_5m')
-                    .eq('id', svcId).maybeSingle();
-                if (svcOld != null) {
-                  if (svcOld['onesignal_30s'] != null)
-                    await MotorNotificaciones.cancelarMisil(svcOld['onesignal_30s'].toString());
-                  if (svcOld['onesignal_2m'] != null)
-                    await MotorNotificaciones.cancelarMisil(svcOld['onesignal_2m'].toString());
-                  if (svcOld['onesignal_5m'] != null)
-                    await MotorNotificaciones.cancelarMisil(svcOld['onesignal_5m'].toString());
-                }
-
-                // 2. Liberar al radar
-                await db.from('servicios').update({'estado': 'pendiente'}).eq('id', svcId);
-
-                // 3. Cascada fresca con pilotos disponibles AHORA
-                final localNombre = widget.usuario['nombre']?.toString() ?? 'Un local';
-                final destino = servicio['destino']?.toString() ?? 'destino';
-                final msgAlarma = '📍 $localNombre solicitó un móvil para $destino.';
-
-                // T=0: Masters
-                final mastersData = await db.from('usuarios').select('id')
-                    .or('rol.eq.central,rol.eq.master,rango_movil.eq.MASTER')
-                    .neq('suspendido', true);
-                final masterIds = mastersData.map((u) => u['id'].toString()).toList();
-                if (masterIds.isNotEmpty) {
-                  await _dispararMisilInmediato(
-                    externalIds: masterIds,
-                    titulo: '👑 SERVICIO ACTIVO',
-                    mensaje: msgAlarma,
-                  );
-                }
-
-                // T+30s: Paradero #1 actual del local
-                final movilesLibres = await db.from('usuarios')
-                    .select('id, paradero_actual, ingreso_fila')
-                    .eq('rol', 'movil').eq('en_linea', true).eq('tiene_se', true).neq('suspendido', true)
-                    .not('paradero_actual', 'is', null);
-                final Map<String, List<Map<String, dynamic>>> grupos = {};
-                for (var m in movilesLibres) {
-                  final p = m['paradero_actual'].toString().trim().toLowerCase();
-                  grupos.putIfAbsent(p, () => []).add(m);
-                }
-                final Map<String, String> numero1s = {};
-                grupos.forEach((p, fila) {
-                  fila.sort((a, b) =>
-                      DateTime.parse(a['ingreso_fila'] ?? DateTime.now().toIso8601String())
-                          .compareTo(DateTime.parse(b['ingreso_fila'] ?? DateTime.now().toIso8601String())));
-                  for (var c in fila) {
-                    final cId = c['id'].toString();
-                    if (!masterIds.contains(cId)) { numero1s[p] = cId; break; }
-                  }
-                });
-                final paraderosRaw = widget.usuario['paradero_exclusivo']?.toString() ?? '';
-                final paraderosLocal = paraderosRaw
-                    .split(',').map((e) => e.trim().toLowerCase()).where((e) => e.isNotEmpty).toList();
-                List<String> pilotosParadero = paraderosLocal.isEmpty
-                    ? numero1s.values.toList()
-                    : paraderosLocal.where((p) => numero1s.containsKey(p)).map((p) => numero1s[p]!).toList();
-
-                String? id30s;
-                if (pilotosParadero.isNotEmpty) {
-                  id30s = await _programarMisilRetardado(
-                    externalIds: pilotosParadero,
-                    titulo: 'TU TURNO DE PARADERO',
-                    mensaje: msgAlarma,
-                    segundosRetardo: cascada.seF2Seg,
-                  );
-                }
-
-                // 4. Guardar misil F2 + arrancar cascada F3/F4 via pg_cron
-                await db.from('servicios').update({
-                  'onesignal_30s': id30s,
-                  'se_cascade_t0': DateTime.now().toUtc().toIso8601String(),
-                  'se_f3_enviado': false,
-                  'se_f4_enviado': false,
-                }).eq('id', svcId);
-
-              } catch (_) {}
-              _liberandoEnProceso.remove(svcId);
-            });
-          }
+          // La liberación la hace el SERVIDOR (se_liberar_programados) a la hora
+          // exacta, aunque el local tenga la app cerrada: cancela los avisos
+          // viejos, pasa a 'pendiente' y arranca F1 (Masters en línea) + F2/F3/F4.
         }
       }
     } else if (estado == 'pendiente') {

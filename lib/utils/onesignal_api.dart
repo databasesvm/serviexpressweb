@@ -155,6 +155,9 @@ class MotorNotificaciones {
         'ios_sound': '$sonido.mp3',
         if (urgente || canalAndroidId != null)
           'existing_android_channel_id': canalAndroidId ?? _canalAlarmaId,
+        // Marca de destino: la app del móvil la ignora (sin alerta de servicio
+        // ni recarga) si por algún motivo le llega un aviso de la Central.
+        'data': {'destino': 'central'},
       },
     );
   }

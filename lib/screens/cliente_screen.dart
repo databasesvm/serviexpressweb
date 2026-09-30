@@ -16,7 +16,8 @@ import 'package:serviexpress_app/screens/chat_screen.dart';
 import 'package:serviexpress_app/screens/pedidos_cliente_screen.dart';
 import 'package:serviexpress_app/screens/cliente_perfil_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:latlong2/latlong.dart';
+import 'package:serviexpress_app/utils/paradero_objetivo.dart';
+import 'package:serviexpress_app/utils/textos_push.dart';
 
 class ClienteScreen extends StatefulWidget {
   final Map<String, dynamic> usuario;
@@ -348,6 +349,7 @@ class _ClienteScreenState extends State<ClienteScreen>
   ) async {
     final int id = servicio['id'] as int;
     try {
+      final String ahoraIso = DateTime.now().toUtc().toIso8601String();
       await Supabase.instance.client
           .from('servicios')
           .update({
@@ -355,165 +357,59 @@ class _ClienteScreenState extends State<ClienteScreen>
             'observacion': aprobada
                 ? 'Cotización aprobada por cliente.'
                 : 'Cotización rechazada por cliente.',
+            // Al aprobar, el reloj de fases arranca AHORA (la cotización pudo
+            // haberse creado hace minutos): tarjetas y servidor usan este ancla.
+            if (aprobada) 'liberacion_at': ahoraIso,
           })
           .eq('id', id);
 
       if (!aprobada) return;
 
       // CASCADA A MÓVILES — misma lógica que local/central/invitado
-      final String destino = servicio['destino']?.toString() ?? 'destino';
-      final String msgAlerta = '🛵 Servicio cliente — $destino';
+      final String msgAlerta = TextosPush.f1Mensaje(TextosPush.ruta(
+          servicio['origen']?.toString(), servicio['destino']?.toString()));
 
-      // T=0: Masters + Central
+      // T=0: Masters en línea con SE (sin suspensión) + aviso a la Central
       final mastersData = await Supabase.instance.client
           .from('usuarios')
           .select('id')
-          .or('rol.eq.central,rol.eq.master,and(rango_movil.eq.MASTER,tiene_se.eq.true)')
-          .neq('suspendido', true);
+          .eq('rol', 'movil')
+          .eq('rango_movil', 'MASTER')
+          .eq('tiene_se', true)
+          .eq('en_linea', true)
+          .neq('suspendido', true)
+          .or('wallet_bloqueado.is.null,wallet_bloqueado.eq.false');
       final masterIds = mastersData.map((u) => u['id'].toString()).toList();
       if (masterIds.isNotEmpty) {
         await MotorNotificaciones.dispararRafa(
           idsDestinos: masterIds,
-          titulo: '👑 NUEVO SERVICIO',
+          titulo: TextosPush.f1Titulo,
           mensaje: msgAlerta,
           urgente: true,
+          sonido: 'master',
+          canalAndroidId: MotorNotificaciones.canalMasterId,
         );
       }
+      await MotorNotificaciones.dispararACentral(
+        titulo: '✅ COTIZACIÓN APROBADA',
+        mensaje: msgAlerta,
+      );
 
-      // T+30s: #1 del paradero — calculado dinámicamente (triple capa)
-      final double? origLatCli = (servicio['origen_lat'] as num?)?.toDouble();
-      final double? origLngCli = (servicio['origen_lng'] as num?)?.toDouble();
-
-      final _svcActivosCli = await Supabase.instance.client
-          .from('servicios')
-          .select('movil_id')
-          .inFilter('estado', ['en_ruta_origen', 'en_origen', 'en_ruta_destino', 'problema'])
-          .not('movil_id', 'is', null);
-      final _svcPendientesCli = await Supabase.instance.client
-          .from('servicios')
-          .select('exclusivo_id, paradero_auto_movil_id')
-          .eq('estado', 'pendiente');
-      final List<String> ocupadosCli = [];
-      for (var s in _svcActivosCli) {
-        ocupadosCli.add(s['movil_id'].toString());
-      }
-      for (var s in _svcPendientesCli) {
-        if (s['exclusivo_id'] != null) {
-          ocupadosCli.addAll(
-            s['exclusivo_id'].toString().split(',').map((e) => e.trim()).where((e) => e.isNotEmpty),
-          );
-        }
-        if (s['paradero_auto_movil_id'] != null) {
-          ocupadosCli.add(s['paradero_auto_movil_id'].toString());
-        }
-      }
-
-      final movilesLibresCli = await Supabase.instance.client
-          .from('usuarios')
-          .select('id, paradero_actual, ingreso_fila')
-          .eq('rol', 'movil')
-          .eq('en_linea', true)
-          .eq('tiene_se', true)
-          .not('paradero_actual', 'is', null);
-      final Map<String, List<Map<String, dynamic>>> gruposParaderosCli = {};
-      for (var m in movilesLibresCli) {
-        final String pName = m['paradero_actual'].toString().trim().toLowerCase();
-        gruposParaderosCli.putIfAbsent(pName, () => []).add(m);
-      }
-      gruposParaderosCli.forEach((_, lista) {
-        lista.sort((a, b) => DateTime.parse(
-          a['ingreso_fila'] ?? DateTime.now().toIso8601String(),
-        ).compareTo(DateTime.parse(
-          b['ingreso_fila'] ?? DateTime.now().toIso8601String(),
-        )));
-      });
-
-      String? paraderoObjetivoCli;
-      if (origLatCli != null && origLngCli != null) {
-        final paraderosList = await Supabase.instance.client
-            .from('paraderos')
-            .select('nombre, latitud, longitud');
-        double menorDist = double.infinity;
-        for (var p in paraderosList) {
-          final pLat = (p['latitud'] as num?)?.toDouble();
-          final pLng = (p['longitud'] as num?)?.toDouble();
-          if (pLat == null || pLng == null) continue;
-          final dist = const Distance().as(
-            LengthUnit.Meter, LatLng(origLatCli, origLngCli), LatLng(pLat, pLng),
-          );
-          if (dist < menorDist) {
-            menorDist = dist;
-            paraderoObjetivoCli = p['nombre'].toString().trim().toLowerCase();
-          }
-        }
-      }
-
-      String? paraderoAutoMovilIdCli;
-      if (paraderoObjetivoCli != null && gruposParaderosCli.containsKey(paraderoObjetivoCli)) {
-        for (var candidato in gruposParaderosCli[paraderoObjetivoCli]!) {
-          final candId = candidato['id'].toString();
-          if (!ocupadosCli.contains(candId)) {
-            paraderoAutoMovilIdCli = candId;
-            break;
-          }
-        }
-      }
-      // Fallback: móvil SE más cercano al origen si no hay paradero
-      if (paraderoAutoMovilIdCli == null && origLatCli != null && origLngCli != null) {
-        final todosMov = await Supabase.instance.client
-            .from('usuarios')
-            .select('id, latitud, longitud')
-            .eq('rol', 'movil')
-            .eq('en_linea', true)
-            .eq('tiene_se', true)
-            .not('latitud', 'is', null)
-            .not('longitud', 'is', null);
-        double menorDistMov = double.infinity;
-        for (var m in todosMov) {
-          final mId = m['id'].toString();
-          if (ocupadosCli.contains(mId)) continue;
-          final mLat = (m['latitud'] as num?)?.toDouble();
-          final mLng = (m['longitud'] as num?)?.toDouble();
-          if (mLat == null || mLng == null) continue;
-          final dist = const Distance().as(
-            LengthUnit.Meter, LatLng(origLatCli, origLngCli), LatLng(mLat, mLng),
-          );
-          if (dist < menorDistMov) {
-            menorDistMov = dist;
-            paraderoAutoMovilIdCli = mId;
-          }
-        }
-      }
-      // F2 (T+30s): guardar #1 del paradero y marcar como ofrecido de inmediato.
-      // El misil a T+30s lleva el push exacto al #1 (acepta voluntariamente).
-      if (paraderoAutoMovilIdCli != null) {
-        await Supabase.instance.client
-            .from('servicios')
-            .update({
-              'paradero_auto_movil_id': paraderoAutoMovilIdCli,
-              'paradero_ofrecido_id': paraderoAutoMovilIdCli,
-              'paradero_ofrecido_at': DateTime.now().toUtc().toIso8601String(),
-            })
-            .eq('id', id);
-        // Marcar expiración de oferta en el usuario para que se-sancion-paradero
-        // pueda sancionarlo aunque el servicio sea cancelado/tomado antes del cron.
-        await Supabase.instance.client.from('usuarios').update({
-          'paradero_oferta_expira_at': DateTime.now().toUtc()
-              .add(const Duration(seconds: 60)).toIso8601String(),
-        }).eq('id', int.parse(paraderoAutoMovilIdCli));
-        await MotorNotificaciones.programarMisilRetardado(
-          externalIds: [paraderoAutoMovilIdCli],
-          titulo: '⚠️ ¡TU TURNO DE PARADERO!',
-          mensaje: 'Tienes 30 segundos para aceptar el servicio.',
-          segundosRetardo: 30,
-          sonido: 'movil_paradero',
-        );
-      }
-
+      // F2 (T+30s): la resuelve el SERVIDOR (se_f2_huecos): #1 del paradero más
+      // cercano al origen o, si está vacío, el móvil más cercano, con todos los filtros.
+      final String? paraderoObjCli = await paraderoMasCercano(
+        (servicio['origen_lat'] as num?)?.toDouble(),
+        (servicio['origen_lng'] as num?)?.toDouble(),
+      );
       // F3/F4 — pg_cron consulta en_linea en tiempo real (se_cascade_t0 = ahora)
       await Supabase.instance.client
           .from('servicios')
-          .update({'se_cascade_t0': DateTime.now().toUtc().toIso8601String()})
+          .update({
+            if (paraderoObjCli != null) 'paradero_origen': paraderoObjCli,
+            'se_cascade_t0': ahoraIso,
+            'se_f3_enviado': false,
+            'se_f4_enviado': false,
+          })
           .eq('id', id);
     } catch (e) {
       debugPrint('Error responderCotizacion: $e');
@@ -1802,9 +1698,12 @@ class _ClienteScreenState extends State<ClienteScreen>
                         try {
                           await MotorNotificaciones.dispararMisil(
                             idDestino: moto['id'].toString(),
-                            titulo: '🔗 NUEVO ENCARGO ENRUTADO',
-                            mensaje:
-                                '${widget.usuario['nombre']} te sumó otro encargo: ${destinoCtrl.text.trim().toUpperCase()}',
+                            titulo: TextosPush.asignadoTitulo,
+                            mensaje: TextosPush.asignadoMensaje(
+                              '${widget.usuario['nombre'] ?? 'El cliente'} (encargo adicional)',
+                              TextosPush.ruta(servicio['origen']?.toString(),
+                                  destinoCtrl.text),
+                            ),
                             urgente: true,
                           );
                         } catch (_) {}

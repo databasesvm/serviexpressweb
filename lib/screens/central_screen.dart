@@ -9,6 +9,7 @@ import 'dart:async';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:serviexpress_app/screens/reporte_financiero_screen.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart';
+import 'package:serviexpress_app/utils/textos_push.dart'; // Textos únicos de push SE
 import 'package:serviexpress_app/screens/chat_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
@@ -206,23 +207,36 @@ class _CentralScreenState extends State<CentralScreen>
     // OneSignal no tiene soporte web — guard kIsWeb obligatorio.
     if (!kIsWeb) {
       Future.microtask(() async {
-        if (widget.usuario != null) {
-          OneSignal.login(widget.usuario!['id'].toString());
-        } else {
-          // Respaldo táctico: Si no llega desde el login, buscamos el ID de la Central en la base de datos
-          final centralBackup = await Supabase.instance.client
-              .from('usuarios')
-              .select('id')
-              .eq('rol', 'central')
-              .limit(1)
-              .maybeSingle();
-          if (centralBackup != null) {
-            OneSignal.login(centralBackup['id'].toString());
+        // Se ESPERA el login antes de poner la etiqueta: si no, la etiqueta
+        // podía quedar en la cuenta anterior del teléfono (p. ej. un móvil).
+        bool puedeSerCentral = false;
+        try {
+          if (widget.usuario != null) {
+            await OneSignal.login(widget.usuario!['id'].toString());
+            final rol = widget.usuario!['rol']?.toString();
+            puedeSerCentral = rol == 'central' ||
+                rol == 'master' ||
+                widget.usuario!['es_dual'] == true;
+          } else {
+            // Respaldo táctico: Si no llega desde el login, buscamos el ID de la Central en la base de datos
+            final centralBackup = await Supabase.instance.client
+                .from('usuarios')
+                .select('id')
+                .eq('rol', 'central')
+                .limit(1)
+                .maybeSingle();
+            if (centralBackup != null) {
+              await OneSignal.login(centralBackup['id'].toString());
+              puedeSerCentral = true;
+            }
           }
-        }
+        } catch (_) {}
         // Tag para que dispararACentral pueda encontrar este dispositivo
         // sin depender de segmentos configurados en el dashboard de OneSignal.
-        OneSignal.User.addTagWithKey('rol', 'central');
+        // Solo cuentas de Central, Master o móviles DUAL.
+        if (puedeSerCentral) {
+          OneSignal.User.addTagWithKey('rol', 'central');
+        }
         await OneSignal.Notifications.requestPermission(true);
 
         // Listener para capturar el androidNotificationId de las notif de

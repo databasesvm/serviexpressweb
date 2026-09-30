@@ -2,9 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:latlong2/latlong.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart'; // <-- RUTA CORREGIDA DE ONESIGNAL
 import 'package:serviexpress_app/screens/guest_tracking_screen.dart';
+import 'package:serviexpress_app/utils/paradero_objetivo.dart';
+import 'package:serviexpress_app/utils/textos_push.dart';
 
 class GuestMototaxiForm extends StatefulWidget {
   const GuestMototaxiForm({super.key});
@@ -98,81 +99,11 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
       String notaFinal =
           '[ MOTOTAXI ] - PAGO: $_metodoPago | 📱 Pasajero: ${_telPasajeroCtrl.text}';
 
-      // ---> ESCÁNER DE FILA INTELIGENTE (INVITADOS - MOTOTAXI) <---
-      String? idPilotoExclusivo;
-      try {
-        final serviciosPendientes = await Supabase.instance.client
-            .from('servicios')
-            .select('exclusivo_id')
-            .eq('estado', 'pendiente')
-            .not('exclusivo_id', 'is', null);
-        List<String> ocupados = serviciosPendientes
-            .map((s) => s['exclusivo_id'].toString())
-            .toList();
-
-        final movilesLibres = await Supabase.instance.client
-            .from('usuarios')
-            .select('id, latitud, longitud, paradero_actual, ingreso_fila')
-            .eq('rol', 'movil')
-            .eq('en_linea', true)
-            .eq('tiene_se', true)
-            .not('latitud', 'is', null);
-
-        final Distance medidorDistancia = const Distance();
-        Map<String, dynamic>? movilMasCercano;
-        double distanciaMinima = 999999;
-        String? paraderoCercano;
-
-        for (var movil in movilesLibres) {
-          if (movil['latitud'] == null ||
-              movil['longitud'] == null ||
-              _origenLat == null ||
-              _origenLng == null)
-            continue;
-          double dist = medidorDistancia.as(
-            LengthUnit.Meter,
-            LatLng(_origenLat!, _origenLng!),
-            LatLng(movil['latitud'], movil['longitud']),
-          );
-          if (dist < distanciaMinima) {
-            distanciaMinima = dist;
-            paraderoCercano = movil['paradero_actual'];
-            if (!ocupados.contains(movil['id'].toString())) {
-              movilMasCercano = movil;
-            }
-          }
-        }
-
-        if (paraderoCercano != null && paraderoCercano.isNotEmpty) {
-          final fila = movilesLibres
-              .where((m) => m['paradero_actual'] == paraderoCercano)
-              .toList();
-          fila.sort(
-            (a, b) =>
-                DateTime.parse(
-                  a['ingreso_fila'] ?? DateTime.now().toIso8601String(),
-                ).compareTo(
-                  DateTime.parse(
-                    b['ingreso_fila'] ?? DateTime.now().toIso8601String(),
-                  ),
-                ),
-          );
-          for (var candidato in fila) {
-            if (!ocupados.contains(candidato['id'].toString())) {
-              idPilotoExclusivo = candidato['id'].toString();
-              break;
-            }
-          }
-        }
-
-        if (idPilotoExclusivo == null &&
-            movilMasCercano != null &&
-            distanciaMinima <= 1000) {
-          idPilotoExclusivo = movilMasCercano['id'].toString();
-        }
-      } catch (e) {
-        debugPrint('Error en escáner de fila invitado: $e');
-      }
+      // Cascada SE completa: F1 Masters aquí, F2 la resuelve el SERVIDOR
+      // (se_f2_huecos: #1 del paradero más cercano al origen o el móvil más
+      // cercano) y F3/F4 los edge functions desde se_cascade_t0.
+      final String? paraderoObjetivo =
+          await paraderoMasCercano(_origenLat, _origenLng);
 
       // ---> INSERCIÓN EN BASE DE DATOS CON CANDADO VIP <---
       final response = await Supabase.instance.client
@@ -191,7 +122,9 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
             },
             'observacion': notaFinal,
             'estado': _requiereCotizacion ? 'cotizacion' : 'pendiente',
-            'exclusivo_id': idPilotoExclusivo,
+            if (paraderoObjetivo != null) 'paradero_origen': paraderoObjetivo,
+            if (!_requiereCotizacion)
+              'se_cascade_t0': DateTime.now().toUtc().toIso8601String(),
           })
           .select()
           .single();
@@ -215,8 +148,13 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
         debugPrint('Error OneSignal: $e');
       }
 
-      // La cascada a móviles se dispara desde guest_tracking_screen.dart
-      // cuando el invitado aprueba la cotización que envía la Central.
+      // F1 (T=0): Masters en línea con SE. Si es cotización, la cascada
+      // arranca en guest_tracking_screen.dart cuando el invitado aprueba.
+      if (!_requiereCotizacion) {
+        await notificarMastersF1Invitado(
+          'Mototaxi (invitado): ${TextosPush.ruta(_origenCtrl.text, _destinoCtrl.text)}',
+        );
+      }
 
       if (mounted) {
         Navigator.pushReplacement(

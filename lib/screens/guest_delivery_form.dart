@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:latlong2/latlong.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart'; // <-- RUTA CORREGIDA DE ONESIGNAL
 import 'package:serviexpress_app/screens/guest_tracking_screen.dart';
 
@@ -108,81 +107,10 @@ class _GuestDeliveryFormState extends State<GuestDeliveryForm> {
       String notaFinal =
           '[ PAQUETERÍA ] - PAGO: $_metodoPago | 📞 Envía: ${_telOrigenCtrl.text} | 📞 Recibe: ${_telDestinoCtrl.text}';
 
-      // ---> ESCÁNER DE FILA INTELIGENTE (INVITADOS - PAQUETERÍA) <---
-      String? idPilotoExclusivo;
-      try {
-        final serviciosPendientes = await Supabase.instance.client
-            .from('servicios')
-            .select('exclusivo_id')
-            .eq('estado', 'pendiente')
-            .not('exclusivo_id', 'is', null);
-        List<String> ocupados = serviciosPendientes
-            .map((s) => s['exclusivo_id'].toString())
-            .toList();
-
-        final movilesLibres = await Supabase.instance.client
-            .from('usuarios')
-            .select('id, latitud, longitud, paradero_actual, ingreso_fila')
-            .eq('rol', 'movil')
-            .eq('en_linea', true)
-            .eq('tiene_se', true)
-            .not('latitud', 'is', null);
-
-        final Distance medidorDistancia = const Distance();
-        Map<String, dynamic>? movilMasCercano;
-        double distanciaMinima = 999999;
-        String? paraderoCercano;
-
-        for (var movil in movilesLibres) {
-          if (movil['latitud'] == null ||
-              movil['longitud'] == null ||
-              _origenLat == null ||
-              _origenLng == null)
-            continue;
-          double dist = medidorDistancia.as(
-            LengthUnit.Meter,
-            LatLng(_origenLat!, _origenLng!),
-            LatLng(movil['latitud'], movil['longitud']),
-          );
-          if (dist < distanciaMinima) {
-            distanciaMinima = dist;
-            paraderoCercano = movil['paradero_actual'];
-            if (!ocupados.contains(movil['id'].toString())) {
-              movilMasCercano = movil;
-            }
-          }
-        }
-
-        if (paraderoCercano != null && paraderoCercano.isNotEmpty) {
-          final fila = movilesLibres
-              .where((m) => m['paradero_actual'] == paraderoCercano)
-              .toList();
-          fila.sort(
-            (a, b) =>
-                DateTime.parse(
-                  a['ingreso_fila'] ?? DateTime.now().toIso8601String(),
-                ).compareTo(
-                  DateTime.parse(
-                    b['ingreso_fila'] ?? DateTime.now().toIso8601String(),
-                  ),
-                ),
-          );
-          for (var candidato in fila) {
-            if (!ocupados.contains(candidato['id'].toString())) {
-              idPilotoExclusivo = candidato['id'].toString();
-              break;
-            }
-          }
-        }
-
-        if (idPilotoExclusivo == null &&
-            movilMasCercano != null &&
-            distanciaMinima <= 1000) {
-          idPilotoExclusivo = movilMasCercano['id'].toString();
-        }
-      } catch (e) {
-        debugPrint('Error en escáner de fila invitado: $e');
-      }
+      // Siempre nace como cotización. Al aprobarla el invitado
+      // (guest_tracking_screen.dart) arranca la cascada SE completa; la F2 la
+      // resuelve el SERVIDOR (se_f2_huecos). Antes se preasignaba un #1 como
+      // exclusivo y el pedido nunca hacía cascada.
 
       // ---> INSERCIÓN EN BASE DE DATOS CON CANDADO VIP <---
       final response = await Supabase.instance.client
@@ -199,7 +127,6 @@ class _GuestDeliveryFormState extends State<GuestDeliveryForm> {
             'tarifa_detalle': {'total': 0.0, 'fuente': 'invitado'},
             'observacion': notaFinal,
             'estado': 'cotizacion',
-            'exclusivo_id': idPilotoExclusivo,
           })
           .select()
           .single();
