@@ -22,7 +22,6 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:serviexpress_app/utils/deeplink_service.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:serviexpress_app/utils/cascada_config.dart'; // CONFIG-CASCADA-EXT
 import 'package:serviexpress_app/utils/textos_push.dart'; // Textos únicos de push SE
 
 part 'local_screen_dispatch.dart';
@@ -455,8 +454,10 @@ class _LocalScreenState extends State<LocalScreen>
   }
 
   // --- VERIFICADOR VIP (PUNTO A PUNTO) ---
-  bool _puedeUsarPuntoAPunto() {
-    final ultimoUsoStr = widget.usuario['ultimo_punto_a_punto']?.toString();
+  bool _puedeUsarPuntoAPunto([Map<String, dynamic>? perfil]) {
+    // Perfil en vivo: el servidor marca el uso del día (también si lo creó la Central)
+    final ultimoUsoStr =
+        (perfil ?? widget.usuario)['ultimo_punto_a_punto']?.toString();
     if (ultimoUsoStr == null || ultimoUsoStr.isEmpty) return true;
     try {
       final ultimoUso = DateTime.parse(ultimoUsoStr).toLocal();
@@ -626,7 +627,7 @@ class _LocalScreenState extends State<LocalScreen>
                 // Stats rápidos para el KPI bar del historial
                 // tiene_punto_a_punto: la central lo activa por local específico
                 final tienePAP = perfilEnVivo['tiene_punto_a_punto'] == true;
-                final puedeVip = tienePAP && _puedeUsarPuntoAPunto();
+                final puedeVip = tienePAP && _puedeUsarPuntoAPunto(perfilEnVivo);
                 final histFinalizados = historial.where((s) => s['estado'] == 'finalizado').length;
                 final histCancelados = historial.where((s) => s['estado'] == 'cancelado').length;
 

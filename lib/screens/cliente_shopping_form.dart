@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart'; // <-- RUTA CORREGIDA
-import 'package:serviexpress_app/utils/textos_push.dart';
 
 class ClienteShoppingForm extends StatefulWidget {
   final Map<String, dynamic> usuario;
@@ -192,6 +191,7 @@ class _ClienteShoppingFormState extends State<ClienteShoppingForm> {
       await Supabase.instance.client.from('servicios').insert({
         'cliente_id': widget.usuario['id'],
         'creador': widget.usuario['nombre'],
+        'tipo_servicio': 'COMPRAS',
         'origen': _tiendaCtrl.text.trim().toUpperCase(),
         'destino': _destinoCtrl.text.trim().toUpperCase(),
         'destino_lat': _destinoLat,
@@ -205,6 +205,8 @@ class _ClienteShoppingFormState extends State<ClienteShoppingForm> {
         'observacion': notaFinal,
         'estado': _requiereCotizacion ? 'cotizacion' : 'pendiente',
         'se_cascade_t0': DateTime.now().toUtc().toIso8601String(),
+        // F1 (Masters) lo manda el servidor; si es cotización no envía nada.
+        if (!_requiereCotizacion) 'se_f1_motivo': 'nuevo',
       });
 
       // ---> GUARDAR ORIGEN/DESTINO PARA PRÓXIMOS PEDIDOS <---
@@ -216,35 +218,9 @@ class _ClienteShoppingFormState extends State<ClienteShoppingForm> {
       }).eq('id', widget.usuario['id']).then((_) {}).catchError((_) {});
 
       // ---> CASCADA SE (F1 Masters T=0, F2 paradero T+30s; F3/F4 vía Edge Function) <---
-      if (!_requiereCotizacion) {
-        try {
-          final String origenNotif = _tiendaCtrl.text.trim().toUpperCase();
-          // F1 (T=0): notificar a Masters SE
-          final masters = await Supabase.instance.client
-              .from('usuarios').select('id')
-              .eq('rango_movil', 'MASTER')
-              .eq('tiene_se', true)
-              .eq('en_linea', true)
-              .neq('suspendido', true)
-              .or('wallet_bloqueado.is.null,wallet_bloqueado.eq.false');
-          final masterIds = masters.map((u) => u['id'].toString()).toList();
-          if (masterIds.isNotEmpty) {
-            await MotorNotificaciones.dispararRafa(
-              idsDestinos: masterIds,
-              titulo: TextosPush.f1Titulo,
-              mensaje: TextosPush.f1Mensaje(
-                  'Compras: ${TextosPush.ruta(origenNotif, _destinoCtrl.text)}'),
-              urgente: true,
-              sonido: 'master',
-              canalAndroidId: MotorNotificaciones.canalMasterId,
-            );
-          }
-          // F2 (T+30s): servidor (se_f2_huecos).
-          // F3 y F4 gestionados por se-notif-fase3/se-notif-fase4 vía se_cascade_t0
-        } catch (e) {
-          debugPrint('Error OneSignal: $e');
-        }
-      }
+      // F1 (T=0) Masters: servidor (trg_se_f1_servidor, se_f1_motivo).
+      // F2 (T+30s): servidor (se_f2_huecos).
+      // F3 y F4: se-notif-fase3/se-notif-fase4 vía se_cascade_t0.
       // ---> DISPARO A CENTRAL POR SEGMENTO (más confiable que por IDs) <---
       try {
         await MotorNotificaciones.dispararACentral(

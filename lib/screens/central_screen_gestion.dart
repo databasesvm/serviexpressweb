@@ -1809,7 +1809,7 @@ class _PanelGestorParaderosState extends State<_PanelGestorParaderos>
   Future<List<Map<String, dynamic>>> _cargar() =>
       Supabase.instance.client
           .from('usuarios')
-          .select('id, nombre, paradero_exclusivo, paradero_nocturno, recargo_nocturno_especial, zona_lluvia, tiene_punto_a_punto')
+          .select('id, nombre, paradero_exclusivo, paradero_nocturno, recargo_nocturno_especial, zona_lluvia, tiene_punto_a_punto, ultimo_punto_a_punto')
           .eq('rol', 'local')
           .order('nombre', ascending: true);
 
@@ -1839,6 +1839,91 @@ class _PanelGestorParaderosState extends State<_PanelGestorParaderos>
         .from('usuarios')
         .update({'tiene_punto_a_punto': valor})
         .eq('id', local['id']);
+    _recargar();
+  }
+
+  /// ¿El local ya usó su Punto a Punto de hoy? (fecha Colombia, la pone el servidor)
+  bool _papUsadoHoy(Map<String, dynamic> local) {
+    final raw = local['ultimo_punto_a_punto']?.toString();
+    if (raw == null || raw.isEmpty) return false;
+    final hoyCo = DateTime.now().toUtc().subtract(const Duration(hours: 5));
+    final hoyStr =
+        '${hoyCo.year.toString().padLeft(4, '0')}-${hoyCo.month.toString().padLeft(2, '0')}-${hoyCo.day.toString().padLeft(2, '0')}';
+    return raw.startsWith(hoyStr);
+  }
+
+  /// La Central crea el Punto a Punto de un local (cuenta como su 1 del día).
+  /// El servidor (trg_pap_preparar) pone el paradero del local (o EXPUENTE),
+  /// valida el límite diario y arranca la cascada SE completa.
+  Future<void> _crearPAPCentral(Map<String, dynamic> local) async {
+    final notaCtrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: Text('⚡ Punto a Punto — ${local['nombre']}',
+            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Text(
+            'Un móvil irá del paradero del local hasta el local, sin cobro. '
+            'Cuenta como el Punto a Punto de hoy de este local.',
+            style: TextStyle(fontSize: 13),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: notaCtrl,
+            maxLines: 2,
+            decoration: const InputDecoration(
+              labelText: 'Nota (opcional)',
+              border: OutlineInputBorder(),
+            ),
+          ),
+        ]),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('CANCELAR', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF7B1FA2)),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('CREAR', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+    final nota = notaCtrl.text.trim();
+    notaCtrl.dispose();
+    if (ok != true || !mounted) return;
+
+    try {
+      await Supabase.instance.client.from('servicios').insert({
+        'local_id': local['id'],
+        'es_punto_a_punto': true,
+        'estado': 'pendiente',
+        'tarifa': 0,
+        'tipo_servicio': 'RECOGIDA LOCAL',
+        'creador': 'Central',
+        'destino': local['nombre'],
+        'observacion': '[ RECOGIDA LOCAL ]${nota.isEmpty ? '' : ' $nota'}',
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('✅ Punto a Punto creado. Arrancó la cascada.'),
+          backgroundColor: Colors.green,
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        final usado = e.toString().contains('PAP_YA_USADO_HOY');
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(usado
+              ? 'Este local ya usó su Punto a Punto de hoy.'
+              : 'No se pudo crear el Punto a Punto: $e'),
+          backgroundColor: Colors.red[700],
+        ));
+      }
+    }
     _recargar();
   }
 
@@ -2251,7 +2336,9 @@ class _PanelGestorParaderosState extends State<_PanelGestorParaderos>
                 const SizedBox(height: 3),
                 Text(
                   activo
-                      ? 'Punto a Punto habilitado — 1 gratis/día'
+                      ? (_papUsadoHoy(local)
+                          ? 'Punto a Punto de hoy ya usado'
+                          : 'Punto a Punto habilitado — 1 gratis/día')
                       : 'Punto a Punto desactivado',
                   style: TextStyle(
                     fontSize: 11,
@@ -2263,6 +2350,21 @@ class _PanelGestorParaderosState extends State<_PanelGestorParaderos>
               ],
             ),
           ),
+          // Crear PAP desde la Central (cuenta como el del día del local)
+          if (activo)
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: OutlinedButton(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF7B1FA2),
+                  side: const BorderSide(color: Color(0xFF7B1FA2)),
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  visualDensity: VisualDensity.compact,
+                ),
+                onPressed: _papUsadoHoy(local) ? null : () => _crearPAPCentral(local),
+                child: const Text('CREAR', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+              ),
+            ),
           // Toggle
           Switch(
             value: activo,

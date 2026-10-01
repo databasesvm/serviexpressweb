@@ -6,7 +6,6 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart';
 import 'package:serviexpress_app/utils/widgets_compartidos.dart';
 import 'package:serviexpress_app/utils/paradero_objetivo.dart';
-import 'package:serviexpress_app/utils/textos_push.dart';
 
 class GuestTrackingScreen extends StatefulWidget {
   const GuestTrackingScreen({super.key});
@@ -69,28 +68,8 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
         // --- CASCADA 4 FASES — igual que el resto de la app ---
         final int svcId = servicio['id'] as int;
 
-        // T=0: Masters en línea con SE (sin suspensión) + aviso a la Central
-        final mastersData = await Supabase.instance.client
-            .from('usuarios')
-            .select('id')
-            .eq('rol', 'movil')
-            .eq('rango_movil', 'MASTER')
-            .eq('tiene_se', true)
-            .eq('en_linea', true)
-            .neq('suspendido', true)
-            .or('wallet_bloqueado.is.null,wallet_bloqueado.eq.false');
-        final masterIds = mastersData.map((u) => u['id'].toString()).toList();
-        if (masterIds.isNotEmpty) {
-          await MotorNotificaciones.dispararRafa(
-            idsDestinos: masterIds,
-            titulo: TextosPush.f1Titulo,
-            mensaje: TextosPush.f1Mensaje(TextosPush.ruta(
-                servicio['origen']?.toString(), servicio['destino']?.toString())),
-            urgente: true,
-            sonido: 'master',
-            canalAndroidId: MotorNotificaciones.canalMasterId,
-          );
-        }
+        // T=0: F1 a Masters lo manda el SERVIDOR (se_f1_motivo, más abajo).
+        // Aquí solo el aviso a la Central.
         await MotorNotificaciones.dispararACentral(
           titulo: '✅ COTIZACIÓN APROBADA (INVITADO)',
           mensaje: 'Invitado aprobó cotización — revisa el radar.',
@@ -111,6 +90,7 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
               'se_cascade_t0': DateTime.now().toUtc().toIso8601String(),
               'se_f3_enviado': false,
               'se_f4_enviado': false,
+              'se_f1_motivo': 'nuevo',
             })
             .eq('id', svcId);
       }

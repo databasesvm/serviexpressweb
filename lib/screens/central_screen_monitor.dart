@@ -1527,7 +1527,6 @@ extension CentralScreenMonitor on _CentralScreenState {
   Future<void> _cotizarRapido(
       BuildContext context, Map<String, dynamic> servicio) async {
     final TextEditingController precioCtrl = TextEditingController();
-    bool esVip = servicio['es_vip'] == true;
 
     await showModalBottomSheet(
       context: context,
@@ -1607,44 +1606,6 @@ extension CentralScreenMonitor on _CentralScreenState {
                     ),
                   ),
                 ),
-                const SizedBox(height: 12),
-
-                // Toggle VIP
-                GestureDetector(
-                  onTap: () => setSheet(() => esVip = !esVip),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: esVip
-                          ? const Color(0xFFFFF8E1)
-                          : Colors.grey[100],
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: esVip
-                            ? const Color(0xFFFFD700)
-                            : Colors.grey[300]!,
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Text(esVip ? '👑' : '⬜',
-                            style: const TextStyle(fontSize: 18)),
-                        const SizedBox(width: 10),
-                        const Expanded(
-                          child: Text('Servicio VIP  (+\$3.000)',
-                              style: TextStyle(fontWeight: FontWeight.w600)),
-                        ),
-                        Switch(
-                          value: esVip,
-                          onChanged: (v) => setSheet(() => esVip = v),
-                          activeThumbColor: const Color(0xFFB8860B),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
                 const SizedBox(height: 16),
 
                 // Botones
@@ -1676,13 +1637,14 @@ extension CentralScreenMonitor on _CentralScreenState {
                             );
                             return;
                           }
-                          final tarifaFinal = esVip ? base + 3000 : base;
+                          // La opción VIP se eliminó: el precio es el ingresado.
+                          final tarifaFinal = base;
                           Navigator.pop(ctx);
                           await Supabase.instance.client
                               .from('servicios')
                               .update({
                                 'tarifa': tarifaFinal,
-                                'es_vip': esVip,
+                                'es_vip': false,
                                 'estado': 'cotizada',
                               })
                               .eq('id', servicio['id']);

@@ -4,8 +4,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart'; // <-- RUTA CORREGIDA DE ONESIGNAL
 import 'package:serviexpress_app/screens/guest_tracking_screen.dart';
-import 'package:serviexpress_app/utils/paradero_objetivo.dart';
-import 'package:serviexpress_app/utils/textos_push.dart';
 
 class GuestFoodForm extends StatefulWidget {
   const GuestFoodForm({super.key});
@@ -109,6 +107,7 @@ class _GuestFoodFormState extends State<GuestFoodForm> {
           .from('servicios')
           .insert({
             'creador': 'Invitado: ${_nombreCtrl.text.trim()}',
+            'tipo_servicio': 'COMIDA',
             'origen': _restauranteCtrl.text.trim().toUpperCase(),
             'destino': _destinoCtrl.text.trim().toUpperCase(),
             'destino_lat': _destinoLat,
@@ -119,6 +118,8 @@ class _GuestFoodFormState extends State<GuestFoodForm> {
             'estado': _requiereCotizacion ? 'cotizacion' : 'pendiente',
             if (!_requiereCotizacion)
               'se_cascade_t0': DateTime.now().toUtc().toIso8601String(),
+            // F1 (Masters) lo manda el servidor (trg_se_f1_servidor)
+            if (!_requiereCotizacion) 'se_f1_motivo': 'nuevo',
           })
           .select()
           .single();
@@ -142,12 +143,7 @@ class _GuestFoodFormState extends State<GuestFoodForm> {
         debugPrint('Error OneSignal: $e');
       }
 
-      // F1 (T=0): Masters en línea con SE
-      if (!_requiereCotizacion) {
-        await notificarMastersF1Invitado(
-          'Comida (invitado): ${TextosPush.ruta(_restauranteCtrl.text, _destinoCtrl.text)}',
-        );
-      }
+      // F1 (T=0): Masters → lo manda el servidor (se_f1_motivo en el insert).
 
       if (mounted) {
         Navigator.pushReplacement(

@@ -120,25 +120,8 @@ class _RankingScreenState extends State<RankingScreen> {
           // MASTER: puntaje fijo 5.0, rango inmune a revocación automática
           final bool esMaster = rangoManual?.toUpperCase() == 'MASTER';
 
-          // --- MOTOR DE REVOCACIÓN AUTOMÁTICA (no aplica a MASTER) ---
-          bool perdioRango = false;
-          if (!esMaster && rangoManual != null && rangoManual.isNotEmpty) {
-            if (puntajes.isEmpty) {
-              perdioRango = true; // Castigo por inactividad
-            } else if (promedio < 4.0) {
-              perdioRango = true; // Castigo por mal rendimiento
-            }
-          }
-
-          if (perdioRango) {
-            // Limpiamos el rango en la base de datos silenciosamente
-            await Supabase.instance.client
-                .from('usuarios')
-                .update({'rango_movil': null})
-                .eq('id', u['id']);
-            rangoManual = null; // Lo anulamos localmente para forzar el cálculo
-          }
-          // ----------------------------------------
+          // El rango lo asigna SOLO la Central. Esta pantalla ya no lo borra
+          // (antes lo hacía desde el teléfono de quien abría el ranking).
 
           if (esMaster) {
             rangoNombre = 'MASTER';

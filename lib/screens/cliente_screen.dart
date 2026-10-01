@@ -369,27 +369,8 @@ class _ClienteScreenState extends State<ClienteScreen>
       final String msgAlerta = TextosPush.f1Mensaje(TextosPush.ruta(
           servicio['origen']?.toString(), servicio['destino']?.toString()));
 
-      // T=0: Masters en línea con SE (sin suspensión) + aviso a la Central
-      final mastersData = await Supabase.instance.client
-          .from('usuarios')
-          .select('id')
-          .eq('rol', 'movil')
-          .eq('rango_movil', 'MASTER')
-          .eq('tiene_se', true)
-          .eq('en_linea', true)
-          .neq('suspendido', true)
-          .or('wallet_bloqueado.is.null,wallet_bloqueado.eq.false');
-      final masterIds = mastersData.map((u) => u['id'].toString()).toList();
-      if (masterIds.isNotEmpty) {
-        await MotorNotificaciones.dispararRafa(
-          idsDestinos: masterIds,
-          titulo: TextosPush.f1Titulo,
-          mensaje: msgAlerta,
-          urgente: true,
-          sonido: 'master',
-          canalAndroidId: MotorNotificaciones.canalMasterId,
-        );
-      }
+      // T=0: F1 a Masters lo manda el SERVIDOR (se_f1_motivo, más abajo).
+      // Aquí solo el aviso a la Central.
       await MotorNotificaciones.dispararACentral(
         titulo: '✅ COTIZACIÓN APROBADA',
         mensaje: msgAlerta,
@@ -409,6 +390,7 @@ class _ClienteScreenState extends State<ClienteScreen>
             'se_cascade_t0': ahoraIso,
             'se_f3_enviado': false,
             'se_f4_enviado': false,
+            'se_f1_motivo': 'nuevo',
           })
           .eq('id', id);
     } catch (e) {

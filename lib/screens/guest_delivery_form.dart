@@ -117,6 +117,7 @@ class _GuestDeliveryFormState extends State<GuestDeliveryForm> {
           .from('servicios')
           .insert({
             'creador': 'Invitado: ${_nombreCtrl.text.trim()}',
+            'tipo_servicio': 'PAQUETERÍA',
             'origen': _dirOrigenCtrl.text.trim().toUpperCase(),
             'destino': _dirDestinoCtrl.text.trim().toUpperCase(),
             'origen_lat': _origenLat,

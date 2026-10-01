@@ -1,36 +1,8 @@
 import 'package:latlong2/latlong.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:serviexpress_app/utils/onesignal_api.dart';
-import 'package:serviexpress_app/utils/textos_push.dart';
 
-/// F1 SE (T=0) para pedidos de invitado: push solo a Masters en línea, con SE,
-/// sin suspensión y con la Billetera al día, con el sonido/canal de Master.
-/// [ruta] = texto "ORIGEN → DESTINO" (ver TextosPush.ruta).
-Future<void> notificarMastersF1Invitado(String ruta) async {
-  final String titulo = TextosPush.f1Titulo;
-  final String mensaje = TextosPush.f1Mensaje(ruta);
-  try {
-    final masters = await Supabase.instance.client
-        .from('usuarios')
-        .select('id')
-        .eq('rol', 'movil')
-        .eq('rango_movil', 'MASTER')
-        .eq('tiene_se', true)
-        .eq('en_linea', true)
-        .neq('suspendido', true)
-        .or('wallet_bloqueado.is.null,wallet_bloqueado.eq.false');
-    final ids = masters.map((u) => u['id'].toString()).toList();
-    if (ids.isEmpty) return;
-    await MotorNotificaciones.dispararRafa(
-      idsDestinos: ids,
-      titulo: titulo,
-      mensaje: mensaje,
-      urgente: true,
-      sonido: 'master',
-      canalAndroidId: MotorNotificaciones.canalMasterId,
-    );
-  } catch (_) {}
-}
+// F1 SE (T=0, Masters) lo manda el SERVIDOR: trigger trg_se_f1_servidor
+// cuando la app pone servicios.se_f1_motivo = 'nuevo' / 'liberado'.
 
 /// Paradero objetivo para la F2 SE de servicios de cliente / invitado.
 ///

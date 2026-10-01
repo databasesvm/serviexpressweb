@@ -715,52 +715,9 @@ extension CentralScreenFormularios on _CentralScreenState {
                           // móvil más cercano (origen o, sin coordenadas, MEMOS).
                           // Solo manda el push si el servicio sigue pendiente.
 
-                          // --- FASE 1 (T=0): MASTERS ---
-                          // Solo suscripción. Master no tiene tope de servicios activos
-                          // — el tope de 10 es de notificaciones simultáneas (anti-saturación),
-                          // no de cuántos servicios puede llevar.
-                          var idsMasters = <String>[];
-                          try {
-                            final mastersResp = await Supabase.instance.client
-                                .rpc(
-                                  'moviles_elegibles_notificacion',
-                                  params: {
-                                    'p_solo_master': true,
-                                    'p_solo_completamente_libres': false,
-                                    'p_tiene_se': true,
-                                  },
-                                );
-                            idsMasters = (mastersResp as List)
-                                .map((m) => m['id'].toString())
-                                .toList();
-                            // Excluir Masters con la Billetera bloqueada
-                            if (idsMasters.isNotEmpty) {
-                              final bloqueados = await Supabase.instance.client
-                                  .from('usuarios')
-                                  .select('id')
-                                  .inFilter('id', idsMasters)
-                                  .eq('wallet_bloqueado', true);
-                              final setBloq = (bloqueados as List)
-                                  .map((u) => u['id'].toString())
-                                  .toSet();
-                              idsMasters = idsMasters
-                                  .where((id) => !setBloq.contains(id))
-                                  .toList();
-                            }
-                            if (idsMasters.isNotEmpty) {
-                              await MotorNotificaciones.dispararRafa(
-                                idsDestinos: idsMasters,
-                                titulo: TextosPush.f1Titulo,
-                                mensaje: TextosPush.f1Mensaje(TextosPush.ruta(
-                                  origenController.text,
-                                  destinoController.text,
-                                )),
-                                urgente: true,
-                                sonido: 'master',
-                                canalAndroidId: MotorNotificaciones.canalMasterId,
-                              );
-                            }
-                          } catch (_) {}
+                          // --- FASE 1 (T=0): MASTERS — la manda el SERVIDOR ---
+                          // se_f1_motivo='nuevo' dispara el push F1 a Masters
+                          // (trigger trg_se_f1_servidor) en el mismo instante.
 
                           // FASE 2 (T+30s): servidor (se_f2_huecos). El móvil
                           // acepta voluntariamente en app (tomar_servicio_candado).
@@ -770,6 +727,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                             'se_cascade_t0': DateTime.now().toUtc().toIso8601String(),
                             'se_f3_enviado': false,
                             'se_f4_enviado': false,
+                            'se_f1_motivo': 'nuevo',
                           }).eq('id', nuevoServicioId);
                         }
 

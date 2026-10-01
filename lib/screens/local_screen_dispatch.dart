@@ -2,7 +2,7 @@
 part of 'local_screen.dart';
 
 // ══════════════════════════════════════════════════════════════════════════════
-// _DispatchMixin — notificaciones, VIP fallback, aprobar cotizaciones, radar
+// _DispatchMixin — notificaciones, aprobar cotizaciones, radar
 // ══════════════════════════════════════════════════════════════════════════════
 mixin _DispatchMixin on State<LocalScreen> {
   // ── Abstract stubs (implementados en otros mixins) ─────────────────────────
@@ -38,255 +38,8 @@ mixin _DispatchMixin on State<LocalScreen> {
         canalAndroidId: canalAndroidId,
       );
 
-  // ─── VIP: verificación periódica + diálogo de fallback ───────────────────
-  //
-  // Flujo:
-  //   Envío VIP → notifica Masters (0s) + Leyenda #1 (30s)
-  //               → espera 3 min → _verificarFallbackVip()
-  //   _verificarFallbackVip:
-  //     • Si el servicio ya fue tomado → no hace nada
-  //     • Si hay nuevos VIP disponibles → les notifica + reinicia timer 3 min
-  //     • Si no hay nadie → llama _mostrarDialogoFallbackVip()
-  //   _mostrarDialogoFallbackVip:
-  //     ESPERAR  → espera 5 min → vuelve a _verificarFallbackVip()
-  //     ESTÁNDAR → resta $3.000, enruta como servicio normal
-
-  Future<void> _verificarFallbackVip({
-    required int servicioId,
-    required String destino,
-    required List<String> pilotosParadero,
-    required bool esPuntoAPunto,
-    required Map<String, dynamic>? coords,
-    required double tarifaConVip,
-  }) async {
-    if (!mounted) return;
-    try {
-      final check = await Supabase.instance.client
-          .from('servicios')
-          .select('estado, es_vip, movil_id')
-          .eq('id', servicioId)
-          .single();
-      // Ya fue tomado o degradado — nada que hacer
-      if (check['estado'] != 'pendiente' ||
-          check['es_vip'] != true ||
-          check['movil_id'] != null) return;
-    } catch (_) {
-      return;
-    }
-    if (!mounted) return;
-
-    // ¿Hay nuevos VIP disponibles ahora?
-    final masters = await Supabase.instance.client
-        .from('usuarios')
-        .select('id')
-        .eq('rol', 'movil')
-        .eq('en_linea', true)
-        .eq('tiene_se', true)
-        .inFilter('rango_movil', ['MASTER']);
-    final leyendas = await Supabase.instance.client
-        .from('usuarios')
-        .select('id, ingreso_fila')
-        .eq('rol', 'movil')
-        .eq('en_linea', true)
-        .eq('tiene_se', true)
-        .eq('rango_movil', 'LEYENDA')
-        .not('paradero_actual', 'is', null)
-        .order('ingreso_fila', ascending: true);
-
-    final List<String> masterIds =
-        masters.map((u) => u['id'].toString()).toList();
-    final List<String> leyendaIds =
-        leyendas.isNotEmpty ? [leyendas.first['id'].toString()] : [];
-
-    if (masterIds.isNotEmpty || leyendaIds.isNotEmpty) {
-      // Nuevos VIP conectados → notificar y reiniciar timer 3 min
-      const String msg = 'Hay un servicio VIP esperando — revisa el radar';
-      if (masterIds.isNotEmpty) {
-        await _dispararMisilInmediato(
-          externalIds: masterIds,
-          titulo: '👑 SERVICIO VIP',
-          mensaje: msg,
-        );
-      }
-      if (leyendaIds.isNotEmpty) {
-        // Misil server-side T+F2 para Leyenda VIP — sobrevive en segundo plano
-        final cascada = await CascadaConfig.cargar(); // CONFIG-CASCADA-EXT
-        final id30sVipV = await _programarMisilRetardado(
-          externalIds: leyendaIds,
-          titulo: '👑 SERVICIO VIP',
-          mensaje: msg,
-          segundosRetardo: cascada.seF2Seg,
-        );
-        if (id30sVipV != null) {
-          await Supabase.instance.client
-              .from('servicios')
-              .update({'onesignal_30s': id30sVipV})
-              .eq('id', servicioId);
-        }
-      }
-      Future.delayed(const Duration(minutes: 3), () {
-        _verificarFallbackVip(
-          servicioId: servicioId,
-          destino: destino,
-          pilotosParadero: pilotosParadero,
-          esPuntoAPunto: esPuntoAPunto,
-          coords: coords,
-          tarifaConVip: tarifaConVip,
-        );
-      });
-    } else {
-      // Aún sin VIP → mostrar diálogo al local
-      if (mounted) {
-        _mostrarDialogoFallbackVip(
-          servicioId: servicioId,
-          destino: destino,
-          pilotosParadero: pilotosParadero,
-          esPuntoAPunto: esPuntoAPunto,
-          coords: coords,
-          tarifaConVip: tarifaConVip,
-        );
-      }
-    }
-  }
-
-  Future<void> _mostrarDialogoFallbackVip({
-    required int servicioId,
-    required String destino,
-    required List<String> pilotosParadero,
-    required bool esPuntoAPunto,
-    required Map<String, dynamic>? coords,
-    required double tarifaConVip,
-  }) async {
-    if (!mounted) return;
-    await showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctxVip) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        title: ShaderMask(
-          shaderCallback: (bounds) => const LinearGradient(
-            colors: [Color(0xFFB8860B), Color(0xFFFFD700), Color(0xFFB8860B)],
-          ).createShader(bounds),
-          child: Text(
-            '👑 SIN MÓVILES VIP',
-            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
-          ),
-        ),
-        content: const Text(
-          'Parece que no hay móviles capacitados disponibles para tu servicio VIP en este momento.\n\n¿Deseas esperar a que haya uno disponible, o prefieres pedirlo como servicio estándar?',
-          style: TextStyle(fontSize: 14),
-        ),
-        actionsAlignment: MainAxisAlignment.spaceBetween,
-        actions: [
-          // ESPERAR: re-verifica en 5 minutos
-          OutlinedButton.icon(
-            style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFFB8860B),
-              side: const BorderSide(color: Color(0xFFFFD700)),
-            ),
-            onPressed: () {
-              Navigator.pop(ctxVip);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text(
-                    '⏳ VIP en espera. Te avisamos en 5 min si hay un Leyenda o Master disponible.',
-                  ),
-                  backgroundColor: Color(0xFF7A5500),
-                  duration: Duration(seconds: 5),
-                ),
-              );
-              Future.delayed(const Duration(minutes: 5), () {
-                _verificarFallbackVip(
-                  servicioId: servicioId,
-                  destino: destino,
-                  pilotosParadero: pilotosParadero,
-                  esPuntoAPunto: esPuntoAPunto,
-                  coords: coords,
-                  tarifaConVip: tarifaConVip,
-                );
-              });
-            },
-            icon: const Icon(Icons.hourglass_top, size: 16),
-            label: const Text('ESPERAR'),
-          ),
-          // SERVICIO ESTÁNDAR: restar $3.000 y enrutar normal
-          ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xff3AF500),
-              foregroundColor: Colors.black,
-            ),
-            onPressed: () async {
-              Navigator.pop(ctxVip);
-              final double tarifaEstandar =
-                  (tarifaConVip - 3000).clamp(0.0, double.infinity);
-              await Supabase.instance.client
-                  .from('servicios')
-                  .update({
-                    'es_vip': false,
-                    'tarifa': tarifaEstandar,
-                    'tarifa_detalle': {
-                      'total': tarifaEstandar,
-                      'fuente': 'local_quitar_vip',
-                    },
-                  })
-                  .eq('id', servicioId);
-
-              final String msgStd = TextosPush.f1Mensaje(TextosPush.ruta(
-                  widget.usuario['nombre']?.toString(), destino));
-              final mastersStd = await Supabase.instance.client
-                  .from('usuarios')
-                  .select('id')
-                  .eq('rango_movil', 'MASTER')
-                  .eq('tiene_se', true)
-                  .eq('en_linea', true)
-                  .neq('suspendido', true)
-                  .or('wallet_bloqueado.is.null,wallet_bloqueado.eq.false');
-              final List<String> masterStdIds =
-                  mastersStd.map((u) => u['id'].toString()).toList();
-
-              if (masterStdIds.isNotEmpty) {
-                await _dispararMisilInmediato(
-                  externalIds: masterStdIds,
-                  titulo: TextosPush.f1Titulo,
-                  mensaje: msgStd,
-                  sonido: 'master',
-                  canalAndroidId: MotorNotificaciones.canalMasterId,
-                );
-              }
-
-              // F2 la hace el servidor (se_f2_huecos) con un solo móvil.
-              // liberacion_at = ahora reinicia el reloj de fases (tarjetas y
-              // servidor) porque el servicio lleva minutos esperando como VIP.
-              final String? paraderoObjStd = await _paraderoObjetivoDeLocal(
-                widget.usuario,
-                (coords?['lat'] as num?)?.toDouble(),
-                (coords?['lng'] as num?)?.toDouble(),
-              );
-              // F3/F4 — pg_cron consulta en_linea en tiempo real
-              await Supabase.instance.client.from('servicios').update({
-                'liberacion_at': DateTime.now().toUtc().toIso8601String(),
-                if (paraderoObjStd != null) 'paradero_origen': paraderoObjStd,
-                'se_cascade_t0': DateTime.now().toUtc().toIso8601String(),
-                'se_f3_enviado': false,
-                'se_f4_enviado': false,
-              }).eq('id', servicioId);
-
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('✅ Pedido enviado como servicio estándar.'),
-                    backgroundColor: Colors.green,
-                  ),
-                );
-              }
-            },
-            icon: const Icon(Icons.motorcycle, size: 16),
-            label: const Text('SERVICIO ESTÁNDAR'),
-          ),
-        ],
-      ),
-    );
-  }
+  // (El flujo VIP del local — avisos VIP, espera de 3/5 min y paso a estándar —
+  //  se eliminó: la opción VIP ya no existe.)
 
   // ── SOLICITUD DIRECTA AL RADAR (Temporal) ────────────────────────────────────
   // Crea un servicio RECOGIDA LOCAL sin destino, datos del cliente ni precio y
@@ -361,29 +114,7 @@ mixin _DispatchMixin on State<LocalScreen> {
             .eq('id', svcId);
       }
 
-      final String msg = TextosPush.f1Mensaje(
-          'Recogida en el local ${localNombre.toUpperCase()}');
-
-      // Fase 1 (T=0): Masters SE
-      final mastersData = await Supabase.instance.client
-          .from('usuarios')
-          .select('id')
-          .eq('rango_movil', 'MASTER')
-          .eq('tiene_se', true)
-          .eq('en_linea', true)
-          .neq('suspendido', true)
-          .or('wallet_bloqueado.is.null,wallet_bloqueado.eq.false');
-      final List<String> masterIds = mastersData.map((u) => u['id'].toString()).toList();
-      if (masterIds.isNotEmpty) {
-        await _dispararMisilInmediato(
-          externalIds: masterIds,
-          titulo: TextosPush.f1Titulo,
-          mensaje: msg,
-          sonido: 'master',
-          canalAndroidId: MotorNotificaciones.canalMasterId,
-        );
-      }
-
+      // Fase 1 (T=0): Masters → la manda el servidor (se_f1_motivo).
       // Fase 2 (T+30s): la hace el servidor (se_f2_huecos).
 
       // F3/F4 — pg_cron consulta en_linea en tiempo real
@@ -391,6 +122,7 @@ mixin _DispatchMixin on State<LocalScreen> {
         'se_cascade_t0': DateTime.now().toUtc().toIso8601String(),
         'se_f3_enviado': false,
         'se_f4_enviado': false,
+        'se_f1_motivo': 'nuevo',
       }).eq('id', svcId);
 
       if (mounted) {
@@ -792,34 +524,11 @@ mixin _DispatchMixin on State<LocalScreen> {
             // y servidor) arranca AHORA. Los programados conservan su hora.
             if (retardoProgramado == 0)
               'liberacion_at': DateTime.now().toUtc().toIso8601String(),
+            // F1 (T=0) a Masters lo manda el SERVIDOR, solo si el servicio ya
+            // está en el radar. Un programado lo avisa el servidor al liberarlo.
+            if (retardoProgramado == 0) 'se_f1_motivo': 'nuevo',
           })
           .eq('id', nuevoServicioId);
-
-      final String mensajeAlarma = TextosPush.f1Mensaje(TextosPush.ruta(
-          servicio['origen']?.toString() ?? widget.usuario['nombre']?.toString(),
-          destinoNuevo));
-      final mastersData = await Supabase.instance.client
-          .from('usuarios')
-          .select('id')
-          .eq('rango_movil', 'MASTER')
-          .eq('tiene_se', true)
-          .eq('en_linea', true)
-          .neq('suspendido', true)
-          .or('wallet_bloqueado.is.null,wallet_bloqueado.eq.false');
-      List<String> masterIds =
-          mastersData.map((u) => u['id'].toString()).toList();
-
-      // F1 (T=0) solo si el servicio ya está en el radar. Un programado no se
-      // ve todavía: su F1 lo envía el servidor cuando lo libera.
-      if (masterIds.isNotEmpty && retardoProgramado == 0) {
-        await _dispararMisilInmediato(
-          externalIds: masterIds,
-          titulo: TextosPush.f1Titulo,
-          mensaje: mensajeAlarma,
-          sonido: 'master',
-          canalAndroidId: MotorNotificaciones.canalMasterId,
-        );
-      }
 
       // F3/F4 — pg_cron (edge functions). Programados: los arranca el servidor al liberar.
       if (!esPuntoAPunto && retardoProgramado == 0) {

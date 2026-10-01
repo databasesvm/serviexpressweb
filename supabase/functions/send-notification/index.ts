@@ -1,6 +1,6 @@
 // supabase/functions/send-notification/index.ts
-// Proxy entre Flutter y OneSignal.
-// La REST API Key vive aquí como secret (ONESIGNAL_REST_API_KEY) — nunca en el APK.
+// Proxy entre la app y OneSignal. La REST API Key vive aquí como secret
+// (ONESIGNAL_REST_API_KEY) — nunca en el APK.
 //
 // Acciones:
 //   POST { action: 'cancel', notification_id: '...' }  → cancela un misil programado
@@ -80,10 +80,10 @@ Deno.serve(async (req: Request) => {
       status: r.status,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
-
   } catch (e) {
     return new Response(JSON.stringify({ error: String(e) }), {
-      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 });

@@ -1273,9 +1273,8 @@ mixin _FormularioMixin on State<LocalScreen> {
                             ? '[ TICKET: #$ticketNum ] '
                             : '';
 
-                        if (esPuntoAPunto) {
-                          notaManual = '[PUNTO A PIN] $notaManual';
-                        } else if (tiempoPreparacion != 'Inmediato') {
+                        // PAP: sin etiqueta — el móvil no debe saberlo antes de aceptar
+                        if (!esPuntoAPunto && tiempoPreparacion != 'Inmediato') {
                           notaManual =
                               '[⏰ PROGRAMADO: $tiempoPreparacion] $notaManual';
                         }
@@ -1580,16 +1579,9 @@ mixin _FormularioMixin on State<LocalScreen> {
                         final int nuevoServicioId =
                             respuestaServicio['id'] as int;
 
-                        // Registrar uso de P.A.P en BD (límite 1 por día)
-                        if (esPuntoAPunto) {
-                          await Supabase.instance.client
-                              .from('usuarios')
-                              .update({
-                                'ultimo_punto_a_punto':
-                                    DateTime.now().toIso8601String(),
-                              })
-                              .eq('id', widget.usuario['id']);
-                        }
+                        // P.A.P: el límite de 1 por día, el paradero (o EXPUENTE)
+                        // y la cascada SE (F1→F4) los aplica el SERVIDOR
+                        // (trigger trg_pap_preparar) al crear el servicio.
 
                         // Sonido de confirmación según tipo de servicio
                         if (_esCot) {
@@ -1618,62 +1610,10 @@ mixin _FormularioMixin on State<LocalScreen> {
                             ),
                           );
                         } else if (esPuntoAPunto) {
-                          // P.A.P: notificar SOLO al #1 del paradero del local
-                          final String paraderosRaw =
-                              widget.usuario['paradero_exclusivo']?.toString() ?? '';
-                          final List<String> paraderosDelLocal = paraderosRaw
-                              .split(',')
-                              .map((e) => e.trim().toLowerCase())
-                              .where((e) => e.isNotEmpty)
-                              .toList();
-
-                          if (paraderosDelLocal.isNotEmpty) {
-                            final movilesParadero = await Supabase.instance.client
-                                .from('usuarios')
-                                .select('id, paradero_actual, ingreso_fila, ticket_prioridad')
-                                .eq('rol', 'movil')
-                                .eq('en_linea', true)
-                                .eq('tiene_se', true)
-                                .not('paradero_actual', 'is', null);
-
-                            String? numeroUnoId;
-                            for (final pLocal in paraderosDelLocal) {
-                              final enParadero = movilesParadero
-                                  .where((m) =>
-                                      m['paradero_actual']
-                                          .toString()
-                                          .trim()
-                                          .toLowerCase() ==
-                                      pLocal)
-                                  .toList();
-                              if (enParadero.isEmpty) continue;
-                              enParadero.sort((a, b) {
-                                final tA = (a['ticket_prioridad'] == true) ? 0 : 1;
-                                final tB = (b['ticket_prioridad'] == true) ? 0 : 1;
-                                if (tA != tB) return tA.compareTo(tB);
-                                return DateTime.parse(
-                                  a['ingreso_fila'] ??
-                                      DateTime.now().toIso8601String(),
-                                ).compareTo(
-                                  DateTime.parse(
-                                    b['ingreso_fila'] ??
-                                        DateTime.now().toIso8601String(),
-                                  ),
-                                );
-                              });
-                              numeroUnoId = enParadero.first['id'].toString();
-                              break;
-                            }
-
-                            if (numeroUnoId != null) {
-                              await _dispararMisilInmediato(
-                                externalIds: [numeroUnoId],
-                                titulo: '🏁 PUNTO A PUNTO',
-                                mensaje:
-                                    'Tienes un servicio punto a punto — revisa el radar',
-                              );
-                            }
-                          }
+                          // P.A.P: cascada SE completa desde el SERVIDOR
+                          // (F1 Masters → F2 #1 del paradero del local con
+                          // sanción → F3 → F4). Sin push "Punto a Punto":
+                          // el móvil lo sabe solo al aceptarlo.
                         } else {
                           final String rutaPush = TextosPush.ruta(
                               widget.usuario['nombre']?.toString(), destinoNuevo);
@@ -1693,16 +1633,9 @@ mixin _FormularioMixin on State<LocalScreen> {
                           // (se_liberar_programados) lo libera a su hora y en ese
                           // momento envía F1 y arranca F2/F3/F4.
                           if (retardoProgramado == 0) {
-                            // F1 (T=0): Masters
-                            if (masterIds.isNotEmpty) {
-                              await _dispararMisilInmediato(
-                                externalIds: masterIds,
-                                titulo: TextosPush.f1Titulo,
-                                mensaje: TextosPush.f1Mensaje(rutaPush),
-                                sonido: 'master',
-                                canalAndroidId: MotorNotificaciones.canalMasterId,
-                              );
-                            }
+                            // F1 (T=0): Masters → lo manda el SERVIDOR
+                            // (se_f1_motivo en el update de más abajo). La lista
+                            // de Masters solo se usa para no avisar doble.
 
                             // Enrutado a un móvil que ya viene en camino (exclusivo):
                             // aviso solo a ese móvil.
@@ -1722,16 +1655,16 @@ mixin _FormularioMixin on State<LocalScreen> {
 
                             // F2 la hace el servidor (se_f2_huecos).
                             // F3/F4 — pg_cron consulta en_linea en tiempo real
-                            if (!esPuntoAPunto) {
-                              await Supabase.instance.client
-                                  .from('servicios')
-                                  .update({
+                            await Supabase.instance.client
+                                .from('servicios')
+                                .update({
+                                  if (!esPuntoAPunto)
                                     'se_cascade_t0': DateTime.now().toUtc().toIso8601String(),
-                                    'se_f3_enviado': false,
-                                    'se_f4_enviado': false,
-                                  })
-                                  .eq('id', nuevoServicioId);
-                            }
+                                  if (!esPuntoAPunto) 'se_f3_enviado': false,
+                                  if (!esPuntoAPunto) 'se_f4_enviado': false,
+                                  'se_f1_motivo': 'nuevo',
+                                })
+                                .eq('id', nuevoServicioId);
                           }
                         }
 

@@ -456,16 +456,21 @@ extension CentralScreenPanelControl on _CentralScreenState {
                                       ...fila.asMap().entries.map((e) {
                                         final idx = e.key + 1;
                                         final m   = e.value;
+                                        // Ticket de prioridad (premio Punto a Punto, 1 solo uso)
+                                        final bool conTicket = m['ticket_prioridad'] == true;
                                         return FadeSlideIn(
                                           key: ValueKey('${key}_${m['id']}'),
                                           child: ListTile(
                                             dense: true,
+                                            tileColor: conTicket ? Colors.purple[50] : null,
                                             leading: _paraderoMovilLeading(m, color),
                                             title: Text(
-                                              '#$idx. ${m['nombre'].toString().toUpperCase()}',
-                                              style: const TextStyle(
+                                              '#$idx. ${m['nombre'].toString().toUpperCase()}'
+                                              '${conTicket ? '  🎟️ TICKET' : ''}',
+                                              style: TextStyle(
                                                 fontWeight: FontWeight.bold,
                                                 fontSize: 12,
+                                                color: conTicket ? Colors.purple[800] : null,
                                               ),
                                             ),
                                             subtitle: Builder(builder: (_) {

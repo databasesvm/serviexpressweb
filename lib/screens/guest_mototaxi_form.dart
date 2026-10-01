@@ -5,7 +5,6 @@ import 'package:geolocator/geolocator.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart'; // <-- RUTA CORREGIDA DE ONESIGNAL
 import 'package:serviexpress_app/screens/guest_tracking_screen.dart';
 import 'package:serviexpress_app/utils/paradero_objetivo.dart';
-import 'package:serviexpress_app/utils/textos_push.dart';
 
 class GuestMototaxiForm extends StatefulWidget {
   const GuestMototaxiForm({super.key});
@@ -110,6 +109,7 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
           .from('servicios')
           .insert({
             'creador': 'Invitado: ${_nombreCtrl.text.trim()}',
+            'tipo_servicio': 'MOTOTAXI',
             'origen': _origenCtrl.text.trim().toUpperCase(),
             'destino': _destinoCtrl.text.trim().toUpperCase(),
             'origen_lat': _origenLat,
@@ -125,6 +125,8 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
             if (paraderoObjetivo != null) 'paradero_origen': paraderoObjetivo,
             if (!_requiereCotizacion)
               'se_cascade_t0': DateTime.now().toUtc().toIso8601String(),
+            // F1 (Masters) lo manda el servidor (trg_se_f1_servidor)
+            if (!_requiereCotizacion) 'se_f1_motivo': 'nuevo',
           })
           .select()
           .single();
@@ -148,13 +150,9 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
         debugPrint('Error OneSignal: $e');
       }
 
-      // F1 (T=0): Masters en línea con SE. Si es cotización, la cascada
-      // arranca en guest_tracking_screen.dart cuando el invitado aprueba.
-      if (!_requiereCotizacion) {
-        await notificarMastersF1Invitado(
-          'Mototaxi (invitado): ${TextosPush.ruta(_origenCtrl.text, _destinoCtrl.text)}',
-        );
-      }
+      // F1 (T=0): Masters → lo manda el servidor (se_f1_motivo en el insert).
+      // Si es cotización, la cascada arranca en guest_tracking_screen.dart
+      // cuando el invitado aprueba.
 
       if (mounted) {
         Navigator.pushReplacement(

@@ -115,7 +115,7 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
   Color _colorRango(String? r) => switch (r) {
     'NOVATO'  => const Color(0xFF6B7280),
     'PRO'     => const Color(0xFF3B82F6),
-    'ÉLITE'   => const Color(0xFFA855F7),
+    'ELITE' || 'ÉLITE' => const Color(0xFFA855F7),
     'LEYENDA' => const Color(0xFFEF8C0E),
     'MASTER'  => const Color(0xFFEF4444),
     _         => Colors.grey,
@@ -1443,7 +1443,8 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
     final cntFN = _moviles.where((u) => u['tiene_fn'] == true && u['tiene_se'] != true).length;
     final cntAmbas = _moviles.where((u) => u['tiene_se'] == true && u['tiene_fn'] == true).length;
 
-    const rangos = ['NOVATO', 'PRO', 'ÉLITE', 'LEYENDA', 'MASTER'];
+    // Mismo texto que usa el servidor para el cupo por rango (sin tilde).
+    const rangos = ['NOVATO', 'PRO', 'ELITE', 'LEYENDA', 'MASTER'];
     return Column(children: [
       // Chips de filtro por facción
       Container(

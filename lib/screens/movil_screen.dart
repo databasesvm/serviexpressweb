@@ -9,6 +9,7 @@ import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:serviexpress_app/utils/motor_rutas.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart'; // MotorNotificaciones — necesario para el botón de pánico
 import 'package:serviexpress_app/utils/textos_push.dart'; // Textos únicos de push SE
+import 'package:serviexpress_app/utils/hora_servidor.dart'; // Reloj alineado con el servidor
 import 'package:serviexpress_app/utils/sonido_manager.dart'; // Motor de audio in-app
 import 'package:serviexpress_app/utils/panico_widgets.dart'; // Botón de pánico
 import 'package:serviexpress_app/utils/permisos_criticos.dart'; // Permisos críticos en segundo plano
@@ -132,6 +133,57 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
   // el vigilante de 30 s detecta que subió rechazos_paradero_hoy.
   int? _rechazosParaderoVistos;
   Timer? _bannerSancionTimer;
+
+  // Punto a Punto: el móvil no sabe que es PAP hasta aceptarlo. Al aceptarlo
+  // se le cuentan los beneficios que gana al terminarlo.
+  void _mostrarBeneficiosPAP() {
+    if (!mounted) return;
+    _sonidos.reproducirSuave(Sonidos.movilParadero);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: const Text('🎁 ¡Es un Punto a Punto!',
+            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.purple)),
+        content: const Text(
+          'Este servicio no tiene cobro. Al terminarlo sin problemas ganas:\n\n'
+          '🎟️ Ticket de prioridad: la próxima vez que entres a un paradero '
+          'quedas de #1 (sirve para 1 servicio).\n'
+          '⭐ +2 puntos de la semana.\n'
+          '📈 +0.2 de calificación.',
+          style: TextStyle(fontSize: 14),
+        ),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.purple),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('ENTENDIDO', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // "Mis calificaciones": la consulta se guarda y se repite como máximo cada
+  // 2 min. Antes se lanzaba en cada redibujado (miles de consultas por día).
+  Future<List<Map<String, dynamic>>>? _futureMisCalif;
+  DateTime? _futureMisCalifAt;
+  Future<List<Map<String, dynamic>>> _misCalificaciones() {
+    final ahora = DateTime.now();
+    if (_futureMisCalif == null ||
+        _futureMisCalifAt == null ||
+        ahora.difference(_futureMisCalifAt!).inMinutes >= 2) {
+      _futureMisCalifAt = ahora;
+      _futureMisCalif = Supabase.instance.client
+          .from('calificaciones')
+          .select('estrellas, comentario, calificador_tipo, created_at')
+          .eq('movil_id', widget.usuario['id'])
+          .order('created_at', ascending: false)
+          .then((r) => List<Map<String, dynamic>>.from(r))
+          .catchError((_) => <Map<String, dynamic>>[]);
+    }
+    return _futureMisCalif!;
+  }
   DateTime? _ultimoBannerSancion;
 
   String _horaCorta(DateTime d) {
@@ -404,6 +456,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Fases y contadores usan la hora del servidor, no la del teléfono.
+    HoraServidor.sincronizar(forzar: true);
 
     // PERMISOS CRÍTICOS — chequeo SILENCIOSO primero, sin mostrar nada.
     // Antes esta pantalla aparecía SIEMPRE al abrir la app, incluso con
@@ -807,7 +861,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       // Cargar nombre del local
       final local = await Supabase.instance.client
           .from('usuarios')
-          .select('nombre, direccion')
+          .select('nombre, direccion_local')
           .eq('id', pedido['local_id'])
           .maybeSingle();
 
@@ -3354,7 +3408,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
           final pickedUpUtc =
               DateTime.parse(servicio['picked_up_at']).toUtc();
           final elapsed =
-              DateTime.now().toUtc().difference(pickedUpUtc).inMinutes;
+              HoraServidor.ahoraUtc().difference(pickedUpUtc).inMinutes;
           final extension = servicio['extension_minutes'] as int? ?? 0;
           final efectivos = elapsed - extension;
 
@@ -3375,7 +3429,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
           const int metaOrigen = 20;
           final acceptedUtc = DateTime.parse(servicio['accepted_at']).toUtc();
           final elapsed =
-              DateTime.now().toUtc().difference(acceptedUtc).inMinutes;
+              HoraServidor.ahoraUtc().difference(acceptedUtc).inMinutes;
 
           if (elapsed >= metaOrigen - 2 &&
               elapsed < metaOrigen &&
@@ -3927,6 +3981,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
           .update({'ultimo_ping': DateTime.now().toUtc().toIso8601String()}).eq(
               'id', widget.usuario['id']);
     } catch (_) {} // silencioso — el cron tiene margen de 2 min
+    // Re-mide la diferencia de reloj con el servidor (máx. cada 5 min)
+    HoraServidor.sincronizar();
   }
 
   Future<void> _cambiarEstado() async {
@@ -4669,7 +4725,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       final llegada = DateTime.parse(raw).toUtc();
       const minMinutos = 5;
       final habilitadoEn = llegada.add(const Duration(minutes: minMinutos));
-      final faltan = habilitadoEn.difference(DateTime.now().toUtc()).inSeconds;
+      final faltan = habilitadoEn.difference(HoraServidor.ahoraUtc()).inSeconds;
       return faltan > 0 ? faltan : 0;
     } catch (_) {
       return 0;
@@ -6300,7 +6356,6 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                           return rangosData.map<Widget>((r) {
                             final esActual = rango == r['nombre'] as String;
                             final Color c = r['color'] as Color;
-                            final bool esVip = r['vip'] as bool;
                             return Container(
                               margin: const EdgeInsets.only(bottom: 4),
                               padding: const EdgeInsets.symmetric(
@@ -6341,13 +6396,6 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                                       color: esActual
                                                           ? c
                                                           : Colors.black87)),
-                                              if (esVip)
-                                                Text('👑 VIP',
-                                                    style: TextStyle(
-                                                        fontSize: 9,
-                                                        fontWeight:
-                                                            FontWeight.bold,
-                                                        color: c)),
                                             ])),
                                       ])),
                                   Expanded(
@@ -6371,29 +6419,6 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                             );
                           }).toList();
                         }(),
-                        const SizedBox(height: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 7),
-                          decoration: BoxDecoration(
-                            color:
-                                const Color(0xFFFF9800).withValues(alpha: 0.08),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                                color: const Color(0xFFFF9800)
-                                    .withValues(alpha: 0.3)),
-                          ),
-                          child: const Row(children: [
-                            Text('👑', style: TextStyle(fontSize: 13)),
-                            SizedBox(width: 6),
-                            Expanded(
-                                child: Text(
-                                    'Leyenda recibe servicios VIP exclusivos con +\$3.000 de tarifa.',
-                                    style: TextStyle(
-                                        fontSize: 10,
-                                        color: Color(0xFF8a5c00)))),
-                          ]),
-                        ),
                       ],
                     ),
                   ),
@@ -6664,12 +6689,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: FutureBuilder<List<Map<String, dynamic>>>(
-                  future: Supabase.instance.client
-                      .from('calificaciones')
-                      .select(
-                          'estrellas, comentario, calificador_tipo, created_at')
-                      .eq('movil_id', widget.usuario['id'].toString())
-                      .order('created_at', ascending: false),
+                  future: _misCalificaciones(),
                   builder: (context, snap) {
                     final califs = snap.data ?? [];
                     final double promedio = califs.isEmpty
@@ -8518,7 +8538,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                                     style: TextStyle(
                                                         fontSize: 10,
                                                         color: Colors.black38)),
-                                                const Text('Prioridad P2P',
+                                                const Text('Ticket prioridad (1 uso)',
                                                     style: TextStyle(
                                                         fontSize: 10,
                                                         color: Colors.purple,
@@ -8801,10 +8821,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                         ),
                         Text(
                           estado == 'en_ruta_destino'
-                              ? (_esMototaxi(servicio['tipo_servicio'])
-                                  ? 'Destino: ${servicio['destino']}'
-                                  : 'Entrega: ${servicio['destino']}')
-                              : 'Recogida: ${servicio['origen']}',
+                              ? 'Entrega: ${servicio['destino']}'
+                              : 'Recoge: ${servicio['origen']}',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -8841,8 +8859,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     const int _limiteDestinoMin = 30;
 
     if (estado == 'en_ruta_origen' && servicio['accepted_at'] != null) {
-      final elapsed = DateTime.now()
-          .toUtc()
+      final elapsed = HoraServidor.ahoraUtc()
           .difference(DateTime.parse(servicio['accepted_at']).toUtc())
           .inMinutes;
       efectivos = elapsed;
@@ -8850,8 +8867,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       mostrarReloj = true;
     } else if (estado == 'en_ruta_destino' &&
         servicio['picked_up_at'] != null) {
-      final elapsed = DateTime.now()
-          .toUtc()
+      final elapsed = HoraServidor.ahoraUtc()
           .difference(DateTime.parse(servicio['picked_up_at']).toUtc())
           .inMinutes;
       efectivos = elapsed - (servicio['extension_minutes'] as int? ?? 0);
@@ -9251,8 +9267,11 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                         padding: const EdgeInsets.fromLTRB(12, 8, 4, 4),
                         child: Row(
                           children: [
-                            const Text('📍 ',
-                                style: TextStyle(fontSize: 14)),
+                            const Text('📍 Recoge: ',
+                                style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.black54)),
                             Expanded(
                               child: Text(
                                 servicio['origen'] ?? '',
@@ -9277,8 +9296,11 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                         ].contains(estado)
                             ? Row(
                                 children: [
-                                  const Text('🏁 ',
-                                      style: TextStyle(fontSize: 14)),
+                                  const Text('🏁 Entrega: ',
+                                      style: TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.black54)),
                                   Expanded(
                                     child: Text(
                                       servicio['destino'] ?? '',
@@ -9298,7 +9320,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                       size: 13, color: Colors.black38),
                                   SizedBox(width: 6),
                                   Text(
-                                    '🚩 visible al iniciar viaje',
+                                    '🏁 Entrega: visible al iniciar viaje',
                                     style: TextStyle(
                                         fontSize: 13,
                                         color: Colors.black45),
@@ -11066,8 +11088,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     const int _limiteDestinoMinFn = 30;
 
     if (estado == 'en_ruta_origen' && servicio['accepted_at'] != null) {
-      efectivos = DateTime.now()
-          .toUtc()
+      efectivos = HoraServidor.ahoraUtc()
           .difference(DateTime.parse(servicio['accepted_at']).toUtc())
           .inMinutes;
       tiempoMeta = _limiteOrigenMinFn;
@@ -11075,8 +11096,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       mostrarReloj = true;
     } else if (estado == 'en_ruta_destino' &&
         servicio['picked_up_at'] != null) {
-      efectivos = DateTime.now()
-              .toUtc()
+      efectivos = HoraServidor.ahoraUtc()
               .difference(DateTime.parse(servicio['picked_up_at']).toUtc())
               .inMinutes -
           (servicio['extension_minutes'] as int? ?? 0);
@@ -11288,7 +11308,11 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                   const SizedBox(height: 4),
                   Row(
                     children: [
-                      const Text('🏥 ', style: TextStyle(fontSize: 13)),
+                      Text('🏥 Recoge: ',
+                          style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.indigo[800])),
                       Expanded(
                         child: Text(servicio['origen'] ?? '—',
                             style: const TextStyle(
@@ -11531,7 +11555,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                         const SizedBox(width: 5),
                         const Expanded(
                           child: Text(
-                            'Dirección se revela al llegar a la sede',
+                            'Entrega: se revela al llegar a la sede',
                             style: TextStyle(
                                 fontSize: 12,
                                 color: Colors.white38,
@@ -11543,7 +11567,9 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                   ] else ...[
                     Row(
                       children: [
-                        const Text('🏁 ', style: TextStyle(fontSize: 13)),
+                        const Text('🏁 Entrega: ',
+                            style: TextStyle(
+                                fontSize: 13, fontWeight: FontWeight.bold)),
                         Expanded(
                           child: Text(servicio['destino'] ?? '—',
                               style: const TextStyle(
@@ -11906,7 +11932,29 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
   Widget _construirTarjetaPendiente(
     Map<String, dynamic> servicio, {
     bool esMaster = false,
+    bool tieneCapacidad = true,
+    int activos = 0,
+    int limite = 1,
+    String rango = 'NOVATO',
   }) {
+    // ── SERVICIO ENRUTADO / ASIGNADO DIRECTAMENTE A MÍ (SE) ─────────────────
+    // Se ve con la tarjeta normal (sin detalles hasta aceptar). Si el cupo de
+    // su rango está lleno, el botón queda "SIN CUPO" con el aviso de cuándo
+    // podrá aceptarlo (al finalizar o liberar su servicio actual).
+    bool sinCupo = false;
+    if (servicio['tipo_fn'] != true) {
+      final miIdStr = widget.usuario['id'].toString();
+      final asignados = (servicio['exclusivo_id'] ?? '')
+          .toString()
+          .split(',')
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
+      sinCupo = asignados.contains(miIdStr) &&
+          !tieneCapacidad &&
+          rango != 'MASTER';
+    }
+
     // ── TARJETA ESPECIAL FN FARMANORTE ────────────────────────────────────────
     final bool esFn = servicio['tipo_fn'] == true;
     if (esFn) {
@@ -12424,18 +12472,23 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.black,
+                          disabledBackgroundColor: Colors.grey[300],
                           padding: const EdgeInsets.symmetric(horizontal: 24),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(8),
                           ),
                           elevation: 4,
                         ),
-                        onPressed: () =>
-                            _aceptarServicioConCandado(context, servicio),
-                        child: const Text(
-                          'ACEPTAR',
+                        onPressed: sinCupo
+                            ? null
+                            : () =>
+                                _aceptarServicioConCandado(context, servicio),
+                        child: Text(
+                          sinCupo ? 'SIN CUPO' : 'ACEPTAR',
                           style: TextStyle(
-                            color: Color(0xff3AF500),
+                            color: sinCupo
+                                ? Colors.grey[700]
+                                : const Color(0xff3AF500),
                             fontWeight: FontWeight.bold,
                             fontSize: 13,
                           ),
@@ -12446,6 +12499,27 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                 ),
               ],
             ),
+
+            // Aviso de cupo lleno (solo en servicios enrutados a este móvil)
+            if (sinCupo)
+              Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(top: 10),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.orange[50],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.orange[300]!),
+                ),
+                child: Text(
+                  'Tienes $activos de $limite servicio${limite == 1 ? '' : 's'} ($rango). '
+                  'Podrás aceptarlo cuando finalices o liberes tu servicio actual.',
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.orange[900],
+                      fontWeight: FontWeight.w600),
+                ),
+              ),
 
             // =================================================
             // TARJETA COMPLETA — SOLO MASTER
@@ -12460,33 +12534,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                 child: Divider(height: 1, color: Color(0xFFE040FB)),
               ),
 
-              // Badge PAP visible solo para Masters (motiva aceptar F1)
-              if (servicio['es_punto_a_punto'] == true) ...[
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  margin: const EdgeInsets.only(bottom: 8),
-                  decoration: BoxDecoration(
-                    color: Colors.purple[900],
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.flash_on, size: 14, color: Colors.purpleAccent),
-                      SizedBox(width: 6),
-                      Text(
-                        '⚡ PUNTO A PUNTO — Servicio gratuito',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.purpleAccent,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+              // PAP: NO se identifica antes de aceptar (regla de negocio).
+              // Los beneficios se muestran al aceptarlo.
 
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -12531,29 +12580,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  // PAP: no mostrar tarifa — es gratis
-                  if (servicio['es_punto_a_punto'] == true)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.purple[900]!.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.purple[300]!),
-                      ),
-                      child: const Text(
-                        'GRATIS',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 15,
-                          color: Colors.purpleAccent,
-                        ),
-                      ),
-                    )
-                  else
-                    Container(
+                  Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 10,
                         vertical: 6,
@@ -12566,7 +12593,10 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                         servicio['tarifa'] != null &&
                                 (servicio['tarifa'] as num) > 0
                             ? _formatearMoneda(servicio['tarifa'])
-                            : 'COTIZAR',
+                            // PAP: sin precio y sin delatarlo antes de aceptar
+                            : (servicio['es_punto_a_punto'] == true
+                                ? '—'
+                                : 'COTIZAR'),
                         style: const TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 15,
@@ -12825,6 +12855,11 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                     _detenerMiAlertaPanico(silencioso: true);
                   }
 
+                  // PAP: recién al aceptarlo se le cuenta y se le dicen los beneficios
+                  if (servicio['es_punto_a_punto'] == true) {
+                    _mostrarBeneficiosPAP();
+                  }
+
                   // Cancelar misiles pendientes según tipo de servicio
                   if (servicio['tipo_fn'] == true) {
                     // FN: cancelar cascada de fases FN (NO tocar onesignal_*)
@@ -12962,6 +12997,11 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       // ubicación.
       if (_eventoPanicoActivoId != null) {
         _detenerMiAlertaPanico(silencioso: true);
+      }
+
+      // PAP: recién al aceptarlo se le cuenta y se le dicen los beneficios
+      if (servicio['es_punto_a_punto'] == true) {
+        _mostrarBeneficiosPAP();
       }
 
       // Cancelar misiles pendientes según tipo de servicio
@@ -13730,7 +13770,6 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         // ══════════════════════════════════════════════════════════════════
         final String rutaLib = TextosPush.ruta(
             servicio['origen']?.toString(), servicio['destino']?.toString());
-        final msgAlerta = TextosPush.liberadoMensaje(rutaLib);
 
         final mastersData = await Supabase.instance.client
             .from('usuarios')
@@ -13761,16 +13800,9 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
             urgente: true,
           );
         }
-        if (masterMobileIds2.isNotEmpty) {
-          await MotorNotificaciones.dispararRafa(
-            idsDestinos: masterMobileIds2,
-            titulo: TextosPush.liberadoTitulo,
-            mensaje: msgAlerta,
-            urgente: true,
-            sonido: 'master',
-            canalAndroidId: MotorNotificaciones.canalMasterId,
-          );
-        }
+        // F1 "servicio liberado" a Masters: lo manda el SERVIDOR
+        // (se_f1_motivo='liberado' en el update de más abajo). La lista de
+        // Masters solo se usa para no avisar doble al asignado.
 
         final exclusivoStr = servicio['exclusivo_id']?.toString() ?? '';
         final paraderoIds = exclusivoStr.isEmpty
@@ -13802,6 +13834,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
           'se_cascade_t0': DateTime.now().toUtc().toIso8601String(),
           'se_f3_enviado': false,
           'se_f4_enviado': false,
+          'se_f1_motivo': 'liberado',
         }).eq('id', servicioId);
       }
 
@@ -13853,7 +13886,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     try {
       if (horaReferencia != null) {
         final transcurridos =
-            DateTime.now().toUtc().difference(horaReferencia).inSeconds;
+            HoraServidor.ahoraUtc().difference(horaReferencia).inSeconds;
         if (transcurridos < segundosMinimos) return;
       }
 
@@ -15678,9 +15711,11 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                                               radarAbierto;
 
                                                       // --- EMBUDO TÁCTICO DE TIEMPOS Y PARADEROS (JERARQUÍA MASTER) ---
+                                                      // Hora del SERVIDOR: quién ve qué
+                                                      // fase no depende del reloj del teléfono.
                                                       final ahoraUtc =
-                                                          DateTime.now()
-                                                              .toUtc();
+                                                          HoraServidor
+                                                              .ahoraUtc();
                                                       List<Map<String, dynamic>>
                                                           pendientes = [];
 
@@ -16624,6 +16659,18 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                                                     servicio,
                                                                     esMaster:
                                                                         esMaster,
+                                                                    tieneCapacidad:
+                                                                        tieneCapacidad,
+                                                                    activos:
+                                                                        _serviciosActivosData
+                                                                            .length,
+                                                                    limite:
+                                                                        limiteRango,
+                                                                    rango: (miPerfilEnVivo[
+                                                                                'rango_movil'] ??
+                                                                            'NOVATO')
+                                                                        .toString()
+                                                                        .toUpperCase(),
                                                                   ),
                                                                 ),
                                                               ),
@@ -16913,7 +16960,7 @@ class _BarraCascadaSEState extends State<_BarraCascadaSE> {
     final t0 = DateTime.tryParse(t0Str.toString());
     if (t0 == null) return const SizedBox.shrink();
 
-    final int elapsed = DateTime.now().toUtc().difference(t0).inSeconds;
+    final int elapsed = HoraServidor.ahoraUtc().difference(t0).inSeconds;
 
     // ¿Hay oferta de paradero activa para ESTE móvil?
     final String? ofrecidoId =
@@ -16943,8 +16990,19 @@ class _BarraCascadaSEState extends State<_BarraCascadaSE> {
         final int restantes = (_f3Seg - elapsed).clamp(0, _f2Seg);
         progreso = _f2Seg > 0 ? restantes / _f2Seg : 0.0;
         barColor = Colors.red[700]!;
-        mensaje =
-            '⚠️ ¡Tu turno de paradero! Acepta en ${restantes}s o serás sancionado';
+        // Solo el verdadero #1 del paradero se arriesga a sanción. El #2, #3…
+        // (varios servicios a la vez) y el "más cercano" no se sancionan.
+        final String tipoF2 =
+            widget.servicio['se_f2_srv_tipo']?.toString() ?? 'paradero';
+        if (tipoF2.startsWith('paradero_')) {
+          mensaje = '⚠️ ¡Tu turno (#${tipoF2.substring(9)} del paradero)! '
+              'Acepta en ${restantes}s — sin sanción';
+        } else if (tipoF2 == 'cercano') {
+          mensaje = '⚠️ Eres el más cercano. Acepta en ${restantes}s — sin sanción';
+        } else {
+          mensaje =
+              '⚠️ ¡Tu turno de paradero! Acepta en ${restantes}s o serás sancionado';
+        }
       }
     } else if (elapsed < _f2Seg) {
       // F1: Masters exclusivos (0–seF2Seg)
