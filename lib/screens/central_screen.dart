@@ -59,7 +59,6 @@ class _CentralScreenState extends State<CentralScreen>
   RealtimeChannel? _canalRadarCentral;
   RealtimeChannel? _canalChatCentral;
   RealtimeChannel? _canalUbicacionesMoviles; // Canal dedicado: refresca mapa al cambiar lat/lng
-  RealtimeChannel? _canalActivaciones;
   RealtimeChannel? _canalFn; // Solicitudes FN desde sedes
 
   // Mapa userId → androidNotificationId para poder eliminar del tray
@@ -170,11 +169,17 @@ class _CentralScreenState extends State<CentralScreen>
   StreamSubscription<List<Map<String, dynamic>>>? _subServiciosMonitor;
   Timer? _reconexionTimer;
   Timer? _debounceUbicaciones;   // Agrupa avisos de ubicación en un solo refresco del mapa
-  Timer? _debounceActivaciones;  // Evita refetch de pendientes en cada GPS PATCH
 
   // Caché de motos — se actualiza en el listener de _subUsuariosMoviles
   // para que _construirBloqueServicios pueda resolver movil_id → #numero real.
   List<Map<String, dynamic>> _movilesCache = [];
+  // Ids de usuarios por activar (activo=false, rol != cliente)
+  final Set<String> _pendientesIds = {};
+  // Cache 2 min del historial 24 h por móvil (panel → Desconectados)
+  final Map<dynamic, (DateTime, Future<List<Map<String, dynamic>>>)>
+      _cacheHist24h = {};
+  // Cache del cliente (teléfono/nombre) para "Líneas directas"
+  final Map<dynamic, Future<Map<String, dynamic>?>> _cacheContactoCliente = {};
 
   // Caché de servicios para FAB de chats pendientes
   List<Map<String, dynamic>> _cacheSvcMonitor = [];
@@ -410,6 +415,7 @@ class _CentralScreenState extends State<CentralScreen>
           schema: 'public',
           table: 'usuarios',
           callback: (payload) {
+            _procesarPendientes(payload); // "por activar" (antes 2 canales extra)
             final upd = payload.newRecord;
             if (payload.eventType == PostgresChangeEvent.delete || upd.isEmpty) {
               final idBorrado = payload.oldRecord['id'];
@@ -488,100 +494,11 @@ class _CentralScreenState extends State<CentralScreen>
         )
         .subscribe();
 
-    // --- CANAL USUARIOS PENDIENTES: detecta nuevos registros por activar ---
-    Supabase.instance.client
-        .channel('usuarios_pendientes_central')
-        .onPostgresChanges(
-          event: PostgresChangeEvent.insert,
-          schema: 'public',
-          table: 'usuarios',
-          callback: (payload) async {
-            final doc = payload.newRecord;
-            if (doc.isEmpty || doc['activo'] == true) return;
-            final pendientes = await Supabase.instance.client
-                .from('usuarios')
-                .select('id')
-                .eq('activo', false)
-                .not('rol', 'in', '("cliente")');
-            final rol = doc['rol']?.toString() ?? '';
-            // Identificador visible: MOVIL##, nunca el nombre real
-            final usuarioField = doc['usuario']?.toString() ?? '';
-            final numStr = usuarioField.replaceAll(RegExp(r'[^0-9]'), '');
-            final identificador = numStr.isNotEmpty
-                ? 'MOVIL$numStr'
-                : (rol == 'local' ? 'LOCAL' : 'MOVIL');
-
-            // ── Push omitido aquí: ya lo envía registro_screen al crear la cuenta ──
-            // (evita que llegue doble a centrales con la app abierta)
-
-            if (mounted) {
-              setState(() => _usuariosPendientes = pendientes.length);
-              _sonidos.reproducir(Sonidos.centralRadar);
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                content: Text('👤 $identificador por activar'),
-                backgroundColor: Colors.orange[800],
-                duration: const Duration(seconds: 6),
-                action: SnackBarAction(
-                  label: 'ACTIVAR',
-                  textColor: Colors.white,
-                  // Ir directo a la pestaña "Por Activar" (tab 1)
-                  onPressed: () => _abrirGestionUsuarios(context, tabInicial: 1),
-                ),
-              ));
-            }
-          },
-        )
-        .subscribe();
-
-    // --- CANAL ACTIVACIONES: detecta cuando un usuario pasa a activo=true ---
-    // Decrementa el contador Y elimina la notificación del tray (si se tiene
-    // el androidNotificationId guardado por el foreground listener).
-    _canalActivaciones = Supabase.instance.client
-        .channel('activaciones_completadas_central')
-        .onPostgresChanges(
-          event: PostgresChangeEvent.update,
-          schema: 'public',
-          table: 'usuarios',
-          callback: (payload) async {
-            final newDoc = payload.newRecord;
-            // newDoc['activo'] == true significa que un usuario fue activado.
-            // NO usamos oldDoc porque Supabase sin REPLICA IDENTITY FULL
-            // lo devuelve vacío, haciendo la condición siempre falsa.
-            if (newDoc['activo'] != true) return;
-            final userId = newDoc['id']?.toString();
-            if (userId != null && !kIsWeb) {
-              final nid = _activacionNotifIds.remove(userId);
-              if (nid != null) {
-                OneSignal.Notifications.removeNotification(nid);
-              }
-            }
-            // Refetch del count real desde la BD con debounce de 15s.
-            // Sin debounce, cada GPS PATCH de un móvil activo (activo=true)
-            // disparaba este GET ~25 veces/min — 36k requests/día innecesarios.
-            // Las activaciones de usuarios son raras; 15s de lag es imperceptible.
-            _debounceActivaciones?.cancel();
-            _debounceActivaciones = Timer(const Duration(seconds: 15), () async {
-              try {
-                final pendientes = await Supabase.instance.client
-                    .from('usuarios')
-                    .select('id')
-                    .eq('activo', false)
-                    .not('rol', 'in', '("cliente")');
-                if (mounted) {
-                  setState(() => _usuariosPendientes = pendientes.length);
-                }
-              } catch (_) {
-                if (mounted) {
-                  setState(() =>
-                      _usuariosPendientes = (_usuariosPendientes - 1).clamp(0, 9999));
-                }
-              }
-            });
-          },
-        )
-        .subscribe();
-
-    // Cargar conteo inicial de pendientes
+    // --- USUARIOS POR ACTIVAR ---
+    // Antes había 2 canales extra sobre `usuarios` (nuevos registros y
+    // activaciones) que recibían TODOS los GPS de los móviles. Ahora lo
+    // procesa el canal de móviles (_procesarPendientes). Aquí solo la carga
+    // inicial de los ids pendientes (activo=false, rol != cliente).
     Future.microtask(() async {
       try {
         final pendientes = await Supabase.instance.client
@@ -589,7 +506,10 @@ class _CentralScreenState extends State<CentralScreen>
             .select('id')
             .eq('activo', false)
             .not('rol', 'in', '("cliente")');
-        if (mounted) setState(() => _usuariosPendientes = pendientes.length);
+        _pendientesIds
+          ..clear()
+          ..addAll(pendientes.map((p) => p['id'].toString()));
+        if (mounted) setState(() => _usuariosPendientes = _pendientesIds.length);
       } catch (_) {}
     });
 
@@ -738,6 +658,106 @@ class _CentralScreenState extends State<CentralScreen>
     await Future.wait([_recargarMovilesCentral(), _recargarServiciosMonitor()]);
   }
 
+  // Historial de las últimas 24 h de un móvil (sección "Desconectados" del
+  // panel). Una consulta por móvil cada 2 min, no en cada redibujo.
+  Future<List<Map<String, dynamic>>> _historial24hMovil(dynamic movilId) {
+    final previo = _cacheHist24h[movilId];
+    if (previo != null &&
+        DateTime.now().difference(previo.$1).inMinutes < 2) {
+      return previo.$2;
+    }
+    final hace24h = DateTime.now()
+        .toUtc()
+        .subtract(const Duration(hours: 24))
+        .toIso8601String();
+    final fut = Supabase.instance.client
+        .from('servicios')
+        .select('id, origen, destino, estado, observacion, created_at')
+        .eq('movil_id', movilId)
+        .not('estado', 'eq', 'pendiente')
+        .not('estado', 'eq', 'en_curso')
+        .not('estado', 'eq', 'problema')
+        .gte('created_at', hace24h)
+        .then((d) => List<Map<String, dynamic>>.from(d));
+    _cacheHist24h[movilId] = (DateTime.now(), fut);
+    return fut;
+  }
+
+  // "Líneas directas" del menú del servicio: el móvil sale de _movilesCache
+  // (ya cargado, sin consulta); si no estuviera, una consulta cacheada.
+  Future<Map<String, dynamic>?> _contactoMovil(dynamic movilId) {
+    final m = _movilesCache.firstWhere(
+      (x) => x['id'].toString() == movilId.toString(),
+      orElse: () => const <String, dynamic>{},
+    );
+    if (m.isNotEmpty) return Future.value(m);
+    return _cacheContactoCliente['m_$movilId'] ??= Supabase.instance.client
+        .from('usuarios')
+        .select('telefono, nombre, usuario, rol')
+        .eq('id', movilId)
+        .maybeSingle();
+  }
+
+  Future<Map<String, dynamic>?> _contactoCliente(dynamic clienteId) {
+    return _cacheContactoCliente['c_$clienteId'] ??= Supabase.instance.client
+        .from('usuarios')
+        .select('telefono, nombre')
+        .eq('id', clienteId)
+        .maybeSingle();
+  }
+
+  // ── USUARIOS POR ACTIVAR (antes 2 canales extra sobre `usuarios`) ────────
+  // Mantiene el set de ids pendientes (activo=false, rol != cliente) con los
+  // avisos que ya llegan al canal de móviles. Sin consultas extra a la BD.
+  void _procesarPendientes(PostgresChangePayload payload) {
+    final doc = payload.newRecord;
+    final esBorrado =
+        payload.eventType == PostgresChangeEvent.delete || doc.isEmpty;
+    final id = (esBorrado ? payload.oldRecord['id'] : doc['id'])?.toString();
+    if (id == null) return;
+    final antes = _pendientesIds.length;
+
+    if (esBorrado) {
+      _pendientesIds.remove(id);
+    } else if (doc['rol']?.toString() == 'cliente') {
+      _pendientesIds.remove(id);
+    } else if (doc['activo'] == true) {
+      if (_pendientesIds.remove(id) && !kIsWeb) {
+        // Activado: quitar su notificación "por activar" de la bandeja
+        final nid = _activacionNotifIds.remove(id);
+        if (nid != null) OneSignal.Notifications.removeNotification(nid);
+      }
+    } else {
+      _pendientesIds.add(id);
+      // Registro NUEVO por activar: sonido + aviso (el push ya lo envía
+      // registro_screen al crear la cuenta).
+      if (payload.eventType == PostgresChangeEvent.insert && mounted) {
+        final rol = doc['rol']?.toString() ?? '';
+        // Identificador visible: MOVIL##, nunca el nombre real
+        final numStr = (doc['usuario']?.toString() ?? '')
+            .replaceAll(RegExp(r'[^0-9]'), '');
+        final identificador = numStr.isNotEmpty
+            ? 'MOVIL$numStr'
+            : (rol == 'local' ? 'LOCAL' : 'MOVIL');
+        _sonidos.reproducir(Sonidos.centralRadar);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('👤 $identificador por activar'),
+          backgroundColor: Colors.orange[800],
+          duration: const Duration(seconds: 6),
+          action: SnackBarAction(
+            label: 'ACTIVAR',
+            textColor: Colors.white,
+            // Ir directo a la pestaña "Por Activar" (tab 1)
+            onPressed: () => _abrirGestionUsuarios(context, tabInicial: 1),
+          ),
+        ));
+      }
+    }
+    if (_pendientesIds.length != antes && mounted) {
+      setState(() => _usuariosPendientes = _pendientesIds.length);
+    }
+  }
+
   // F: ya NO hay .stream() de usuarios ni de servicios (cada cambio llegaba
   // duplicado: stream + canal). Las listas se cargan por REST aquí y se
   // mantienen en vivo con los canales _canalRadarCentral (servicios) y
@@ -883,8 +903,6 @@ class _CentralScreenState extends State<CentralScreen>
     _canalChatCentral?.unsubscribe();
     _canalUbicacionesMoviles?.unsubscribe();
     _debounceUbicaciones?.cancel();
-    _debounceActivaciones?.cancel();
-    _canalActivaciones?.unsubscribe();
     _canalFn?.unsubscribe();
     _canalBilletera?.unsubscribe();
     if (_listenerActivacion != null && !kIsWeb) {

@@ -1014,21 +1014,10 @@ extension CentralScreenPanelControl on _CentralScreenState {
                             // entonces. Filtrado server-side: más rápido
                             // que traer todo el historial y descartar
                             // el resto en el cliente.
-                            final hace24h = DateTime.now()
-                                .toUtc()
-                                .subtract(const Duration(hours: 24))
-                                .toIso8601String();
+                            // Cacheado 2 min por móvil: antes se consultaba
+                            // en cada redibujo (cada GPS de cualquier móvil).
                             return FutureBuilder<List<Map<String, dynamic>>>(
-                              future: Supabase.instance.client
-                                  .from('servicios')
-                                  .select(
-                                    'id, origen, destino, estado, observacion, created_at',
-                                  )
-                                  .eq('movil_id', movil['id'])
-                                  .not('estado', 'eq', 'pendiente')
-                                  .not('estado', 'eq', 'en_curso')
-                                  .not('estado', 'eq', 'problema')
-                                  .gte('created_at', hace24h),
+                              future: _historial24hMovil(movil['id']),
                               builder: (context, historySnapshot) {
                                 final historialReciente =
                                     historySnapshot.data ?? [];

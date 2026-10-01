@@ -47,6 +47,17 @@ extension CentralScreenPerfil on _CentralScreenState {
       } catch (_) {}
     }
 
+    // Calificaciones: se consultan UNA vez al abrir el perfil (antes la
+    // consulta estaba dentro del dibujo y se repetía en cada redibujo).
+    final Future<List<Map<String, dynamic>>> futureCalificaciones =
+        Supabase.instance.client
+            .from('calificaciones')
+            .select('estrellas, comentario, calificador_tipo, '
+                'calificador_nombre, created_at')
+            .eq('movil_id', movil['id'].toString())
+            .order('created_at', ascending: false)
+            .limit(20);
+
     // Suspensión
     final bool suspendido = movil['suspendido'] == true;
     String? suspendidoHastaTexto;
@@ -344,14 +355,8 @@ extension CentralScreenPerfil on _CentralScreenState {
                           // —— CALIFICACIONES (con nombre real del calificador) ——
                           seccionHeader('CALIFICACIONES RECIBIDAS'),
                           FutureBuilder<List<Map<String, dynamic>>>(
-                            future: Supabase.instance.client
-                                .from('calificaciones')
-                                .select(
-                                    'estrellas, comentario, calificador_tipo, '
-                                    'calificador_nombre, created_at')
-                                .eq('movil_id', movil['id'].toString())
-                                .order('created_at', ascending: false)
-                                .limit(20),
+                            future: futureCalificaciones, // 1 vez al abrir
+
                             builder: (context, snap) {
                               if (snap.connectionState ==
                                   ConnectionState.waiting) {

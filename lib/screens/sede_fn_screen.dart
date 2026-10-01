@@ -59,6 +59,8 @@ class _SedeFnScreenState extends State<SedeFnScreen>
   RealtimeChannel? _canalConfig;
   Timer? _reconTimer;
   DateTime? _ultimaEmisionStream; // Para reconexión condicional (anti-egress)
+  DateTime? _ultimaReconstruccion;  // Vigilante: respaldo cada 5 min
+  bool _streamConError = false;     // Vigilante: el stream dio error
 
   List<Map<String, dynamic>>? _cacheServicios;
 
@@ -175,8 +177,13 @@ class _SedeFnScreenState extends State<SedeFnScreen>
         .from('servicios')
         .stream(primaryKey: ['id'])
         .eq('fn_sede_solicitante_id', sedeId)
-        .order('id', ascending: false);
+        .order('id', ascending: false)
+        // Los activos siempre están entre los más recientes; antes bajaba
+        // TODO el historial de la sede en cada (re)conexión.
+        .limit(50);
 
+    _streamConError = false;
+    _ultimaReconstruccion = DateTime.now();
     _subServicios = crudo.listen(
       (data) {
         _ultimaEmisionStream = DateTime.now(); // Timestamp para reconexión condicional
@@ -188,7 +195,7 @@ class _SedeFnScreenState extends State<SedeFnScreen>
         _activosCount.value = _cacheServicios!.length;
         if (!_ctrlServicios.isClosed) _ctrlServicios.add(_cacheServicios!);
       },
-      onError: (_) {},
+      onError: (_) => _streamConError = true, // el vigilante reconstruye
     );
   }
 
@@ -226,6 +233,13 @@ class _SedeFnScreenState extends State<SedeFnScreen>
           event: PostgresChangeEvent.update,
           schema: 'public',
           table: 'servicios',
+          // Filtro en el servidor: solo los servicios de ESTA sede (antes
+          // llegaban todos los cambios de todos los servicios del sistema).
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'fn_sede_solicitante_id',
+            value: sedeId,
+          ),
           callback: (payload) {
             final nuevo = payload.newRecord;
             final viejo = payload.oldRecord;
@@ -311,12 +325,18 @@ class _SedeFnScreenState extends State<SedeFnScreen>
   }
 
   void _iniciarReconexion() {
-    // Solo reconecta si el stream lleva >35s sin emitir datos (anti-egress)
+    // Vigilante (cada 30 s): reconstruye solo si la conexión Realtime cayó,
+    // si el stream dio error, o como respaldo tras 5 min sin datos y sin
+    // reconstruir (antes lo hacía cada 30 s en reposo, re-descargando todo).
     _reconTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (!mounted) return;
-      final sinDatos = _ultimaEmisionStream == null ||
-          DateTime.now().difference(_ultimaEmisionStream!).inSeconds > 35;
-      if (sinDatos) _construirStream();
+      final ahora = DateTime.now();
+      final socketCaido = !_db.realtime.isConnected;
+      final sinDatosLargo = (_ultimaEmisionStream == null ||
+              ahora.difference(_ultimaEmisionStream!).inMinutes >= 5) &&
+          (_ultimaReconstruccion == null ||
+              ahora.difference(_ultimaReconstruccion!).inMinutes >= 5);
+      if (socketCaido || _streamConError || sinDatosLargo) _construirStream();
     });
   }
 

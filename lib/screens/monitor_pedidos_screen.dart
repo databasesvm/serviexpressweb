@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -30,6 +31,7 @@ class _MonitorPedidosScreenState extends State<MonitorPedidosScreen>
   List<Map<String, dynamic>> _moviles = [];
   bool _cargando = true;
   RealtimeChannel? _canal;
+  Timer? _debouncePedidos;
 
   @override
   void initState() {
@@ -43,6 +45,7 @@ class _MonitorPedidosScreenState extends State<MonitorPedidosScreen>
   void dispose() {
     _tabCtrl.dispose();
     _canal?.unsubscribe();
+    _debouncePedidos?.cancel();
     super.dispose();
   }
 
@@ -99,9 +102,29 @@ class _MonitorPedidosScreenState extends State<MonitorPedidosScreen>
           event: PostgresChangeEvent.all,
           schema: 'public',
           table: 'pedidos',
-          callback: (_) => _cargarDatos(),
+          callback: (_) {
+            // Solo recarga los PEDIDOS (locales y móviles no cambian por un
+            // pedido) y agrupa los cambios de 1 s en una sola recarga.
+            _debouncePedidos?.cancel();
+            _debouncePedidos = Timer(const Duration(seconds: 1), () {
+              if (mounted) _cargarPedidos();
+            });
+          },
         )
         .subscribe();
+  }
+
+  Future<void> _cargarPedidos() async {
+    try {
+      final pedidos = await _db
+          .from('pedidos')
+          .select(
+              '*, items_pedido(nombre_snapshot, cantidad, precio_snapshot)')
+          .not('estado', 'in', '("entregado","cancelado")')
+          .order('created_at', ascending: false);
+      if (!mounted) return;
+      setState(() => _pedidos = List<Map<String, dynamic>>.from(pedidos));
+    } catch (_) {}
   }
 
   // -----------------------------------------------------------------------

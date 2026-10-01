@@ -587,11 +587,8 @@ extension CentralScreenMonitor on _CentralScreenState {
                           children: [
                             if (servicio['movil_id'] != null)
                               FutureBuilder<Map<String, dynamic>?>(
-                                future: Supabase.instance.client
-                                    .from('usuarios')
-                                    .select('telefono, nombre, usuario, rol')
-                                    .eq('id', servicio['movil_id'])
-                                    .maybeSingle(),
+                                // Sale de la lista de móviles ya cargada (sin consultar).
+                                future: _contactoMovil(servicio['movil_id']),
                                 builder: (ctx, snap) {
                                   final tel = snap.data?['telefono']?.toString() ?? '';
                                   final nom = _formatearNombreCentral(snap.data);
@@ -638,11 +635,8 @@ extension CentralScreenMonitor on _CentralScreenState {
                               const SizedBox(height: 8),
                             if (servicio['cliente_id'] != null)
                               FutureBuilder<Map<String, dynamic>?>(
-                                future: Supabase.instance.client
-                                    .from('usuarios')
-                                    .select('telefono, nombre')
-                                    .eq('id', servicio['cliente_id'])
-                                    .maybeSingle(),
+                                // Una consulta por cliente (no en cada redibujo).
+                                future: _contactoCliente(servicio['cliente_id']),
                                 builder: (ctx, snap) {
                                   final tel = snap.data?['telefono']?.toString() ?? '';
                                   final nom = snap.data?['nombre']?.toString() ?? 'Cliente';

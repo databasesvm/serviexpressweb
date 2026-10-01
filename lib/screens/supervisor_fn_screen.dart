@@ -32,6 +32,8 @@ class _SupervisorFnScreenState extends State<SupervisorFnScreen>
   List<Map<String, dynamic>>? _cache;
   Timer? _reconTimer;
   DateTime? _ultimaEmision; // Para reconexión condicional (anti-egress)
+  DateTime? _ultimaReconstruccion; // Vigilante: respaldo cada 5 min
+  bool _streamConError = false;    // Vigilante: el stream dio error
 
   @override
   void initState() {
@@ -40,11 +42,18 @@ class _SupervisorFnScreenState extends State<SupervisorFnScreen>
     OneSignal.login(widget.usuario['id'].toString());
     OneSignal.User.addTagWithKey('rol', 'supervisor_fn');
     _construirStream();
-    // Solo reconecta si el stream lleva >35s sin emitir datos (anti-egress)
+    // Vigilante (cada 30 s): reconstruye solo si la conexión Realtime cayó,
+    // si el stream dio error, o como respaldo tras 5 min sin datos y sin
+    // reconstruir (antes lo hacía cada 30 s en reposo, re-descargando todo).
     _reconTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      final sinDatos = _ultimaEmision == null ||
-          DateTime.now().difference(_ultimaEmision!).inSeconds > 35;
-      if (sinDatos) _construirStream();
+      if (!mounted) return;
+      final ahora = DateTime.now();
+      final socketCaido = !_db.realtime.isConnected;
+      final sinDatosLargo = (_ultimaEmision == null ||
+              ahora.difference(_ultimaEmision!).inMinutes >= 5) &&
+          (_ultimaReconstruccion == null ||
+              ahora.difference(_ultimaReconstruccion!).inMinutes >= 5);
+      if (socketCaido || _streamConError || sinDatosLargo) _construirStream();
     });
   }
 
@@ -71,8 +80,13 @@ class _SupervisorFnScreenState extends State<SupervisorFnScreen>
         .from('servicios')
         .stream(primaryKey: ['id'])
         .eq('fn_origen', 'sede')
-        .order('id', ascending: false);
+        .order('id', ascending: false)
+        // Solo se muestran los de hoy: 100 recientes bastan (antes bajaba
+        // todos los servicios FN de sedes desde siempre).
+        .limit(100);
 
+    _streamConError = false;
+    _ultimaReconstruccion = DateTime.now();
     _sub = crudo.listen(
       (data) {
         _ultimaEmision = DateTime.now(); // Timestamp para reconexión condicional
@@ -84,7 +98,7 @@ class _SupervisorFnScreenState extends State<SupervisorFnScreen>
         }).toList();
         if (!_ctrl.isClosed) _ctrl.add(filtrado);
       },
-      onError: (_) {},
+      onError: (_) => _streamConError = true, // el vigilante reconstruye
     );
   }
 
