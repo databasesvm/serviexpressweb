@@ -43,7 +43,26 @@ class CascadaConfig {
 
   /// Carga los tiempos desde config_sistema. Si falla, retorna los defaults
   /// (equivalente al comportamiento hardcodeado original).
-  static Future<CascadaConfig> cargar() async {
+  // Caché en memoria (5 min): antes cada tarjeta de servicio volvía a
+  // consultar los tiempos al aparecer (~4.000 consultas/día).
+  static Future<CascadaConfig>? _cacheFut;
+  static DateTime? _cacheAt;
+
+  static Future<CascadaConfig> cargar() {
+    final ahora = DateTime.now();
+    if (_cacheFut == null ||
+        _cacheAt == null ||
+        ahora.difference(_cacheAt!).inMinutes >= 5) {
+      _cacheAt = ahora;
+      _cacheFut = _cargarDesdeBd();
+    }
+    return _cacheFut!;
+  }
+
+  /// Fuerza recarga en el próximo uso (p. ej. tras editar los tiempos).
+  static void invalidar() => _cacheFut = null;
+
+  static Future<CascadaConfig> _cargarDesdeBd() async {
     try {
       final row = await Supabase.instance.client
           .from('config_sistema')
@@ -65,6 +84,7 @@ class CascadaConfig {
       );
     } catch (_) {
       // Si hay error de red o BD, usa defaults (comportamiento original)
+      _cacheFut = null; // reintentar en el próximo uso
       return const CascadaConfig();
     }
   }

@@ -7,11 +7,10 @@ import 'dart:io';
 import 'package:serviexpress_app/screens/ranking_screen.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:serviexpress_app/utils/motor_rutas.dart';
-import 'package:serviexpress_app/utils/onesignal_api.dart'; // MotorNotificaciones — necesario para el botón de pánico
+import 'package:serviexpress_app/utils/onesignal_api.dart'; // MotorNotificaciones
 import 'package:serviexpress_app/utils/textos_push.dart'; // Textos únicos de push SE
 import 'package:serviexpress_app/utils/hora_servidor.dart'; // Reloj alineado con el servidor
 import 'package:serviexpress_app/utils/sonido_manager.dart'; // Motor de audio in-app
-import 'package:serviexpress_app/utils/panico_widgets.dart'; // Botón de pánico
 import 'package:serviexpress_app/utils/permisos_criticos.dart'; // Permisos críticos en segundo plano
 import 'package:serviexpress_app/services/ota_updater.dart'; // OTA updates
 import 'package:serviexpress_app/services/background_service.dart'; // Opción B: foreground service
@@ -32,6 +31,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData, FilteringTextInputFormatter;
 import 'package:serviexpress_app/utils/cascada_config.dart'; // CONFIG-CASCADA-EXT
+import 'package:serviexpress_app/utils/config_cache.dart'; // Caché de consultas repetidas (wallet)
 
 part 'movil_widgets.dart';
 
@@ -107,14 +107,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
   List<Map<String, dynamic>> _solicitudesDescanso = [];
   bool _cargandoSolicitudesDescanso = false;
 
-  // --- COMPARTIDO DE UBICACIÓN POR PÁNICO (24H) ---
-  int? _eventoPanicoActivoId;
-  DateTime? _panicoUbicacionExpiraAt;
-
-  // --- CONTROL DE BOTÓN DE PÁNICO ---
-  // Solo visible cuando hay servicio activo Y no se ha usado hoy.
+  // --- SERVICIO ACTIVO (bloquea salir de la app con servicio en curso) ---
   bool _tieneServicioActivo = false;
-  bool _panicoUsadoHoy = false;
   // -------------------------------------------------
 
   // --- ZONAS DE PARADERO: nombre -> [lat, lng, radio en metros] ---
@@ -133,6 +127,31 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
   // el vigilante de 30 s detecta que subió rechazos_paradero_hoy.
   int? _rechazosParaderoVistos;
   Timer? _bannerSancionTimer;
+
+  // Aviso en pantalla de servicio cancelado (push del servidor o cambio en
+  // vivo). Se muestra una sola vez por servicio.
+  final Set<int> _cancelacionesAvisadas = {};
+  void _mostrarAvisoCancelado(int? servicioId, String titulo, String mensaje) {
+    if (!mounted) return;
+    if (servicioId != null && !_cancelacionesAvisadas.add(servicioId)) return;
+    _sonidos.reproducirSuave(Sonidos.movilFinalizar);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: Text(titulo,
+            style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+        content: Text(mensaje, style: const TextStyle(fontSize: 14)),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.black),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('ENTENDIDO', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
 
   // Punto a Punto: el móvil no sabe que es PAP hasta aceptarlo. Al aceptarlo
   // se le cuentan los beneficios que gana al terminarlo.
@@ -186,34 +205,12 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
   }
   DateTime? _ultimoBannerSancion;
 
-  String _horaCorta(DateTime d) {
-    final l = d.toLocal();
-    final h12 = l.hour % 12 == 0 ? 12 : l.hour % 12;
-    final mm = l.minute.toString().padLeft(2, '0');
-    return '$h12:$mm ${l.hour < 12 ? 'a. m.' : 'p. m.'}';
-  }
-
   /// Textos locales (respaldo si el push no llegó) — mismos que el servidor.
+  /// Única sanción: salir del paradero (sin contador ni suspensión).
   (String, String) _textoSancionLocal(int vez, DateTime? hasta) {
-    if (vez <= 1) {
-      return (
-        '⚠️ Expulsado del paradero (1ª vez hoy)',
-        'No aceptaste tu turno en 30 s. Regístrate de nuevo cuando estés listo. '
-            'Si vuelve a pasar hoy: 2ª vez → suspendido 1 hora; 3ª vez → suspendido 24 horas.',
-      );
-    }
-    if (vez == 2) {
-      return (
-        '❌ Suspendido 1 hora (2ª vez hoy)',
-        'No aceptaste tu turno por segunda vez. '
-            '${hasta != null ? 'Puedes volver al paradero a las ${_horaCorta(hasta)}. ' : ''}'
-            'Si pasa una 3ª vez hoy quedarás suspendido 24 horas.',
-      );
-    }
     return (
-      '🚫 Suspendido 24 horas (${vez}ª vez hoy)',
-      'No aceptaste tu turno por ${vez == 3 ? 'tercera' : '${vez}ª'} vez hoy. '
-          '${hasta != null ? 'Puedes volver al paradero mañana a las ${_horaCorta(hasta)}.' : ''}',
+      '⚠️ Saliste del paradero',
+      'No aceptaste tu turno de #1 en 30 s. Puedes volver a registrarte en el paradero cuando quieras.',
     );
   }
 
@@ -429,10 +426,14 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
   // Referencias a los canales Realtime — necesarias para cancelarlos
   // correctamente en dispose(). Sin guardar la referencia, .unsubscribe()
   // en dispose() crea un objeto nuevo y el canal original queda activo.
-  RealtimeChannel? _canalRadarBg;
-  RealtimeChannel? _canalPanico;
   // Fila del paradero — canal liviano sin GPS de otros móviles
   RealtimeChannel? _canalFila;
+  Timer? _debounceFila;
+  // Vigilante de conexión (E4): estado real del canal de servicios.
+  int _genCanales = 0;
+  Timer? _debounceRecargaSvc; // D: descarga de respaldo agrupada
+  bool _canalServiciosCaido = false;
+  DateTime? _ultimaReconstruccion;
   // ---- DOMICILIOS ----
   RealtimeChannel? _canalPedidosMovil;
   Map<String, dynamic>? _pedidoDomicilioActivo;
@@ -518,6 +519,20 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         if (tipo == 'force_gps_update') {
           event.preventDefault();
           if (mounted && _estaEnLinea) _forzarActualizacionGps();
+          return;
+        }
+        // Servicio cancelado (lo manda el servidor): aviso en pantalla
+        if (tipo == 'servicio_cancelado') {
+          event.preventDefault();
+          final d = event.notification.additionalData ?? const {};
+          final int? sid = int.tryParse('${d['servicio_id']}');
+          _mostrarAvisoCancelado(
+            sid,
+            d['titulo']?.toString() ??
+                event.notification.title ??
+                '❌ Servicio cancelado',
+            d['mensaje']?.toString() ?? event.notification.body ?? '',
+          );
           return;
         }
         // Sanción de paradero: banner de 30 s con su propio sonido de aviso
@@ -618,8 +633,6 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       if (mounted) _cargarProduccion();
     });
     Future.delayed(const Duration(milliseconds: 800), _cargarMinutosActivosHoy);
-    Future.delayed(
-        const Duration(milliseconds: 1000), _verificarPanicoUsadoHoy);
 
     // ---- DOMICILIOS DE LA CARTA ----
     // Ya NO se escucha la tabla `pedidos` (antes a TODOS los móviles les salía
@@ -628,116 +641,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     // (trigger fn_pedido_a_servicio) que llega por la cascada F1–F4 normal, con
     // su tarjeta, push, transferir y liberar. El estado se refleja en el pedido.
 
-    // ---> INYECCIÓN: RADAR EN SEGUNDO PLANO (OÍDO SATELITAL) <---
-    _canalRadarBg = Supabase.instance.client
-        .channel('radar_bg_${widget.usuario['id']}')
-        .onPostgresChanges(
-          event: PostgresChangeEvent.all,
-          schema: 'public',
-          table: 'servicios',
-          callback: (payload) {
-            if (!_estaEnLinea) return;
-
-            // FIX #90: Cuando Central cancela un servicio, RLS bloquea
-            // el SELECT del row cancelado → Supabase entrega el evento
-            // con newRecord vacío (sanitizado) o con estado fuera de los
-            // activos. En ese caso quitamos el servicio del cache aquí,
-            // de forma inmediata, sin esperar el REST fetch de
-            // _canalUpdateServicios (que puede no llegar si RLS silencia
-            // también ese canal).
-            const _estadosActivos = {
-              'pendiente',
-              'en_ruta_origen',
-              'en_origen',
-              'en_ruta_destino',
-              'problema',
-            };
-            if (_cacheServicios != null) {
-              final newRec = payload.newRecord;
-              final oldRec = payload.oldRecord;
-              final nuevoEstado = newRec['estado']?.toString() ?? '';
-              final fueraDeActivos = newRec.isEmpty ||
-                  (nuevoEstado.isNotEmpty &&
-                      !_estadosActivos.contains(nuevoEstado));
-              if (fueraDeActivos) {
-                final rawId = oldRec['id'] ?? newRec['id'];
-                if (rawId != null) {
-                  final idInt = (rawId is num)
-                      ? rawId.toInt()
-                      : int.tryParse(rawId.toString());
-                  if (idInt != null) {
-                    final antes = _cacheServicios!.length;
-                    _cacheServicios = _cacheServicios!
-                        .where((s) => s['id'] != idInt)
-                        .toList();
-                    if (_cacheServicios!.length < antes &&
-                        !_ctrlServicios.isClosed) {
-                      _ctrlServicios.add(_cacheServicios!);
-                    }
-                  }
-                }
-              }
-            }
-
-            // Notifica solo al ValueListenableBuilder del radar, sin
-            // reconstruir todo el árbol (AppBar, perfil, etc.).
-            if (mounted) _radarTick.value++;
-          },
-        )
-        .subscribe();
-    // ------------------------------------------------------------
-
-    // --- CANAL PÁNICO: escucha eventos de emergencia en tiempo real ---
-    _canalPanico = Supabase.instance.client
-        .channel('panico_global')
-        .onPostgresChanges(
-          event: PostgresChangeEvent.insert,
-          schema: 'public',
-          table: 'eventos_panico',
-          callback: (payload) {
-            final doc = payload.newRecord;
-            if (doc.isEmpty || !mounted) return;
-            final tipo = doc['tipo']?.toString() ?? 'global';
-            final destinoId = doc['destino_id'];
-            final disparadorId = doc['disparado_por_id'];
-            final miId = widget.usuario['id'];
-
-            // SILENCIO PARA EL DISPARADOR: por seguridad, quien activa el
-            // pánico no recibe su propia alerta (overlay ni sonido).
-            if (disparadorId != null &&
-                disparadorId.toString() == miId.toString()) {
-              return;
-            }
-
-            // Para alertas individuales: solo mostramos si somos el destino
-            if (tipo == 'individual' &&
-                destinoId?.toString() != miId.toString()) {
-              return;
-            }
-
-            // Ubicación en vivo: solo si rolDisparador == 'movil' y la
-            // ventana de 24h sigue vigente
-            bool tieneUbicacion = false;
-            if ((doc['rol_disparador']?.toString() ?? '') == 'movil' &&
-                doc['ultima_lat'] != null &&
-                doc['ubicacion_expira_at'] != null) {
-              final expira = DateTime.tryParse(
-                doc['ubicacion_expira_at'].toString(),
-              )?.toUtc();
-              tieneUbicacion =
-                  expira != null && DateTime.now().toUtc().isBefore(expira);
-            }
-
-            _mostrarPanicoOverlay(
-              disparadoPor: doc['disparado_por_nombre'] ?? 'Sistema',
-              usuarioDisparador: doc['disparado_por_usuario']?.toString(),
-              rolDisparador: doc['rol_disparador'] ?? '',
-              eventoId: doc['id'] as int?,
-              tieneUbicacion: tieneUbicacion,
-            );
-          },
-        )
-        .subscribe();
+    // (El antiguo canal "radar_bg" se unió al canal único de servicios que
+    //  se crea en _construirStreams → _procesarCambioServicio.)
 
     _arranqueSeguro();
     _iniciarRelojSupervisionMultitarea();
@@ -1485,11 +1390,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                   const SizedBox(height: 24),
                   // Instrucciones de pago
                   FutureBuilder<Map<String, dynamic>?>(
-                    future: Supabase.instance.client
-                        .from('config_sistema')
-                        .select('info_recarga_wallet')
-                        .eq('id', 1)
-                        .maybeSingle(),
+                    future: ConfigCache.infoRecarga(),
                     builder: (_, snapCfg) {
                       final info =
                           snapCfg.data?['info_recarga_wallet']?.toString();
@@ -1534,13 +1435,13 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                   const SizedBox(height: 20),
                   // Check solicitud pendiente (pago_semanal o pago_semanal_con_recargo)
                   FutureBuilder<List<dynamic>>(
-                    future: Supabase.instance.client
-                        .from('solicitudes_recarga_wallet')
-                        .select('id, created_at')
-                        .eq('movil_id', movilId)
-                        .eq('estado', 'pendiente')
-                        .inFilter('tipo_solicitud', ['pago_semanal', 'pago_semanal_con_recargo'])
-                        .limit(1),
+                    future: ConfigCache.solicitudPendiente(
+                      movilId: movilId,
+                      columnas: 'id, created_at',
+                      tipos: const ['pago_semanal', 'pago_semanal_con_recargo'],
+                      estadoBilletera: ConfigCache.estadoBilletera(
+                          _cacheMiPerfil ?? widget.usuario),
+                    ),
                     builder: (_, snapPend) {
                       final pendiente =
                           snapPend.hasData && snapPend.data!.isNotEmpty;
@@ -1877,9 +1778,9 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _bannerSancionTimer?.cancel();
-    _canalRadarBg?.unsubscribe();
-    _canalPanico?.unsubscribe();
     _canalFila?.unsubscribe();
+    _debounceFila?.cancel();
+    _debounceRecargaSvc?.cancel();
     _canalUpdateServicios?.unsubscribe();
     _canalPedidosMovil?.unsubscribe();
 
@@ -1962,7 +1863,10 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       Supabase.instance.client
           .from('servicios')
           .update({'chat_movil': false}).eq('id', svcClienteMsg['id']);
-      final clienteId = (svcClienteMsg['cliente_id'] as num?)?.toInt();
+      // Cliente de la app o, si no hay, el local del servicio
+      final clienteId = ((svcClienteMsg['cliente_id'] ?? svcClienteMsg['local_id'])
+              as num?)
+          ?.toInt();
       Navigator.push(
         context,
         MaterialPageRoute(
@@ -2149,48 +2053,25 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     // sin lat/lng ni datos que los móviles no necesitan ver de otros).
     _recargarFila();
 
-    // Canal liviano para detectar cambios en la fila: solo escucha
-    // updates de usuarios en línea. Cuando alguien entra/sale del
-    // paradero, el REST fetch de _recargarFila() actualiza _filaNotifier.
-    // Los GPS updates de otros móviles NO llegan aquí porque este canal
-    // no suscribe a todos los móviles, solo reacciona a cambios relevantes.
+    // Canal de la fila: escucha la tabla mínima `fila_cambios`, que el
+    // servidor (trg_aviso_fila_cambio) solo toca cuando a un móvil le
+    // cambia algo de la fila (paradero, ingreso, ticket, en_linea, número,
+    // nombre o rango). Los GPS de otros móviles YA NO llegan a este
+    // teléfono → ahorro grande de mensajes Realtime y datos.
     _canalFila?.unsubscribe();
     _canalFila = Supabase.instance.client
         .channel('fila_paradero_${widget.usuario['id']}')
         .onPostgresChanges(
           event: PostgresChangeEvent.update,
           schema: 'public',
-          table: 'usuarios',
-          filter: PostgresChangeFilter(
-            type: PostgresChangeFilterType.eq,
-            column: 'en_linea',
-            value: true,
-          ),
-          callback: (payload) {
-            // Solo recargamos si cambió algo relevante para la fila:
-            // paradero_actual, ingreso_fila o ticket_prioridad.
-            // GPS PATCHes (lat/lng) llegan cada ~2s pero no afectan
-            // el orden de la fila → los ignoramos sin REST GET.
-            final rec = payload.newRecord;
-            final id = rec['id'];
-            final cached = _filaNotifier.value
-                .firstWhere((m) => m['id'] == id, orElse: () => const {});
-
-            if (cached.isEmpty) {
-              // No estaba en fila cacheada.
-              // Sin paradero → es solo GPS → ignorar.
-              if (rec['paradero_actual'] == null ||
-                  rec['ingreso_fila'] == null) return;
-              // Con paradero → entró a la fila → recargar.
-            } else {
-              // Ya estaba en fila. ¿Cambió algo que afecte el orden?
-              if (cached['paradero_actual'] == rec['paradero_actual'] &&
-                  cached['ingreso_fila'] == rec['ingreso_fila'] &&
-                  cached['ticket_prioridad'] == rec['ticket_prioridad']) {
-                return; // Solo GPS u otro campo irrelevante → ignorar.
-              }
-            }
-            _recargarFila();
+          table: 'fila_cambios',
+          callback: (_) {
+            // Agrupa avisos seguidos (p. ej. expulsión + reingreso) en
+            // una sola recarga liviana de la fila.
+            _debounceFila?.cancel();
+            _debounceFila = Timer(const Duration(milliseconds: 400), () {
+              if (mounted) _recargarFila();
+            });
           },
         )
         .subscribe();
@@ -2230,10 +2111,14 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
           setState(() => _conexionPerdida = false);
         if (!_ctrlServicios.isClosed) _ctrlServicios.add(data);
         _verificarTransferenciaEntrante(List<Map<String, dynamic>>.from(data));
-        // Actualizar conteo de chats pendientes: central por servicio + cliente/local
+        // Actualizar conteo de chats pendientes: central por servicio + cliente/local.
+        // SOLO de MIS servicios: el stream trae también servicios de otros
+        // móviles y antes el botón "Central" sonaba a todos.
+        final miIdChat = widget.usuario['id'].toString();
         _svcChatCount = data
             .where((s) =>
-                s['chat_central_movil'] == true || s['chat_movil'] == true)
+                s['movil_id']?.toString() == miIdChat &&
+                (s['chat_central_movil'] == true || s['chat_movil'] == true))
             .length;
         _chatCentralTotal.value = _svcChatCount +
             ((_cacheMiPerfil ?? widget.usuario)['chat_central'] == true
@@ -2262,116 +2147,194 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       },
     );
 
-    // CANAL UPDATE — cuando la Central cambia el estado de un servicio
-    // (cancela, finaliza, reactiva), el .stream() con .inFilter() puede
-    // tardar hasta 20s en quitar/agregar la fila. Este canal Postgres
-    // escucha cualquier UPDATE en servicios y fuerza un refresh REST
-    // inmediato para que el radar se actualice al instante.
+    // CANAL ÚNICO DE SERVICIOS (D) — reemplaza a los dos canales de antes
+    // (radar_bg + movil_svc_update). Con cada cambio de un servicio aplica
+    // la fila que trae el aviso directamente a la lista (sin re-descargar
+    // los 50 servicios), refresca el radar, avisa cancelaciones y detecta
+    // autoasignación. Solo si el aviso llega vacío (RLS) hace una descarga
+    // de respaldo, agrupada en 1 s.
+    _genCanales++;
+    final gen = _genCanales;
+    _canalServiciosCaido = false;
+    _ultimaReconstruccion = DateTime.now();
     _canalUpdateServicios?.unsubscribe();
     _canalUpdateServicios = Supabase.instance.client
         .channel('movil_svc_update_${widget.usuario['id']}')
         .onPostgresChanges(
-          event: PostgresChangeEvent.update,
+          event: PostgresChangeEvent.all,
           schema: 'public',
           table: 'servicios',
-          callback: (payload) {
-            // FIX #90: Filtrado inmediato antes del REST fetch,
-            // para los casos donde el evento sí llega con datos de estado.
-            const _estadosActivos2 = {
-              'pendiente',
-              'en_ruta_origen',
-              'en_origen',
-              'en_ruta_destino',
-              'problema',
-            };
-            if (_cacheServicios != null) {
-              final newRec2 = payload.newRecord;
-              final oldRec2 = payload.oldRecord;
-              final nuevoEstado2 = newRec2['estado']?.toString() ?? '';
-              final fueraDeActivos2 = newRec2.isEmpty ||
-                  (nuevoEstado2.isNotEmpty &&
-                      !_estadosActivos2.contains(nuevoEstado2));
-              if (fueraDeActivos2) {
-                final rawId2 = oldRec2['id'] ?? newRec2['id'];
-                if (rawId2 != null) {
-                  final idInt2 = (rawId2 is num)
-                      ? rawId2.toInt()
-                      : int.tryParse(rawId2.toString());
-                  if (idInt2 != null) {
-                    _cacheServicios = _cacheServicios!
-                        .where((s) => s['id'] != idInt2)
-                        .toList();
-                    if (!_ctrlServicios.isClosed) {
-                      _ctrlServicios.add(_cacheServicios!);
-                    }
-                  }
-                }
-              }
-            }
-            Supabase.instance.client
-                .from('servicios')
-                .select()
-                .inFilter('estado', [
-                  'pendiente',
-                  'en_ruta_origen',
-                  'en_origen',
-                  'en_ruta_destino',
-                  'problema',
-                ])
-                .order('id', ascending: false)
-                .limit(50)
-                .then((data) {
-                  _cacheServicios = List<Map<String, dynamic>>.from(data);
-                  if (!_ctrlServicios.isClosed)
-                    _ctrlServicios.add(_cacheServicios!);
-                  _verificarTransferenciaEntrante(_cacheServicios!);
-
-                  // ── AUTOASIGNACIÓN: sacar del paradero ──────────────────
-                  // Si pg_cron asignó este móvil a un servicio activo,
-                  // limpiamos el paradero igual que si hubiera aceptado
-                  // manualmente — evita que quede como "fantasma" en fila.
-                  if (_miParaderoCache != null) {
-                    final miId = widget.usuario['id'].toString();
-                    final fueAutoAsignado = _cacheServicios!.any((s) {
-                      final sMovilId = s['movil_id']?.toString() ?? '';
-                      final sEstado = s['estado']?.toString() ?? '';
-                      return sMovilId == miId &&
-                          (sEstado == 'en_ruta_origen' ||
-                              sEstado == 'en_origen' ||
-                              sEstado == 'en_ruta_destino');
-                    });
-                    if (fueAutoAsignado) {
-                      _miParaderoCache = null;
-                      Supabase.instance.client
-                          .from('usuarios')
-                          .update({
-                            'paradero_actual': null,
-                            'ingreso_fila': null,
-                          })
-                          .eq('id', miId)
-                          .catchError((_) {});
-                    }
-                  }
-                })
-                .catchError((_) {});
-          },
+          callback: _procesarCambioServicio,
         )
-        .subscribe();
+        .subscribe((status, _) {
+          // Estado real del canal: si da error, se cierra o vence, el
+          // vigilante reconstruye. Se ignoran avisos de canales viejos
+          // (los que cerramos nosotros al reconstruir).
+          if (gen != _genCanales) return;
+          if (status == RealtimeSubscribeStatus.subscribed) {
+            _canalServiciosCaido = false;
+          } else {
+            _canalServiciosCaido = true;
+          }
+        });
   }
 
-  // Reconstruye los streams cada 30s — bastante seguido para que una
-  // caída silenciosa nunca dure más de medio minuto sin corregirse
-  // sola, pero sin saturar la base de datos con la flota completa.
-  // No usa setState() — la reconexión es invisible para el árbol de
-  // widgets, así que no hace falta forzar ningún rebuild para lograrla.
+  // ── D: procesar un cambio de servicio con la fila que trae el aviso ──────
+  static const Set<String> _kEstadosActivosSvc = {
+    'pendiente',
+    'en_ruta_origen',
+    'en_origen',
+    'en_ruta_destino',
+    'problema',
+  };
+
+  void _procesarCambioServicio(PostgresChangePayload payload) {
+    if (!mounted) return;
+    final newRec = payload.newRecord;
+    final oldRec = payload.oldRecord;
+
+    // Refrescar solo el radar (ValueListenableBuilder), sin rebuild total.
+    _radarTick.value++;
+
+    // Sin lista aún → descarga de respaldo.
+    if (_cacheServicios == null) {
+      _programarRecargaServicios();
+      return;
+    }
+
+    final rawId = newRec['id'] ?? oldRec['id'];
+    final int? id = rawId == null
+        ? null
+        : (rawId is num ? rawId.toInt() : int.tryParse(rawId.toString()));
+
+    // Aviso vacío (borrado o filtrado por permisos): quitarlo si lo
+    // tenemos y confirmar con una descarga de respaldo agrupada.
+    if (newRec.isEmpty) {
+      if (id != null) {
+        final antes = _cacheServicios!.length;
+        _cacheServicios =
+            _cacheServicios!.where((s) => s['id'] != id).toList();
+        if (_cacheServicios!.length < antes && !_ctrlServicios.isClosed) {
+          _ctrlServicios.add(_cacheServicios!);
+        }
+      }
+      _programarRecargaServicios();
+      return;
+    }
+    if (id == null) return;
+
+    final estado = newRec['estado']?.toString() ?? '';
+    final idx = _cacheServicios!.indexWhere((s) => s['id'] == id);
+
+    if (!_kEstadosActivosSvc.contains(estado)) {
+      // Salió de los estados activos (cancelado, finalizado, etc.)
+      if (estado == 'cancelado' && idx >= 0) {
+        // Respaldo del aviso de cancelación: si MI servicio (asignado o con
+        // mi oferta de paradero) pasó a cancelado, avisar en pantalla.
+        final previo = _cacheServicios![idx];
+        final miId = widget.usuario['id'].toString();
+        final eraMio = previo['movil_id']?.toString() == miId ||
+            previo['paradero_ofrecido_id']?.toString() == miId;
+        if (eraMio) {
+          _mostrarAvisoCancelado(
+            id,
+            '❌ Servicio cancelado',
+            '${TextosPush.ruta(previo['origen']?.toString(), previo['destino']?.toString())} '
+                'fue cancelado. Ya no tienes que ir.',
+          );
+        }
+      }
+      if (idx >= 0) {
+        _cacheServicios = List<Map<String, dynamic>>.from(_cacheServicios!)
+          ..removeAt(idx);
+        if (!_ctrlServicios.isClosed) _ctrlServicios.add(_cacheServicios!);
+      }
+      return;
+    }
+
+    // Activo: reemplazar la fila (o agregarla en orden id desc, máx. 50).
+    final fila = Map<String, dynamic>.from(newRec);
+    final lista = List<Map<String, dynamic>>.from(_cacheServicios!);
+    if (idx >= 0) {
+      lista[idx] = fila;
+    } else {
+      final pos = lista.indexWhere(
+          (s) => ((s['id'] as num?)?.toInt() ?? 0) < id);
+      if (pos < 0) {
+        lista.add(fila);
+      } else {
+        lista.insert(pos, fila);
+      }
+      if (lista.length > 50) lista.removeRange(50, lista.length);
+    }
+    _cacheServicios = lista;
+    if (!_ctrlServicios.isClosed) _ctrlServicios.add(_cacheServicios!);
+    _verificarTransferenciaEntrante(_cacheServicios!);
+    _revisarAutoasignacion();
+  }
+
+  // AUTOASIGNACIÓN: si el servidor asignó este móvil a un servicio activo,
+  // limpiamos el paradero igual que si hubiera aceptado manualmente — evita
+  // que quede como "fantasma" en la fila.
+  void _revisarAutoasignacion() {
+    if (_miParaderoCache == null || _cacheServicios == null) return;
+    final miId = widget.usuario['id'].toString();
+    final fueAutoAsignado = _cacheServicios!.any((s) {
+      final sEstado = s['estado']?.toString() ?? '';
+      return (s['movil_id']?.toString() ?? '') == miId &&
+          (sEstado == 'en_ruta_origen' ||
+              sEstado == 'en_origen' ||
+              sEstado == 'en_ruta_destino');
+    });
+    if (fueAutoAsignado) {
+      _miParaderoCache = null;
+      Supabase.instance.client
+          .from('usuarios')
+          .update({'paradero_actual': null, 'ingreso_fila': null})
+          .eq('id', miId)
+          .catchError((_) {});
+    }
+  }
+
+  // Descarga de respaldo de los servicios activos (solo cuando un aviso
+  // llega vacío). Agrupa los avisos de 1 s en una sola consulta.
+  void _programarRecargaServicios() {
+    _debounceRecargaSvc?.cancel();
+    _debounceRecargaSvc = Timer(const Duration(seconds: 1), () {
+      if (!mounted) return;
+      Supabase.instance.client
+          .from('servicios')
+          .select()
+          .inFilter('estado', _kEstadosActivosSvc.toList())
+          .order('id', ascending: false)
+          .limit(50)
+          .then((data) {
+        if (!mounted) return;
+        _cacheServicios = List<Map<String, dynamic>>.from(data);
+        if (!_ctrlServicios.isClosed) _ctrlServicios.add(_cacheServicios!);
+        _verificarTransferenciaEntrante(_cacheServicios!);
+        _revisarAutoasignacion();
+      }).catchError((_) {});
+    });
+  }
+
+  // Vigilante de conexión (cada 30 s). Antes reconstruía todo si los
+  // servicios no cambiaban en 35 s — en horas tranquilas eso pasaba cada
+  // 30 s aunque la conexión estuviera perfecta (miles de descargas/día).
+  // Ahora reconstruye solo si la conexión Realtime realmente cayó, o como
+  // red de seguridad si pasan 5 min sin datos y sin reconstruir.
+  // No usa setState() — la reconexión es invisible para el árbol de widgets.
   void _iniciarVigilanteDeConexion() {
     _reconexionTimer?.cancel();
     _reconexionTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
       if (!mounted) return;
-      // Fix #2: reconecta solo si el stream lleva >35s sin emitir (muerto).
-      // Evita cancelar y recrear suscripciones sanas cada 30s innecesariamente.
-      final sinDatos = _ultimaEmisionServicios == null ||
-          DateTime.now().difference(_ultimaEmisionServicios!).inSeconds > 35;
+      final ahora = DateTime.now();
+      final socketCaido = !Supabase.instance.client.realtime.isConnected;
+      final sinDatosLargo = (_ultimaEmisionServicios == null ||
+              ahora.difference(_ultimaEmisionServicios!).inMinutes >= 5) &&
+          (_ultimaReconstruccion == null ||
+              ahora.difference(_ultimaReconstruccion!).inMinutes >= 5);
+      final sinDatos = socketCaido || _canalServiciosCaido || sinDatosLargo;
       if (sinDatos) {
         _construirStreams();
         // Notificación silenciosa estilo WhatsApp: avisa que hay problemas de
@@ -2449,7 +2412,6 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         // App vuelve al frente — reconstruir streams y reiniciar heartbeat.
         if (mounted) {
           _construirStreams();
-          _verificarPanicoPendiente();
           _chequearPermisosCriticos();
           if (_estaEnLinea) {
             _iniciarHeartbeat();
@@ -2513,267 +2475,6 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       );
       if (mounted) setState(() => _permisosCriticosFaltantes = falta);
     } catch (_) {}
-  }
-
-  // Busca eventos de pánico de los últimos 2 minutos dirigidos a este móvil
-  // (global o individual). Si encuentra uno y el overlay NO está visible,
-  // lo muestra — cubre el caso de app minimizada al recibir la alerta.
-  Future<void> _verificarPanicoPendiente() async {
-    try {
-      final miId = widget.usuario['id'].toString();
-      final hace2min =
-          DateTime.now().toUtc().subtract(const Duration(minutes: 2));
-      final eventos = await Supabase.instance.client
-          .from('eventos_panico')
-          .select()
-          .neq('disparado_por_id', widget.usuario['id'])
-          .gte('created_at', hace2min.toIso8601String())
-          .order('created_at', ascending: false)
-          .limit(5);
-
-      for (final ev in eventos) {
-        final tipo = ev['tipo']?.toString() ?? 'global';
-        final destinoId = ev['destino_id']?.toString() ?? '';
-        // Filtramos: global (todos) o individual (solo si el destino soy yo)
-        if (tipo == 'individual' && destinoId != miId) continue;
-
-        // Verificamos que el evento no esté ya expirado manualmente
-        final expiraStr = ev['ubicacion_expira_at']?.toString();
-        if (expiraStr != null) {
-          final expira = DateTime.tryParse(expiraStr)?.toUtc();
-          if (expira != null && DateTime.now().toUtc().isAfter(expira))
-            continue;
-        }
-
-        // Solo mostramos el más reciente
-        bool tieneUbicacion = false;
-        if ((ev['rol_disparador']?.toString() ?? '') == 'movil' &&
-            ev['ultima_lat'] != null &&
-            ev['ubicacion_expira_at'] != null) {
-          final expira =
-              DateTime.tryParse(ev['ubicacion_expira_at'].toString())?.toUtc();
-          tieneUbicacion =
-              expira != null && DateTime.now().toUtc().isBefore(expira);
-        }
-        if (mounted) {
-          _mostrarPanicoOverlay(
-            disparadoPor: ev['disparado_por_nombre'] ?? 'Sistema',
-            usuarioDisparador: ev['disparado_por_usuario']?.toString(),
-            rolDisparador: ev['rol_disparador'] ?? '',
-            eventoId: ev['id'] as int?,
-            tieneUbicacion: tieneUbicacion,
-          );
-        }
-        break; // Solo mostramos una vez el más reciente
-      }
-    } catch (_) {}
-  }
-
-  // =========================================================================
-  // PÁNICO — Alerta de emergencia
-  // =========================================================================
-
-  void _mostrarPanicoOverlay({
-    required String disparadoPor,
-    String? usuarioDisparador,
-    required String rolDisparador,
-    int? eventoId,
-    bool tieneUbicacion = false,
-  }) {
-    if (!mounted) return;
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      barrierColor: Colors.transparent,
-      builder: (_) => PanicoOverlay(
-        disparadoPor: disparadoPor,
-        usuarioDisparador: usuarioDisparador,
-        rolDisparador: rolDisparador,
-        eventoId: eventoId,
-        tieneUbicacion: tieneUbicacion,
-      ),
-    );
-  }
-
-  // Verifica si este móvil ya disparó pánico hoy (zona horaria local).
-  // Actualiza _panicoUsadoHoy para controlar la visibilidad del botón.
-  Future<void> _verificarPanicoUsadoHoy() async {
-    try {
-      final hoyInicio = DateTime.now().toLocal();
-      final hoyInicioUtc = DateTime(
-        hoyInicio.year,
-        hoyInicio.month,
-        hoyInicio.day,
-      ).toUtc().toIso8601String();
-
-      final resultado = await Supabase.instance.client
-          .from('eventos_panico')
-          .select('id')
-          .eq('disparado_por_id', widget.usuario['id'])
-          .eq('rol_disparador', 'movil')
-          .gte('created_at', hoyInicioUtc)
-          .limit(1);
-
-      if (mounted) {
-        setState(() => _panicoUsadoHoy = resultado.isNotEmpty);
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _dispararPanico() async {
-    try {
-      final yo = widget.usuario;
-
-      // Capturamos la última posición conocida para compartirla 24h
-      // con todos los receptores — más oportunidad de ubicar al
-      // móvil si pasa lo peor.
-      final pos = _ultimaPosicionConocida;
-      final ahoraUtc = DateTime.now().toUtc();
-      final expiraUtc = ahoraUtc.add(const Duration(hours: 24));
-
-      final insertado = await Supabase.instance.client
-          .from('eventos_panico')
-          .insert({
-            'disparado_por_id': yo['id'],
-            'disparado_por_nombre': yo['nombre'],
-            'disparado_por_usuario': yo['usuario'],
-            'rol_disparador': yo['rol'] ?? 'movil',
-            'tipo': 'global',
-            if (pos != null) 'ultima_lat': pos.latitude,
-            if (pos != null) 'ultima_lng': pos.longitude,
-            if (pos != null)
-              'ubicacion_actualizada_at': ahoraUtc.toIso8601String(),
-            if (pos != null) 'ubicacion_expira_at': expiraUtc.toIso8601String(),
-          })
-          .select('id')
-          .single();
-
-      // Activamos el compartido en vivo: el GPS tracker (siempre activo)
-      // alimentará este evento con cada nueva posición durante 24h.
-      if (pos != null) {
-        _eventoPanicoActivoId = insertado['id'] as int;
-        _panicoUbicacionExpiraAt = expiraUtc;
-      }
-
-      // Push a Central/Master siempre (sin filtro en_linea — ellos no lo usan)
-      // + todos los móviles que estén en línea. Excluir suspendidos en ambos casos.
-      final centralesYMasters = await Supabase.instance.client
-          .from('usuarios')
-          .select('id')
-          .inFilter('rol', ['central', 'master'])
-          .eq('activo', true)
-          .neq('suspendido', true);
-
-      final movilesEnLinea = await Supabase.instance.client
-          .from('usuarios')
-          .select('id')
-          .eq('rol', 'movil')
-          .eq('en_linea', true)
-          .neq('suspendido', true);
-
-      final ids = [
-        ...centralesYMasters.map((u) => u['id'].toString()),
-        ...movilesEnLinea.map((u) => u['id'].toString()),
-      ].where((id) => id != yo['id'].toString()).toSet().toList();
-
-      if (ids.isNotEmpty) {
-        await MotorNotificaciones.dispararRafa(
-          idsDestinos: ids,
-          titulo: '🚨 ALERTA DE PÁNICO',
-          mensaje:
-              '${yo['nombre']} (${(yo['usuario'] ?? '').toString().toUpperCase()}) activó la alerta de emergencia. Revisa tu situación.',
-          urgente: true,
-          sonido: Sonidos.panico,
-        );
-      }
-
-      // Marcar como usado hoy — el botón desaparece hasta mañana
-      if (mounted) setState(() => _panicoUsadoHoy = true);
-
-      // Confirmación discreta — solo para quien disparó.
-      // Sin colores de alarma: en una situación crítica, no debe
-      // delatar al usuario frente a terceros mirando su pantalla.
-      if (mounted) mostrarConfirmacionDiscreta(context);
-    } catch (e) {
-      debugPrint('_dispararPanico: $e');
-    }
-  }
-
-  // --- DETENER MI PROPIA ALERTA — antes de que se cumplan las 24h ---
-  // Sin esto, la única forma de que el compartido de ubicación parara
-  // era esperar la ventana completa de 24h — las alertas se podían
-  // acumular sin cerrarse nunca de verdad.
-  //
-  // silencioso=true: usado por el auto-cierre (ver abajo) cuando el
-  // sistema detecta que el moto ya está trabajando con normalidad
-  // (aceptó un servicio o se registró en un paradero) — eso por sí
-  // solo es una señal fuerte de que la emergencia ya pasó. No pide
-  // confirmación ni interrumpe el flujo en el que está, solo avisa
-  // con un toast discreto.
-  Future<void> _detenerMiAlertaPanico({bool silencioso = false}) async {
-    if (_eventoPanicoActivoId == null) return;
-
-    if (!silencioso) {
-      final confirmar = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          title: const Text('¿Detener tu alerta?'),
-          content: const Text(
-            'Dejas de compartir tu ubicación en vivo. Solo hazlo si ya '
-            'estás bien — Central y los demás móviles dejarán de ver tu '
-            'posición a partir de ahora.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Seguir compartiendo'),
-            ),
-            ElevatedButton(
-              style:
-                  ElevatedButton.styleFrom(backgroundColor: Colors.green[700]),
-              onPressed: () => Navigator.pop(ctx, true),
-              child: Text(
-                'YA ESTOY BIEN',
-                style:
-                    TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-              ),
-            ),
-          ],
-        ),
-      );
-      if (confirmar != true) return;
-    }
-
-    final idEvento = _eventoPanicoActivoId!;
-    try {
-      await Supabase.instance.client.from('eventos_panico').update({
-        // Expira YA — el campo que el GPS timer y el resto del
-        // sistema ya respetan para saber cuándo dejar de compartir.
-        'ubicacion_expira_at': DateTime.now().toUtc().toIso8601String(),
-      }).eq('id', idEvento);
-
-      if (mounted) {
-        setState(() {
-          _eventoPanicoActivoId = null;
-          _panicoUbicacionExpiraAt = null;
-        });
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              silencioso
-                  ? '✅ Alerta cerrada automáticamente — ya estás trabajando con normalidad.'
-                  : '✅ Alerta detenida. Ya no se comparte tu ubicación.',
-            ),
-            backgroundColor: Colors.green[700],
-          ),
-        );
-      }
-    } catch (e) {
-      debugPrint('_detenerMiAlertaPanico: $e');
-    }
   }
 
   Future<void> _cerrarSesionSegura() async {
@@ -2882,10 +2583,6 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _arranqueSeguro() async {
-    // PÁNICO 24H: si la app se cerró/reinició dentro de la ventana de 24h
-    // de una alerta propia, retomamos el compartido de ubicación.
-    await _restaurarPanicoActivo();
-
     LocationPermission permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied ||
         permission == LocationPermission.deniedForever) {
@@ -2902,43 +2599,11 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         }
       }
     } else {
-      // El GPS arranca si está en línea, O si hay un pánico activo dentro
-      // de su ventana de 24h (la ubicación de emergencia no espera turno).
-      final compartiendoPanico = _eventoPanicoActivoId != null &&
-          _panicoUbicacionExpiraAt != null &&
-          DateTime.now().toUtc().isBefore(_panicoUbicacionExpiraAt!);
-
-      if (_estaEnLinea || compartiendoPanico) {
+      // El GPS arranca solo si está en línea.
+      if (_estaEnLinea) {
         _iniciarRastreoGps();
-        if (_estaEnLinea) _iniciarHeartbeatUbicacion();
+        _iniciarHeartbeatUbicacion();
       }
-    }
-  }
-
-  /// Busca si este usuario disparó un pánico cuya ventana de 24h aún
-  /// no expiró, y de ser así, retoma el compartido de ubicación en vivo.
-  Future<void> _restaurarPanicoActivo() async {
-    try {
-      final nowIso = DateTime.now().toUtc().toIso8601String();
-      final activo = await Supabase.instance.client
-          .from('eventos_panico')
-          .select('id, ubicacion_expira_at')
-          .eq('disparado_por_id', widget.usuario['id'])
-          .eq('rol_disparador', 'movil')
-          .not('ubicacion_expira_at', 'is', null)
-          .gt('ubicacion_expira_at', nowIso)
-          .order('created_at', ascending: false)
-          .limit(1)
-          .maybeSingle();
-
-      if (activo != null) {
-        _eventoPanicoActivoId = activo['id'] as int;
-        _panicoUbicacionExpiraAt = DateTime.parse(
-          activo['ubicacion_expira_at'].toString(),
-        ).toUtc();
-      }
-    } catch (e) {
-      debugPrint('_restaurarPanicoActivo: $e');
     }
   }
 
@@ -3068,33 +2733,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
             }
           }
         } else if (pos != null) {
-          // Aunque esté offline, igual guardamos la última posición
-          // conocida — la necesitamos para el compartido de pánico.
+          // Aunque esté offline, guardamos la última posición conocida.
           _ultimaPosicionConocida = pos;
-        }
-
-        // --- COMPARTIDO DE PÁNICO 24H ---
-        // Si hay un evento de pánico activo y la ventana de 24h no ha
-        // expirado, también actualizamos su ubicación en tiempo real.
-        // Esto corre SIEMPRE, sin importar si el móvil está en línea —
-        // en una emergencia real, la ubicación debe seguir reportándose.
-        if (pos != null &&
-            _eventoPanicoActivoId != null &&
-            _panicoUbicacionExpiraAt != null) {
-          if (DateTime.now().toUtc().isBefore(_panicoUbicacionExpiraAt!)) {
-            try {
-              await Supabase.instance.client.from('eventos_panico').update({
-                'ultima_lat': pos.latitude,
-                'ultima_lng': pos.longitude,
-                'ubicacion_actualizada_at':
-                    DateTime.now().toUtc().toIso8601String(),
-              }).eq('id', _eventoPanicoActivoId!);
-            } catch (_) {}
-          } else {
-            // La ventana de 24h expiró — dejamos de compartir
-            _eventoPanicoActivoId = null;
-            _panicoUbicacionExpiraAt = null;
-          }
         }
       },
       // Auto-reinicio si Android mata el proveedor de ubicación.
@@ -3233,12 +2873,6 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
           'longitud': pos.longitude,
         }).eq('id', widget.usuario['id']);
         _miParaderoCache = nuevoParadero; // sincroniza la caché de geocerca
-
-        // AUTO-CIERRE DE PÁNICO: registrarse en un paradero para seguir
-        // trabajando es otra señal fuerte de que la emergencia ya pasó.
-        if (_eventoPanicoActivoId != null) {
-          _detenerMiAlertaPanico(silencioso: true);
-        }
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -4459,17 +4093,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
           _detenerHeartbeatUbicacion(); // Fallback GPS
           _notifReconexionActiva =
               false; // reset — la notif foreground desaparece al parar el servicio
-          // PÁNICO 24H: si hay una alerta activa dentro de su ventana de
-          // 24h, el GPS sigue corriendo aunque el móvil se marque offline.
-          // La ubicación de emergencia no se detiene por un toggle de turno.
-          final compartiendoPanico = _eventoPanicoActivoId != null &&
-              _panicoUbicacionExpiraAt != null &&
-              DateTime.now().toUtc().isBefore(_panicoUbicacionExpiraAt!);
-
-          if (!compartiendoPanico) {
-            _gpsTimer?.cancel();
-            _detenerHeartbeatUbicacion();
-          }
+          _gpsTimer?.cancel();
+          _detenerHeartbeatUbicacion();
         }
       });
 
@@ -5472,14 +5097,12 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                   final hoy = DateTime.now();
                   final esDomingo = hoy.weekday == DateTime.sunday;
                   return FutureBuilder<List<dynamic>>(
-                    future: Supabase.instance.client
-                        .from('solicitudes_recarga_wallet')
-                        .select('monto_solicitado, estado, created_at')
-                        .eq('movil_id', miPerfil['id'])
-                        .eq('estado', 'pendiente')
-                        .eq('tipo_solicitud', 'pago_semanal')
-                        .order('created_at', ascending: false)
-                        .limit(1),
+                    future: ConfigCache.solicitudPendiente(
+                      movilId: miPerfil['id'],
+                      columnas: 'monto_solicitado, estado, created_at',
+                      tipos: const ['pago_semanal'],
+                      estadoBilletera: ConfigCache.estadoBilletera(miPerfil),
+                    ),
                     builder: (_, snapRec) {
                       final pendiente =
                           snapRec.hasData && snapRec.data!.isNotEmpty
@@ -5610,11 +5233,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                               ],
                               // Instrucciones de pago (desde config_sistema)
                               FutureBuilder<Map<String, dynamic>?>(
-                                future: Supabase.instance.client
-                                    .from('config_sistema')
-                                    .select('info_recarga_wallet')
-                                    .eq('id', 1)
-                                    .maybeSingle(),
+                                future: ConfigCache.infoRecarga(),
                                 builder: (_, snapCfg) {
                                   final info = snapCfg
                                       .data?['info_recarga_wallet']
@@ -5790,13 +5409,11 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                 final planLabel =
                     tipoPlan == 'prediario' ? 'PREDIARIO' : 'POSTDIA';
                 return FutureBuilder<List<dynamic>>(
-                  future: Supabase.instance.client
-                      .from('solicitudes_recarga_wallet')
-                      .select('monto_solicitado, estado, created_at')
-                      .eq('movil_id', miPerfil['id'])
-                      .eq('estado', 'pendiente')
-                      .order('created_at', ascending: false)
-                      .limit(1),
+                  future: ConfigCache.solicitudPendiente(
+                    movilId: miPerfil['id'],
+                    columnas: 'monto_solicitado, estado, created_at',
+                    estadoBilletera: ConfigCache.estadoBilletera(miPerfil),
+                  ),
                   builder: (_, snapRec) {
                     final pendiente =
                         snapRec.hasData && snapRec.data!.isNotEmpty
@@ -9419,56 +9036,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                 }),
                 const SizedBox(height: 10),
 
-                // Chip WA receptor (teléfono manual)
-                if (servicio['telefono_receptor'] != null &&
-                    servicio['telefono_receptor']
-                        .toString()
-                        .trim()
-                        .isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: GestureDetector(
-                      onTap: () async {
-                        String num = servicio['telefono_receptor']
-                            .toString()
-                            .replaceAll(RegExp(r'[^0-9]'), '');
-                        if (num.length == 10) num = '57$num';
-                        final uri = Uri.parse(
-                            'https://wa.me/$num?text=${Uri.encodeComponent('Hola, soy el móvil de Serviexpress que lleva tu servicio.')}');
-                        await launchUrl(uri,
-                            mode: LaunchMode.externalApplication);
-                      },
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF25D366),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Text('📱',
-                                    style: TextStyle(fontSize: 13)),
-                                const SizedBox(width: 4),
-                                Text(
-                                  'WA ${servicio['telefono_receptor']}',
-                                  style: const TextStyle(
-                                    fontSize: 13,
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+                // (Chip "WA <teléfono>" eliminado: duplicaba el botón
+                // "WhatsApp Cliente" / "WA Cliente" de abajo.)
 
                 // Foto de comanda (solo en_origen y no mototaxi)
                 if (estado == 'en_origen' && !esMoto)
@@ -9543,7 +9112,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                           icon: const Text('📷',
                               style: TextStyle(fontSize: 20)),
                           label: const Text(
-                            'FOTOGRAFÍA DE LA COMANDA',
+                            'Foto de la Comanda',
                             style: TextStyle(
                                 fontWeight: FontWeight.bold, fontSize: 13),
                           ),
@@ -9856,8 +9425,11 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                       servicioId: servicio['id'],
                                       alarmaLocal: 'chat_movil',
                                       alarmaDestino: 'chat_cliente',
+                                      // Cliente de la app o, si no hay, el
+                                      // local del servicio (antes iba a la Central)
                                       destinatarioId:
-                                          (servicio['cliente_id'] as num?)
+                                          ((servicio['cliente_id'] ??
+                                                  servicio['local_id']) as num?)
                                               ?.toInt(),
                                       tipoFaq: TipoFaqChat.movil,
                                     ),
@@ -12847,14 +12419,6 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                   }).eq('id', widget.usuario['id']);
                   _miParaderoCache = null; // sincroniza caché local con la BD
 
-                  // AUTO-CIERRE DE PÁNICO: aceptar un servicio con
-                  // normalidad es una señal fuerte de que la emergencia
-                  // ya pasó — no hace falta esperar a que se cumplan
-                  // las 24h para dejar de compartir la ubicación.
-                  if (_eventoPanicoActivoId != null) {
-                    _detenerMiAlertaPanico(silencioso: true);
-                  }
-
                   // PAP: recién al aceptarlo se le cuenta y se le dicen los beneficios
                   if (servicio['es_punto_a_punto'] == true) {
                     _mostrarBeneficiosPAP();
@@ -12990,14 +12554,6 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
             'paradero_oferta_expira_at': null,
           }).eq('id', widget.usuario['id']);
       _miParaderoCache = null; // sincroniza caché local con la BD
-
-      // AUTO-CIERRE DE PÁNICO: aceptar un servicio con normalidad es
-      // una señal fuerte de que la emergencia ya pasó — no hace falta
-      // esperar a que se cumplan las 24h para dejar de compartir la
-      // ubicación.
-      if (_eventoPanicoActivoId != null) {
-        _detenerMiAlertaPanico(silencioso: true);
-      }
 
       // PAP: recién al aceptarlo se le cuenta y se le dicen los beneficios
       if (servicio['es_punto_a_punto'] == true) {
@@ -14019,11 +13575,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                 children: [
                   // ── Datos de pago configurados por Central ─────────────────
                   FutureBuilder<Map<String, dynamic>?>(
-                    future: Supabase.instance.client
-                        .from('config_sistema')
-                        .select('info_recarga_wallet')
-                        .eq('id', 1)
-                        .maybeSingle(),
+                    future: ConfigCache.infoRecarga(),
                     builder: (_, snapCfg) {
                       final info =
                           snapCfg.data?['info_recarga_wallet']?.toString();
@@ -14230,6 +13782,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                           'estado': 'pendiente',
                           'tipo_solicitud': tipoSolicitud,
                         });
+                        ConfigCache.invalidarSolicitudes();
                         // Notificar a la central
                         final _mp = _cacheMiPerfil ?? widget.usuario;
                         final _numMov = _mp['numero_movil'];
@@ -15100,37 +14653,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
           backgroundColor: Colors.black,
           iconTheme: const IconThemeData(color: Colors.white),
           actions: [
-            // AppBar simplificado: Perfil, Ranking y Cerrar sesión ahora
-            // viven en la pestaña de Perfil — el AppBar solo conserva lo
-            // que debe estar accesible SIEMPRE sin importar la pestaña:
-            // la alerta de pánico, por seguridad.
-
-            // ALERTA DE PÁNICO — solo visible en 2 casos:
-            // 1. Ya hay una activa → botón pulsante para DETENERLA.
-            // 2. Hay un servicio en curso Y no se ha usado hoy → botón para disparar.
-            // Fuera de servicio o ya usado: botón oculto (reduce abuso en fases de prueba).
-            if (_eventoPanicoActivoId != null &&
-                _panicoUbicacionExpiraAt != null &&
-                DateTime.now().toUtc().isBefore(_panicoUbicacionExpiraAt!))
-              PulsingPanicoButton(
-                color: Colors.red,
-                child: IconButton(
-                  icon: const Icon(Icons.shield_rounded, color: Colors.red),
-                  tooltip: 'Tu alerta sigue activa — toca para detenerla',
-                  onPressed: () => _detenerMiAlertaPanico(),
-                ),
-              )
-            else if (_tieneServicioActivo && !_panicoUsadoHoy)
-              BotonPanicoTrigger(
-                esCompacto: true,
-                segundos: 2,
-                icono: Icons.shield_rounded,
-                colorAcento: Colors.red,
-                titulo: 'ALERTA DE PÁNICO',
-                descripcion:
-                    'Se notificará a Central y a todos los móviles en línea. Usa esto solo en una emergencia real.',
-                onActivado: _dispararPanico,
-              ),
+            // AppBar simplificado: Perfil, Ranking y Cerrar sesión viven en
+            // la pestaña de Perfil.
             const SizedBox(width: 6),
           ],
         ),

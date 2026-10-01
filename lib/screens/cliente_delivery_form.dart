@@ -14,6 +14,17 @@ class ClienteDeliveryForm extends StatefulWidget {
 
 class _ClienteDeliveryFormState extends State<ClienteDeliveryForm> {
   final _formKey = GlobalKey<FormState>();
+  // "Rutas recientes": se consulta UNA vez al abrir (antes en cada redibujo)
+  // y solo con las columnas que se usan.
+  late final Future<List<Map<String, dynamic>>> _historialFuture =
+      Supabase.instance.client
+          .from('servicios')
+          .select('origen, destino')
+          .eq('cliente_id', widget.usuario['id'])
+          .eq('estado', 'finalizado')
+          .like('observacion', '%[ PAQUETERÍA ]%')
+          .order('id', ascending: false)
+          .limit(30);
   bool _procesando = false;
 
   final _telOrigenCtrl = TextEditingController();
@@ -320,14 +331,7 @@ class _ClienteDeliveryFormState extends State<ClienteDeliveryForm> {
 
   Widget _construirHistorial() {
     return FutureBuilder<List<Map<String, dynamic>>>(
-      future: Supabase.instance.client
-          .from('servicios')
-          .select()
-          .eq('cliente_id', widget.usuario['id'])
-          .eq('estado', 'finalizado')
-          .like('observacion', '%[ PAQUETERÍA ]%')
-          .order('id', ascending: false)
-          .limit(30),
+      future: _historialFuture,
       builder: (context, snapshot) {
         if (!snapshot.hasData || snapshot.data!.isEmpty)
           return const SizedBox.shrink();

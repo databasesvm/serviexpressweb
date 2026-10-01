@@ -48,6 +48,8 @@ class _ClienteScreenState extends State<ClienteScreen>
   StreamSubscription<List<Map<String, dynamic>>>? _subMiPerfil;
   Timer? _reconexionTimer;
   DateTime? _ultimaEmisionServicios; // Para reconexión condicional (anti-egress)
+  DateTime? _ultimaReconstruccion;   // Vigilante: respaldo cada 5 min sin datos
+  bool _streamConError = false;      // Vigilante: un stream dio error
 
   List<Map<String, dynamic>>? _cacheServiciosActivos;
   final ValueNotifier<int> _chatClienteCount = ValueNotifier(0);
@@ -82,13 +84,17 @@ class _ClienteScreenState extends State<ClienteScreen>
   void _construirStreams() {
     _subServiciosActivos?.cancel();
     _subMiPerfil?.cancel();
+    _streamConError = false;
+    _ultimaReconstruccion = DateTime.now();
 
     final crudoServicios = Supabase.instance.client
         .from('servicios')
         .stream(primaryKey: ['id'])
         .eq('cliente_id', widget.usuario['id'])
         .order('id', ascending: false)
-        .limit(50);
+        // 20 bastan: solo se usan los activos y los finalizados sin
+        // calificar (el historial tiene su propia consulta liviana).
+        .limit(20);
 
     final crudoPerfil = Supabase.instance.client
         .from('usuarios')
@@ -103,6 +109,7 @@ class _ClienteScreenState extends State<ClienteScreen>
         if (!_ctrlServiciosActivos.isClosed) _ctrlServiciosActivos.add(data);
       },
       onError: (e) {
+        _streamConError = true; // el vigilante reconstruye
         if (!_ctrlServiciosActivos.isClosed) _ctrlServiciosActivos.addError(e);
       },
     );
@@ -111,20 +118,27 @@ class _ClienteScreenState extends State<ClienteScreen>
         if (!_ctrlMiPerfil.isClosed) _ctrlMiPerfil.add(data);
       },
       onError: (e) {
+        _streamConError = true; // el vigilante reconstruye
         if (!_ctrlMiPerfil.isClosed) _ctrlMiPerfil.addError(e);
       },
     );
   }
 
-  // Reconstruye los streams SOLO si llevan más de 35s sin emitir datos.
-  // Evita reconexiones innecesarias que causan egress masivo en Supabase.
+  // Vigilante de conexión (cada 30 s). Antes reconstruía todo si los
+  // servicios no cambiaban en 35 s (en reposo pasaba cada 30 s aunque la
+  // conexión estuviera bien). Ahora solo si la conexión Realtime cayó, si un
+  // stream dio error, o como respaldo tras 5 min sin datos y sin reconstruir.
   void _iniciarVigilanteDeConexion() {
     _reconexionTimer?.cancel();
     _reconexionTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (!mounted) return;
-      final sinDatos = _ultimaEmisionServicios == null ||
-          DateTime.now().difference(_ultimaEmisionServicios!).inSeconds > 35;
-      if (sinDatos) _construirStreams();
+      final ahora = DateTime.now();
+      final socketCaido = !Supabase.instance.client.realtime.isConnected;
+      final sinDatosLargo = (_ultimaEmisionServicios == null ||
+              ahora.difference(_ultimaEmisionServicios!).inMinutes >= 5) &&
+          (_ultimaReconstruccion == null ||
+              ahora.difference(_ultimaReconstruccion!).inMinutes >= 5);
+      if (socketCaido || _streamConError || sinDatosLargo) _construirStreams();
     });
   }
 
@@ -313,24 +327,11 @@ class _ClienteScreenState extends State<ClienteScreen>
 
   Future<void> _cancelarPedido(int id) async {
     try {
-      final res = await Supabase.instance.client
+      await Supabase.instance.client
           .from('servicios')
           .update({'estado': 'cancelado'})
-          .eq('id', id)
-          .select('movil_id')
-          .maybeSingle();
-      // Notificar al móvil si ya tenía uno asignado
-      final movilId = res?['movil_id']?.toString();
-      if (movilId != null && movilId.isNotEmpty && movilId != 'null') {
-        MotorNotificaciones.dispararMisil(
-          idDestino: movilId,
-          titulo: '❌ Servicio cancelado',
-          mensaje: 'El servicio #$id fue cancelado por el cliente.',
-          urgente: false,
-          sonido: 'central_cancelado',
-          canalAndroidId: MotorNotificaciones.canalCanceladoId,
-        );
-      }
+          .eq('id', id);
+      // El aviso al móvil lo manda el SERVIDOR (trg_avisar_servicio_cancelado).
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

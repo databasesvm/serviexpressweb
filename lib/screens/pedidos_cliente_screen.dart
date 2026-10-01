@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
@@ -111,6 +112,7 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
   String _catFiltro = 'Todos';
   bool _cargando = true;
   RealtimeChannel? _canalPedidos;
+  Timer? _debouncePedidos;
 
   List<Map<String, dynamic>> get _localesFiltrados {
     return _locales.where((l) {
@@ -142,6 +144,7 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
   @override
   void dispose() {
     _canalPedidos?.unsubscribe();
+    _debouncePedidos?.cancel();
     super.dispose();
   }
 
@@ -155,27 +158,49 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
           .eq('rol', 'local')
           .order('nombre');
 
-      // Ratings por local
+      // Ratings por local: el servidor ya calcula el promedio (vista
+      // v_rating_locales) → 1 fila por local en vez de 1 por calificación.
       final ratingsData = await _db
-          .from('calificaciones')
-          .select('local_id, estrellas')
-          .eq('calificador_tipo', 'cliente_local')
-          .not('local_id', 'is', null);
-
-      final Map<int, List<int>> ratingsPorLocal = {};
+          .from('v_rating_locales')
+          .select('local_id, promedio');
+      final Map<int, double> promedios = {};
       for (final r in ratingsData) {
         final lid = (r['local_id'] as num?)?.toInt();
-        if (lid != null) {
-          ratingsPorLocal
-              .putIfAbsent(lid, () => [])
-              .add((r['estrellas'] as num).toInt());
-        }
+        final prom = (r['promedio'] as num?)?.toDouble();
+        if (lid != null && prom != null) promedios[lid] = prom;
       }
-      final Map<int, double> promedios = {};
-      ratingsPorLocal.forEach((lid, stars) {
-        promedios[lid] = stars.reduce((a, b) => a + b) / stars.length;
-      });
 
+      if (!mounted) return;
+      setState(() {
+        _locales = _ordenarLocales(locales);
+        _ratingPorLocal = promedios;
+      });
+      await _cargarPedidos();
+    } catch (e) {
+      if (mounted) setState(() => _cargando = false);
+    }
+  }
+
+  // Ordenar: abiertos primero, cerrados segundo, sin domicilio al final
+  List<Map<String, dynamic>> _ordenarLocales(List<dynamic> locales) {
+    final listaLocales = List<Map<String, dynamic>>.from(locales);
+    listaLocales.sort((a, b) {
+      int prioridad(Map<String, dynamic> l) {
+        if (l['domicilios_activo'] != true) return 2; // sin domicilio
+        if (_estaAbierto(l)) return 0;               // abierto
+        return 1;                                     // cerrado
+      }
+      final pa = prioridad(a), pb = prioridad(b);
+      if (pa != pb) return pa - pb;
+      return (a['nombre']?.toString() ?? '').compareTo(b['nombre']?.toString() ?? '');
+    });
+    return listaLocales;
+  }
+
+  // Solo los pedidos del cliente (activos + entregados 7 días). Es lo único
+  // que se recarga cuando cambia un pedido — locales y estrellas no.
+  Future<void> _cargarPedidos() async {
+    try {
       final pedidos = await _db
           .from('pedidos')
           .select('*, items_pedido(nombre_snapshot, cantidad, precio_snapshot, modificadores_json, notas_snapshot)')
@@ -215,22 +240,7 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
           .where((p) => !yaCalificados.contains(p['id'].toString()))
           .toList();
 
-      // Ordenar: abiertos primero, cerrados segundo, sin domicilio al final
-      final listaLocales = List<Map<String, dynamic>>.from(locales);
-      listaLocales.sort((a, b) {
-        int prioridad(Map<String, dynamic> l) {
-          if (l['domicilios_activo'] != true) return 2; // sin domicilio
-          if (_estaAbierto(l)) return 0;               // abierto
-          return 1;                                     // cerrado
-        }
-        final pa = prioridad(a), pb = prioridad(b);
-        if (pa != pb) return pa - pb;
-        return (a['nombre']?.toString() ?? '').compareTo(b['nombre']?.toString() ?? '');
-      });
-
       setState(() {
-        _locales = listaLocales;
-        _ratingPorLocal = promedios;
         _pedidosActivos = List<Map<String, dynamic>>.from(pedidos);
         _pedidosEntregados = List<Map<String, dynamic>>.from(entregados);
         _cargando = false;
@@ -258,13 +268,19 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
           event: PostgresChangeEvent.all,
           schema: 'public',
           table: 'pedidos',
-          callback: (payload) {
-            final rec = payload.newRecord;
-            if (rec.isEmpty) return;
-            if ((rec['cliente_id'] as num?)?.toInt() != widget.usuario['id']) {
-              return;
-            }
-            _cargarDatos();
+          // Filtro en el servidor: solo llegan los pedidos de ESTE cliente
+          // (antes llegaban los de todos y la app los descartaba).
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'cliente_id',
+            value: widget.usuario['id'],
+          ),
+          callback: (_) {
+            // Agrupa cambios seguidos en una sola recarga de pedidos.
+            _debouncePedidos?.cancel();
+            _debouncePedidos = Timer(const Duration(seconds: 1), () {
+              if (mounted) _cargarPedidos();
+            });
           },
         )
         .subscribe();
@@ -946,7 +962,7 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
       final localData = await _db
           .from('usuarios')
           .select(
-              'id, nombre, direccion, foto_perfil, tiempo_entrega, categoria_local, horario_apertura, horario_cierre, dias_semana, pedido_minimo')
+              'id, nombre, direccion, foto_perfil_url, tiempo_entrega, categoria_local, horario_apertura, horario_cierre, dias_semana, pedido_minimo')
           .eq('id', localId)
           .single();
 

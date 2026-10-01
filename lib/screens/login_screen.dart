@@ -854,7 +854,7 @@ class _LoginScreenState extends State<LoginScreen>
               'telefono': '',
               'contrasena': hashContrasena('google_$correo'),
               'activo': true,
-              'foto_perfil': foto,
+              'foto_perfil_url': foto,
               'google_auth': true,
             })
             .select()

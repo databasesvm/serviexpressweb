@@ -51,8 +51,6 @@ class _LocalScreenState extends State<LocalScreen>
   bool _guardandoPerfil = false;
   @override
   final SonidoManager _sonidos = SonidoManager();
-  RealtimeChannel? _canalEstados;
-  RealtimeChannel? _canalChat;
   /// Contador de servicios activos para el badge en la pestaña ACTIVOS
   final ValueNotifier<int> _activosCount = ValueNotifier(0);
 
@@ -76,9 +74,15 @@ class _LocalScreenState extends State<LocalScreen>
   StreamSubscription<List<Map<String, dynamic>>>? _subServiciosLocal;
   Timer? _reconexionTimer;
 
-  // Caché anti-parpadeo: evita spinner al reconectar cada 30s
+  // Caché anti-parpadeo: evita spinner al reconectar
   List<Map<String, dynamic>>? _cachePerfilPropio;
   List<Map<String, dynamic>>? _cacheServiciosLocal;
+
+  // Último estado y móvil CONOCIDOS de cada servicio del local. El evento de
+  // Realtime no trae el "antes" (solo el id), así que comparamos contra esto
+  // para sonar SOLO cuando cambia algo visible en la tarjeta (estado o móvil)
+  // y no con los movimientos internos de la cascada (fases, ofertas, avisos).
+  final Map<int, ({String estado, String? movil})> _estadoConocido = {};
 
   // FAB chat: se activa cuando el móvil escribe al local en un servicio activo
   final ValueNotifier<int> _chatLocalCount = ValueNotifier(0);
@@ -126,76 +130,87 @@ class _LocalScreenState extends State<LocalScreen>
       if (!kIsWeb && mounted) await OtaUpdater.verificar(context);
     });
 
-    // Canal: detecta cambios de estado en los servicios de este local.
-    // OPTIMIZACIÓN: filtro server-side por local_id — antes llegaban UPDATEs
-    // de servicios de TODOS los locales del sistema a TODOS los dispositivos.
-    _canalEstados = Supabase.instance.client
-        .channel('local_estados_${widget.usuario['id']}')
-        .onPostgresChanges(
-          event: PostgresChangeEvent.update,
-          schema: 'public',
-          table: 'servicios',
-          filter: PostgresChangeFilter(
-            type: PostgresChangeFilterType.eq,
-            column: 'local_id',
-            value: widget.usuario['id'],
-          ),
-          callback: (payload) {
-            if (!mounted) return;
-            final nuevo = payload.newRecord;
-            final viejo = payload.oldRecord;
-            final String estadoNuevo = nuevo['estado']?.toString() ?? '';
-            final String estadoAnterior = viejo['estado']?.toString() ?? '';
+    // OPTIMIZACIÓN: ya no hay canales extra. Antes había uno que recibía
+    // los mismos cambios que el stream de servicios (duplicado) y otro que
+    // recibía TODOS los mensajes de chat del sistema. Los sonidos de estado
+    // y de chat se calculan ahora dentro de los listeners del stream
+    // (_sonidosPorCambios y _sonidoChatPerfil).
+  }
 
-            // Móvil asignado directamente (movil_id: null → valor) sin cambio de estado
-            // p.ej. asignación manual desde central que no cambia el estado aún
-            final movilAntes = viejo['movil_id'];
-            final movilAhora = nuevo['movil_id'];
-            if (movilAntes == null && movilAhora != null) {
-              _sonidos.reproducirSuave(Sonidos.localEstado);
-              return;
-            }
+  // ── SONIDOS desde el stream de servicios ─────────────────────────────────
+  // Compara cada servicio contra lo último conocido (_estadoConocido) y
+  // suena SOLO si cambió algo visible en la tarjeta: el estado o la
+  // asignación de móvil. Los movimientos internos de la cascada no suenan.
+  // También detecta mensajes de chat nuevos del móvil (chat_cliente: false→true).
+  // Máximo un sonido por actualización (prioridad: cotización > estado > chat).
+  final Set<int> _chatConMsg = {};
+  bool _chatInicializado = false;
+  bool _chatCentralPrevio = false;
+  bool _perfilInicializado = false;
 
-            if (estadoNuevo == estadoAnterior) return;
+  void _sonidosPorCambios(List<Map<String, dynamic>> data) {
+    if (!mounted) return;
+    int? cotizada;
+    bool cambioEstado = false;
+    bool chatNuevo = false;
 
-            // Central respondió la cotización → alerta fuerte + glow en card
-            if (estadoAnterior == 'cotizacion' && estadoNuevo == 'cotizada') {
-              _sonidos.reproducir(Sonidos.localRespuesta);
-              final int svcId = nuevo['id'] as int;
-              _cotizadasRecientes.add(svcId);
-              setState(() {});
-              Future.delayed(const Duration(seconds: 4), () {
-                if (!mounted) return;
-                _cotizadasRecientes.remove(svcId);
-                setState(() {});
-              });
-            } else {
-              // Todos los demás cambios de estado → mismo sonido suave
-              // (en_ruta_origen, en_origen, en_ruta_destino, finalizado, etc.)
-              _sonidos.reproducirSuave(Sonidos.localEstado);
-            }
-          },
-        )
-        .subscribe();
+    for (final s in data) {
+      final sid = (s['id'] as num?)?.toInt();
+      if (sid == null) continue;
+      final String estadoNuevo = s['estado']?.toString() ?? '';
+      final String? movilAhora = s['movil_id']?.toString();
+      final previo = _estadoConocido[sid];
+      _estadoConocido[sid] = (estado: estadoNuevo, movil: movilAhora);
 
-    // Canal: detecta mensajes de chat nuevos
-    _canalChat = Supabase.instance.client
-        .channel('local_chat_${widget.usuario['id']}')
-        .onPostgresChanges(
-          event: PostgresChangeEvent.insert,
-          schema: 'public',
-          table: 'mensajes',
-          callback: (payload) {
-            final doc = payload.newRecord;
-            if (doc.isEmpty || !mounted) return;
-            final emisorId = doc['emisor_id']?.toString();
-            final miId = widget.usuario['id']?.toString();
-            if (emisorId != null && emisorId != miId) {
-              _sonidos.reproducirSuave(Sonidos.localChat);
-            }
-          },
-        )
-        .subscribe();
+      // Chat del móvil hacia el local
+      final bool tieneMsg = s['chat_cliente'] == true;
+      if (tieneMsg) {
+        if (_chatInicializado && !_chatConMsg.contains(sid)) chatNuevo = true;
+        _chatConMsg.add(sid);
+      } else {
+        _chatConMsg.remove(sid);
+      }
+
+      if (previo == null) continue; // primera vez que lo vemos: sin sonido
+      if (estadoNuevo != previo.estado) {
+        if (previo.estado == 'cotizacion' && estadoNuevo == 'cotizada') {
+          cotizada = sid;
+        } else {
+          cambioEstado = true;
+        }
+      } else if (previo.movil == null && movilAhora != null) {
+        cambioEstado = true; // móvil asignado sin cambio de estado
+      }
+    }
+    _chatInicializado = true;
+
+    if (cotizada != null) {
+      // Central respondió la cotización → alerta fuerte + glow en la tarjeta
+      _sonidos.reproducir(Sonidos.localRespuesta);
+      final int svcId = cotizada;
+      _cotizadasRecientes.add(svcId);
+      setState(() {});
+      Future.delayed(const Duration(seconds: 4), () {
+        if (!mounted) return;
+        _cotizadasRecientes.remove(svcId);
+        setState(() {});
+      });
+    } else if (cambioEstado) {
+      _sonidos.reproducirSuave(Sonidos.localEstado);
+    } else if (chatNuevo) {
+      _sonidos.reproducirSuave(Sonidos.localChat);
+    }
+  }
+
+  // Chat de soporte de la Central hacia el local (usuarios.chat_central: false→true)
+  void _sonidoChatPerfil(List<Map<String, dynamic>> data) {
+    if (data.isEmpty || !mounted) return;
+    final bool ahora = data.first['chat_central'] == true;
+    if (_perfilInicializado && ahora && !_chatCentralPrevio) {
+      _sonidos.reproducirSuave(Sonidos.localChat);
+    }
+    _chatCentralPrevio = ahora;
+    _perfilInicializado = true;
   }
 
   // Reconstruye ambos streams reenviando hacia los controllers
@@ -216,25 +231,27 @@ class _LocalScreenState extends State<LocalScreen>
         // NOTA: stream() solo admite 1 .eq(). No se puede añadir
         // .eq('oculto_local', false) — rompe el SDK. Se filtra abajo.
         .order('id', ascending: false)
-        // OPTIMIZACIÓN: 200 registros cubren cualquier día operativo holgado.
-        // El HISTORIAL solo muestra servicios de HOY (filtro created_at en Dart)
-        // → nunca se necesita historial de semanas anteriores en tiempo real.
-        // Sin este límite, el stream descargaba TODO el historial del local
-        // desde siempre en cada reconexión (cada 30s).
-        .limit(200);
+        // OPTIMIZACIÓN: el local solo muestra activos + historial de HOY
+        // (filtro created_at en Dart). 80 cubren holgado un día operativo.
+        .limit(80);
 
     _subPerfilPropio = crudoPerfil.listen(
       (data) {
         _cachePerfilPropio = data;
+        _sonidoChatPerfil(data);
         if (!_ctrlPerfilPropio.isClosed) _ctrlPerfilPropio.add(data);
       },
       onError: (e) {
         if (!_ctrlPerfilPropio.isClosed) _ctrlPerfilPropio.addError(e);
+        _reconectarTrasError();
       },
     );
     _subServiciosLocal = crudoServicios.listen(
       (data) {
         _cacheServiciosLocal = data;
+        // Sonidos (estado / móvil asignado / cotización / chat) comparando
+        // contra lo último conocido. Reemplaza los dos canales extra.
+        _sonidosPorCambios(data);
         _chatLocalCount.value = data.where((s) => s['chat_cliente'] == true).length;
         _activosCount.value = data.where((s) =>
           s['oculto_local'] != true &&
@@ -246,8 +263,55 @@ class _LocalScreenState extends State<LocalScreen>
       },
       onError: (e) {
         if (!_ctrlServiciosLocal.isClosed) _ctrlServiciosLocal.addError(e);
+        _reconectarTrasError();
       },
     );
+  }
+
+  // Si un stream falla, reconstruye en 3 s (una sola vez aunque fallen ambos).
+  Timer? _timerReconexionError;
+  void _reconectarTrasError() {
+    if (_timerReconexionError?.isActive == true) return;
+    _timerReconexionError = Timer(const Duration(seconds: 3), () {
+      if (mounted) _construirStreams();
+    });
+  }
+
+  // Revisión LIVIANA de que la conexión en vivo no se haya muerto en silencio:
+  // pide al servidor solo el último cambio de los servicios del local (1 fila,
+  // 2 columnas) y lo compara con lo que tiene la app. Si no coincide, se
+  // perdieron cambios → reconstruye los streams. Reemplaza la recarga completa
+  // cada 30 s (perfil + hasta 200 servicios con todas sus columnas).
+  Future<void> _verificarFrescura() async {
+    if (!mounted) return;
+    try {
+      final r = await Supabase.instance.client
+          .from('servicios')
+          .select('id, updated_at')
+          .eq('local_id', widget.usuario['id'])
+          .order('updated_at', ascending: false)
+          .limit(1)
+          .maybeSingle();
+      if (r == null) return; // el local aún no tiene servicios
+      final cache = _cacheServiciosLocal;
+      final local = cache?.firstWhere(
+        (s) => s['id'].toString() == r['id'].toString(),
+        orElse: () => <String, dynamic>{},
+      );
+      // Se comparan como fechas (el formato del texto puede variar entre
+      // la conexión en vivo y la consulta normal).
+      final DateTime? enServidor =
+          DateTime.tryParse(r['updated_at']?.toString() ?? '');
+      final DateTime? enApp = (local == null || local.isEmpty)
+          ? null
+          : DateTime.tryParse(local['updated_at']?.toString() ?? '');
+      final bool alDia = enServidor != null &&
+          enApp != null &&
+          enApp.isAtSameMomentAs(enServidor);
+      if (!alDia && mounted) _construirStreams();
+    } catch (_) {
+      // Sin red: el onError del stream o el regreso a la app reconectan.
+    }
   }
 
   // Abre el chat del servicio donde el móvil escribió al local
@@ -270,14 +334,14 @@ class _LocalScreenState extends State<LocalScreen>
     ));
   }
 
-  // Reconstruye cada 30s. No usa setState() — la reconexión es
-  // invisible para el árbol de widgets, así que no hace falta forzar
-  // ningún rebuild para lograrla.
+  // Vigilante: cada 60 s hace la revisión liviana (_verificarFrescura) y solo
+  // reconstruye los streams si de verdad se perdieron cambios. Antes
+  // reconstruía TODO cada 30 s aunque la conexión estuviera bien.
   void _iniciarVigilanteDeConexion() {
     _reconexionTimer?.cancel();
-    _reconexionTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+    _reconexionTimer = Timer.periodic(const Duration(seconds: 60), (_) {
       if (!mounted) return;
-      _construirStreams();
+      _verificarFrescura();
     });
   }
 
@@ -285,7 +349,7 @@ class _LocalScreenState extends State<LocalScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // Momento de mayor riesgo: el local minimiza la app (cambia a
     // WhatsApp, etc.) y al volver el canal puede estar muerto.
-    // Reconstruimos de inmediato, sin esperar los 30s.
+    // Reconstruimos de inmediato al volver a la app.
     if (state == AppLifecycleState.resumed && mounted) {
       _construirStreams();
     }
@@ -294,9 +358,8 @@ class _LocalScreenState extends State<LocalScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _canalEstados?.unsubscribe();
-    _canalChat?.unsubscribe();
     _reconexionTimer?.cancel();
+    _timerReconexionError?.cancel();
     _subPerfilPropio?.cancel();
     _subServiciosLocal?.cancel();
     _ctrlPerfilPropio.close();

@@ -129,7 +129,7 @@ class _GuestDeliveryFormState extends State<GuestDeliveryForm> {
             'observacion': notaFinal,
             'estado': 'cotizacion',
           })
-          .select()
+          .select('id') // solo se usa el id para el seguimiento
           .single();
 
       // Guardamos el ID del pedido para el Tracker del invitado

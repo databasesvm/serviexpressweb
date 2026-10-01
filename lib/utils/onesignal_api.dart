@@ -39,8 +39,6 @@ class MotorNotificaciones {
   // ── CANALES ANDROID (deben coincidir con ServiMotoApp.kt) ───────────────
   // Alertas de servicio (alerta.mp3) — T=0 para no-masters, paradero, cascada
   static const String _canalAlarmaId       = 'serviexpress_alerta_v2';
-  // Pánico (panico.mp3)
-  static const String canalPanicoId        = 'serviexpress_panico_v1';
   // Masters rango MASTER — sonido suave (master.mp3)
   static const String canalMasterId        = 'serviexpress_master_v1';
   // Inactividad 5h45min (movil_inactividad.mp3)
@@ -76,7 +74,6 @@ class MotorNotificaciones {
     bool urgente = true,
     String sonido = 'alerta',
     /// Override del canal Android. Por defecto usa _canalAlarmaId.
-    /// Usar _canalPanicoId para alertas de pánico.
     String? canalAndroidId,
     /// collapse_id de OneSignal: si hay una notif previa con el mismo ID,
     /// la reemplaza en lugar de apilar otra. Útil para activaciones.

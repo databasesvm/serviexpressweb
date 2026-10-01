@@ -457,7 +457,7 @@ class _HistorialServiciosScreenState extends State<HistorialServiciosScreen> {
                   child: Row(mainAxisSize: MainAxisSize.min, children: [
                     Text('📷', style: const TextStyle(fontSize: 9)),
                     const SizedBox(width: 3),
-                    Text('foto comanda',
+                    Text('Foto de la Comanda',
                         style: TextStyle(fontSize: 9, color: Colors.brown[700], fontWeight: FontWeight.w600)),
                   ]),
                 ),

@@ -2642,18 +2642,8 @@ extension CentralScreenFormularios on _CentralScreenState {
                                           'SISTEMA: Fusionado dentro del bloque #${svcPrincipal['id']}',
                                     })
                                     .eq('id', svcSecundario['id']);
-                                // Notificar al móvil del secundario si tenía uno asignado
-                                final movilIdSec = svcSecundario['movil_id']?.toString();
-                                if (movilIdSec != null && movilIdSec.isNotEmpty && movilIdSec != 'null') {
-                                  MotorNotificaciones.dispararMisil(
-                                    idDestino: movilIdSec,
-                                    titulo: '❌ Servicio cancelado',
-                                    mensaje: 'El servicio #${svcSecundario['id']} fue fusionado y cancelado.',
-                                    urgente: false,
-                                    sonido: 'central_cancelado',
-                                    canalAndroidId: MotorNotificaciones.canalCanceladoId,
-                                  );
-                                }
+                                // El aviso al móvil del secundario lo manda el
+                                // SERVIDOR (trg_avisar_servicio_cancelado).
 
                                 if (ctx.mounted) {
                                   Navigator.pop(ctx);

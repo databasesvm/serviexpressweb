@@ -152,7 +152,7 @@ class _ClienteMototaxiFormState extends State<ClienteMototaxiForm> {
 
       final data = await Supabase.instance.client
           .from('servicios')
-          .select()
+          .select('origen, destino') // solo lo que usa "rutas recientes"
           .eq('cliente_id', clienteId)
           .eq('estado', 'finalizado')
           .like('observacion', '%[ MOTOTAXI ]%')

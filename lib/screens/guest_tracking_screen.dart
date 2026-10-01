@@ -26,6 +26,9 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
   // cada emit posterior del stream (GPS, chat, etc.).
   Future<List<Map<String, dynamic>>>? _futureMovilGst;
 
+  // Cache de "¿ya califiqué?" por servicio (evita re-consultar en cada redibujo).
+  final Map<dynamic, Future<List<Map<String, dynamic>>>> _futureCalifGst = {};
+
   @override
   void initState() {
     super.initState();
@@ -265,6 +268,9 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
                               ? null
                               : comentarioCtrl.text.trim(),
                         }, onConflict: 'servicio_id, calificador_tipo');
+                        // Volver a consultar "¿ya califiqué?" para mostrarlo.
+                        _futureCalifGst.remove(servicio['id']);
+                        if (mounted) setState(() {});
 
                         // Actualizar puntuación del móvil (solo si está asignado)
                         if (movilId != null) {
@@ -704,11 +710,14 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
                         servicio['movil_id'] != null) ...[
                       const SizedBox(height: 20),
                       FutureBuilder<List<Map<String, dynamic>>>(
-                        future: Supabase.instance.client
-                            .from('calificaciones')
-                            .select('estrellas')
-                            .eq('servicio_id', servicio['id'])
-                            .eq('calificador_tipo', 'invitado'),
+                        // Una consulta por servicio (antes en cada redibujo).
+                        // Se invalida justo después de calificar.
+                        future: _futureCalifGst[servicio['id']] ??=
+                            Supabase.instance.client
+                                .from('calificaciones')
+                                .select('estrellas')
+                                .eq('servicio_id', servicio['id'])
+                                .eq('calificador_tipo', 'invitado'),
                         builder: (context, snap) {
                           final yaCalifique =
                               snap.hasData && snap.data!.isNotEmpty;

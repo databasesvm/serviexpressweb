@@ -66,8 +66,8 @@ String movilLabelConNombre(Map<String, dynamic> u) {
 
 // =========================================================================
 // PULSING PANICO BUTTON — Latido de corazón + borde/glow animado
-// Úsalo cuando un botón de pánico o convocatoria está ACTIVO.
-// Parámetros: color = color del glow (rojo para pánico, naranja para convocatoria)
+// Se usa en los botones de aviso de chat (central, local, cliente, móvil).
+// Parámetros: color = color del glow
 // =========================================================================
 class PulsingPanicoButton extends StatefulWidget {
   final Widget child;

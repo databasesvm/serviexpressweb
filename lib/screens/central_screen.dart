@@ -10,6 +10,8 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:serviexpress_app/screens/reporte_financiero_screen.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart';
 import 'package:serviexpress_app/utils/textos_push.dart'; // Textos únicos de push SE
+import 'package:serviexpress_app/utils/hora_servidor.dart'; // Reloj alineado con el servidor
+import 'package:serviexpress_app/utils/cascada_config.dart'; // Tiempos de la cascada SE
 import 'package:serviexpress_app/screens/chat_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
@@ -17,7 +19,6 @@ import 'package:serviexpress_app/screens/ranking_screen.dart'; // FIX #7: fuente
 import 'package:serviexpress_app/screens/monitor_pedidos_screen.dart';
 import 'package:serviexpress_app/utils/widgets_compartidos.dart'; // FIX #10: widgets compartidos sin duplicados
 import 'package:serviexpress_app/utils/sonido_manager.dart'; // SONIDOS: motor de audio in-app
-import 'package:serviexpress_app/utils/panico_widgets.dart'; // Botón de pánico
 import 'package:serviexpress_app/utils/campo_tarifa_inteligente.dart'; // Motor de tarifas
 import 'package:serviexpress_app/services/ota_updater.dart'; // OTA updates
 import 'package:serviexpress_app/screens/fn_panel_screen.dart'; // Panel FN Farmanorte
@@ -57,7 +58,6 @@ class _CentralScreenState extends State<CentralScreen>
   final SonidoManager _sonidos = SonidoManager(); // Motor de audio in-app
   RealtimeChannel? _canalRadarCentral;
   RealtimeChannel? _canalChatCentral;
-  RealtimeChannel? _canalPanico;
   RealtimeChannel? _canalUbicacionesMoviles; // Canal dedicado: refresca mapa al cambiar lat/lng
   RealtimeChannel? _canalActivaciones;
   RealtimeChannel? _canalFn; // Solicitudes FN desde sedes
@@ -67,13 +67,6 @@ class _CentralScreenState extends State<CentralScreen>
   final Map<String, int> _activacionNotifIds = {};
   // Listener de OneSignal guardado para poder removerlo en dispose().
   void Function(OSNotificationWillDisplayEvent)? _listenerActivacion;
-
-  // Timers de expiración automática para alertas de pánico (2 min)
-  Timer? _timerExpiracionGlobal;
-  Timer? _timerExpiracionIndividual;
-
-  // Estado de convocatoria global activa — controla botón "Detener"
-  bool _convocatoriaGlobalActiva = false;
 
   // Sección desconectados — colapsable
   bool _desconectadosExpandidos = false;
@@ -142,6 +135,16 @@ class _CentralScreenState extends State<CentralScreen>
 
   // Timestamp de última actualización del stream de servicios
   DateTime _ultimaActualizacion = DateTime.now();
+  // FAB de soporte general: stream creado una sola vez (E5)
+  late final Stream<List<Map<String, dynamic>>> _streamAlarmaSoporte =
+      Supabase.instance.client
+          .from('usuarios')
+          .stream(primaryKey: ['id'])
+          .eq('alarma_soporte', true)
+          .asBroadcastStream();
+  // Vigilante de conexión (E4)
+  bool _streamCentralConError = false;
+  DateTime _ultimaReconstruccionCentral = DateTime.now();
 
   /// Contadores de mensajes no leídos por sala (sala_id → cantidad).
   /// Se incrementa cuando llega un mensaje ajeno en el canal Realtime.
@@ -166,7 +169,7 @@ class _CentralScreenState extends State<CentralScreen>
   StreamSubscription<List<Map<String, dynamic>>>? _subUsuariosMoviles;
   StreamSubscription<List<Map<String, dynamic>>>? _subServiciosMonitor;
   Timer? _reconexionTimer;
-  Timer? _debounceUbicaciones;   // Limita el REST fetch de ubicaciones a 1 por segundo
+  Timer? _debounceUbicaciones;   // Agrupa avisos de ubicación en un solo refresco del mapa
   Timer? _debounceActivaciones;  // Evita refetch de pendientes en cada GPS PATCH
 
   // Caché de motos — se actualiza en el listener de _subUsuariosMoviles
@@ -202,6 +205,8 @@ class _CentralScreenState extends State<CentralScreen>
   @override
   void initState() {
     super.initState();
+    // Monitor: las fases de la cascada se cuentan con la hora del servidor.
+    HoraServidor.sincronizar(forzar: true);
 
     // --- INYECCIÓN TÁCTICA 1: IDENTIDAD Y PERMISOS PUSH (SOLO MÓVIL) ---
     // OneSignal no tiene soporte web — guard kIsWeb obligatorio.
@@ -268,8 +273,7 @@ class _CentralScreenState extends State<CentralScreen>
     // hacia los controllers estables de arriba — sin parpadeo — y
     // _iniciarVigilanteDeConexion() la reconstruye cada 30s + al volver
     // de segundo plano, para que nunca haga falta cerrar la app.
-    _preCargarDatosIniciales(); // Carga REST inmediata — paradero visible sin esperar WebSocket
-    _construirStreams();
+    _construirStreams(); // Carga REST de móviles y servicios (los canales los mantienen en vivo)
     _iniciarVigilanteDeConexion();
     _construirCanalFn(); // Canal Realtime para solicitudes FN desde sedes
     Future.delayed(const Duration(milliseconds: 700), _cargarReportesSinLeer);
@@ -319,6 +323,7 @@ class _CentralScreenState extends State<CentralScreen>
                         s['chat_movil_central'] == true ||
                         s['chat_cliente_central'] == true)
                     .length;
+                _ultimaActualizacion = DateTime.now();
                 _ctrlServiciosMonitor.add(List.from(_cacheSvcMonitor));
               }
             }
@@ -381,62 +386,70 @@ class _CentralScreenState extends State<CentralScreen>
                       s['chat_movil_central'] == true ||
                       s['chat_cliente_central'] == true)
                   .length;
+              _ultimaActualizacion = DateTime.now();
               _ctrlServiciosMonitor.add(List.from(_cacheSvcMonitor));
             }
           },
         )
-        .subscribe();
+        .subscribe((status, _) {
+          // Si el canal da error o se cierra, el vigilante recarga.
+          if (status != RealtimeSubscribeStatus.subscribed) {
+            _streamCentralConError = true;
+          }
+        });
 
-    // --- CANAL UBICACIONES: refresca el mapa al instante cuando un móvil
-    // actualiza su lat/lng. El .stream() de usuarios puede tener lag de
-    // varios segundos; este canal Postgres dispara un REST fetch inmediato
-    // en cuanto detecta cualquier UPDATE en la tabla usuarios (en_linea,
-    // latitud, longitud, etc.) — así el mapa siempre muestra posiciones frescas.
+    // --- CANAL MÓVILES (F): única fuente en vivo de la lista de móviles de
+    // la central (mapa, panel, fila). Toma la fila completa que trae el
+    // aviso y la aplica al instante, sin consultar la BD. Ignora clientes,
+    // locales y sedes. Agrega móviles nuevos y quita los eliminados.
     _canalUbicacionesMoviles?.unsubscribe();
     _canalUbicacionesMoviles = Supabase.instance.client
         .channel('central_ubicaciones_moviles')
         .onPostgresChanges(
-          event: PostgresChangeEvent.update,
+          event: PostgresChangeEvent.all,
           schema: 'public',
           table: 'usuarios',
-          callback: (_) {
-            // Debounce: si hay 10 motos actualizando lat/lng al mismo tiempo,
-            // agrupa los eventos y hace UN solo fetch 800ms después del último.
+          callback: (payload) {
+            final upd = payload.newRecord;
+            if (payload.eventType == PostgresChangeEvent.delete || upd.isEmpty) {
+              final idBorrado = payload.oldRecord['id'];
+              if (idBorrado == null) return;
+              final antes = _movilesCache.length;
+              _movilesCache =
+                  _movilesCache.where((m) => m['id'] != idBorrado).toList();
+              if (_movilesCache.length == antes) return;
+            } else {
+              final esMovil = upd['rol'] == 'movil' || upd['es_dual'] == true;
+              final idx =
+                  _movilesCache.indexWhere((m) => m['id'] == upd['id']);
+              if (!esMovil) {
+                // Dejó de ser móvil/dual → sacarlo; si nunca lo fue, ignorar.
+                if (idx < 0) return;
+                _movilesCache = List<Map<String, dynamic>>.from(_movilesCache)
+                  ..removeAt(idx);
+              } else if (idx < 0) {
+                _movilesCache = [..._movilesCache, Map<String, dynamic>.from(upd)];
+              } else {
+                _movilesCache[idx] = {..._movilesCache[idx], ...upd};
+              }
+            }
+            // Agrupa avisos seguidos en un solo refresco del mapa.
             _debounceUbicaciones?.cancel();
-            _debounceUbicaciones = Timer(const Duration(milliseconds: 800), () {
+            _debounceUbicaciones = Timer(const Duration(milliseconds: 300), () {
               if (!mounted) return;
-              // Solo traemos los campos de ubicación — el cache completo ya lo
-              // mantiene el .stream() de usuarios. Hacemos MERGE para no perder
-              // nombre, rango, wallet, etc. que el stream ya cargó.
-              Supabase.instance.client
-                  .from('usuarios')
-                  .select('id, en_linea, latitud, longitud, paradero_actual, ingreso_fila, ticket_prioridad')
-                  .or('rol.eq.movil,es_dual.eq.true')
-                  .then((data) {
-                    for (final upd in data) {
-                      final idx = _movilesCache
-                          .indexWhere((m) => m['id'] == upd['id']);
-                      if (idx >= 0) {
-                        _movilesCache[idx] = {
-                          ..._movilesCache[idx],
-                          'en_linea':        upd['en_linea'],
-                          'latitud':         upd['latitud'],
-                          'longitud':        upd['longitud'],
-                          'paradero_actual': upd['paradero_actual'],
-                          'ingreso_fila':    upd['ingreso_fila'],
-                          'ticket_prioridad':upd['ticket_prioridad'],
-                        };
-                      }
-                    }
-                    if (!_ctrlUsuariosMoviles.isClosed) {
-                      _ctrlUsuariosMoviles.add(_movilesCache);
-                    }
-                  })
-                  .catchError((_) {});
+              if (!_ctrlUsuariosMoviles.isClosed) {
+                _ctrlUsuariosMoviles
+                    .add(List<Map<String, dynamic>>.from(_movilesCache));
+              }
             });
           },
         )
-        .subscribe();
+        .subscribe((status, _) {
+          // Si el canal da error o se cierra, el vigilante recarga.
+          if (status != RealtimeSubscribeStatus.subscribed) {
+            _streamCentralConError = true;
+          }
+        });
 
     // --- CANAL CHAT: SUENA CUANDO LLEGA UN MENSAJE A CUALQUIER SALA ---
     _canalChatCentral = Supabase.instance.client
@@ -448,10 +461,20 @@ class _CentralScreenState extends State<CentralScreen>
           callback: (payload) {
             final doc = payload.newRecord;
             if (doc.isEmpty) return;
-            // Solo contar y sonar si el mensaje NO lo envió la Central misma
+            // Solo contar y sonar si el mensaje va DIRIGIDO a la Central
+            // (salas soporte_*) y NO lo envió la Central. La Central escribe
+            // con emisor_id = 0 (ChatScreen miId: 0); antes se oía a sí misma
+            // y sonaba también con los chats móvil ↔ cliente/local (servicio_*).
             final emisorId = doc['emisor_id']?.toString();
             final miId = widget.usuario?['id']?.toString();
-            if (emisorId != null && emisorId != miId) {
+            final salaChat = doc['sala_id']?.toString() ?? '';
+            // -1 = respuestas automáticas del asistente (bot): no suenan
+            final esDeCentral = emisorId == null ||
+                emisorId == '0' ||
+                emisorId == '-1' ||
+                emisorId == miId;
+            final paraCentral = salaChat.startsWith('soporte_');
+            if (!esDeCentral && paraCentral) {
               _sonidos.reproducirSuave(Sonidos.centralChat);
               // Incrementar contador de no leídos para esa sala
               final salaId = doc['sala_id']?.toString();
@@ -465,57 +488,6 @@ class _CentralScreenState extends State<CentralScreen>
         )
         .subscribe();
 
-    // --- CANAL PÁNICO: escucha eventos de emergencia en tiempo real ---
-    _canalPanico = Supabase.instance.client
-        .channel('panico_global')
-        .onPostgresChanges(
-          event: PostgresChangeEvent.insert,
-          schema: 'public',
-          table: 'eventos_panico',
-          callback: (payload) {
-            final doc = payload.newRecord;
-            if (doc.isEmpty || !mounted) return;
-            final tipo = doc['tipo']?.toString() ?? 'global';
-            final destinoId = doc['destino_id'];
-            final disparadorId = doc['disparado_por_id'];
-            final miId = widget.usuario?['id'];
-
-            // SILENCIO PARA EL DISPARADOR: por seguridad, quien activa el
-            // pánico no recibe su propia alerta (overlay ni sonido).
-            if (disparadorId != null &&
-                disparadorId.toString() == miId?.toString()) {
-              return;
-            }
-
-            // Para alertas individuales: solo mostramos si somos el destino
-            if (tipo == 'individual' &&
-                destinoId?.toString() != miId?.toString()) {
-              return;
-            }
-
-            // Ubicación en vivo: solo si rolDisparador == 'movil' y la
-            // ventana de 24h sigue vigente
-            bool tieneUbicacion = false;
-            if ((doc['rol_disparador']?.toString() ?? '') == 'movil' &&
-                doc['ultima_lat'] != null &&
-                doc['ubicacion_expira_at'] != null) {
-              final expira = DateTime.tryParse(
-                doc['ubicacion_expira_at'].toString(),
-              )?.toUtc();
-              tieneUbicacion =
-                  expira != null && DateTime.now().toUtc().isBefore(expira);
-            }
-
-            _mostrarPanicoOverlay(
-              disparadoPor: doc['disparado_por_nombre'] ?? 'Sistema',
-              usuarioDisparador: doc['disparado_por_usuario']?.toString(),
-              rolDisparador: doc['rol_disparador'] ?? '',
-              eventoId: doc['id'] as int?,
-              tieneUbicacion: tieneUbicacion,
-            );
-          },
-        )
-        .subscribe();
     // --- CANAL USUARIOS PENDIENTES: detecta nuevos registros por activar ---
     Supabase.instance.client
         .channel('usuarios_pendientes_central')
@@ -761,85 +733,82 @@ class _CentralScreenState extends State<CentralScreen>
     );
   }
 
+  // Carga REST de móviles y servicios (ver _construirStreams).
   Future<void> _preCargarDatosIniciales() async {
-    try {
-      final moviles = await Supabase.instance.client
-          .from('usuarios')
-          .select()
-          .or('rol.eq.movil,es_dual.eq.true');
-      if (!_ctrlUsuariosMoviles.isClosed) {
-        _ctrlUsuariosMoviles.add(List<Map<String, dynamic>>.from(moviles));
-      }
-      final servicios = await Supabase.instance.client
-          .from('servicios')
-          .select()
-          .eq('archivado', false)
-          .order('id', ascending: false);
-      if (!_ctrlServiciosMonitor.isClosed) {
-        _ctrlServiciosMonitor.add(List<Map<String, dynamic>>.from(servicios));
-      }
-    } catch (_) {
-      // Si falla, el stream WebSocket llegará en breve de todas formas
-    }
+    await Future.wait([_recargarMovilesCentral(), _recargarServiciosMonitor()]);
   }
 
+  // F: ya NO hay .stream() de usuarios ni de servicios (cada cambio llegaba
+  // duplicado: stream + canal). Las listas se cargan por REST aquí y se
+  // mantienen en vivo con los canales _canalRadarCentral (servicios) y
+  // _canalUbicacionesMoviles (móviles). Se llama al abrir, al pulsar
+  // "Actualizar radar", tras purgar y cuando el vigilante detecta caída.
   void _construirStreams() {
     _subUsuariosMoviles?.cancel();
     _subServiciosMonitor?.cancel();
-
-    final crudoUsuarios = Supabase.instance.client
-        .from('usuarios')
-        .stream(primaryKey: ['id']);
-
-    // Servicios no archivados — incluye finalizados/cancelados recientes
-    // (< 4h, aún no archivados por pg_cron). El canal _canalRadarCentral
-    // complementa este stream con actualizaciones inmediatas de cualquier
-    // campo (estado, tarifa, etc.) sin esperar el WebSocket del .stream().
-    final crudoServicios = Supabase.instance.client
-        .from('servicios')
-        .stream(primaryKey: ['id'])
-        .eq('archivado', false)
-        .order('id', ascending: false)
-        .limit(500);
-
-    _subUsuariosMoviles = crudoUsuarios.listen(
-      (data) {
-        // Filtrar: móviles normales + cuenta dual (es_dual=true)
-        final filtrado = data.where((u) =>
-            u['rol'] == 'movil' || u['es_dual'] == true).toList();
-        _movilesCache = List.from(filtrado); // Cache para resolver movil_id → #numero
-        if (!_ctrlUsuariosMoviles.isClosed) _ctrlUsuariosMoviles.add(filtrado);
-      },
-      onError: (e) {
-        if (!_ctrlUsuariosMoviles.isClosed) _ctrlUsuariosMoviles.addError(e);
-      },
-    );
-    _subServiciosMonitor = crudoServicios.listen(
-      (data) {
-        _ultimaActualizacion = DateTime.now();
-        _cacheSvcMonitor = List<Map<String, dynamic>>.from(data);
-        _chatServicioTotal.value = _cacheSvcMonitor.where((s) =>
-            s['chat_movil_central'] == true ||
-            s['chat_cliente_central'] == true).length;
-        if (!_ctrlServiciosMonitor.isClosed) _ctrlServiciosMonitor.add(data);
-      },
-      onError: (e) {
-        if (!_ctrlServiciosMonitor.isClosed) {
-          _ctrlServiciosMonitor.addError(e);
-        }
-      },
-    );
+    _streamCentralConError = false;
+    _ultimaReconstruccionCentral = DateTime.now();
+    _recargarMovilesCentral();
+    _recargarServiciosMonitor();
   }
 
-  // Reconstruye los streams SOLO si llevan más de 35s sin emitir datos.
-  // Evita reconexiones innecesarias que causan egress masivo en Supabase.
+  // Móviles + cuentas duales (mapa, panel, resolver movil_id → #numero).
+  Future<void> _recargarMovilesCentral() async {
+    try {
+      final data = await Supabase.instance.client
+          .from('usuarios')
+          .select()
+          .or('rol.eq.movil,es_dual.eq.true');
+      if (!mounted) return;
+      _movilesCache = List<Map<String, dynamic>>.from(data);
+      if (!_ctrlUsuariosMoviles.isClosed) {
+        _ctrlUsuariosMoviles.add(List.from(_movilesCache));
+      }
+    } catch (e) {
+      _streamCentralConError = true; // el vigilante reintenta
+    }
+  }
+
+  // Servicios no archivados — incluye finalizados/cancelados recientes
+  // (< 4h, aún no archivados por pg_cron). Máx. 500, como antes.
+  Future<void> _recargarServiciosMonitor() async {
+    try {
+      final data = await Supabase.instance.client
+          .from('servicios')
+          .select()
+          .eq('archivado', false)
+          .order('id', ascending: false)
+          .limit(500);
+      if (!mounted) return;
+      _ultimaActualizacion = DateTime.now();
+      _cacheSvcMonitor = List<Map<String, dynamic>>.from(data);
+      _chatServicioTotal.value = _cacheSvcMonitor.where((s) =>
+          s['chat_movil_central'] == true ||
+          s['chat_cliente_central'] == true).length;
+      if (!_ctrlServiciosMonitor.isClosed) {
+        _ctrlServiciosMonitor.add(List.from(_cacheSvcMonitor));
+      }
+    } catch (e) {
+      _streamCentralConError = true; // el vigilante reintenta
+    }
+  }
+
+  // Vigilante de conexión (cada 30 s). Antes reconstruía (y re-descargaba
+  // 500 servicios) si no había cambios en 35 s, aunque la conexión estuviera
+  // bien. Ahora solo si la conexión Realtime cayó, si un stream dio error,
+  // o como red de seguridad tras 5 min sin datos y sin reconstruir.
   void _iniciarVigilanteDeConexion() {
     _reconexionTimer?.cancel();
     _reconexionTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (!mounted) return;
-      final sinDatos =
-          DateTime.now().difference(_ultimaActualizacion).inSeconds > 35;
-      if (sinDatos) _construirStreams();
+      final ahora = DateTime.now();
+      final socketCaido = !Supabase.instance.client.realtime.isConnected;
+      final sinDatosLargo =
+          ahora.difference(_ultimaActualizacion).inMinutes >= 5 &&
+              ahora.difference(_ultimaReconstruccionCentral).inMinutes >= 5;
+      if (socketCaido || _streamCentralConError || sinDatosLargo) {
+        _construirStreams();
+      }
     });
   }
 
@@ -912,7 +881,6 @@ class _CentralScreenState extends State<CentralScreen>
     // Apagamos el canal satelital al salir para evitar fugas de memoria
     _canalRadarCentral?.unsubscribe();
     _canalChatCentral?.unsubscribe();
-    _canalPanico?.unsubscribe();
     _canalUbicacionesMoviles?.unsubscribe();
     _debounceUbicaciones?.cancel();
     _debounceActivaciones?.cancel();
@@ -925,8 +893,6 @@ class _CentralScreenState extends State<CentralScreen>
     }
     _reloj?.cancel();
     _reconexionTimer?.cancel();
-    _timerExpiracionGlobal?.cancel();
-    _timerExpiracionIndividual?.cancel();
     _subUsuariosMoviles?.cancel();
     _subServiciosMonitor?.cancel();
     _ctrlUsuariosMoviles.close();
@@ -1159,17 +1125,6 @@ class _CentralScreenState extends State<CentralScreen>
                   onPressed: () => _enviarLinkInvitado(context),
                 ),
                 const SizedBox(width: 6),
-                BotonPanicoTrigger(
-                  segundos: 2,
-                  icono: Icons.campaign_rounded,
-                  colorAcento: Colors.orange,
-                  titulo: 'CONVOCATORIA GENERAL',
-                  descripcion:
-                      'Se notificará a TODO el personal en línea (móviles y central) que necesitas su atención urgente.',
-                  onActivado: _dispararPanico,
-                  onDetener: () => _detenerAlerta(tipo: 'global'),
-                ),
-                const SizedBox(width: 6),
                 Stack(
                   clipBehavior: Clip.none,
                   children: [
@@ -1307,9 +1262,9 @@ class _CentralScreenState extends State<CentralScreen>
           ),
           // FAB 2: soporte general (alarma_soporte)
           StreamBuilder<List<Map<String, dynamic>>>(
-            stream: Supabase.instance.client
-                .from('usuarios')
-                .stream(primaryKey: ['id']).eq('alarma_soporte', true),
+            // Creado UNA vez (antes se recreaba en cada redibujo de la
+            // central → nueva conexión + consulta cada vez).
+            stream: _streamAlarmaSoporte,
             builder: (context, snap) {
               final lista = snap.data ?? [];
               if (lista.isEmpty) return const SizedBox.shrink();
@@ -1491,11 +1446,6 @@ class _CentralScreenState extends State<CentralScreen>
                 ]),
               ),
             ),
-            _item(Icons.campaign_rounded, 'Convocatoria general', Colors.orange, () {
-              // Abre el diálogo de pánico directamente
-              _dispararPanico();
-            }),
-
             const Divider(color: Colors.white10, height: 20),
 
             // ── Sesión ──

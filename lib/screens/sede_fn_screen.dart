@@ -2847,18 +2847,7 @@ class _ActivosTabState extends State<_ActivosTab> {
         'estado': 'cancelado',
         'observacion': 'Cancelado por la sede dentro de los 5 minutos.',
       }).eq('id', s['id']);
-      // Notificar al móvil si ya tenía uno asignado
-      final movilId = s['movil_id']?.toString();
-      if (movilId != null && movilId.isNotEmpty && movilId != 'null') {
-        MotorNotificaciones.dispararMisil(
-          idDestino: movilId,
-          titulo: '❌ Servicio cancelado',
-          mensaje: 'El servicio #${s['id']} fue cancelado por la sede.',
-          urgente: false,
-          sonido: 'central_cancelado',
-          canalAndroidId: MotorNotificaciones.canalCanceladoId,
-        );
-      }
+      // El aviso al móvil lo manda el SERVIDOR (trg_avisar_servicio_cancelado).
     } catch (e) {
       _snack('Error: $e');
     }

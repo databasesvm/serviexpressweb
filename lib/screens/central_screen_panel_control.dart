@@ -702,7 +702,7 @@ extension CentralScreenPanelControl on _CentralScreenState {
                                                           child: Row(mainAxisSize: MainAxisSize.min, children: [
                                                             const Text('📷', style: TextStyle(fontSize: 9)),
                                                             const SizedBox(width: 2),
-                                                            Text('foto comanda',
+                                                            Text('Foto de la Comanda',
                                                                 style: TextStyle(
                                                                     fontSize: 8,
                                                                     color: Colors.brown[600],
@@ -1180,8 +1180,9 @@ extension CentralScreenPanelControl on _CentralScreenState {
                       constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                       onPressed: () async {
                         // 1. Fetch + reconexión de streams (datos frescos)
+                        _streamCentralConError = false;
+                        _ultimaReconstruccionCentral = DateTime.now();
                         await _preCargarDatosIniciales();
-                        _construirStreams();
 
                         // 2. Push silencioso heartbeat a todos los móviles
                         // conectados — les ordena reiniciar el GPS stream y

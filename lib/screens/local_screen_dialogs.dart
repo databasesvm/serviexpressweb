@@ -31,9 +31,17 @@ mixin _DialogsMixin on State<LocalScreen> {
   // =========================================================================
   void _mostrarHistorialGlobal(BuildContext context) {
     // Future cacheado ANTES del builder para que setModalState no lo recree.
+    // OPTIMIZACIÓN: solo las columnas que usa la tarjeta del historial
+    // (antes traía las ~130 columnas de cada servicio).
     final futureHistorial = Supabase.instance.client
         .from('servicios')
-        .select()
+        .select(
+          'id, estado, created_at, updated_at, liberacion_at, accepted_at, '
+          'picked_up_at, movil_id, cliente_id, local_id, ticket_factura, '
+          'telefono_receptor, es_punto_a_punto, tarifa, origen, destino, '
+          'numero_local, chat_cliente, observacion, foto_comanda_url, '
+          'calificacion_local, comentario_local, tipo_servicio, oculto_local',
+        )
         .eq('local_id', widget.usuario['id'])
         .inFilter('estado', [
           'finalizado',
@@ -156,7 +164,9 @@ mixin _DialogsMixin on State<LocalScreen> {
                                   .update({'oculto_local': true})
                                   .eq('id', historialGlobal[index]['id']);
 
-                              // Recargamos el panel en vivo
+                              // Quitarlo de la lista ya descargada (la consulta
+                              // no se repite) y redibujar el panel.
+                              historialGlobal.removeAt(index);
                               setModalState(() {});
                             }
                           },
@@ -243,6 +253,22 @@ mixin _DialogsMixin on State<LocalScreen> {
   ) {
     String filtroActual = '';
 
+    // OPTIMIZACIÓN: se descarga UNA vez al abrir. Antes la consulta estaba
+    // dentro del builder y se repetía con cada letra del buscador.
+    final Future<List<dynamic>> futureCrm = Future.wait([
+      Supabase.instance.client
+          .from('servicios')
+          .select('id, destino, estado, created_at, telefono_receptor')
+          .eq('local_id', widget.usuario['id'])
+          .not('telefono_receptor', 'is', null)
+          .order('id', ascending: false)
+          .limit(300), // solo los últimos 300 (antes: todo el historial)
+      Supabase.instance.client
+          .from('crm_clientes_info')
+          .select('telefono, nombre, notas')
+          .eq('local_id', widget.usuario['id']),
+    ]);
+
     showModalBottomSheet(
       context: contextoPrincipal,
       isScrollControlled: true,
@@ -293,17 +319,7 @@ mixin _DialogsMixin on State<LocalScreen> {
 
               Expanded(
                 child: FutureBuilder<List<dynamic>>(
-                  future: Future.wait([
-                    Supabase.instance.client
-                        .from('servicios')
-                        .select('id, destino, estado, created_at, telefono_receptor')
-                        .eq('local_id', widget.usuario['id'])
-                        .not('telefono_receptor', 'is', null),
-                    Supabase.instance.client
-                        .from('crm_clientes_info')
-                        .select('telefono, nombre, notas')
-                        .eq('local_id', widget.usuario['id']),
-                  ]),
+                  future: futureCrm,
                   builder: (context, snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting) {
                       return const Center(

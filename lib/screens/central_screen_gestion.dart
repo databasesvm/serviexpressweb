@@ -102,38 +102,6 @@ extension CentralScreenGestion on _CentralScreenState {
               },
             ),
             _opcionMenuAccion(
-              icono: Icons.campaign_rounded,
-              color: Colors.orange[800]!,
-              titulo: 'Llamar urgente',
-              subtitulo: 'Convocatoria individual — mantener presionado',
-              onTap: () {
-                Navigator.pop(ctx);
-                showDialog(
-                  context: context,
-                  builder: (_) => PanicoConfirmDialog(
-                    segundos: 1.5,
-                    icono: Icons.campaign_rounded,
-                    colorAcento: Colors.orange,
-                    titulo: 'LLAMAR A ${_formatearNombreCentral(m)}',
-                    descripcion:
-                        'Se enviará una alerta urgente a este móvil. Úsalo '
-                        'cuando necesites su atención de inmediato.',
-                    onActivado: () => _dispararPanicoIndividual(m),
-                  ),
-                );
-              },
-            ),
-            _opcionMenuAccion(
-              icono: Icons.notifications_off_rounded,
-              color: Colors.red[700]!,
-              titulo: 'Detener llamado urgente',
-              subtitulo: 'Cancela la alerta individual activa a este móvil',
-              onTap: () {
-                Navigator.pop(ctx);
-                _detenerAlerta(tipo: 'individual', movilId: m['id']);
-              },
-            ),
-            _opcionMenuAccion(
               icono: Icons.badge_rounded,
               color: Colors.teal,
               titulo: 'Ver perfil completo',
@@ -1658,6 +1626,7 @@ extension CentralScreenGestion on _CentralScreenState {
                         'cascada_fn_f4_seg':         int.tryParse(fnF4c.text) ?? 90,
                       })
                       .eq('id', 1);
+                  CascadaConfig.invalidar(); // la central ve los tiempos nuevos al instante
                   await _cargarBloqueoInactividad(); // recarga todos los campos de config
                   if (dlgCtx.mounted) Navigator.pop(dlgCtx);
                 } catch (e) {

@@ -22,6 +22,28 @@ mixin _CardsMixin on State<LocalScreen> {
   /// IDs de servicios que acaban de pasar a 'cotizada' (highlight animado)
   final Set<int> _cotizadasRecientes = {};
 
+  /// Datos del móvil por id, consultados UNA vez y reutilizados. Antes la
+  /// tarjeta los pedía al servidor en cada redibujado (muchas veces por minuto).
+  final Map<String, Future<List<Map<String, dynamic>>>> _infoMovilCache = {};
+  Future<List<Map<String, dynamic>>> _infoMovil(dynamic movilId) {
+    final key = movilId.toString();
+    return _infoMovilCache.putIfAbsent(
+      key,
+      () => Supabase.instance.client
+          .from('usuarios')
+          .select(
+            'id, nombre, usuario, rol, telefono, foto_perfil_url, '
+            'pago_nequi, pago_daviplata, pago_bancolombia',
+          )
+          .eq('id', movilId)
+          .then((r) => List<Map<String, dynamic>>.from(r))
+          .catchError((_) {
+        _infoMovilCache.remove(key); // si falló, reintenta en el próximo dibujo
+        return <Map<String, dynamic>>[];
+      }),
+    );
+  }
+
   @override
   void dispose() {
     _expansionTick.dispose();
@@ -105,20 +127,7 @@ mixin _CardsMixin on State<LocalScreen> {
         await anularMisil(res['onesignal_5m']);
       }
 
-      // Notificar al móvil si ya tenía uno asignado
-      if (res != null) {
-        final movilId = res['movil_id']?.toString();
-        if (movilId != null && movilId.isNotEmpty && movilId != 'null') {
-          MotorNotificaciones.dispararMisil(
-            idDestino: movilId,
-            titulo: '❌ Servicio cancelado',
-            mensaje: 'El servicio #$id fue cancelado por el local.',
-            urgente: false,
-            sonido: 'central_cancelado',
-            canalAndroidId: MotorNotificaciones.canalCanceladoId,
-          );
-        }
-      }
+      // El aviso al móvil lo manda el SERVIDOR (trg_avisar_servicio_cancelado).
       // Notificar a la Central que el pedido fue cancelado por el local
       MotorNotificaciones.dispararACentral(
         titulo: '❌ PEDIDO CANCELADO',
@@ -577,13 +586,7 @@ mixin _CardsMixin on State<LocalScreen> {
 
             if (servicio['movil_id'] != null)
               FutureBuilder<List<Map<String, dynamic>>>(
-                future: Supabase.instance.client
-                    .from('usuarios')
-                    .select(
-                      'id, nombre, usuario, rol, telefono, foto_perfil_url, '
-                      'pago_nequi, pago_daviplata, pago_bancolombia',
-                    )
-                    .eq('id', servicio['movil_id']),
+                future: _infoMovil(servicio['movil_id']),
                 builder: (context, snapshot) {
                   final data =
                       (snapshot.data != null && snapshot.data!.isNotEmpty)

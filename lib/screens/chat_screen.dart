@@ -213,14 +213,6 @@ final _kFaqsMovil = <_FaqCategoria>[
   ]),
   _FaqCategoria('🆘 Emergencias', [
     _FaqItem(
-      pregunta: '¿Cómo activo el botón de pánico?',
-      respuesta:
-          'El botón de pánico aparece cuando tienes un servicio activo 🆘\n\n'
-          'Al activarlo se alerta a toda la Central y a los mototaxistas cercanos. '
-          'Úsalo solo en situaciones de peligro real.',
-      keywords: ['panico', 'pánico', 'emergencia', 'peligro', 'boton panico'],
-    ),
-    _FaqItem(
       pregunta: 'Necesito ayuda de la Central',
       respuesta:
           'Le avisamos a la Central que necesitas asistencia 📞\n\n'
@@ -925,7 +917,9 @@ class _ChatScreenState extends State<ChatScreen> {
           .uploadBinary(
             filePath,
             bytes,
-            fileOptions: FileOptions(contentType: 'image/$ext'),
+            // "jpg" no es un tipo válido: el estándar es image/jpeg
+            fileOptions: FileOptions(
+                contentType: 'image/${ext == 'jpg' ? 'jpeg' : ext}'),
           );
 
       final imageUrl = Supabase.instance.client.storage

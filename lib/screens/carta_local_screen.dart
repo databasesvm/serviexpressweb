@@ -63,6 +63,7 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
   @override
   void dispose() {
     _timerReloj?.cancel();
+    _debouncePedidos?.cancel();
     _tabCtrl.dispose();
     _canalPedidos?.unsubscribe();
     super.dispose();
@@ -113,6 +114,13 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
     _categorias = cats;
   }
 
+  // OPTIMIZACIÓN:
+  //  A) el servidor manda SOLO los pedidos de este local (filtro server-side);
+  //  B) un cambio en un pedido recarga SOLO los pedidos (no catálogo ni perfil)
+  //     y sin ruedita de carga;
+  //  C) varios cambios seguidos (< 1 s) → una sola recarga.
+  Timer? _debouncePedidos;
+
   void _iniciarCanalPedidos() {
     _canalPedidos = _db
         .channel('pedidos_local_${widget.localId}')
@@ -120,14 +128,34 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
           event: PostgresChangeEvent.all,
           schema: 'public',
           table: 'pedidos',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'local_id',
+            value: widget.localId,
+          ),
           callback: (payload) {
-            final rec = payload.newRecord;
-            if (rec.isEmpty) return;
-            if ((rec['local_id'] as num?)?.toInt() != widget.localId) return;
-            _cargarDatos();
+            _debouncePedidos?.cancel();
+            _debouncePedidos = Timer(const Duration(seconds: 1), () {
+              if (mounted) _recargarPedidos();
+            });
           },
         )
         .subscribe();
+  }
+
+  /// Recarga solo los pedidos activos del local (sin catálogo ni perfil).
+  Future<void> _recargarPedidos() async {
+    try {
+      final peds = await _db
+          .from('pedidos')
+          .select('*, comprobante_url, items_pedido(nombre_snapshot, cantidad, precio_snapshot, modificadores_json, notas_snapshot), movil:movil_id(telefono, nombre)')
+          .eq('local_id', widget.localId)
+          .neq('estado', 'entregado')
+          .neq('estado', 'cancelado')
+          .order('created_at', ascending: false);
+      if (!mounted) return;
+      setState(() => _pedidos = List<Map<String, dynamic>>.from(peds));
+    } catch (_) {}
   }
 
   // -----------------------------------------------------------------------
@@ -642,7 +670,7 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
           .from('pedidos')
           .update({'estado': siguiente}).eq('id', pedido['id']);
       _sonidos.reproducir(Sonidos.localRespuesta);
-      await _cargarDatos();
+      await _recargarPedidos(); // solo pedidos (no catálogo)
       final clienteId = pedido['cliente_id']?.toString() ?? '';
       if (clienteId.isNotEmpty) {
         const msgs = {
@@ -708,7 +736,7 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
           .from('pedidos')
           .update({'estado': 'cancelado'}).eq('id', pedido['id']);
       _sonidos.reproducirSuave(Sonidos.localAccion);
-      await _cargarDatos();
+      await _recargarPedidos(); // solo pedidos (no catálogo)
       final clienteId = pedido['cliente_id']?.toString() ?? '';
       if (clienteId.isNotEmpty) {
         MotorNotificaciones.dispararMisil(

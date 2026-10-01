@@ -217,18 +217,7 @@ extension CentralScreenMonitor on _CentralScreenState {
                           'Central canceló la cotización por falta de respuesta.',
                     })
                     .eq('id', id);
-                // Notificar al móvil si ya tenía uno asignado
-                final movilId = servicio['movil_id']?.toString();
-                if (movilId != null && movilId.isNotEmpty && movilId != 'null') {
-                  MotorNotificaciones.dispararMisil(
-                    idDestino: movilId,
-                    titulo: '❌ Servicio cancelado',
-                    mensaje: 'El servicio #$id fue cancelado.',
-                    urgente: false,
-                    sonido: 'central_cancelado',
-                    canalAndroidId: MotorNotificaciones.canalCanceladoId,
-                  );
-                }
+                // El aviso al móvil lo manda el SERVIDOR (trg_avisar_servicio_cancelado).
                 if (context.mounted) Navigator.pop(context);
               },
               child: const Text(
@@ -442,6 +431,73 @@ extension CentralScreenMonitor on _CentralScreenState {
                       ),
                       const SizedBox(height: 12),
                     ],
+
+                    // ── FOTO DE LA COMANDA (auditoría) ─────────────────────
+                    _seccion(
+                      icon: Icons.receipt_long,
+                      color: Colors.tealAccent,
+                      titulo: 'FOTO DE LA COMANDA',
+                      child: Builder(builder: (ctxFoto) {
+                        final fotoUrl =
+                            servicio['foto_comanda_url']?.toString() ?? '';
+                        if (fotoUrl.isEmpty) {
+                          return const Text(
+                            'El móvil no subió foto de la comanda en este servicio.',
+                            style: TextStyle(color: Colors.white54, fontSize: 12),
+                          );
+                        }
+                        return Align(
+                          alignment: Alignment.centerLeft,
+                          child: ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.teal.shade700,
+                              foregroundColor: Colors.white,
+                            ),
+                            icon: const Icon(Icons.photo, size: 16),
+                            label: const Text('📷 Ver Foto de la Comanda',
+                                style: TextStyle(fontWeight: FontWeight.bold)),
+                            onPressed: () => showDialog(
+                              context: ctxFoto,
+                              builder: (dctx) => Dialog(
+                                backgroundColor: Colors.black,
+                                insetPadding: const EdgeInsets.all(12),
+                                child: Stack(children: [
+                                  InteractiveViewer(
+                                    maxScale: 5,
+                                    child: Image.network(
+                                      fotoUrl,
+                                      fit: BoxFit.contain,
+                                      loadingBuilder: (c, w, p) => p == null
+                                          ? w
+                                          : const SizedBox(
+                                              height: 220,
+                                              child: Center(
+                                                  child: CircularProgressIndicator(
+                                                      color: Colors.white))),
+                                      errorBuilder: (c, e, st) => const Padding(
+                                        padding: EdgeInsets.all(24),
+                                        child: Text('No se pudo cargar la foto.',
+                                            style: TextStyle(color: Colors.white70)),
+                                      ),
+                                    ),
+                                  ),
+                                  Positioned(
+                                    top: 4,
+                                    right: 4,
+                                    child: IconButton(
+                                      icon: const Icon(Icons.close,
+                                          color: Colors.white),
+                                      onPressed: () => Navigator.pop(dctx),
+                                    ),
+                                  ),
+                                ]),
+                              ),
+                            ),
+                          ),
+                        );
+                      }),
+                    ),
+                    const SizedBox(height: 12),
 
                     // ── FIJAR TARIFA ──────────────────────────────────────
                     if (!['finalizado', 'finalizado_por_demora', 'finalizado_con_problema'].contains(estado)) ...[
@@ -690,17 +746,7 @@ extension CentralScreenMonitor on _CentralScreenState {
                                   .update({'estado': 'cancelado', 'onesignal_30s': null, 'onesignal_2m': null, 'onesignal_5m': null,
                                            'fn_notif_fase2': null, 'fn_notif_fase3': null, 'fn_notif_fase4': null, 'fn_notif_fase4b': null})
                                   .eq('id', id);
-                              final movilId = servicio['movil_id']?.toString();
-                              if (movilId != null && movilId.isNotEmpty && movilId != 'null') {
-                                MotorNotificaciones.dispararMisil(
-                                  idDestino: movilId,
-                                  titulo: '❌ Servicio cancelado',
-                                  mensaje: 'El servicio #$id fue cancelado.',
-                                  urgente: false,
-                                  sonido: 'central_cancelado',
-                                  canalAndroidId: MotorNotificaciones.canalCanceladoId,
-                                );
-                              }
+                              // El aviso al móvil lo manda el SERVIDOR (trg_avisar_servicio_cancelado).
                               if (context.mounted) Navigator.pop(context);
                             }),
                           if (estado != 'finalizado')
@@ -1356,18 +1402,7 @@ extension CentralScreenMonitor on _CentralScreenState {
         if (esFn) 'fn_notif_fase4b': null,
         if (esFn) 'fn_notificados_fase1': <String>[],
       }).eq('id', servicio['id']);
-      // Notificar al móvil si ya tenía uno asignado
-      final movilId = servicio['movil_id']?.toString();
-      if (movilId != null && movilId.isNotEmpty && movilId != 'null') {
-        MotorNotificaciones.dispararMisil(
-          idDestino: movilId,
-          titulo: '❌ Servicio cancelado',
-          mensaje: 'El servicio #${servicio['id']} fue cancelado.',
-          urgente: false,
-          sonido: 'central_cancelado',
-          canalAndroidId: MotorNotificaciones.canalCanceladoId,
-        );
-      }
+      // El aviso al móvil lo manda el SERVIDOR (trg_avisar_servicio_cancelado).
       _seleccionadoId.value = null;
     }
   }
@@ -2253,6 +2288,22 @@ extension CentralScreenMonitor on _CentralScreenState {
                           ),
                         ],
                       ),
+                      // ── FILA 3a: fase de la cascada SE (pendientes) ──────────
+                      if (estado == 'pendiente' &&
+                          servicio['tipo_fn'] != true) ...[
+                        const SizedBox(height: 2),
+                        _FaseCascadaCentral(
+                          servicio: servicio,
+                          movilPorId: (id) {
+                            if (id == null || id.trim().isEmpty) return null;
+                            final m = _movilesCache.firstWhere(
+                              (x) => x['id'].toString() == id.trim(),
+                              orElse: () => <String, dynamic>{},
+                            );
+                            return m.isEmpty ? null : m;
+                          },
+                        ),
+                      ],
                       // ── FILA 3: sub-estado en curso ──────────────────────────
                       if (['en_ruta_origen', 'en_origen', 'en_ruta_destino']
                           .contains(estado)) ...[
@@ -2887,4 +2938,134 @@ extension CentralScreenMonitor on _CentralScreenState {
     label: Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: fg)),
   );
 
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FASE DE LA CASCADA SE en la tarjeta del monitor (servicios pendientes).
+// Se refresca cada segundo y cuenta con la hora del servidor (HoraServidor),
+// con el mismo ancla que usa la cascada: GREATEST(created_at, liberacion_at).
+//   F1 Masters → F2 #1 paradero / #2… / más cercano → F3 1 km → F4 todos
+// ═══════════════════════════════════════════════════════════════════════════
+class _FaseCascadaCentral extends StatefulWidget {
+  final Map<String, dynamic> servicio;
+  final Map<String, dynamic>? Function(String? id) movilPorId;
+  const _FaseCascadaCentral({required this.servicio, required this.movilPorId});
+
+  @override
+  State<_FaseCascadaCentral> createState() => _FaseCascadaCentralState();
+}
+
+class _FaseCascadaCentralState extends State<_FaseCascadaCentral> {
+  static CascadaConfig _cfg = const CascadaConfig();
+  static bool _cfgCargada = false;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    if (!_cfgCargada) {
+      _cfgCargada = true;
+      CascadaConfig.cargar().then((c) {
+        _cfg = c;
+        if (mounted) setState(() {});
+      });
+    }
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      HoraServidor.sincronizar(); // máx. cada 5 min
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  String _mmss(int seg) {
+    if (seg < 0) seg = 0;
+    final m = seg ~/ 60, s = seg % 60;
+    return m > 0 ? '$m:${s.toString().padLeft(2, '0')}' : '$s s';
+  }
+
+  String _nombreMovil(Map<String, dynamic>? m, String? id) {
+    if (m == null) return id != null ? 'Móvil id $id' : 'móvil';
+    final n = RegExp(r'\d+').firstMatch(m['usuario']?.toString() ?? '')?.group(0);
+    return n != null ? 'Móvil ${n.padLeft(2, '0')}' : (m['nombre']?.toString() ?? 'móvil');
+  }
+
+  Widget _linea(Color color, String texto) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: color.withValues(alpha: 0.5)),
+        ),
+        child: Text(texto,
+            style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: color)),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final s = widget.servicio;
+
+    // Enrutado / asignación directa: no hace cascada
+    final excl = s['exclusivo_id']?.toString().trim() ?? '';
+    if (excl.isNotEmpty) {
+      final primero = excl.split(',').first.trim();
+      return _linea(Colors.blueGrey[700]!,
+          '📌 Asignado directo a ${_nombreMovil(widget.movilPorId(primero), primero)} (sin cascada)');
+    }
+    if (s['se_cascade_t0'] == null) {
+      return _linea(Colors.grey[700]!, '⏳ Esperando que arranque la cascada…');
+    }
+
+    final created = DateTime.tryParse(s['created_at']?.toString() ?? '')?.toUtc();
+    final lib = DateTime.tryParse(s['liberacion_at']?.toString() ?? '')?.toUtc();
+    if (created == null) return const SizedBox.shrink();
+    final ancla = (lib != null && lib.isAfter(created)) ? lib : created;
+    final e = HoraServidor.ahoraUtc().difference(ancla).inSeconds;
+
+    final f2 = _cfg.seF2Seg, f3 = _cfg.seF3Seg, f4 = _cfg.seF4Seg;
+
+    if (e < f2) {
+      return _linea(Colors.green[700]!, '🟢 F1 · Masters — quedan ${_mmss(f2 - e)}');
+    }
+    if (e < f3) {
+      final ofrecido = s['paradero_ofrecido_id']?.toString().trim();
+      final tipo = s['se_f2_srv_tipo']?.toString() ?? '';
+      final m = widget.movilPorId(ofrecido);
+      final quien = _nombreMovil(m, ofrecido);
+      final par = (m?['paradero_actual'] ?? s['paradero_origen'] ?? 'paradero')
+          .toString()
+          .toUpperCase();
+      String txt;
+      if (ofrecido == null || ofrecido.isEmpty) {
+        txt = e < f2 + 15 ? 'F2 · buscando #1 del paradero…' : 'F2 · sin móviles en paradero';
+      } else if (tipo.startsWith('paradero_')) {
+        txt = 'F2 · #${tipo.substring(9)} $par → $quien (sin sanción)';
+      } else if (tipo == 'cercano') {
+        txt = 'F2 · más cercano → $quien';
+      } else {
+        txt = 'F2 · #1 $par → $quien';
+      }
+      return _linea(Colors.red[700]!, '🔴 $txt — quedan ${_mmss(f3 - e)}');
+    }
+    if (e < f4) {
+      return _linea(Colors.orange[800]!, '🟠 F3 · móviles a 1 km — quedan ${_mmss(f4 - e)}');
+    }
+
+    // F4: abierto a todos. Se cancela solo: PAP a los 20 min de creado,
+    // los demás a los 10 min sin móvil.
+    final esPap = s['es_punto_a_punto'] == true;
+    final limite = esPap
+        ? created.add(const Duration(minutes: 20))
+        : (lib ?? created).add(const Duration(minutes: 10));
+    final restan = limite.difference(HoraServidor.ahoraUtc()).inSeconds;
+    return _linea(
+      Colors.purple[700]!,
+      '🟣 F4 · todos — lleva ${_mmss(e - f4)}'
+      '${restan > 0 ? ' · se cancela solo en ${_mmss(restan)}' : ''}',
+    );
+  }
 }

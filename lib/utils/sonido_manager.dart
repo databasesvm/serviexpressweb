@@ -14,7 +14,7 @@
 //
 // DOS PLAYERS — sin conflictos de prioridad:
 //
-//   _playerPrincipal → alertas, notificaciones, cotizaciones, pánico.
+//   _playerPrincipal → alertas, notificaciones, cotizaciones.
 //     Interrumpe cualquier sonido que esté sonando.
 //     Método: reproducir()
 //
@@ -34,8 +34,8 @@
 // │ Sonidos.localRespuesta      │ Sonidos.movilConfirmar        │
 // │ Sonidos.movilChatCentral    │ Sonidos.movilChatCliente     │
 // │ Sonidos.alerta              │ Sonidos.movilParadero        │
-// │ Sonidos.panico              │ Sonidos.movilCarga           │
-// │ Sonidos.fnCotizacion        │ Sonidos.adios                │
+// │ Sonidos.fnCotizacion        │ Sonidos.movilCarga           │
+// │                             │ Sonidos.adios                │
 // └─────────────────────────────┴──────────────────────────────┘
 
 import 'package:audioplayers/audioplayers.dart';
@@ -82,9 +82,6 @@ class Sonidos {
   /// Suena en la sede FN cuando la central responde la cotización.
   static const String fnCotizacion = 'fn_cotizacion';
 
-  // COMPARTIDO
-  static const String panico = 'panico';
-
   // TRANSFERENCIAS Y SESIÓN
   static const String transferenciaMovil = 'transferencia_movil'; // Push transferencia entre móviles
   static const String adios = 'adios';                            // Botón desconectar / cerrar sesión
@@ -106,7 +103,6 @@ class SonidoManager {
     Sonidos.fnCotizacion:      ['💊 Cotización FN', 'Nueva solicitud de Farmanorte'],
     Sonidos.localRespuesta:    ['✅ Respuesta Central', 'La central respondió tu solicitud'],
     Sonidos.localEstado:       ['📦 Estado actualizado', 'El estado de tu pedido cambió'],
-    Sonidos.panico:            ['🚨 PÁNICO', '¡Alerta de emergencia activada!'],
     Sonidos.alerta:            ['🔔 Alerta', 'Nuevo evento en ServiMoto'],
   };
 
@@ -141,16 +137,14 @@ class SonidoManager {
     }
     _playerPrincipal.setReleaseMode(ReleaseMode.stop);
     _playerSecundario.setReleaseMode(ReleaseMode.stop);
-    _playerPanico.setReleaseMode(ReleaseMode.loop);
   }
 
   final AudioPlayer _playerPrincipal = AudioPlayer();
   final AudioPlayer _playerSecundario = AudioPlayer();
-  final AudioPlayer _playerPanico = AudioPlayer(); // Dedicado: loop hasta cerrar
 
   // =========================================================================
   // REPRODUCCIÓN PRINCIPAL — Interrumpe lo que esté sonando
-  // Para: alertas, notificaciones importantes, cotizaciones, pánico
+  // Para: alertas, notificaciones importantes, cotizaciones
   // En web: además lanza notificación emergente del SO (toast Windows/Android).
   // =========================================================================
   Future<void> reproducir(String nombreArchivo) async {
@@ -184,38 +178,13 @@ class SonidoManager {
   }
 
   // =========================================================================
-  // PÁNICO — Loop hasta detenerPanico()
-  // =========================================================================
-  Future<void> reproducirPanico() async {
-    try {
-      await _playerPanico.stop();
-      await _playerPanico.play(AssetSource('sounds/${Sonidos.panico}.mp3'));
-    } catch (e) {
-      debugPrint('SonidoManager › reproducirPanico → $e');
-    }
-    if (kIsWeb) {
-      WebAlertaManager.mostrar(
-        titulo: '🚨 PÁNICO',
-        cuerpo: '¡Alerta de emergencia activada!',
-      );
-    }
-  }
-
-  Future<void> detenerPanico() async {
-    try {
-      await _playerPanico.stop();
-    } catch (_) {}
-  }
-
-  // =========================================================================
-  // SILENCIAR — Corta los tres players de inmediato
+  // SILENCIAR — Corta los dos players de inmediato
   // Usar al navegar fuera de la pantalla o en modo "No molestar"
   // =========================================================================
   Future<void> silenciar() async {
     try {
       await _playerPrincipal.stop();
       await _playerSecundario.stop();
-      await _playerPanico.stop();
     } catch (_) {}
   }
 
@@ -225,6 +194,5 @@ class SonidoManager {
   void dispose() {
     _playerPrincipal.dispose();
     _playerSecundario.dispose();
-    _playerPanico.dispose();
   }
 }

@@ -128,7 +128,7 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
             // F1 (Masters) lo manda el servidor (trg_se_f1_servidor)
             if (!_requiereCotizacion) 'se_f1_motivo': 'nuevo',
           })
-          .select()
+          .select('id') // solo se usa el id para el seguimiento
           .single();
 
       // Guardamos el ID del pedido + origen/destino para próximos pedidos

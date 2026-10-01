@@ -93,6 +93,16 @@ mixin _FormularioMixin on State<LocalScreen> {
   void _abrirPanelTarifario(BuildContext contextoPrincipal) {
     String filtroActual = '';
 
+    // OPTIMIZACIÓN: las tarifas se descargan al abrir y solo se vuelven a
+    // descargar al agregar o quitar una. Antes se repetía con cada letra
+    // escrita en el buscador.
+    Future<List<Map<String, dynamic>>> cargarTarifas() => Supabase.instance.client
+        .from('se_precios_dir')
+        .select('precio, red_dir_catalogo!inner(id, nombre, municipio, sector_id, activo, sectores(nombre))')
+        .eq('usuario_id', widget.usuario['id'])
+        .eq('red_dir_catalogo.activo', true);
+    var futureTarifas = cargarTarifas();
+
     showModalBottomSheet(
       context: contextoPrincipal,
       isScrollControlled: true,
@@ -289,7 +299,7 @@ mixin _FormularioMixin on State<LocalScreen> {
 
                                   if (ctxAdd.mounted) {
                                     Navigator.pop(ctxAdd);
-                                    setModalState(() {});
+                                    setModalState(() => futureTarifas = cargarTarifas());
                                   }
                                 },
                                 child: const Text(
@@ -309,11 +319,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                 // LISTADO DE TARIFAS
                 Expanded(
                   child: FutureBuilder<List<Map<String, dynamic>>>(
-                    future: Supabase.instance.client
-                        .from('se_precios_dir')
-                        .select('precio, red_dir_catalogo!inner(id, nombre, municipio, sector_id, activo, sectores(nombre))')
-                        .eq('usuario_id', widget.usuario['id'])
-                        .eq('red_dir_catalogo.activo', true),
+                    future: futureTarifas,
                     builder: (context, snapshot) {
                       if (snapshot.connectionState == ConnectionState.waiting)
                         return const Center(
@@ -388,7 +394,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                                       .delete()
                                       .eq('usuario_id', widget.usuario['id'])
                                       .eq('dir_id', item['id']);
-                                  setModalState(() {});
+                                  setModalState(() => futureTarifas = cargarTarifas());
                                 },
                               ),
                             ),
@@ -1317,7 +1323,8 @@ mixin _FormularioMixin on State<LocalScreen> {
                             retardoProgramado == 0) {
                           final pendientes = await Supabase.instance.client
                               .from('servicios')
-                              .select()
+                              // Solo lo que se usa (antes: todas las columnas)
+                              .select('id, ruta_grupo_id, destino')
                               .eq('local_id', widget.usuario['id'])
                               .eq('estado', 'pendiente')
                               .eq('es_punto_a_punto', false)

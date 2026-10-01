@@ -13,7 +13,6 @@ class ServiMotoApp : Application() {
         // ── CANALES EXISTENTES ───────────────────────────────────────────────
         const val CHANNEL_ALERTA_ID         = "serviexpress_alerta_v2"
         const val CHANNEL_ZONA_ID           = "serviexpress_zona_v2"
-        const val CHANNEL_PANICO_ID         = "serviexpress_panico_v1"
         const val CHANNEL_ONESIGNAL_DEFAULT = "OneSignal_channel_id"
 
         // ── CANALES NUEVOS ───────────────────────────────────────────────────
@@ -81,7 +80,8 @@ class ServiMotoApp : Application() {
         listOf(
             CHANNEL_ONESIGNAL_DEFAULT,
             "a26379a9-df0b-4d1e-8679-20ee949f7c59",
-            "63802a9e-afed-4b02-83b8-55376cea49f0"
+            "63802a9e-afed-4b02-83b8-55376cea49f0",
+            "serviexpress_panico_v1" // canal de pánico eliminado: se borra del teléfono
         ).forEach { nm.deleteNotificationChannel(it) }
 
         val HI  = NotificationManager.IMPORTANCE_HIGH
@@ -91,7 +91,6 @@ class ServiMotoApp : Application() {
             // ── ALERTAS CRÍTICAS ────────────────────────────────────────────
             crearCanal(CHANNEL_ALERTA_ID,        "Alertas de Servicio",     "Avisos urgentes de nuevos servicios.",          HI,  uri("alerta")),
             crearCanal(CHANNEL_ZONA_ID,           "Alertas de Proximidad",   "Servicios en tu zona o global.",                HI,  uri("alerta")),
-            crearCanal(CHANNEL_PANICO_ID,         "Alertas de Pánico",       "Emergencias urgentes (pánico).",                HI,  uri("panico")),
             // Recrea el default de OneSignal fresco antes de que el SDK lo registre sin sonido
             crearCanal(CHANNEL_ONESIGNAL_DEFAULT, "Notificaciones",          "Notificaciones generales de ServiExpress.",     HI,  uri("alerta")),
 
