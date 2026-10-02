@@ -20,6 +20,13 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+// REGLA DE SONIDOS (Android decide el sonido por el CANAL, no por el nombre):
+//   • Todo lo de la cascada SE/FN (F1–F4, asignaciones directas, liberados,
+//     expulsión) → alerta.mp3 por el canal "Alertas de Servicio".
+//   • Móviles de rango MASTER → master.mp3 por el canal "Alertas Master".
+//   • Lo demás usa su propio canal (chat, transferencias, confirmaciones…).
 
 // =========================================================================
 // MOTOR DE NOTIFICACIONES
@@ -43,8 +50,27 @@ class MotorNotificaciones {
   static const String canalMasterId        = 'serviexpress_master_v1';
   // Inactividad 5h45min (movil_inactividad.mp3)
   static const String canalInactividadId   = 'serviexpress_inactividad_v1';
-  // Chat hacia el móvil (movil_chat_central.mp3)
-  static const String canalChatMovilId     = 'serviexpress_chat_movil_v1';
+  // ── TRANSICIÓN DE CANALES ─────────────────────────────────────────────
+  // Android NO muestra un push si el teléfono no tiene el canal. Los canales
+  // nuevos solo existen en la app nueva, así que mientras los móviles van
+  // actualizando se usan los canales viejos (false). Cuando TODOS tengan la
+  // app nueva → poner true (y avisar para cambiar también el servidor).
+  static const bool canalesNuevosActivos = false;
+
+  // Chat hacia el móvil (movil_chat_central.mp3) — v2: el v1 no tenía sonido
+  static const String canalChatMovilId = canalesNuevosActivos
+      ? 'serviexpress_chat_movil_v2'
+      : 'serviexpress_chat_movil_v1';
+  // Transferencias entre móviles (transferencia_movil.mp3)
+  static const String canalTransferenciaId = canalesNuevosActivos
+      ? 'serviexpress_transferencia_v1'
+      : _canalAlarmaId;
+  // Confirmaciones al móvil: activación, billetera, descanso (movil_confirmar.mp3)
+  static const String canalConfirmacionId = canalesNuevosActivos
+      ? 'serviexpress_confirmacion_v1'
+      : _canalAlarmaId;
+  // Expulsión del paradero (expulsion_paradero.mp3) — lo usa el servidor
+  static const String canalExpulsionId = 'serviexpress_expulsion_v1';
   // Chat hacia la central (central_chat.mp3)
   static const String canalChatCentralId   = 'serviexpress_chat_central_v1';
   // Chat hacia el local (local_chat.mp3)
@@ -123,6 +149,36 @@ class MotorNotificaciones {
         'existing_android_channel_id': canalAndroidId ?? _canalAlarmaId,
         if (data != null) 'data': data,
       },
+    );
+  }
+
+  // -----------------------------------------------------------------------
+  // 2b. SERVICIO DIRECTO A UN MÓVIL (cascada / asignación directa)
+  //     alerta.mp3 para todos; master.mp3 si el móvil es de rango MASTER.
+  // -----------------------------------------------------------------------
+  static Future<void> dispararServicioDirecto({
+    required String idDestino,
+    required String titulo,
+    required String mensaje,
+  }) async {
+    if (idDestino == 'null' || idDestino.isEmpty) return;
+    bool esMaster = false;
+    try {
+      final u = await Supabase.instance.client
+          .from('usuarios')
+          .select('rango_movil')
+          .eq('id', idDestino)
+          .maybeSingle();
+      esMaster =
+          (u?['rango_movil']?.toString() ?? '').toUpperCase() == 'MASTER';
+    } catch (_) {}
+    await dispararMisil(
+      idDestino: idDestino,
+      titulo: titulo,
+      mensaje: mensaje,
+      urgente: true,
+      sonido: esMaster ? 'master' : 'alerta',
+      canalAndroidId: esMaster ? canalMasterId : _canalAlarmaId,
     );
   }
 

@@ -1153,12 +1153,12 @@ class _FormularioTabState extends State<_FormularioTab> {
           titulo: titulo,
           mensaje: msg,
           segundosRetardo: cascadaSede1.fnF3Seg,
-          sonido: Sonidos.fnCotizacion,
+          sonido: Sonidos.alerta, // cascada FN (no-Masters)
         );
       }
 
       // ── FASE 4 (T+90s): TODOS + Masters (SIN CUBRIR) ────────────────────────
-      // Push separado: Masters con master.mp3, no-Masters con fnCotizacion.
+      // Push separado: Masters con master.mp3, no-Masters con alerta.mp3.
       // Solo los Masters ven la card in-app con detalles y botón aceptar
       // (el radar limita puedeVer = esMaster en FASE 4 — ver movil_screen.dart).
       final fase4NoMasters = [
@@ -1172,7 +1172,7 @@ class _FormularioTabState extends State<_FormularioTab> {
           titulo: '🚨 FN SIN CUBRIR — $consec',
           mensaje: msg,
           segundosRetardo: cascadaSede1.fnF4Seg,
-          sonido: Sonidos.fnCotizacion,
+          sonido: Sonidos.alerta, // cascada FN (no-Masters)
         );
       }
       // Masters re-alertados con master.mp3 (push separado para sonido correcto)
@@ -1395,13 +1395,11 @@ class _FormularioTabState extends State<_FormularioTab> {
       if (usaPrecioSugerido && newServiceId != null) {
         if (_movilPreselId != null) {
           // Asignación directa — solo notificar al móvil asignado (sin cascada a Masters)
-          await MotorNotificaciones.dispararMisil(
+          await MotorNotificaciones.dispararServicioDirecto(
             idDestino: _movilPreselId!,
             titulo: '🎯 SERVICIO FN DIRECTO',
             mensaje: 'Servicio asignado · ${_destinoCtrl.text.trim()}'
                 ' · \$${_miles(_tarifaEfectiva!.toInt())}',
-            urgente: true,
-            sonido: Sonidos.movilParadero,
           );
         } else {
           // Cascada abierta
@@ -2427,13 +2425,11 @@ class _ActivosTabState extends State<_ActivosTab> {
         }).eq('id', s['id']);
 
         // Notificar solo al móvil preseleccionado
-        await MotorNotificaciones.dispararMisil(
+        await MotorNotificaciones.dispararServicioDirecto(
           idDestino: preselId,
           titulo: '🎯 SERVICIO FN ASIGNADO',
           mensaje: 'Servicio asignado · $destino'
               '${tarifa != null ? ' · \$${_miles(tarifa)}' : ''}',
-          urgente: true,
-          sonido: Sonidos.movilParadero,
         );
 
         await MotorNotificaciones.dispararACentral(
@@ -2528,7 +2524,8 @@ class _ActivosTabState extends State<_ActivosTab> {
           titulo: '👑 TURNO FN — MASTER',
           mensaje: 'Servicio disponible · $zona',
           urgente: true,
-          sonido: Sonidos.movilParadero,
+          sonido: Sonidos.master,
+          canalAndroidId: MotorNotificaciones.canalMasterId,
         );
       }
 
@@ -2555,7 +2552,7 @@ class _ActivosTabState extends State<_ActivosTab> {
           titulo: '🔵 TURNO FN CERCA',
           mensaje: 'Servicio disponible · $zona',
           segundosRetardo: cascadaSede2.fnF3Seg,
-          sonido: Sonidos.movilParadero,
+          sonido: Sonidos.alerta, // cascada FN (no-Masters)
         );
       }
 
@@ -2568,14 +2565,27 @@ class _ActivosTabState extends State<_ActivosTab> {
         ...fase4Ids, // no-Masters fuera de 2km
         ...masters, // Masters re-alertados
       ];
+      // No-Masters → alerta.mp3 ; Masters → master.mp3 (push aparte)
+      final fase4NoMasters = [...fase3Ids, ...fase4Ids];
       String? notifF4;
-      if (fase4Todos.isNotEmpty) {
+      if (fase4NoMasters.isNotEmpty) {
         notifF4 = await MotorNotificaciones.programarMisilRetardado(
-          externalIds: fase4Todos,
+          externalIds: fase4NoMasters,
           titulo: '🚨 FN SIN CUBRIR — $consec',
           mensaje: 'Servicio sin cubrir · $zona',
           segundosRetardo: cascadaSede2.fnF4Seg,
-          sonido: Sonidos.movilParadero,
+          sonido: Sonidos.alerta,
+        );
+      }
+      String? notifF4b;
+      if (masters.isNotEmpty) {
+        notifF4b = await MotorNotificaciones.programarMisilRetardado(
+          externalIds: masters,
+          titulo: '🚨 FN SIN CUBRIR — $consec',
+          mensaje: 'Servicio sin cubrir · $zona',
+          segundosRetardo: cascadaSede2.fnF4Seg,
+          sonido: Sonidos.master,
+          canalAndroidId: MotorNotificaciones.canalMasterId,
         );
       }
 
@@ -2583,6 +2593,7 @@ class _ActivosTabState extends State<_ActivosTab> {
       final notifMap2 = <String, dynamic>{
         if (notifF3 != null) 'fn_notif_fase3': notifF3,
         if (notifF4 != null) 'fn_notif_fase4': notifF4,
+        if (notifF4b != null) 'fn_notif_fase4b': notifF4b,
         if (fase3Ids.isNotEmpty) 'fn_notificados_fase3': fase3Ids,
         if (fase4Todos.isNotEmpty) 'fn_notificados_fase4': fase4Todos,
       };

@@ -134,7 +134,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
   void _mostrarAvisoCancelado(int? servicioId, String titulo, String mensaje) {
     if (!mounted) return;
     if (servicioId != null && !_cancelacionesAvisadas.add(servicioId)) return;
-    _sonidos.reproducirSuave(Sonidos.movilFinalizar);
+    // Sonido propio de cancelación (igual que el push en segundo plano).
+    _sonidos.reproducir(Sonidos.centralCancelado);
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -227,7 +228,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     }
     _ultimoBannerSancion = DateTime.now();
     _miParaderoCache = null; // ya no está en la fila
-    _sonidos.reproducir(Sonidos.movilInactividad); // sonido de aviso, no de servicio
+    _sonidos.reproducir(Sonidos.expulsionParadero); // sonido propio de expulsión
 
     final messenger = ScaffoldMessenger.of(context);
     messenger.hideCurrentMaterialBanner();
@@ -432,6 +433,9 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
   // Vigilante de conexión (E4): estado real del canal de servicios.
   int _genCanales = 0;
   Timer? _debounceRecargaSvc; // D: descarga de respaldo agrupada
+  // Servicios que el servidor dijo que ya no están disponibles (cancelados,
+  // completados o tomados por otro): no deben volver a mostrarse.
+  final Set<int> _idsDescartados = {};
   bool _canalServiciosCaido = false;
   DateTime? _ultimaReconstruccion;
   // ---- DOMICILIOS ----
@@ -565,12 +569,17 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
               _sonidos.reproducirSuave(Sonidos.movilChatCentral);
               break;
             case 'transferencia_movil':
-              // Transferencia aceptada o rechazada entre móviles — suave
-              _sonidos.reproducirSuave(Sonidos.movilConfirmar);
+              // Transferencia (solicitud, aceptada o rechazada) entre móviles
+              _sonidos.reproducir(Sonidos.transferenciaMovil);
               break;
             case 'billetera':
-              // Billetera desbloqueada, recarga aprobada, etc. — suave
+            case 'cuenta_activada':
+              // Billetera desbloqueada, recarga aprobada, cuenta activada — suave
               _sonidos.reproducirSuave(Sonidos.movilConfirmar);
+              break;
+            case 'inactividad_bloqueo':
+            case 'inactividad_eliminacion':
+              _sonidos.reproducir(Sonidos.centralCaducado);
               break;
             default:
               // Nuevo servicio SE/FN, asignación directa, etc.
@@ -579,7 +588,13 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                 // Activar el mutex para que el StreamBuilder no reproduzca
                 // el mismo sonido cuando detecte el cambio en Supabase.
                 _reproduciendoAudio = true;
-                _sonidos.reproducir(Sonidos.alerta);
+                // Regla: cascada SE/FN → alerta; móvil de rango MASTER → master.
+                final esMasterYo = ((_cacheMiPerfil ?? widget.usuario)['rango_movil']
+                            ?.toString() ??
+                        '')
+                    .toUpperCase() ==
+                    'MASTER';
+                _sonidos.reproducir(esMasterYo ? Sonidos.master : Sonidos.alerta);
                 _verificarGeocercaUnaVez();
                 // Recalcular las tarjetas: las fases dependen del tiempo y
                 // la lista solo se reconstruye con eventos. Sin esto, el push
@@ -1166,6 +1181,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
               'El móvil canceló tu pedido. Motivo: $motivo. Buscamos otro.',
           urgente: false,
           sonido: Sonidos.centralCancelado,
+          canalAndroidId: MotorNotificaciones.canalCanceladoId,
         );
       }
 
@@ -1991,27 +2007,10 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     _subUsuarios?.cancel();
     _subServicios?.cancel();
 
-    // PRE-CARGA RÁPIDA: fetch REST normal antes de que el WebSocket de
-    // Realtime negocie (~2-5s). El StreamBuilder deja el estado
-    // "waiting" en cuanto llega este primer dato — sin spinner largo.
-    // El stream de Realtime lo reemplazará cuando llegue.
-    Supabase.instance.client
-        .from('servicios')
-        .select()
-        .inFilter('estado', [
-          'pendiente',
-          'en_ruta_origen',
-          'en_origen',
-          'en_ruta_destino',
-          'problema',
-        ])
-        .order('id', ascending: false)
-        .limit(50)
-        .then((data) {
-          _cacheServicios = List<Map<String, dynamic>>.from(data);
-          if (!_ctrlServicios.isClosed) _ctrlServicios.add(_cacheServicios!);
-        })
-        .catchError((_) {});
+    // SERVICIOS: ya no hay .stream() (filtrado por estado, nunca recibía
+    // las cancelaciones y devolvía tarjetas viejas). Carga REST aquí y el
+    // canal único (_procesarCambioServicio) la mantiene en vivo.
+    _cargarServiciosActivos();
 
     // Pre-carga mi propio perfil (instantánea REST)
     Supabase.instance.client
@@ -2075,77 +2074,6 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
           },
         )
         .subscribe();
-
-    final crudoServicios = Supabase.instance.client
-        .from('servicios')
-        .stream(primaryKey: ['id'])
-        // FIX #9: antes descargaba 150 servicios sin ningún filtro —
-        // cancelados, finalizados, de otras zonas, todo. El builder
-        // solo necesita 5 estados. Reducción aprox. del 90% en datos.
-        //
-        // 'pendiente'        → radar del Francotirador y fila de paradero
-        // 'en_ruta_origen'   → servicio activo del móvil (yendo al origen)
-        // 'en_origen'        → servicio activo (esperando en origen)
-        // 'en_ruta_destino'  → servicio activo (yendo al destino)
-        // 'problema'         → servicio activo con incidencia
-        .inFilter('estado', [
-          'pendiente',
-          'en_ruta_origen',
-          'en_origen',
-          'en_ruta_destino',
-          'problema',
-        ])
-        .order('id', ascending: false)
-        .limit(50); // Reducido de 150: sin histórico, sin cancelados
-
-    // _subUsuarios eliminado: el móvil ya no suscribe al stream de todos
-    // los móviles. La fila del paradero se actualiza por _canalFila +
-    // _recargarFila() (REST fetch de solo los campos necesarios, sin GPS).
-    _subServicios = crudoServicios.listen(
-      (data) {
-        _cacheServicios = data;
-        _ultimaEmisionServicios = DateTime.now(); // Fix #2
-        // Llegaron datos: cancelar debounce y quitar overlay si estaba activo
-        _timerOverlayDesconexion?.cancel();
-        if (_conexionPerdida && mounted)
-          setState(() => _conexionPerdida = false);
-        if (!_ctrlServicios.isClosed) _ctrlServicios.add(data);
-        _verificarTransferenciaEntrante(List<Map<String, dynamic>>.from(data));
-        // Actualizar conteo de chats pendientes: central por servicio + cliente/local.
-        // SOLO de MIS servicios: el stream trae también servicios de otros
-        // móviles y antes el botón "Central" sonaba a todos.
-        final miIdChat = widget.usuario['id'].toString();
-        _svcChatCount = data
-            .where((s) =>
-                s['movil_id']?.toString() == miIdChat &&
-                (s['chat_central_movil'] == true || s['chat_movil'] == true))
-            .length;
-        _chatCentralTotal.value = _svcChatCount +
-            ((_cacheMiPerfil ?? widget.usuario)['chat_central'] == true
-                ? 1
-                : 0);
-      },
-      onError: (e) {
-        // #91: si hay caché, mantenerlo visible; no propagar el error al StreamBuilder.
-        if (_cacheServicios != null && !_ctrlServicios.isClosed) {
-          _ctrlServicios.add(_cacheServicios!);
-        } else if (!_ctrlServicios.isClosed) {
-          _ctrlServicios.addError(e);
-        }
-        // Debounce: intentar reconectar en 3s antes de mostrar overlay.
-        // Si los datos vuelven dentro de 5s, el overlay nunca aparece.
-        // Esto elimina falsos positivos por micro-cortes de red.
-        _timerOverlayDesconexion?.cancel();
-        _timerOverlayDesconexion = Timer(const Duration(seconds: 5), () {
-          if (mounted && !_conexionPerdida)
-            setState(() => _conexionPerdida = true);
-        });
-        // Reconectar inmediatamente en 3s (no esperar el tick de 30s)
-        Future.delayed(const Duration(seconds: 3), () {
-          if (mounted) _construirStreams();
-        });
-      },
-    );
 
     // CANAL ÚNICO DE SERVICIOS (D) — reemplaza a los dos canales de antes
     // (radar_bg + movil_svc_update). Con cada cambio de un servicio aplica
@@ -2211,12 +2139,9 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     // tenemos y confirmar con una descarga de respaldo agrupada.
     if (newRec.isEmpty) {
       if (id != null) {
-        final antes = _cacheServicios!.length;
-        _cacheServicios =
-            _cacheServicios!.where((s) => s['id'] != id).toList();
-        if (_cacheServicios!.length < antes && !_ctrlServicios.isClosed) {
-          _ctrlServicios.add(_cacheServicios!);
-        }
+        _idsDescartados.add(id);
+        _emitirServicios(
+            _cacheServicios!.where((s) => s['id'] != id).toList());
       }
       _programarRecargaServicios();
       return;
@@ -2244,13 +2169,16 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
           );
         }
       }
+      _idsDescartados.add(id); // no debe volver a aparecer
       if (idx >= 0) {
-        _cacheServicios = List<Map<String, dynamic>>.from(_cacheServicios!)
-          ..removeAt(idx);
-        if (!_ctrlServicios.isClosed) _ctrlServicios.add(_cacheServicios!);
+        _emitirServicios(List<Map<String, dynamic>>.from(_cacheServicios!)
+          ..removeAt(idx));
       }
       return;
     }
+
+    // Activo de nuevo (p. ej. liberado o reactivado por la central).
+    _idsDescartados.remove(id);
 
     // Activo: reemplazar la fila (o agregarla en orden id desc, máx. 50).
     final fila = Map<String, dynamic>.from(newRec);
@@ -2267,10 +2195,77 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       }
       if (lista.length > 50) lista.removeRange(50, lista.length);
     }
-    _cacheServicios = lista;
-    if (!_ctrlServicios.isClosed) _ctrlServicios.add(_cacheServicios!);
-    _verificarTransferenciaEntrante(_cacheServicios!);
+    _emitirServicios(lista);
     _revisarAutoasignacion();
+  }
+
+  // ÚNICA salida de la lista de servicios hacia la pantalla (ya no hay
+  // .stream() de servicios que pudiera devolver tarjetas viejas).
+  // Quita cualquier servicio cerrado/descartado y actualiza chats,
+  // transferencias y el aviso de desconexión.
+  void _emitirServicios(List<Map<String, dynamic>> data) {
+    final lista = data
+        .where((s) =>
+            _kEstadosActivosSvc.contains(s['estado']?.toString()) &&
+            !_idsDescartados.contains((s['id'] as num?)?.toInt()))
+        .toList();
+    _cacheServicios = lista;
+    _ultimaEmisionServicios = DateTime.now();
+    _timerOverlayDesconexion?.cancel();
+    if (_conexionPerdida && mounted) setState(() => _conexionPerdida = false);
+    if (!_ctrlServicios.isClosed) _ctrlServicios.add(lista);
+    _verificarTransferenciaEntrante(lista);
+    // Conteo de chats pendientes: SOLO de MIS servicios.
+    final miIdChat = widget.usuario['id'].toString();
+    _svcChatCount = lista
+        .where((s) =>
+            s['movil_id']?.toString() == miIdChat &&
+            (s['chat_central_movil'] == true || s['chat_movil'] == true))
+        .length;
+    _chatCentralTotal.value = _svcChatCount +
+        ((_cacheMiPerfil ?? widget.usuario)['chat_central'] == true ? 1 : 0);
+  }
+
+  /// Llamar cuando el servidor dice que un servicio ya no está disponible
+  /// (cancelado, completado o tomado por otro): la tarjeta se quita YA.
+  void _descartarServicio(dynamic rawId) {
+    final id = rawId is num ? rawId.toInt() : int.tryParse('$rawId');
+    if (id == null || _cacheServicios == null) return;
+    _idsDescartados.add(id);
+    _emitirServicios(_cacheServicios!);
+    _radarTick.value++;
+  }
+
+  // Carga completa (REST) de los servicios activos: al abrir, al volver a
+  // la app y cuando el vigilante detecta caída. Es la foto fiel del
+  // servidor, así que limpia la lista de descartados.
+  Future<void> _cargarServiciosActivos() async {
+    try {
+      final data = await Supabase.instance.client
+          .from('servicios')
+          .select()
+          .inFilter('estado', _kEstadosActivosSvc.toList())
+          .order('id', ascending: false)
+          .limit(50);
+      if (!mounted) return;
+      _idsDescartados.clear();
+      _emitirServicios(List<Map<String, dynamic>>.from(data));
+      _revisarAutoasignacion();
+    } catch (e) {
+      // Sin red: mantener la lista visible y avisar si dura más de 5 s.
+      _canalServiciosCaido = true; // el vigilante reintenta
+      if (_cacheServicios != null && !_ctrlServicios.isClosed) {
+        _ctrlServicios.add(_cacheServicios!);
+      } else if (!_ctrlServicios.isClosed) {
+        _ctrlServicios.addError(e);
+      }
+      _timerOverlayDesconexion?.cancel();
+      _timerOverlayDesconexion = Timer(const Duration(seconds: 5), () {
+        if (mounted && !_conexionPerdida) {
+          setState(() => _conexionPerdida = true);
+        }
+      });
+    }
   }
 
   // AUTOASIGNACIÓN: si el servidor asignó este móvil a un servicio activo,
@@ -2301,20 +2296,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
   void _programarRecargaServicios() {
     _debounceRecargaSvc?.cancel();
     _debounceRecargaSvc = Timer(const Duration(seconds: 1), () {
-      if (!mounted) return;
-      Supabase.instance.client
-          .from('servicios')
-          .select()
-          .inFilter('estado', _kEstadosActivosSvc.toList())
-          .order('id', ascending: false)
-          .limit(50)
-          .then((data) {
-        if (!mounted) return;
-        _cacheServicios = List<Map<String, dynamic>>.from(data);
-        if (!_ctrlServicios.isClosed) _ctrlServicios.add(_cacheServicios!);
-        _verificarTransferenciaEntrante(_cacheServicios!);
-        _revisarAutoasignacion();
-      }).catchError((_) {});
+      if (mounted) _cargarServiciosActivos();
     });
   }
 
@@ -4008,24 +3990,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
             .then((data) {
           if (!_ctrlUsuarios.isClosed) _ctrlUsuarios.add(data);
         }).catchError((_) {});
-        Supabase.instance.client
-            .from('servicios')
-            .select()
-            .inFilter('estado', [
-              'pendiente',
-              'en_ruta_origen',
-              'en_origen',
-              'en_ruta_destino',
-              'problema',
-            ])
-            .order('id', ascending: false)
-            .limit(50)
-            .then((data) {
-              _cacheServicios = List<Map<String, dynamic>>.from(data);
-              if (!_ctrlServicios.isClosed)
-                _ctrlServicios.add(_cacheServicios!);
-            })
-            .catchError((_) {});
+        _cargarServiciosActivos();
       }
 
       // SE-CONNECT-NOTIFY: al conectarse, notificar servicios SE pendientes
@@ -12355,6 +12320,11 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
 
                   if (!exito) {
                     final String motivo = fila?['motivo']?.toString() ?? '';
+                    // Ya no está disponible (cancelado/completado/tomado):
+                    // quitar la tarjeta YA para que no vuelva a aparecer.
+                    if (motivo != 'limite_alcanzado') {
+                      _descartarServicio(servicio['id']);
+                    }
                     String mensaje;
                     if (motivo == 'limite_alcanzado') {
                       mensaje =
@@ -12490,6 +12460,11 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
 
       if (!exito) {
         final String motivo = fila?['motivo']?.toString() ?? '';
+        // Ya no está disponible (cancelado/completado/tomado):
+        // quitar la tarjeta YA para que no vuelva a aparecer.
+        if (motivo != 'limite_alcanzado') {
+          _descartarServicio(servicio['id']);
+        }
         String mensaje;
         if (motivo == 'limite_alcanzado') {
           mensaje = '🚫 Alcanzaste tu límite de servicios simultáneos.';
@@ -12732,7 +12707,9 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         mensaje:
             'Móvil ${RegExp(r'\d+').firstMatch(widget.usuario['usuario']?.toString() ?? '')?.group(0) ?? '?'} quiere transferirte un servicio',
         urgente: true,
-        sonido: Sonidos.movilParadero,
+        sonido: Sonidos.transferenciaMovil,
+        canalAndroidId: MotorNotificaciones.canalTransferenciaId,
+        data: {'tipo': 'transferencia_movil'},
       );
 
       if (mounted) {
@@ -12853,6 +12830,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
               '${movilLabel(widget.usuario)} aceptó tu servicio #${servicio['id']}',
           urgente: false,
           sonido: Sonidos.transferenciaMovil,
+          canalAndroidId: MotorNotificaciones.canalTransferenciaId,
           data: {'tipo': 'transferencia_movil'},
         );
       }
@@ -12873,6 +12851,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
           mensaje: '${movilLabel(widget.usuario)} rechazó tu solicitud',
           urgente: false,
           sonido: Sonidos.transferenciaMovil,
+          canalAndroidId: MotorNotificaciones.canalTransferenciaId,
           data: {'tipo': 'transferencia_movil'},
         );
       }
@@ -13028,12 +13007,10 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       }).eq('id', servicio['id']);
 
       // 6. Headsup al nuevo móvil
-      await MotorNotificaciones.dispararMisil(
+      await MotorNotificaciones.dispararServicioDirecto(
         idDestino: nuevoId.toString(),
         titulo: '📍 TU TURNO EN EL PARADERO',
         mensaje: 'Un servicio está esperando por ti',
-        urgente: true,
-        sonido: Sonidos.movilParadero,
       );
     } catch (e) {
       if (mounted) {
@@ -13282,7 +13259,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
             titulo: '🔵 TURNO FN LIBERADO — PARA TI',
             mensaje: 'Servicio Farmanorte disponible · $zonaFn',
             segundosRetardo: cascadaMovil2.fnF2Seg + 1,
-            sonido: Sonidos.movilParadero,
+            sonido: Sonidos.alerta, // cascada FN
           );
         }
 
@@ -13294,7 +13271,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
             titulo: '🔵 TURNO FN LIBERADO',
             mensaje: 'Servicio Farmanorte sin tomar · $zonaFn',
             segundosRetardo: cascadaMovil2.fnF3Seg + 1,
-            sonido: Sonidos.movilParadero,
+            sonido: Sonidos.alerta, // cascada FN
           );
         }
 
@@ -13306,7 +13283,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
             titulo: '🔵 TURNO FN LIBERADO',
             mensaje: 'Servicio Farmanorte sin tomar · $zonaFn',
             segundosRetardo: cascadaMovil2.fnF4Seg + 1,
-            sonido: Sonidos.movilParadero,
+            sonido: Sonidos.alerta, // cascada FN
           );
         }
 

@@ -162,6 +162,7 @@ class _MonitorPedidosScreenState extends State<MonitorPedidosScreen>
             mensaje: info.$2,
             urgente: nuevoEstado == 'entregado' || nuevoEstado == 'en_camino',
             sonido: Sonidos.centralRadar,
+            canalAndroidId: MotorNotificaciones.canalRadarId,
           );
         }
       }
@@ -200,7 +201,8 @@ class _MonitorPedidosScreenState extends State<MonitorPedidosScreen>
         titulo: '❌ Pedido cancelado',
         mensaje: 'Tu pedido fue cancelado por la central. Disculpa los inconvenientes.',
         urgente: false,
-        sonido: Sonidos.centralRadar,
+        sonido: Sonidos.centralCancelado,
+        canalAndroidId: MotorNotificaciones.canalCanceladoId,
       );
     }
   }

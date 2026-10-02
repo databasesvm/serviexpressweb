@@ -67,6 +67,7 @@ class Sonidos {
   static const String movilConfirmar = 'movil_confirmar';
   static const String movilCarga = 'movil_cargar';
   static const String movilParadero = 'movil_paradero';
+  static const String expulsionParadero = 'expulsion_paradero'; // #1 sale del paradero
   static const String movilConectado = 'movil_conectado';  // Al activar turno
   static const String movilFinalizar = 'movil_finalizar';  // Al completar servicio (hold)
 

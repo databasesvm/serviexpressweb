@@ -590,6 +590,7 @@ class _RegistroScreenState extends State<RegistroScreen> {
                     '${filaInsertada['nombre'] ?? 'Nuevo usuario'} esperando activacion. Gestion > Usuarios.',
                 urgente: true,
                 sonido: Sonidos.centralRadar,
+                canalAndroidId: MotorNotificaciones.canalRadarId,
               );
             }
           } catch (_) {}

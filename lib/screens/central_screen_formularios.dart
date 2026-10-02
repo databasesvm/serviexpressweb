@@ -689,15 +689,13 @@ extension CentralScreenFormularios on _CentralScreenState {
                         if (movilDirectoServimotoId != null) {
                           // ASIGNACIÓN DIRECTA — notificación solo al móvil elegido
                           final String origenSnap = origenController.text.trim();
-                          await MotorNotificaciones.dispararMisil(
+                          await MotorNotificaciones.dispararServicioDirecto(
                             idDestino: movilDirectoServimotoId!,
                             titulo: TextosPush.asignadoTitulo,
                             mensaje: TextosPush.asignadoMensaje(
                               'La Central',
                               TextosPush.ruta(origenSnap, destinoController.text),
                             ),
-                            urgente: true,
-                            sonido: Sonidos.movilParadero,
                           );
                         } else {
                           // ══════════════════════════════════════════════════
@@ -1981,13 +1979,11 @@ extension CentralScreenFormularios on _CentralScreenState {
 
                             // Notificación diferenciada: no es "turno disponible",
                             // es "la central te asignó" — tono y título distintos
-                            await MotorNotificaciones.dispararRafa(
-                              idsDestinos: [movilDirectoId!],
+                            await MotorNotificaciones.dispararServicioDirecto(
+                              idDestino: movilDirectoId!,
                               titulo: '📋 CENTRAL TE ASIGNÓ UN TURNO FN',
                               mensaje:
                                   'Tienes un servicio Farmanorte asignado · $zonaLabel',
-                              urgente: true,
-                              sonido: Sonidos.movilParadero,
                             );
 
                             if (context.mounted) {
@@ -2165,7 +2161,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                                 titulo: '🔵 TURNO FN CERCA',
                                 mensaje: 'Servicio Farmanorte disponible · $zonaLabel',
                                 segundosRetardo: _cascadaFnF3Seg, // CONFIG-CASCADA-C
-                                sonido: Sonidos.movilParadero,
+                                sonido: Sonidos.alerta, // cascada FN (no-Masters)
                               );
                             }
 
@@ -2177,7 +2173,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                                 titulo: '🔵 TURNO FN SIN TOMAR',
                                 mensaje: 'Servicio Farmanorte · $zonaLabel',
                                 segundosRetardo: _cascadaFnF4Seg, // CONFIG-CASCADA-C
-                                sonido: Sonidos.movilParadero,
+                                sonido: Sonidos.alerta, // cascada FN (no-Masters)
                               );
                             }
 
@@ -2415,7 +2411,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                                 mensaje:
                                     'Servicio Farmanorte disponible · $zonaLabel',
                                 segundosRetardo: _cascadaFnF3Seg, // CONFIG-CASCADA-C
-                                sonido: Sonidos.movilParadero,
+                                sonido: Sonidos.alerta, // cascada FN (no-Masters)
                               );
                             }
 
@@ -2429,7 +2425,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                                 mensaje:
                                     'Servicio Farmanorte · $zonaLabel',
                                 segundosRetardo: _cascadaFnF4Seg, // CONFIG-CASCADA-C
-                                sonido: Sonidos.movilParadero,
+                                sonido: Sonidos.alerta, // cascada FN (no-Masters)
                               );
                             }
 

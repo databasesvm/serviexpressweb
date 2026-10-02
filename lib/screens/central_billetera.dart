@@ -482,6 +482,7 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                                       : 'Se acreditaron \$${monto.toStringAsFixed(0)} en tu billetera.',
                       urgente: false,
                       sonido: Sonidos.movilConfirmar,
+                      canalAndroidId: MotorNotificaciones.canalConfirmacionId,
                       data: {'tipo': 'billetera'},
                     );
                     _cargar();

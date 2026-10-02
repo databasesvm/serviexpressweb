@@ -20,8 +20,15 @@ class ServiMotoApp : Application() {
         const val CHANNEL_MASTER_ID         = "serviexpress_master_v1"
         // Aviso de inactividad 5h45min al móvil
         const val CHANNEL_INACTIVIDAD_ID    = "serviexpress_inactividad_v1"
-        // Chat: móvil recibe mensaje de central o cliente
-        const val CHANNEL_CHAT_MOVIL_ID     = "serviexpress_chat_movil_v1"
+        // Chat: móvil recibe mensaje de central o cliente.
+        // v2: el v1 se creó sin archivo de sonido (Android no deja cambiarlo).
+        const val CHANNEL_CHAT_MOVIL_ID     = "serviexpress_chat_movil_v2"
+        // Transferencias entre móviles (solicitud, aceptada, rechazada)
+        const val CHANNEL_TRANSFERENCIA_ID  = "serviexpress_transferencia_v1"
+        // Confirmaciones al móvil (activación, billetera, descanso)
+        const val CHANNEL_CONFIRMACION_ID   = "serviexpress_confirmacion_v1"
+        // Expulsión del paradero (#1 no aceptó su turno)
+        const val CHANNEL_EXPULSION_ID      = "serviexpress_expulsion_v1"
         // Chat: central recibe mensaje de móvil, local o cliente
         const val CHANNEL_CHAT_CENTRAL_ID   = "serviexpress_chat_central_v1"
         // Chat: local recibe mensaje
@@ -81,7 +88,10 @@ class ServiMotoApp : Application() {
             CHANNEL_ONESIGNAL_DEFAULT,
             "a26379a9-df0b-4d1e-8679-20ee949f7c59",
             "63802a9e-afed-4b02-83b8-55376cea49f0",
-            "serviexpress_panico_v1" // canal de pánico eliminado: se borra del teléfono
+            "serviexpress_panico_v1"     // canal de pánico eliminado: se borra del teléfono
+            // TRANSICIÓN: "serviexpress_chat_movil_v1" NO se borra todavía — los
+            // demás teléfonos (app vieja) siguen enviando el chat por ese canal.
+            // Borrarlo cuando todos tengan la app nueva.
         ).forEach { nm.deleteNotificationChannel(it) }
 
         val HI  = NotificationManager.IMPORTANCE_HIGH
@@ -102,8 +112,15 @@ class ServiMotoApp : Application() {
 
             // ── CHAT ────────────────────────────────────────────────────────
             crearCanal(CHANNEL_CHAT_MOVIL_ID,     "Chat — Móvil",            "Mensajes de chat recibidos por el móvil.",      MED, uri("movil_chat_central")),
+            // TRANSICIÓN: el v1 sigue existiendo mientras haya apps viejas enviándolo
+            crearCanal("serviexpress_chat_movil_v1", "Chat — Móvil (anterior)", "Mensajes de chat recibidos por el móvil.", MED, uri("movil_chat_central")),
             crearCanal(CHANNEL_CHAT_CENTRAL_ID,   "Chat — Central",          "Mensajes de chat recibidos por la central.",    MED, uri("central_chat")),
             crearCanal(CHANNEL_CHAT_LOCAL_ID,     "Chat — Local",            "Mensajes de chat recibidos por el local.",      MED, uri("local_chat")),
+
+            // ── MÓVIL: TRANSFERENCIAS Y CONFIRMACIONES ──────────────────────
+            crearCanal(CHANNEL_TRANSFERENCIA_ID,  "Transferencias",          "Transferencias de servicios entre móviles.",    HI,  uri("transferencia_movil")),
+            crearCanal(CHANNEL_CONFIRMACION_ID,   "Confirmaciones",          "Activación, billetera y descansos.",            MED, uri("movil_confirmar")),
+            crearCanal(CHANNEL_EXPULSION_ID,      "Expulsión del paradero",  "Saliste del paradero por no aceptar tu turno.", HI,  uri("expulsion_paradero")),
 
             // ── CENTRAL: EVENTOS OPERATIVOS ─────────────────────────────────
             crearCanal(CHANNEL_COTIZACION_ID,     "Cotización",              "Nueva cotización recibida.",                    HI,  uri("central_cotizacion")),

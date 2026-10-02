@@ -232,6 +232,7 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
       mensaje: cuerpo,
       urgente: false,
       sonido: Sonidos.movilConfirmar,
+      canalAndroidId: MotorNotificaciones.canalConfirmacionId,
       data: {'tipo': tipo},
     ).ignore();
   }
@@ -399,6 +400,7 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
       mensaje: cuerpoActivacion,
       urgente: false,
       sonido: Sonidos.movilConfirmar,
+      canalAndroidId: MotorNotificaciones.canalConfirmacionId,
       data: {'tipo': 'cuenta_activada'},
     ).ignore();
 
