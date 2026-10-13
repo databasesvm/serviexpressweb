@@ -56,7 +56,15 @@ class CampoTarifaInteligente extends StatefulWidget {
   /// recargo, total, fuente} en el momento del dispatch.
   final void Function(Map<String, dynamic> detalle)? onDetalleChanged;
 
+  /// Precio calculado por el sistema (rutas, lista del local, km por sector).
+  /// Si viene, se usa como base en lugar del sugeridor por historial, y los
+  /// recargos se suman encima. Así la central ve UNA sola sugerencia.
+  final int? precioSistema;
+  final String? desgloseSistema;
+
   const CampoTarifaInteligente({
+    this.precioSistema,
+    this.desgloseSistema,
     super.key,
     required this.origenController,
     required this.destinoController,
@@ -103,6 +111,17 @@ class _CampoTarifaInteligenteState extends State<CampoTarifaInteligente> {
     widget.origenController.addListener(_onRutaCambio);
     widget.destinoController.addListener(_onRutaCambio);
     widget.tarifaController.addListener(_detectarEdicionManual);
+    // Precio del sistema: no se consulta el sugeridor viejo
+    if (widget.precioSistema != null && widget.precioSistema! > 0) {
+      _precioSugerido = widget.precioSistema;
+      _confianza = 'sistema';
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (!_centralModificoManualmente) _preLlenarCampo(_precioSugerido! + _recargo);
+        _emitirDetalle();
+      });
+      return;
+    }
     // Consulta inicial si ya vienen con datos
     if (widget.origenController.text.isNotEmpty &&
         widget.destinoController.text.isNotEmpty) {
@@ -123,6 +142,7 @@ class _CampoTarifaInteligenteState extends State<CampoTarifaInteligente> {
   // ESCUCHAS
   // -----------------------------------------------------------------------
   void _onRutaCambio() {
+    if (widget.precioSistema != null && widget.precioSistema! > 0) return;
     // Si Central ya escribió un precio propio, no sobreescribimos
     _centralModificoManualmente = false;
 
@@ -293,7 +313,9 @@ class _CampoTarifaInteligenteState extends State<CampoTarifaInteligente> {
         : 0;
     final String fuente = _centralModificoManualmente
         ? 'manual'
-        : (_precioSugerido != null ? 'motor_$_confianza' : 'sin_historial');
+        : (_confianza == 'sistema'
+            ? 'sistema'
+            : (_precioSugerido != null ? 'motor_$_confianza' : 'sin_historial'));
     widget.onDetalleChanged!({
       'base': base,
       'lluvia': _ultimoEstadoRecargos?.lluvia ?? false,
@@ -358,7 +380,37 @@ class _CampoTarifaInteligenteState extends State<CampoTarifaInteligente> {
               ],
             ),
           )
-        else if (_precioSugerido != null && _numPrecedentes >= 3) ...[
+        else if (_confianza == 'sistema' && _precioSugerido != null) ...[
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.blue.withValues(alpha: 0.06),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
+            ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('🧮 Calculado por el sistema: ${_formatearPeso(_precioSugerido!)}',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              if ((widget.desgloseSistema ?? '').isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(widget.desgloseSistema!, style: const TextStyle(fontSize: 11, color: Colors.black54)),
+              ],
+              if (_centralModificoManualmente)
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: () {
+                      _centralModificoManualmente = false;
+                      _preLlenarCampo(_precioSugerido! + _recargo);
+                    },
+                    child: const Text('↺ Volver al calculado', style: TextStyle(fontSize: 11)),
+                  ),
+                ),
+            ]),
+          ),
+          const SizedBox(height: 10),
+        ] else if (_precioSugerido != null && _numPrecedentes >= 3) ...[
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
@@ -374,7 +426,7 @@ class _CampoTarifaInteligenteState extends State<CampoTarifaInteligente> {
                     const Icon(Icons.lightbulb_outline, size: 16),
                     const SizedBox(width: 6),
                     Text(
-                      'Precio sugerido: ${_formatearPeso(_precioSugerido!)}',
+                      '${_confianza == 'sistema' ? 'Calculado' : 'Precio sugerido'}: ${_formatearPeso(_precioSugerido!)}',
                       style: const TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 14,

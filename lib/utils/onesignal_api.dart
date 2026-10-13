@@ -109,6 +109,14 @@ class MotorNotificaciones {
           .eq('id', userId)
           .eq('canales_v2', false);
     } catch (_) {}
+    // v3: esta versión también trae el canal de avisos SIN sonido
+    try {
+      await Supabase.instance.client
+          .from('usuarios')
+          .update({'canales_v3': true})
+          .eq('id', userId)
+          .eq('canales_v3', false);
+    } catch (_) {}
   }
   // Chat hacia la central (central_chat.mp3)
   static const String canalChatCentralId   = 'serviexpress_chat_central_v1';

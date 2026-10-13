@@ -9,6 +9,7 @@ import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:serviexpress_app/utils/motor_rutas.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart'; // MotorNotificaciones
 import 'package:serviexpress_app/utils/textos_push.dart'; // Textos únicos de push SE
+import 'package:serviexpress_app/utils/ubicacion_cliente.dart'; // Ubicación GPS del cliente
 import 'package:serviexpress_app/utils/hora_servidor.dart'; // Reloj alineado con el servidor
 import 'package:serviexpress_app/utils/sonido_manager.dart'; // Motor de audio in-app
 import 'package:serviexpress_app/utils/permisos_criticos.dart'; // Permisos críticos en segundo plano
@@ -116,6 +117,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
   // Cada entrada: [latitud, longitud, radio_metros].
   // Se inicializa vacío y se llena en _cargarZonasParadero() al arrancar.
   Map<String, List<double>> _kZonasParadero = {};
+  // Última orden de GPS forzado ya atendida (usuarios.gps_forzado_at)
+  String? _gpsForzadoVisto;
   // Geocerca anti-falsos: cuántas lecturas GPS confiables seguidas han caído
   // fuera del paradero. Solo se expulsa con 2 seguidas (una sola lectura mala
   // de GPS ya no saca al móvil de la fila).
@@ -576,6 +579,21 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
             case 'cuenta_activada':
               // Billetera desbloqueada, recarga aprobada, cuenta activada — suave
               _sonidos.reproducirSuave(Sonidos.movilConfirmar);
+              break;
+            case 'ubicacion_cliente':
+              // El cliente marcó su ubicación GPS: sonido suave + aviso en pantalla
+              _sonidos.reproducirSuave(Sonidos.movilConfirmar);
+              final cuerpo = event.notification.body ?? '';
+              if (cuerpo.isNotEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: Text('📍 $cuerpo'),
+                  backgroundColor: cuerpo.contains('POCO PRECISA')
+                      ? Colors.red[700]
+                      : const Color(0xFF2E7D32),
+                  duration: const Duration(seconds: 6),
+                  behavior: SnackBarBehavior.floating,
+                ));
+              }
               break;
             case 'inactividad_bloqueo':
             case 'inactividad_eliminacion':
@@ -1364,7 +1382,9 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
 
 
   // ── Overlay de bloqueo semanal: cubre TODA la pantalla cuando wallet_bloqueado=true ──
-  Widget _overlayBilleteraBlockeada(dynamic movilId, {bool recargo = false}) => Positioned.fill(
+  Widget _overlayBilleteraBlockeada(dynamic movilId,
+          {bool recargo = false, bool multaPendiente = false}) =>
+      Positioned.fill(
         child: Container(
           color: const Color(0xFF0D0D0D),
           child: SafeArea(
@@ -1388,7 +1408,10 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                         color: recargo ? Colors.orangeAccent : Colors.redAccent, size: 38),
                   ),
                   const SizedBox(height: 20),
-                  Text(recargo ? 'RECARGO POR MORA ACTIVO' : 'BILLETERA BLOQUEADA',
+                  Text(
+                      multaPendiente
+                          ? 'FALTA LA MULTA'
+                          : recargo ? 'RECARGO POR MORA ACTIVO' : 'BILLETERA BLOQUEADA',
                       style: TextStyle(
                           color: recargo ? Colors.orangeAccent : Colors.redAccent,
                           fontSize: 18,
@@ -1396,9 +1419,17 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                           letterSpacing: 1.5)),
                   const SizedBox(height: 12),
                   Text(
-                    recargo
-                        ? 'Tu billetera fue bloqueada por mora. Para desbloquearla debes pagar \$80.000 (\$60.000 semana + \$20.000 recargo por mora).'
-                        : 'Tu billetera semanal ha sido bloqueada por falta de pago.\nPara reactivarla, envía el soporte de pago y espera la aprobación de la central.',
+                    multaPendiente
+                        ? 'Ya recibimos tu pago de la semana (\$60.000) ✔\n\n'
+                          'Para desbloquear tu billetera falta la multa por mora de \$20.000. '
+                          'Paga la multa y envía el comprobante.'
+                        : recargo
+                        ? 'No se registró el pago de tu semana antes de las 12:20 p. m. del lunes, '
+                          'por eso se sumó una multa por mora.\n\n'
+                          'Total a pagar: \$80.000 (\$60.000 semana + \$20.000 multa).\n'
+                          'Paga, envía el comprobante y la central desbloqueará tu billetera.'
+                        : 'Cada lunes a las 12:00 m se cobra tu semana (\$60.000) y no se registró tu pago.\n\n'
+                          'Paga y envía el comprobante antes de las 12:20 p. m. para evitar una multa de \$20.000.',
                     textAlign: TextAlign.center,
                     style: const TextStyle(
                         color: Colors.white60, fontSize: 13, height: 1.6),
@@ -1454,7 +1485,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                     future: ConfigCache.solicitudPendiente(
                       movilId: movilId,
                       columnas: 'id, created_at',
-                      tipos: const ['pago_semanal', 'pago_semanal_con_recargo'],
+                      tipos: const ['pago_semanal', 'pago_semanal_con_recargo', 'pago_multa'],
                       estadoBilletera: ConfigCache.estadoBilletera(
                           _cacheMiPerfil ?? widget.usuario),
                     ),
@@ -1498,9 +1529,11 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                         child: ElevatedButton.icon(
                           icon: const Icon(Icons.upload_rounded, size: 16),
                           label: Text(
-                              recargo
-                                  ? 'ENVIAR COMPROBANTE \$80.000'
-                                  : 'ENVIAR COMPROBANTE PARA DESBLOQUEAR',
+                              multaPendiente
+                                  ? 'PAGAR MULTA \$20.000'
+                                  : recargo
+                                      ? 'PAGAR SEMANA + MULTA'
+                                      : 'PAGAR MI SEMANA',
                               style: const TextStyle(
                                   fontSize: 12, fontWeight: FontWeight.bold)),
                           style: ElevatedButton.styleFrom(
@@ -1512,9 +1545,11 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                           ),
                           onPressed: () => _solicitarRecargaWallet(
                               movilId, 'semanal',
-                              tipoSolicitud: recargo
-                                  ? 'pago_semanal_con_recargo'
-                                  : 'pago_semanal'),
+                              tipoSolicitud: multaPendiente
+                                  ? 'pago_multa'
+                                  : recargo
+                                      ? 'pago_semanal_con_recargo'
+                                      : 'pago_semanal'),
                         ),
                       );
                     },
@@ -2036,6 +2071,19 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         if (data.isNotEmpty) {
           _cacheMiPerfil = data.first;
           if (!_ctrlMiPerfil.isClosed) _ctrlMiPerfil.add(data.first);
+          // GPS FORZADO (reporte de ausencia o la central): el servidor marca
+          // gps_forzado_at y este teléfono manda su ubicación al instante,
+          // sin preguntarle nada al piloto.
+          final gf = data.first['gps_forzado_at']?.toString();
+          if (gf != null && gf != _gpsForzadoVisto) {
+            _gpsForzadoVisto = gf;
+            final t = DateTime.tryParse(gf);
+            // Solo órdenes recientes (no reaccionar a una vieja al abrir la app)
+            if (t != null &&
+                DateTime.now().toUtc().difference(t.toUtc()).inMinutes < 2) {
+              _forzarActualizacionGps();
+            }
+          }
           // Actualizar conteo de chats: chat_central (nivel usuario)
           _chatCentralTotal.value =
               _svcChatCount + (data.first['chat_central'] == true ? 1 : 0);
@@ -3352,11 +3400,13 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
   }
 
   // ── REPORTAR MÓVIL AUSENTE DEL PARADERO ─────────────────────────────────────
-  // Flujo al reportar:
-  //   1. Confirma el reporte
-  //   2. Consulta la última posición del reportado en la BD
-  //   3a. Si está fuera del radio → lo saca de la fila automáticamente (no avisa a central)
-  //   3b. Si está dentro del radio (o sin coordenadas) → notifica a Central/Master
+  // Flujo al reportar (medida manual de último recurso):
+  //   1. Confirma el reporte → queda registrado en reportes_paradero
+  //   2. El servidor FUERZA el GPS del reportado (gps_forzado_at)
+  //   3. A los 20 s el servidor decide con la ubicación nueva (la manda la
+  //      app abierta o, si está cerrada de recientes, el servicio en 2º plano):
+  //      fuera → lo saca de la fila (la central lo ve solo en su panel);
+  //      dentro o el GPS no respondió → aviso a la central + panel.
   Future<void> _reportarMovilAusente(
     Map<String, dynamic> movilReportado,
     String paradero,
@@ -3396,101 +3446,68 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     if (confirmar != true || !mounted) return;
 
     try {
-      // Pedir al fantasma que actualice su GPS ahora mismo (si tiene app abierta)
-      MotorNotificaciones.dispararMisil(
-        idDestino: movilReportado['id'].toString(),
-        titulo: '📍',
-        mensaje: '',
-        urgente: false,
-        data: {'tipo': 'force_gps_update'},
-      );
+      final db = Supabase.instance.client;
+      // 1) Registrar el reporte y FORZAR el GPS del reportado (el servidor
+      //    marca gps_forzado_at y su app manda la ubicación sin preguntar).
+      final reporteId = await db.rpc('fn_reportar_ausente', params: {
+        'p_reportado': movilReportado['id'],
+        'p_paradero': paradero,
+        'p_reportante': widget.usuario['id'], // respaldo si la cuenta no migró a Auth
+      });
 
-      // Pequeña espera para dar tiempo al fantasma de responder si está activo
-      await Future.delayed(const Duration(milliseconds: 800));
-
-      // Consultar última posición del reportado directamente en BD
-      final datosReportado = await Supabase.instance.client
-          .from('usuarios')
-          .select('id, latitud, longitud, paradero_actual')
-          .eq('id', movilReportado['id'])
-          .maybeSingle();
-
-      if (!mounted) return;
-
-      // Si ya salió del paradero por otra vía, no hacer nada
-      if (datosReportado == null || datosReportado['paradero_actual'] == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text('$reportadoNombre ya salió de la fila.'),
-              backgroundColor: Colors.grey),
-        );
-        return;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('📡 Verificando la ubicación de $reportadoNombre…'),
+          backgroundColor: Colors.blueGrey,
+          duration: const Duration(seconds: 20),
+        ));
       }
 
-      final zona = _kZonasParadero[paradero];
-      final double? lat = (datosReportado['latitud'] as num?)?.toDouble();
-      final double? lng = (datosReportado['longitud'] as num?)?.toDouble();
+      // 2) Dar tiempo a que llegue la ubicación forzada. 20 s: si el reportado
+      //    tiene la app cerrada de recientes, la atiende el servicio en segundo
+      //    plano en su siguiente ciclo (cada 15 s) + lo que tarde el GPS.
+      await Future.delayed(const Duration(seconds: 20));
 
-      bool estaFuera = false;
-      if (zona != null && lat != null && lng != null) {
-        final dist = Geolocator.distanceBetween(lat, lng, zona[0], zona[1]);
-        estaFuera =
-            dist > zona[2] + 50; // mismo margen que la geocerca automática
-      }
+      // 3) El servidor decide: fuera → lo saca; dentro o sin GPS → a la central
+      final res = await db.rpc('fn_resolver_reporte_ausente',
+          params: {'p_reporte': reporteId});
+      final estado = (res is Map ? res['estado'] : null)?.toString() ?? '';
 
-      if (estaFuera) {
-        // Sacar automáticamente — no molestar a la central
-        await Supabase.instance.client
-            .from('usuarios')
-            .update({'paradero_actual': null, 'ingreso_fila': null}).eq(
-                'id', movilReportado['id']);
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                  '📍 $reportadoNombre no estaba en $paradero — fue sacado de la fila automáticamente.'),
-              backgroundColor: Colors.green[700],
-              duration: const Duration(seconds: 4),
-            ),
-          );
-        }
-      } else {
-        // Está dentro del rango (o sin coordenadas) — avisar a central
+      if (estado == 'pendiente_central') {
         final reportanteNombre =
             (widget.usuario['usuario'] ?? widget.usuario['nombre'] ?? '')
                 .toString()
                 .toUpperCase();
-
-        final receptores = await Supabase.instance.client
-            .from('usuarios')
-            .select('id')
-            .inFilter('rol', ['central', 'master'])
-            .eq('activo', true)
-            .neq('suspendido', true);
-
-        final ids = receptores.map((u) => u['id'].toString()).toList();
-        if (ids.isNotEmpty) {
-          await MotorNotificaciones.dispararRafa(
-            idsDestinos: ids,
-            titulo: '🚩 Reporte de ausencia en $paradero',
-            mensaje:
-                '$reportanteNombre reporta que $reportadoNombre podría no estar en $paradero. La ubicación registrada lo sitúa dentro del rango.',
-            urgente: true,
-          );
-        }
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                  '⚠️ $reportadoNombre aparece dentro del rango. Se avisó a la central para que verifique.'),
-              backgroundColor: Colors.orange,
-              duration: const Duration(seconds: 4),
-            ),
-          );
-        }
+        final gpsOk = res is Map && res['gps_respondio'] == true;
+        MotorNotificaciones.dispararACentral(
+          titulo: '🚩 Reporte de ausencia en $paradero',
+          mensaje: gpsOk
+              ? '$reportanteNombre reporta que $reportadoNombre no está en $paradero. Su GPS lo ubica dentro del rango: verifica.'
+              : '$reportanteNombre reporta que $reportadoNombre no está en $paradero. Su GPS NO respondió: verifica.',
+          urgente: false,
+          sonido: 'central_cotizacion',
+          canalAndroidId: MotorNotificaciones.canalCotizacionId,
+        );
       }
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      final (String texto, Color color) = switch (estado) {
+        'retirado_auto' => (
+            '📍 $reportadoNombre no estaba en $paradero — fue sacado de la fila.',
+            Colors.green[700]!
+          ),
+        'sin_efecto' => ('$reportadoNombre ya salió de la fila.', Colors.grey),
+        _ => (
+            '⚠️ No se pudo confirmar que $reportadoNombre esté fuera. Se avisó a la central para que verifique.',
+            Colors.orange
+          ),
+      };
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(texto),
+        backgroundColor: color,
+        duration: const Duration(seconds: 4),
+      ));
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -9138,6 +9155,15 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                     ),
                   ),
 
+                // Ubicación que marcó el cliente (exacta / aproximada / poco precisa)
+                if (!tieneProblema)
+                  IndicadorUbicacionCliente(
+                    servicio,
+                    onVerMapa: _procesando
+                        ? null
+                        : () => _abrirNavegadorSatelital(servicio, false),
+                  ),
+
                 // Navegar
                 if (mostrarBotonNavegar && !tieneProblema)
                   Padding(
@@ -13523,6 +13549,35 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     Uint8List? _imgBytes;
     bool _subiendo = false;
 
+    // ── Pago semanal: semana fija + multa por mora (si aplica) ──────────────
+    // 'pago_multa' = la central ya aceptó la semana; solo falta la multa
+    final bool soloMulta = tipoSolicitud == 'pago_multa';
+    final bool esPagoSemanal = tipoSolicitud == 'pago_semanal' ||
+        tipoSolicitud == 'pago_semanal_con_recargo' ||
+        soloMulta;
+    final bool conMora = tipoSolicitud == 'pago_semanal_con_recargo';
+    bool incluirMulta = true; // con mora: el móvil decide si la incluye
+    final perfilPago = _cacheMiPerfil ?? widget.usuario;
+    // Premio por puntos: descuento sobre la semana (no aplica con mora)
+    final int descPct = (conMora || soloMulta)
+        ? 0
+        : ((perfilPago['descuento_semana_pct'] as num?)?.toInt() ?? 0);
+    // Si solo falta la multa, la semana ya está pagada → no se cobra de nuevo
+    final double montoSemana =
+        soloMulta ? 0 : (descPct >= 100 ? 0 : 60000 * (1 - descPct / 100));
+    const double multaCompleta = 20000;
+    String pesos(double v) {
+      final s = v.round().toString();
+      final b = StringBuffer();
+      for (int i = 0; i < s.length; i++) {
+        if (i > 0 && (s.length - i) % 3 == 0) b.write('.');
+        b.write(s[i]);
+      }
+      return '\$$b';
+    }
+    double multaActual() =>
+        soloMulta ? multaCompleta : (conMora && incluirMulta ? multaCompleta : 0);
+
     await showDialog(
       context: context,
       builder: (_) => StatefulBuilder(
@@ -13535,8 +13590,10 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                 color: Color(0xFF818CF8), size: 20),
             const SizedBox(width: 8),
             Text(
-                tipoSolicitud == 'pago_semanal'
-                    ? 'Enviar Soporte de Pago'
+                esPagoSemanal
+                    ? (soloMulta
+                        ? 'Pagar la multa'
+                        : conMora ? 'Pagar semana + multa' : 'Pagar tu semana')
                     : tipoPlan == 'prediario'
                         ? 'Recargar Saldo'
                         : 'Pagar Deuda',
@@ -13593,58 +13650,196 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                       );
                     },
                   ),
-                  // Banner de recargo por mora
-                  if (tipoSolicitud == 'pago_semanal_con_recargo') ...[
+                  // ── ¿Qué pasó? (pago semanal) ─────────────────────────────
+                  if (esPagoSemanal) ...[
                     Container(
                       width: double.infinity,
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.all(12),
+                      margin: const EdgeInsets.only(bottom: 12),
                       decoration: BoxDecoration(
-                        color: Colors.orange.withValues(alpha: 0.12),
+                        color: (conMora ? Colors.orange : Colors.blueGrey)
+                            .withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Colors.orangeAccent.withValues(alpha: 0.5)),
+                        border: Border.all(
+                            color: (conMora ? Colors.orangeAccent : Colors.white24)
+                                .withValues(alpha: 0.5)),
                       ),
-                      child: const Row(children: [
-                        Icon(Icons.warning_amber_rounded, color: Colors.orangeAccent, size: 16),
-                        SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            '⚠️ Recargo por mora activo. El monto mínimo es \$80.000 (\$60.000 semana + \$20.000 recargo).',
-                            style: TextStyle(color: Colors.orangeAccent, fontSize: 11, height: 1.4),
-                          ),
+                      child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('¿QUÉ PASÓ?',
+                                style: TextStyle(
+                                    color: conMora ? Colors.orangeAccent : Colors.white70,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 0.8)),
+                            const SizedBox(height: 6),
+                            Text(
+                              soloMulta
+                                  ? 'Ya recibimos tu pago de la semana (\$60.000) ✔\n\n'
+                                    'Para desbloquear tu billetera falta la multa por mora de ${pesos(multaCompleta)}.'
+                                  : conMora
+                                  ? 'No se registró el pago de tu semana antes de las 12:20 p. m. del lunes. '
+                                    'Por eso se sumó una multa por mora de ${pesos(multaCompleta)}.\n\n'
+                                    'Total a pagar: ${pesos(montoSemana + multaCompleta)} '
+                                    '(${pesos(montoSemana)} semana + ${pesos(multaCompleta)} multa).'
+                                  : 'Tu plan es semanal: cada lunes a las 12:00 m se cobra la semana. '
+                                    'Como no se registró tu pago, tu billetera quedó bloqueada.\n\n'
+                                    'Importante: si no pagas antes de las 12:20 p. m. del lunes, '
+                                    'se suma una multa por mora de ${pesos(multaCompleta)}.',
+                              style: const TextStyle(
+                                  color: Colors.white, fontSize: 12, height: 1.45),
+                            ),
+                            const SizedBox(height: 10),
+                            const Text('¿QUÉ DEBES HACER?',
+                                style: TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 0.8)),
+                            const SizedBox(height: 6),
+                            const Text(
+                              '1. Transfiere a la cuenta que aparece arriba.\n'
+                              '2. Revisa los valores de abajo.\n'
+                              '3. Adjunta la foto del comprobante (obligatorio).\n'
+                              '4. Envía. La central lo revisa y desbloquea tu billetera.',
+                              style: TextStyle(
+                                  color: Colors.white70, fontSize: 12, height: 1.5),
+                            ),
+                          ]),
+                    ),
+                    // Semana (fija)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.06),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(children: [
+                        const Expanded(
+                          child: Text('Pago de la semana',
+                              style: TextStyle(color: Colors.white70, fontSize: 13)),
                         ),
+                        Text(soloMulta ? 'Pagada ✔' : pesos(montoSemana),
+                            style: TextStyle(
+                                color: soloMulta ? const Color(0xFF22C55E) : Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold)),
                       ]),
                     ),
-                  ],
-                  Text(
-                    tipoSolicitud == 'pago_semanal' || tipoSolicitud == 'pago_semanal_con_recargo'
-                        ? 'Adjunta el soporte de pago. La central lo revisará y desbloqueará tu billetera.'
-                        : 'Ingresa el monto y adjunta el comprobante de transferencia. Tu saldo se actualizará automáticamente.',
-                    style: const TextStyle(
-                        color: Colors.white54, fontSize: 11, height: 1.4),
-                  ),
-                  const SizedBox(height: 14),
-                  TextField(
-                    controller: montoCtrl,
-                    keyboardType: TextInputType.number,
-                    style: const TextStyle(color: Colors.white, fontSize: 14),
-                    decoration: InputDecoration(
-                      labelText: tipoSolicitud == 'pago_semanal'
-                          ? 'Monto del soporte de pago (\$)'
-                          : 'Monto a recargar (\$)',
-                      labelStyle:
-                          const TextStyle(color: Colors.white54, fontSize: 12),
-                      prefixText: '\$ ',
-                      prefixStyle: const TextStyle(color: Colors.white54),
-                      filled: true,
-                      fillColor: Colors.white.withValues(alpha: 0.06),
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 10),
-                      border: OutlineInputBorder(
+                    if (soloMulta) ...[
+                      const SizedBox(height: 10),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(10),
-                          borderSide: BorderSide.none),
+                        ),
+                        child: Row(children: [
+                          const Expanded(
+                            child: Text('Multa por mora',
+                                style: TextStyle(color: Colors.white70, fontSize: 13)),
+                          ),
+                          Text(pesos(multaCompleta),
+                              style: const TextStyle(
+                                  color: Colors.orangeAccent,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold)),
+                        ]),
+                      ),
+                    ],
+                    if (descPct > 0) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        descPct >= 100
+                            ? '🏆 Premio por puntos: esta semana es gratis.'
+                            : '🎉 Premio por puntos: $descPct% de descuento en tu semana.',
+                        style: const TextStyle(color: Color(0xFF4CAF50), fontSize: 11),
+                      ),
+                    ],
+                    if (conMora) ...[
+                      const SizedBox(height: 10),
+                      // Multa: el móvil marca si la incluye en este pago
+                      Container(
+                        decoration: BoxDecoration(
+                          color: Colors.orange.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: CheckboxListTile(
+                          value: incluirMulta,
+                          onChanged: (v) => setDs(() => incluirMulta = v ?? true),
+                          activeColor: Colors.orangeAccent,
+                          checkColor: Colors.black,
+                          dense: true,
+                          controlAffinity: ListTileControlAffinity.leading,
+                          title: Text('Incluir multa por mora ${pesos(multaCompleta)}',
+                              style: const TextStyle(color: Colors.white, fontSize: 13)),
+                        ),
+                      ),
+                      if (!incluirMulta) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          'Sin la multa, la central puede aceptar tu semana pero tu billetera '
+                          'seguirá bloqueada hasta que pagues los ${pesos(multaCompleta)} de la multa.',
+                          style: const TextStyle(
+                              color: Colors.orangeAccent, fontSize: 11, height: 1.4),
+                        ),
+                      ],
+                    ],
+                    const SizedBox(height: 10),
+                    // Total
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF818CF8).withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                            color: const Color(0xFF818CF8).withValues(alpha: 0.5)),
+                      ),
+                      child: Row(children: [
+                        const Expanded(
+                          child: Text('TOTAL A PAGAR',
+                              style: TextStyle(
+                                  color: Color(0xFF818CF8),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold)),
+                        ),
+                        Text(
+                            pesos(montoSemana + multaActual()),
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold)),
+                      ]),
                     ),
-                  ),
+                  ] else ...[
+                    const Text(
+                      'Ingresa el monto y adjunta el comprobante de transferencia. Tu saldo se actualizará cuando la central lo apruebe.',
+                      style: TextStyle(
+                          color: Colors.white54, fontSize: 11, height: 1.4),
+                    ),
+                    const SizedBox(height: 14),
+                    TextField(
+                      controller: montoCtrl,
+                      keyboardType: TextInputType.number,
+                      style: const TextStyle(color: Colors.white, fontSize: 14),
+                      decoration: InputDecoration(
+                        labelText: 'Monto a recargar (\$)',
+                        labelStyle:
+                            const TextStyle(color: Colors.white54, fontSize: 12),
+                        prefixText: '\$ ',
+                        prefixStyle: const TextStyle(color: Colors.white54),
+                        filled: true,
+                        fillColor: Colors.white.withValues(alpha: 0.06),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 10),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide: BorderSide.none),
+                      ),
+                    ),
+                  ],
+                  ...[
                   const SizedBox(height: 10),
                   TextField(
                     controller: notaCtrl,
@@ -13662,8 +13857,9 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                           borderSide: BorderSide.none),
                     ),
                   ),
+                  ], // fin nota
                   const SizedBox(height: 12),
-                  // Comprobante
+                  // Comprobante (OBLIGATORIO)
                   InkWell(
                     onTap: () async {
                       final picker = ImagePicker();
@@ -13699,7 +13895,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                               Icon(Icons.upload_rounded,
                                   color: Colors.white38, size: 24),
                               SizedBox(height: 4),
-                              Text('Adjuntar comprobante',
+                              Text('Adjuntar foto del comprobante (obligatorio)',
                                   style: TextStyle(
                                       color: Colors.white54, fontSize: 12)),
                             ]),
@@ -13720,18 +13916,37 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
               onPressed: _subiendo
                   ? null
                   : () async {
-                      final monto = double.tryParse(
-                          montoCtrl.text.replaceAll(',', '.').trim());
-                      if (monto == null || monto <= 0) return;
-                      // Validación monto mínimo con recargo por mora
-                      if (tipoSolicitud == 'pago_semanal_con_recargo' && monto < 80000) {
-                        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                          content: Text('El monto mínimo con recargo por mora es \$80.000 (\$60.000 semana + \$20.000 recargo).'),
+                      void aviso(String t) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+                          content: Text(t),
                           backgroundColor: Colors.orangeAccent,
                           behavior: SnackBarBehavior.floating,
                         ));
+                      }
+                      // Montos: pago semanal = semana fija + multa; recarga = libre
+                      final double monto;
+                      final double multa;
+                      if (esPagoSemanal) {
+                        multa = multaActual();
+                        monto = montoSemana + multa;
+                      } else {
+                        final m = double.tryParse(
+                            montoCtrl.text.replaceAll(',', '.').trim());
+                        if (m == null || m <= 0) {
+                          aviso('Escribe el monto.');
+                          return;
+                        }
+                        monto = m;
+                        multa = 0;
+                      }
+                      // Comprobante obligatorio
+                      if (_imgBytes == null) {
+                        aviso('Adjunta la foto del comprobante.');
                         return;
                       }
+                      final String? notaFinal = notaCtrl.text.trim().isNotEmpty
+                          ? notaCtrl.text.trim()
+                          : null;
                       setDs(() => _subiendo = true);
                       try {
                         String? urlComprobante;
@@ -13752,9 +13967,9 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                             .insert({
                           'movil_id': movilId,
                           'monto_solicitado': monto,
-                          'nota': notaCtrl.text.trim().isNotEmpty
-                              ? notaCtrl.text.trim()
-                              : null,
+                          if (esPagoSemanal) 'monto_semana': montoSemana,
+                          if (esPagoSemanal) 'monto_multa': multa,
+                          'nota': notaFinal,
                           'comprobante_url': urlComprobante,
                           'estado': 'pendiente',
                           'tipo_solicitud': tipoSolicitud,
@@ -13767,13 +13982,19 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                             ? 'Movil ${_numMov.toString().padLeft(2, '0')}'
                             : (_mp['nombre']?.toString() ?? 'Móvil');
                         MotorNotificaciones.dispararACentral(
-                          titulo: tipoSolicitud == 'pago_semanal_con_recargo'
-                              ? '⚠️ Pago con recargo por mora'
-                              : tipoSolicitud == 'pago_semanal'
-                                  ? '📎 Soporte de pago semanal'
-                                  : '💳 Solicitud de recarga',
-                          mensaje: tipoSolicitud == 'pago_semanal_con_recargo'
-                              ? '$_movilLabel envió soporte de \$${monto.toStringAsFixed(0)} con recargo por mora. Verifica \$80.000. Revisa en Gestión > Billetera.'
+                          titulo: soloMulta
+                              ? '📎 Pago de multa por mora'
+                              : tipoSolicitud == 'pago_semanal_con_recargo'
+                                  ? '⚠️ Pago con recargo por mora'
+                                  : tipoSolicitud == 'pago_semanal'
+                                      ? '📎 Soporte de pago semanal'
+                                      : '💳 Solicitud de recarga',
+                          mensaje: soloMulta
+                              ? '$_movilLabel envió el pago de la multa ${pesos(multa)}. Revisa en Gestión > Billetera.'
+                              : tipoSolicitud == 'pago_semanal_con_recargo'
+                              ? (multa > 0
+                                  ? '$_movilLabel envió soporte de ${pesos(monto)}: semana ${pesos(montoSemana)} + multa ${pesos(multa)}. Revisa en Gestión > Billetera.'
+                                  : '$_movilLabel envió solo la semana ${pesos(montoSemana)} — multa NO incluida. Revisa en Gestión > Billetera.')
                               : tipoSolicitud == 'pago_semanal'
                                   ? '$_movilLabel envió un soporte de \$${monto.toStringAsFixed(0)}. Revisa en Gestión > Billetera.'
                                   : '$_movilLabel solicita recarga de \$${monto.toStringAsFixed(0)}. Revisa en Gestión > Billetera.',
@@ -13800,8 +14021,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                         fontSize: 16)),
                               ]),
                               content: Text(
-                                tipoSolicitud == 'pago_semanal'
-                                    ? 'Tu comprobante de \$${monto.toStringAsFixed(0)} está siendo revisado.\n\nTu billetera será desbloqueada en cuanto la central lo apruebe.'
+                                esPagoSemanal
+                                    ? 'Tu comprobante de ${pesos(monto)} está siendo revisado.\n\nTu billetera será desbloqueada en cuanto la central lo apruebe.'
                                     : 'Tu recarga de \$${monto.toStringAsFixed(0)} está siendo revisada por el equipo.\n\nTu saldo se actualizará automáticamente en cuanto sea aprobada.',
                                 style: const TextStyle(
                                     color: Colors.white70,
@@ -16358,9 +16579,11 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                     perfil['tipo_plan_movil']?.toString() == 'semanal';
                 final bloqueado = perfil['wallet_bloqueado'] == true;
                 final recargo = perfil['recargo_mora_activo'] == true;
+                final multaPendiente = perfil['multa_pendiente'] == true;
                 if (esMaster || !esSemanal || !bloqueado)
                   return const SizedBox.shrink();
-                return _overlayBilleteraBlockeada(perfil['id'], recargo: recargo);
+                return _overlayBilleteraBlockeada(perfil['id'],
+                    recargo: recargo, multaPendiente: multaPendiente);
               },
             ),
           ], // Stack children

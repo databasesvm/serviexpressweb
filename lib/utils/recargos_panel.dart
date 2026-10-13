@@ -96,6 +96,7 @@ class _RecargosPanelState extends State<RecargosPanel> {
   int _minimaBase = 8000;
   int _horaInicioNocturno = 0;
   int _horaFinNocturno = 6;
+  bool _nocturnoManual = false; // encendido a mano por la central (fuera de horario)
 
   // --- Estado local ---
   bool _nocturno = false;
@@ -173,6 +174,7 @@ class _RecargosPanelState extends State<RecargosPanel> {
       _minimaBase = row['minima_nocturna'] as int? ?? 8000;
       _horaInicioNocturno = (row['hora_inicio_nocturno'] as num?)?.toInt() ?? 0;
       _horaFinNocturno = (row['hora_fin_nocturno'] as num?)?.toInt() ?? 6;
+      _nocturnoManual = row['nocturno_manual'] as bool? ?? false;
       _apiKey = nuevaClave?.trim();
       _apiActiva = apiAhora;
     });
@@ -202,7 +204,8 @@ class _RecargosPanelState extends State<RecargosPanel> {
 
   void _actualizarNocturno() {
     final hora = DateTime.now().toUtc().subtract(const Duration(hours: 5)).hour;
-    final esNocturno = hora >= _horaInicioNocturno && hora < _horaFinNocturno;
+    final esNocturno =
+        (hora >= _horaInicioNocturno && hora < _horaFinNocturno) || _nocturnoManual;
     if (esNocturno != _nocturno) {
       setState(() => _nocturno = esNocturno);
       _notificarPadre();
@@ -531,9 +534,11 @@ class _RecargosPanelState extends State<RecargosPanel> {
                 ),
               ),
               Text(
-                'Automático · ${_horaInicioNocturno.toString().padLeft(2, '0')}:00 – '
-                '${_horaFinNocturno.toString().padLeft(2, '0')}:00',
-                style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                _nocturnoManual
+                    ? 'Encendido a mano por la central'
+                    : 'Automático · ${_horaInicioNocturno.toString().padLeft(2, '0')}:00 – '
+                        '${_horaFinNocturno.toString().padLeft(2, '0')}:00',
+                style: TextStyle(fontSize: 11, color: _nocturnoManual ? Colors.indigo : Colors.grey[500]),
               ),
               if (_nocturno)
                 Text(
@@ -543,22 +548,51 @@ class _RecargosPanelState extends State<RecargosPanel> {
             ],
           ),
         ),
-        // Indicador (no modificable, es automático)
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-          decoration: BoxDecoration(
-            color: _nocturno ? Colors.indigo[50] : Colors.grey[100],
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Text(
-            _nocturno ? 'ACTIVO' : 'INACTIVO',
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.bold,
-              color: _nocturno ? Colors.indigo : Colors.grey,
-              letterSpacing: 0.5,
+        // Estado + interruptor manual (el horario lo sigue activando solo)
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: _nocturno ? Colors.indigo[50] : Colors.grey[100],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                _nocturno ? 'ACTIVO' : 'INACTIVO',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  color: _nocturno ? Colors.indigo : Colors.grey,
+                  letterSpacing: 0.5,
+                ),
+              ),
             ),
-          ),
+            Row(mainAxisSize: MainAxisSize.min, children: [
+              const Text('Manual', style: TextStyle(fontSize: 10, color: Colors.black45)),
+              Switch(
+                value: _nocturnoManual,
+                activeColor: Colors.indigo,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                onChanged: _guardando
+                    ? null
+                    : (v) async {
+                        setState(() => _guardando = true);
+                        try {
+                          await Supabase.instance.client
+                              .from('config_sistema')
+                              .update({'nocturno_manual': v}).eq('id', 1);
+                          setState(() => _nocturnoManual = v);
+                          _actualizarNocturno();
+                        } catch (e) {
+                          debugPrint('RecargosPanel: nocturno manual → $e');
+                        } finally {
+                          if (mounted) setState(() => _guardando = false);
+                        }
+                      },
+              ),
+            ]),
+          ],
         ),
       ],
     );

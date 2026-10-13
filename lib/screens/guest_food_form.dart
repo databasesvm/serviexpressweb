@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart'; // <-- RUTA CORREGIDA DE ONESIGNAL
+import 'package:serviexpress_app/utils/alta_demanda.dart';
 import 'package:serviexpress_app/screens/guest_tracking_screen.dart';
 
 class GuestFoodForm extends StatefulWidget {
@@ -228,6 +229,7 @@ class _GuestFoodFormState extends State<GuestFoodForm> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            const BannerAltaDemanda(),
             _construirBloque(
               titulo: 'Identificación',
               icono: Icons.person,

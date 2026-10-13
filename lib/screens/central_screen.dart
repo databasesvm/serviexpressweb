@@ -10,6 +10,10 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:serviexpress_app/screens/reporte_financiero_screen.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart';
 import 'package:serviexpress_app/utils/textos_push.dart'; // Textos únicos de push SE
+import 'package:serviexpress_app/utils/ubicacion_cliente.dart'; // Ubicación GPS del cliente
+import 'package:serviexpress_app/screens/rutas_aprendidas_screen.dart'; // Rutas y precios aprendidos
+import 'package:serviexpress_app/screens/sectores_tarifa_screen.dart'; // Sectores y tarifa por km
+import 'package:serviexpress_app/utils/alta_demanda.dart'; // Alta demanda SE
 import 'package:serviexpress_app/utils/hora_servidor.dart'; // Reloj alineado con el servidor
 import 'package:serviexpress_app/utils/cascada_config.dart'; // Tiempos de la cascada SE
 import 'package:serviexpress_app/screens/chat_screen.dart';
@@ -38,6 +42,7 @@ part 'central_screen_panel_control.dart';
 part 'central_screen_gestion.dart';
 part 'central_screen_fn.dart';
 part 'central_screen_reportes.dart';
+part 'central_screen_reportes_paradero.dart';
 part 'central_billetera.dart';
 
 class CentralScreen extends StatefulWidget {
@@ -191,6 +196,12 @@ class _CentralScreenState extends State<CentralScreen>
   // Billetera: solicitudes pendientes de comprobación
   int _billeteraPendientes = 0;
   RealtimeChannel? _canalBilletera;
+
+  // Reportes de ausencia en paradero (móvil reporta a otro de la fila)
+  final ValueNotifier<List<Map<String, dynamic>>> _reportesParadero =
+      ValueNotifier(const []);
+  RealtimeChannel? _canalReportesParadero;
+  Timer? _debounceReportesParadero;
 
   // ── PARADEROS-C: lista dinámica desde BD (panel de control) ─────────────
   // Se carga una sola vez al iniciar. Los cambios en BD se reflejan
@@ -542,6 +553,9 @@ class _CentralScreenState extends State<CentralScreen>
         if (mounted) setState(() => _billeteraPendientes = rows.length);
       } catch (_) {}
     });
+
+    // ── CANAL REPORTES DE PARADERO (aviso en el panel) ────────────────────
+    _iniciarReportesParadero();
 
     // pg_cron en Supabase es ahora el responsable principal de caducar
     // servicios. Este timer es solo un respaldo por si el servidor falla
@@ -905,6 +919,9 @@ class _CentralScreenState extends State<CentralScreen>
     _debounceUbicaciones?.cancel();
     _canalFn?.unsubscribe();
     _canalBilletera?.unsubscribe();
+    _canalReportesParadero?.unsubscribe();
+    _debounceReportesParadero?.cancel();
+    _reportesParadero.dispose();
     if (_listenerActivacion != null && !kIsWeb) {
       OneSignal.Notifications.removeForegroundWillDisplayListener(
           _listenerActivacion!);
@@ -1278,6 +1295,43 @@ class _CentralScreenState extends State<CentralScreen>
               );
             },
           ),
+          // Recordatorio: alta demanda encendida (tocar para apagar/editar)
+          StreamBuilder<Map<String, dynamic>?>(
+            stream: AltaDemanda.estado,
+            builder: (_, snap) {
+              if (snap.data?['alta_demanda_se'] != true) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: FloatingActionButton.extended(
+                  heroTag: 'fab_alta_demanda',
+                  backgroundColor: Colors.orange[800],
+                  onPressed: () => abrirControlAltaDemanda(context),
+                  icon: const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 20),
+                  label: const Text('ALTA DEMANDA',
+                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                ),
+              );
+            },
+          ),
+          // FAB 3: reportes de ausencia en paradero (sin revisar)
+          ValueListenableBuilder<List<Map<String, dynamic>>>(
+            valueListenable: _reportesParadero,
+            builder: (_, lista, __) {
+              if (lista.isEmpty) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: FloatingActionButton.extended(
+                  heroTag: 'fab_reportes_paradero',
+                  backgroundColor: Colors.deepOrange[700],
+                  onPressed: _abrirReportesParadero,
+                  icon: const Icon(Icons.flag_rounded, color: Colors.white, size: 20),
+                  label: Text('Paradero (${lista.length})',
+                      style: const TextStyle(
+                          color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                ),
+              );
+            },
+          ),
           // FAB 2: soporte general (alarma_soporte)
           StreamBuilder<List<Map<String, dynamic>>>(
             // Creado UNA vez (antes se recreaba en cada redibujo de la
@@ -1437,6 +1491,9 @@ class _CentralScreenState extends State<CentralScreen>
             ),
             _item(Icons.add_box_rounded, 'Nuevo servicio', const Color(0xff3AF500), () => _abrirFormularioDespacho(context)),
             _item(Icons.share_rounded, 'Enviar link al cliente', const Color(0xff25D366), () => _enviarLinkInvitado(context)),
+            _item(Icons.alt_route_rounded, 'Rutas y precios aprendidos', Colors.amber, () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RutasAprendidasScreen()))),
+            _item(Icons.pentagon_rounded, 'Sectores y tarifa por km', Colors.amber, () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SectoresTarifaScreen()))),
+            _item(Icons.warning_amber_rounded, 'Alta demanda (aviso a locales y clientes)', Colors.orange, () => abrirControlAltaDemanda(context)),
 
             const Divider(color: Colors.white10, height: 20),
 

@@ -105,6 +105,9 @@ class _ServiMotoTaskHandler extends TaskHandler {
   bool _gpsEnProceso = false;
   // Geocerca anti-falsos: 2 lecturas confiables seguidas fuera del paradero.
   int _lecturasFueraParadero = 0;
+  // Última orden de GPS forzado ya atendida (usuarios.gps_forzado_at).
+  // Así el "Reportar ausente" funciona aunque la app esté cerrada de recientes.
+  String? _gpsForzadoAtendido;
 
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
@@ -155,12 +158,15 @@ class _ServiMotoTaskHandler extends TaskHandler {
       if (!_gpsEnProceso) {
         _gpsEnProceso = true;
         try {
-          // Guard: skip GPS si el stream UI ya actualizó en los últimos 25s
+          // Guard: skip GPS si el stream UI ya actualizó en los últimos 25s,
+          // SALVO que haya una orden de GPS forzado nueva (reporte de ausencia
+          // o la central): esa se atiende siempre, aunque la app esté cerrada.
           bool streamUiActivo = false;
+          bool forzado = false;
           try {
             final perfilPing = await Supabase.instance.client
                 .from('usuarios')
-                .select('ultima_ubicacion_at')
+                .select('ultima_ubicacion_at, gps_forzado_at')
                 .eq('id', userId)
                 .maybeSingle();
             final ubiStr = perfilPing?['ultima_ubicacion_at'] as String?;
@@ -171,10 +177,22 @@ class _ServiMotoTaskHandler extends TaskHandler {
                 streamUiActivo = true;
               }
             }
+            final gf = perfilPing?['gps_forzado_at'] as String?;
+            if (gf != null && gf != _gpsForzadoAtendido) {
+              final gfAt = DateTime.tryParse(gf);
+              // Orden reciente y posterior a la última ubicación enviada
+              final ubiAt = ubiStr != null ? DateTime.tryParse(ubiStr) : null;
+              if (gfAt != null &&
+                  DateTime.now().toUtc().difference(gfAt.toUtc()).inMinutes < 2 &&
+                  (ubiAt == null || ubiAt.isBefore(gfAt))) {
+                forzado = true;
+              }
+              _gpsForzadoAtendido = gf;
+            }
           } catch (_) {}
 
           final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-          if (!streamUiActivo && serviceEnabled) {
+          if ((forzado || !streamUiActivo) && serviceEnabled) {
             final permission = await Geolocator.checkPermission();
             if (permission == LocationPermission.always ||
                 permission == LocationPermission.whileInUse) {

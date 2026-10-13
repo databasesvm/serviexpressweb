@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart'; // <-- RUTA CORREGIDA
+import 'package:serviexpress_app/utils/alta_demanda.dart';
 
 class ClienteShoppingForm extends StatefulWidget {
   final Map<String, dynamic> usuario;
@@ -405,6 +406,7 @@ class _ClienteShoppingFormState extends State<ClienteShoppingForm> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            const BannerAltaDemanda(),
             _construirHistorial(),
             _construirBloque(
               titulo: '¿Qué y dónde compramos?',

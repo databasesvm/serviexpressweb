@@ -23,6 +23,8 @@ import 'package:share_plus/share_plus.dart';
 import 'package:serviexpress_app/utils/deeplink_service.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:serviexpress_app/utils/textos_push.dart'; // Textos únicos de push SE
+import 'package:serviexpress_app/utils/ubicacion_cliente.dart'; // Ubicación GPS del cliente
+import 'package:serviexpress_app/utils/alta_demanda.dart'; // Franja de alta demanda
 
 part 'local_screen_dispatch.dart';
 part 'local_screen_cards.dart';
@@ -779,6 +781,7 @@ class _LocalScreenState extends State<LocalScreen>
                           ),
                         ),
                         const Divider(height: 1, color: Colors.white12),
+                        const BannerAltaDemanda(margin: EdgeInsets.fromLTRB(12, 10, 12, 0)),
                         Expanded(
                           child: activos.isEmpty
                               ? Center(

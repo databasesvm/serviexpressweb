@@ -47,6 +47,8 @@ class ServiMotoApp : Application() {
         const val CHANNEL_CANCELADO_ID      = "serviexpress_cancelado_v1"
         // FN / Local / Cliente: respuesta de cotización
         const val CHANNEL_FN_COTIZACION_ID  = "serviexpress_fn_cotizacion_v1"
+        // Avisos informativos SIN sonido (ej: alta demanda)
+        const val CHANNEL_AVISOS_ID         = "serviexpress_avisos_v1"
     }
 
     override fun onCreate() {
@@ -132,6 +134,14 @@ class ServiMotoApp : Application() {
 
             // ── FN / LOCAL / CLIENTE ────────────────────────────────────────
             crearCanal(CHANNEL_FN_COTIZACION_ID,  "Respuesta Cotización",    "Central respondió tu cotización.",              MED, uri("fn_cotizacion")),
+
+            // ── AVISOS SIN SONIDO (alta demanda) ────────────────────────────
+            NotificationChannel(CHANNEL_AVISOS_ID, "Avisos", "Avisos informativos sin sonido.", MED).apply {
+                setSound(null, null)
+                enableVibration(false)
+                setShowBadge(true)
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+            },
         ).forEach { nm.createNotificationChannel(it) }
     }
 }

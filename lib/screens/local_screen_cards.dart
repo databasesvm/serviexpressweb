@@ -16,6 +16,35 @@ mixin _CardsMixin on State<LocalScreen> {
   });
 
   // ── Campos propios ─────────────────────────────────────────────────────────
+  // Etiqueta "Móvil 07" de móviles asignados directo (se consulta 1 vez por móvil)
+  final Map<String, String> _etiquetasMovilAsignado = {};
+  final Set<String> _etiquetasMovilPidiendo = {};
+
+  String? _etiquetaMovilAsignado(String id) {
+    final ya = _etiquetasMovilAsignado[id];
+    if (ya != null || id.isEmpty || _etiquetasMovilPidiendo.contains(id)) return ya;
+    _etiquetasMovilPidiendo.add(id);
+    () async {
+      try {
+        final u = await Supabase.instance.client
+            .from('usuarios')
+            .select('numero_movil, nombre')
+            .eq('id', id)
+            .maybeSingle();
+        if (u != null) {
+          final n = u['numero_movil'];
+          _etiquetasMovilAsignado[id] = n != null
+              ? 'Móvil ${n.toString().padLeft(2, '0')}'
+              : (u['nombre']?.toString() ?? 'Móvil');
+          if (mounted) _expansionTick.value++; // redibuja solo la lista
+        }
+      } catch (_) {
+        _etiquetasMovilPidiendo.remove(id); // reintentar en el próximo dibujo
+      }
+    }();
+    return null;
+  }
+
   final Set<int> _tarjetasColapsadasLocal = {};
   final Set<int> _tarjetasExpandidasLocal = {};
   final ValueNotifier<int> _expansionTick = ValueNotifier(0);
@@ -297,7 +326,767 @@ mixin _CardsMixin on State<LocalScreen> {
     );
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TARJETA DE SERVICIO DEL LOCAL (diseño nuevo, oscuro)
+  //   • Franja de color por estado, cabecera con estado/número/tiempo/destino/
+  //     precio, línea de avance, bloque del móvil (pagos visibles con copiar),
+  //     datos con íconos, precio con desglose y acciones abajo.
+  //   • El local NO ve la fase de la cascada: solo "Buscando móvil".
+  // ═══════════════════════════════════════════════════════════════════════════
+  static const Color _tFondo = Color(0xFF1C1C1E);
+  static const Color _tFondo2 = Color(0xFF26262A);
+  static const Color _tTexto2 = Color(0xFF9A9AA0);
+
   Widget _construirTarjetaServicio(
+    Map<String, dynamic> servicio, {
+    bool esHistorial = false,
+    bool esGlobal = false,
+    VoidCallback? onOcultar,
+    VoidCallback? onEliminar,
+    VoidCallback? extraRebuild,
+  }) {
+    final int svcId = servicio['id'] as int;
+    final bool estaExpandida = esHistorial
+        ? _tarjetasExpandidasLocal.contains(svcId)
+        : !_tarjetasColapsadasLocal.contains(svcId);
+    void toggleExpansion() {
+      final set = esHistorial ? _tarjetasExpandidasLocal : _tarjetasColapsadasLocal;
+      set.contains(svcId) ? set.remove(svcId) : set.add(svcId);
+      _expansionTick.value++;
+      extraRebuild?.call();
+    }
+
+    final String estado = servicio['estado']?.toString() ?? '';
+    final bool esPAP = servicio['es_punto_a_punto'] == true;
+    final bool terminado = ['finalizado', 'finalizado_por_demora', 'finalizado_con_problema',
+        'cancelado', 'caducado'].contains(estado);
+
+    // ── Estado visual ────────────────────────────────────────────────────
+    late Color color;
+    late String textoEstado;
+    late IconData icono;
+    final bool asignadoDirecto = estado == 'pendiente' &&
+        (servicio['exclusivo_id']?.toString().trim() ?? '').isNotEmpty;
+    switch (estado) {
+      case 'programado':
+        color = Colors.lightBlueAccent;
+        icono = Icons.schedule;
+        textoEstado = 'PROGRAMADO';
+        if (servicio['liberacion_at'] != null) {
+          final diff = DateTime.parse(servicio['liberacion_at']).toLocal().difference(DateTime.now()).inMinutes;
+          textoEstado = diff > 0 ? 'PROGRAMADO · SALE EN $diff MIN' : 'LIBERANDO…';
+        }
+        break;
+      case 'pendiente':
+        if (asignadoDirecto) {
+          final et = _etiquetaMovilAsignado(servicio['exclusivo_id'].toString().split(',').first.trim());
+          color = Colors.lightBlueAccent;
+          icono = Icons.assignment_ind_rounded;
+          textoEstado = et != null ? 'ASIGNADO A ${et.toUpperCase()} · ESPERANDO QUE ACEPTE' : 'MÓVIL ASIGNADO · ESPERANDO QUE ACEPTE';
+        } else {
+          color = Colors.amber;
+          icono = Icons.radar;
+          textoEstado = 'BUSCANDO MÓVIL';
+        }
+        break;
+      case 'en_curso':
+      case 'en_ruta_origen':
+        color = const Color(0xff3AF500);
+        icono = Icons.two_wheeler;
+        textoEstado = 'MÓVIL EN CAMINO AL LOCAL';
+        break;
+      case 'en_origen':
+        color = Colors.orangeAccent;
+        icono = Icons.storefront;
+        textoEstado = 'MÓVIL EN EL LOCAL';
+        break;
+      case 'en_ruta_destino':
+        color = const Color(0xff3AF500);
+        icono = Icons.delivery_dining;
+        textoEstado = 'EN RUTA DE ENTREGA';
+        break;
+      case 'problema':
+        color = Colors.redAccent;
+        icono = Icons.warning_amber_rounded;
+        textoEstado = 'NOVEDAD REPORTADA';
+        break;
+      case 'cotizacion':
+        color = Colors.orangeAccent;
+        icono = Icons.hourglass_top_rounded;
+        textoEstado = 'ESPERANDO PRECIO';
+        break;
+      case 'cotizada':
+        color = Colors.lightBlueAccent;
+        icono = Icons.monetization_on;
+        textoEstado = 'COTIZACIÓN RECIBIDA';
+        break;
+      case 'cotizacion_aprobada':
+        color = Colors.tealAccent;
+        icono = Icons.check_circle_outline;
+        textoEstado = 'APROBADA · EN ESPERA';
+        break;
+      case 'finalizado':
+        color = Colors.greenAccent;
+        icono = Icons.check_circle;
+        textoEstado = 'ENTREGADO';
+        break;
+      case 'cancelado':
+        color = Colors.grey;
+        icono = Icons.block;
+        textoEstado = 'CANCELADO';
+        break;
+      case 'caducado':
+        color = Colors.purpleAccent;
+        icono = Icons.hourglass_disabled;
+        textoEstado = 'NADIE TOMÓ EL SERVICIO';
+        break;
+      case 'finalizado_por_demora':
+      case 'finalizado_con_problema':
+        color = Colors.orangeAccent;
+        icono = Icons.report_problem;
+        textoEstado = 'CERRADO CON NOVEDAD';
+        break;
+      default:
+        color = Colors.grey;
+        icono = Icons.help_outline;
+        textoEstado = estado.toUpperCase();
+    }
+
+    // ── Tiempo del estado (activos: "hace X"; historial: hora) ───────────
+    final dynamic tsEstado = switch (estado) {
+      'en_ruta_origen' || 'en_curso' => servicio['accepted_at'],
+      'en_origen' => servicio['llegada_sede_at'] ?? servicio['updated_at'],
+      'en_ruta_destino' => servicio['picked_up_at'],
+      'pendiente' || 'cotizacion' => servicio['created_at'],
+      _ => servicio['updated_at'] ?? servicio['created_at'],
+    };
+    final String tiempo = (esHistorial || terminado ? _fmtHora(tsEstado) : _fmtElapsed(tsEstado))
+        .replaceFirst(' · ', '');
+
+    final num? tarifa = servicio['tarifa'] as num?;
+    final num tarifaNum = tarifa ?? 0;
+    final bool hayTarifa = !esPAP && tarifaNum > 0;
+    final String tipo = (servicio['tipo_servicio'] ?? '').toString().toUpperCase();
+    final IconData iconoTipo = tipo.contains('MOTOTAXI')
+        ? Icons.two_wheeler
+        : (tipo.contains('COMIDA') || tipo.contains('DOMICILIO'))
+            ? Icons.restaurant
+            : tipo.contains('COMPRA')
+                ? Icons.shopping_bag_outlined
+                : Icons.inventory_2_outlined;
+
+    final bool destacada = !esHistorial && _cotizadasRecientes.contains(svcId);
+
+    // ─────────────────────────────────────────────────────────────────────
+    Widget cabecera() => InkWell(
+          onTap: toggleExpansion,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Flexible(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(icono, size: 14, color: color),
+                      const SizedBox(width: 5),
+                      Flexible(
+                        child: Text(textoEstado,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.3)),
+                      ),
+                    ]),
+                  ),
+                ),
+                if (tiempo.isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  Text(tiempo, style: const TextStyle(color: _tTexto2, fontSize: 11)),
+                ],
+                const Spacer(),
+                Text('#${servicio['numero_local'] ?? servicio['id']}',
+                    style: const TextStyle(color: _tTexto2, fontWeight: FontWeight.bold, fontSize: 12)),
+                Icon(estaExpandida ? Icons.expand_less : Icons.expand_more, color: _tTexto2, size: 20),
+              ]),
+              const SizedBox(height: 8),
+              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Icon(esPAP ? Icons.flash_on : iconoTipo, size: 18, color: Colors.white70),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    esPAP ? 'Punto a punto · ${servicio['origen'] ?? ''}' : (servicio['destino']?.toString() ?? '—'),
+                    maxLines: estaExpandida ? 3 : 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700, height: 1.25),
+                  ),
+                ),
+                if (hayTarifa) ...[
+                  const SizedBox(width: 8),
+                  Text(fmtPeso(tarifa),
+                      style: const TextStyle(color: Color(0xff3AF500), fontSize: 16, fontWeight: FontWeight.bold)),
+                ],
+              ]),
+            ]),
+          ),
+        );
+
+    // ── Línea de avance (sin fases de cascada) ────────────────────────────
+    Widget lineaAvance() {
+      final pasos = <(String, dynamic)>[
+        ('Pedido', servicio['created_at']),
+        ('Móvil', servicio['accepted_at']),
+        ('En local', servicio['llegada_sede_at']),
+        ('En camino', servicio['picked_up_at']),
+        ('Entregado', estado == 'finalizado' ? servicio['updated_at'] : null),
+      ];
+      final int actual = switch (estado) {
+        'en_ruta_origen' || 'en_curso' => 1,
+        'en_origen' => 2,
+        'en_ruta_destino' => 3,
+        'finalizado' => 4,
+        'problema' => servicio['picked_up_at'] != null ? 3 : (servicio['llegada_sede_at'] != null ? 2 : 1),
+        _ => 0,
+      };
+      String hora(dynamic iso) => _fmtHora(iso).replaceFirst(' · ', '');
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Row(children: [
+          for (int i = 0; i < pasos.length; i++) ...[
+            Expanded(
+              child: Column(children: [
+                Row(children: [
+                  Expanded(
+                      child: Container(
+                          height: 2,
+                          color: i == 0 ? Colors.transparent : (i <= actual ? color : Colors.white12))),
+                  Container(
+                    width: 14,
+                    height: 14,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: i < actual ? color : (i == actual ? color.withValues(alpha: 0.25) : _tFondo2),
+                      border: Border.all(color: i <= actual ? color : Colors.white24, width: 2),
+                    ),
+                    child: i < actual ? const Icon(Icons.check, size: 9, color: Colors.black) : null,
+                  ),
+                  Expanded(
+                      child: Container(
+                          height: 2,
+                          color: i == pasos.length - 1 ? Colors.transparent : (i < actual ? color : Colors.white12))),
+                ]),
+                const SizedBox(height: 4),
+                Text(pasos[i].$1,
+                    style: TextStyle(
+                        fontSize: 10,
+                        color: i <= actual ? Colors.white : _tTexto2,
+                        fontWeight: i == actual ? FontWeight.bold : FontWeight.normal)),
+                Text(pasos[i].$2 != null && i <= actual ? hora(pasos[i].$2) : ' ',
+                    style: const TextStyle(fontSize: 9, color: _tTexto2)),
+              ]),
+            ),
+          ],
+        ]),
+      );
+    }
+
+    // ── Bloque del móvil ──────────────────────────────────────────────────
+    Widget bloqueMovil() => FutureBuilder<List<Map<String, dynamic>>>(
+          future: _infoMovil(servicio['movil_id']),
+          builder: (context, snap) {
+            final data = (snap.data != null && snap.data!.isNotEmpty) ? snap.data!.first : null;
+            if (data == null) return const SizedBox.shrink();
+            final usr = data['usuario']?.toString() ?? '';
+            final numMovil = usr.replaceAll(RegExp(r'[^0-9]'), '');
+            final esMovil = (data['rol']?.toString() ?? 'movil') == 'movil';
+            final nombreFinal = esMovil && numMovil.isNotEmpty
+                ? 'Móvil $numMovil'
+                : (data['nombre']?.toString() ?? 'Móvil');
+            final telefonoReal = data['telefono']?.toString() ?? '';
+            final fotoUrl = data['foto_perfil_url']?.toString();
+            final tieneFoto = fotoUrl != null && fotoUrl.isNotEmpty;
+            final bool chatNuevo = !esHistorial && servicio['chat_cliente'] == true;
+            final pagos = <(String, Color, String)>[
+              if ((data['pago_nequi']?.toString() ?? '').isNotEmpty)
+                ('Nequi', const Color(0xFFE5007D), data['pago_nequi'].toString()),
+              if ((data['pago_daviplata']?.toString() ?? '').isNotEmpty)
+                ('Daviplata', const Color(0xFFEE2A24), data['pago_daviplata'].toString()),
+              if ((data['pago_bancolombia']?.toString() ?? '').isNotEmpty)
+                ('Bancolombia', const Color(0xFFFFCC00), data['pago_bancolombia'].toString()),
+            ];
+
+            Widget botonIcono(IconData ic, Color c, String tip, VoidCallback onTap, {bool alerta = false}) =>
+                Tooltip(
+                  message: tip,
+                  child: InkWell(
+                    onTap: onTap,
+                    borderRadius: BorderRadius.circular(10),
+                    child: Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: (alerta ? Colors.red : c).withValues(alpha: alerta ? 0.9 : 0.16),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(ic, size: 19, color: alerta ? Colors.white : c),
+                    ),
+                  ),
+                );
+
+            return Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(color: _tFondo2, borderRadius: BorderRadius.circular(10)),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  CircleAvatar(
+                    radius: 20,
+                    backgroundColor: Colors.black,
+                    backgroundImage: tieneFoto ? NetworkImage(fotoUrl) : null,
+                    child: tieneFoto
+                        ? null
+                        : Text(numMovil.isNotEmpty ? numMovil : '?',
+                            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(nombreFinal,
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                      if (esMovil && data['nombre'] != null)
+                        Text(data['nombre'].toString().toUpperCase(),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: _tTexto2, fontSize: 10)),
+                    ]),
+                  ),
+                  if (telefonoReal.isNotEmpty) ...[
+                    botonIcono(Icons.wechat, Colors.greenAccent, 'WhatsApp', () async {
+                      final n = telefonoReal.startsWith('57') ? telefonoReal : '57$telefonoReal';
+                      final uri = Uri.parse('https://wa.me/$n');
+                      if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
+                    }),
+                    const SizedBox(width: 6),
+                  ],
+                  botonIcono(
+                    chatNuevo ? Icons.mark_email_unread : (esHistorial ? Icons.history : Icons.chat_bubble_outline),
+                    Colors.lightBlueAccent,
+                    chatNuevo ? 'Mensaje nuevo' : 'Chat',
+                    () {
+                      if (!esHistorial) {
+                        Supabase.instance.client.from('servicios').update({'chat_cliente': false}).eq('id', servicio['id']);
+                      }
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => ChatScreen(
+                            salaId: 'servicio_${servicio['id']}',
+                            miId: widget.usuario['id'],
+                            miNombre: widget.usuario['nombre'],
+                            titulo: 'Chat con $nombreFinal ${esHistorial ? "(Historial)" : ""}',
+                            servicioId: servicio['id'],
+                            alarmaLocal: 'chat_cliente',
+                            alarmaDestino: 'chat_movil',
+                            destinatarioId: (servicio['movil_id'] as num?)?.toInt(),
+                            tipoFaq: TipoFaqChat.local,
+                          ),
+                        ),
+                      );
+                    },
+                    alerta: chatNuevo,
+                  ),
+                  const SizedBox(width: 6),
+                  botonIcono(Icons.badge_outlined, Colors.white70, 'Ver perfil', () => _verPerfilMovilLocal(context, data)),
+                ]),
+                const SizedBox(height: 10),
+                // Pagos: siempre visibles, con botón de copiar
+                if (pagos.isEmpty)
+                  const Text('Sin métodos de pago registrados',
+                      style: TextStyle(color: _tTexto2, fontSize: 11, fontStyle: FontStyle.italic))
+                else
+                  ...pagos.map((p) => Container(
+                        margin: const EdgeInsets.only(top: 4),
+                        padding: const EdgeInsets.fromLTRB(10, 4, 4, 4),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.25),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border(left: BorderSide(color: p.$2, width: 3)),
+                        ),
+                        child: Row(children: [
+                          SizedBox(
+                            width: 84,
+                            child: Text(p.$1,
+                                style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.bold)),
+                          ),
+                          Expanded(
+                            child: Text(p.$3,
+                                style: const TextStyle(
+                                    color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600, letterSpacing: 0.5)),
+                          ),
+                          IconButton(
+                            tooltip: 'Copiar',
+                            visualDensity: VisualDensity.compact,
+                            icon: const Icon(Icons.copy_rounded, size: 18, color: Colors.white70),
+                            onPressed: () {
+                              Clipboard.setData(ClipboardData(text: p.$3));
+                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                                content: Text('Número de ${p.$1} copiado'),
+                                duration: const Duration(seconds: 2),
+                                behavior: SnackBarBehavior.floating,
+                              ));
+                            },
+                          ),
+                        ]),
+                      )),
+                if (['en_ruta_origen', 'en_origen', 'en_ruta_destino'].contains(estado) && !esHistorial) ...[
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.lightBlueAccent,
+                        side: BorderSide(color: Colors.lightBlueAccent.withValues(alpha: 0.5)),
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                      ),
+                      onPressed: () => _abrirFormularioPedido(
+                        context,
+                        perfilEnVivo: widget.usuario,
+                        movilPreselId: data['id'].toString(),
+                        movilPreselLabel: movilLabel(data),
+                      ),
+                      icon: const Icon(Icons.add_circle_outline, size: 16),
+                      label: Text('NUEVO PEDIDO CON ${movilLabel(data).toUpperCase()}',
+                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                ],
+              ]),
+            );
+          },
+        );
+
+    // ── Fila de dato con ícono ───────────────────────────────────────────
+    Widget dato(IconData ic, Widget contenido, {Widget? accion}) => Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Padding(padding: const EdgeInsets.only(top: 1), child: Icon(ic, size: 16, color: _tTexto2)),
+            const SizedBox(width: 10),
+            Expanded(child: contenido),
+            if (accion != null) accion,
+          ]),
+        );
+
+    final String telCliente = servicio['telefono_receptor']?.toString().trim() ?? '';
+    final String ticket = servicio['ticket_factura']?.toString().trim() ?? '';
+    final String nota = servicio['observacion']?.toString().trim() ?? '';
+    final String fotoComanda = servicio['foto_comanda_url']?.toString() ?? '';
+    final int recargo = (servicio['recargo_total'] as num?)?.toInt() ?? 0;
+
+    Future<void> contactarCliente(BuildContext ctx) async {
+      final dig = telCliente.replaceAll(RegExp(r'[^0-9]'), '');
+      final wa = dig.startsWith('57') ? dig : '57$dig';
+      await showModalBottomSheet(
+        context: ctx,
+        backgroundColor: _tFondo,
+        builder: (bs) => SafeArea(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            ListTile(
+              title: Text('Cliente · $telCliente', style: const TextStyle(color: Colors.white)),
+            ),
+            ListTile(
+              leading: const Icon(Icons.call, color: Colors.lightBlueAccent),
+              title: const Text('Llamar', style: TextStyle(color: Colors.white)),
+              onTap: () async {
+                Navigator.pop(bs);
+                await launchUrl(Uri.parse('tel:$dig'));
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.wechat, color: Colors.greenAccent),
+              title: const Text('WhatsApp', style: TextStyle(color: Colors.white)),
+              onTap: () async {
+                Navigator.pop(bs);
+                await launchUrl(Uri.parse('https://wa.me/$wa'), mode: LaunchMode.externalApplication);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.copy_rounded, color: Colors.white70),
+              title: const Text('Copiar número', style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Clipboard.setData(ClipboardData(text: telCliente));
+                Navigator.pop(bs);
+              },
+            ),
+          ]),
+        ),
+      );
+    }
+
+    Widget botonPrincipal(String texto, IconData? ic, Color c, VoidCallback onTap) => ElevatedButton.icon(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: c,
+            foregroundColor: Colors.black,
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+          onPressed: onTap,
+          icon: Icon(ic ?? Icons.check, size: 18),
+          label: Text(texto, style: const TextStyle(fontWeight: FontWeight.bold)),
+        );
+    Widget botonSecundario(String texto, Color c, VoidCallback? onTap, {IconData? ic}) => OutlinedButton.icon(
+          style: OutlinedButton.styleFrom(
+            foregroundColor: c,
+            side: BorderSide(color: c.withValues(alpha: 0.5)),
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+          onPressed: onTap,
+          icon: Icon(ic ?? Icons.close, size: 16),
+          label: Text(texto, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+        );
+
+    // ── Cuerpo ────────────────────────────────────────────────────────────
+    Widget cuerpo() => Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Divider(color: Colors.white10, height: 1),
+            const SizedBox(height: 12),
+            if (!esPAP && ['pendiente', 'en_curso', 'en_ruta_origen', 'en_origen', 'en_ruta_destino',
+                    'problema', 'finalizado'].contains(estado))
+              lineaAvance(),
+            if (servicio['movil_id'] != null) bloqueMovil(),
+
+            // Datos del pedido
+            if (ticket.isNotEmpty)
+              dato(Icons.receipt_long, Text('Ticket / factura #$ticket',
+                  style: const TextStyle(color: Colors.lightBlueAccent, fontWeight: FontWeight.bold, fontSize: 13))),
+            if (telCliente.isNotEmpty)
+              dato(
+                Icons.phone,
+                InkWell(
+                  onTap: () => contactarCliente(context),
+                  child: Text('Cliente: $telCliente',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          decoration: TextDecoration.underline,
+                          decorationColor: Colors.white38)),
+                ),
+                accion: InkWell(
+                  onTap: () => contactarCliente(context),
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 6),
+                    child: Icon(Icons.more_horiz, color: _tTexto2, size: 18),
+                  ),
+                ),
+              ),
+            if (nota.isNotEmpty)
+              dato(Icons.sticky_note_2_outlined,
+                  Text(nota, style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.3))),
+            if (fotoComanda.isNotEmpty)
+              dato(
+                Icons.photo_camera_outlined,
+                GestureDetector(
+                  onTap: () => showDialog(
+                    context: context,
+                    builder: (dctx) => Dialog(
+                      backgroundColor: Colors.black,
+                      insetPadding: const EdgeInsets.all(12),
+                      child: Stack(children: [
+                        InteractiveViewer(child: Image.network(fotoComanda, fit: BoxFit.contain)),
+                        Positioned(
+                          top: 8,
+                          right: 8,
+                          child: IconButton(
+                              icon: const Icon(Icons.close, color: Colors.white),
+                              onPressed: () => Navigator.pop(dctx)),
+                        ),
+                      ]),
+                    ),
+                  ),
+                  child: Row(children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: Image.network(fotoComanda,
+                          width: 56,
+                          height: 56,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) =>
+                              const SizedBox(width: 56, height: 56, child: Icon(Icons.broken_image, color: Colors.grey))),
+                    ),
+                    const SizedBox(width: 10),
+                    const Text('Foto de comanda · toca para ver',
+                        style: TextStyle(color: _tTexto2, fontSize: 12)),
+                  ]),
+                ),
+              ),
+
+            // Precio
+            if (esPAP)
+              Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(top: 2, bottom: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.purple.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Text('⚡ PUNTO A PUNTO — Servicio gratuito',
+                    style: TextStyle(color: Colors.purpleAccent, fontWeight: FontWeight.bold, fontSize: 13)),
+              )
+            else
+              Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(top: 2, bottom: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(color: _tFondo2, borderRadius: BorderRadius.circular(10)),
+                child: estado == 'cotizacion'
+                    ? const Row(children: [
+                        Icon(Icons.hourglass_top_rounded, size: 16, color: Colors.orangeAccent),
+                        SizedBox(width: 8),
+                        Text('Esperando el precio de la central…',
+                            style: TextStyle(color: Colors.orangeAccent, fontWeight: FontWeight.bold, fontSize: 13)),
+                      ])
+                    : Row(children: [
+                        const Text('Tarifa', style: TextStyle(color: _tTexto2, fontSize: 12)),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: recargo > 0 && hayTarifa
+                              ? Text('base ${fmtPeso(tarifaNum - recargo)} + recargo ${fmtPeso(recargo)}',
+                                  style: const TextStyle(color: _tTexto2, fontSize: 11))
+                              : const SizedBox.shrink(),
+                        ),
+                        Text(hayTarifa ? fmtPeso(tarifa) : '—',
+                            style: const TextStyle(color: Color(0xff3AF500), fontWeight: FontWeight.bold, fontSize: 18)),
+                      ]),
+              ),
+
+            // Ubicación del cliente
+            if (!esHistorial && !terminado) ...[
+              IndicadorUbicacionCliente(servicio, oscuro: true),
+            ],
+
+            // ── Acciones ──────────────────────────────────────────────────
+            const SizedBox(height: 10),
+            if (!esHistorial) ...[
+              if (estado == 'cotizada')
+                Row(children: [
+                  Expanded(child: botonSecundario('RECHAZAR', Colors.redAccent, () => _cancelarPedido(servicio['id']))),
+                  const SizedBox(width: 8),
+                  Expanded(
+                      flex: 2,
+                      child: botonPrincipal('APROBAR', Icons.check, Colors.lightBlueAccent,
+                          () => _completarDatosYAprobar(context, servicio))),
+                ])
+              else if (estado == 'cotizacion_aprobada') ...[
+                Text('Precio aprobado: ${fmtPeso(tarifa)}. Cuando el pedido esté listo, solicita el móvil.',
+                    style: const TextStyle(color: Colors.tealAccent, fontSize: 12, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                Row(children: [
+                  Expanded(child: botonSecundario('CANCELAR', Colors.redAccent, () => _cancelarPedido(servicio['id']))),
+                  const SizedBox(width: 8),
+                  Expanded(
+                      flex: 2,
+                      child: botonPrincipal('SOLICITAR MÓVIL', Icons.two_wheeler, Colors.tealAccent,
+                          () => _solicitarMovilAprobado(context, servicio))),
+                ]),
+              ],
+              if (!terminado)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Row(children: [
+                    Expanded(
+                      child: botonSecundario('PEDIR UBICACIÓN', Colors.lightBlueAccent,
+                          () => pedirUbicacionCliente(servicio), ic: Icons.my_location),
+                    ),
+                    if (estado == 'pendiente' || estado == 'cotizacion') ...[
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: botonSecundario(estado == 'cotizacion' ? 'DESCARTAR' : 'CANCELAR', Colors.redAccent,
+                            () => _cancelarPedido(servicio['id'])),
+                      ),
+                    ],
+                  ]),
+                ),
+            ],
+
+            // Historial: calificar / ocultar / eliminar
+            if (esHistorial && estado == 'finalizado' && servicio['movil_id'] != null) ...[
+              if (servicio['calificacion_local'] == null)
+                SizedBox(
+                  width: double.infinity,
+                  child: botonPrincipal('CALIFICAR MÓVIL', Icons.star_rate_rounded, Colors.amber,
+                      () => _mostrarDialogoCalificacion(servicio)),
+                )
+              else
+                Row(children: [
+                  const Text('Tu calificación', style: TextStyle(color: _tTexto2, fontSize: 12)),
+                  const Spacer(),
+                  ...List.generate(
+                      5,
+                      (i) => Icon(i < (servicio['calificacion_local'] as int) ? Icons.star : Icons.star_border,
+                          color: Colors.amber, size: 18)),
+                ]),
+              const SizedBox(height: 8),
+            ],
+            if (esHistorial && !esGlobal)
+              SizedBox(
+                width: double.infinity,
+                child: botonSecundario('OCULTAR DEL TABLERO DE HOY', Colors.white54, onOcultar, ic: Icons.archive),
+              ),
+            if (esGlobal)
+              SizedBox(
+                width: double.infinity,
+                child: botonSecundario('ELIMINAR PERMANENTEMENTE', Colors.redAccent, onEliminar, ic: Icons.delete),
+              ),
+          ]),
+        );
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 600),
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: _tFondo,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+            color: destacada ? Colors.lightBlueAccent : Colors.white.withValues(alpha: 0.06),
+            width: destacada ? 2 : 1),
+        boxShadow: [
+          if (destacada)
+            BoxShadow(color: Colors.lightBlueAccent.withValues(alpha: 0.45), blurRadius: 20, spreadRadius: 2)
+          else
+            BoxShadow(color: Colors.black.withValues(alpha: 0.35), blurRadius: 6, offset: const Offset(0, 2)),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Stack(children: [
+          Padding(
+            padding: const EdgeInsets.only(left: 4),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              cabecera(),
+              if (estaExpandida) cuerpo(),
+            ]),
+          ),
+          // Franja de color del estado
+          Positioned(
+            left: 0,
+            top: 0,
+            bottom: 0,
+            child: Container(width: 4, color: esHistorial ? color.withValues(alpha: 0.5) : color),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  // Diseño anterior de la tarjeta (ya no se usa; se conserva temporalmente
+  // como referencia y se puede borrar).
+  Widget _construirTarjetaServicioAnterior(
     Map<String, dynamic> servicio, {
     bool esHistorial = false,
     bool esGlobal = false,
@@ -356,6 +1145,17 @@ mixin _CardsMixin on State<LocalScreen> {
           // viejos, pasa a 'pendiente' y arranca F1 (Masters en línea) + F2/F3/F4.
         }
       }
+    } else if (estado == 'pendiente' &&
+        (servicio['exclusivo_id']?.toString().trim() ?? '').isNotEmpty) {
+      // Enrutado / asignado directo: ya tiene móvil, falta que lo acepte
+      final idMovil = servicio['exclusivo_id'].toString().split(',').first.trim();
+      final etiqueta = _etiquetaMovilAsignado(idMovil);
+      bordeColor = Colors.blue[700]!;
+      fondoColor = const Color(0xFFE3F2FD);
+      textoEstado = etiqueta != null
+          ? 'ASIGNADO A ${etiqueta.toUpperCase()} — ESPERANDO QUE ACEPTE'
+          : 'MÓVIL ASIGNADO — ESPERANDO QUE ACEPTE';
+      iconoEstado = Icons.assignment_ind_rounded;
     } else if (estado == 'pendiente') {
       bordeColor = Colors.amber[700]!;
       fondoColor = const Color(0xFFFFF9C4);
@@ -1173,23 +1973,11 @@ mixin _CardsMixin on State<LocalScreen> {
                       style: TextStyle(
                           fontWeight: FontWeight.bold, fontSize: 11),
                     ),
-                    onPressed: () async {
-                      final link =
-                          'https://oukiofdtargjrclualgm.supabase.co'
-                          '/functions/v1/capturar-ubicacion?id=${servicio['id']}';
-                      final mensaje = Uri.encodeComponent(
-                        'Hola 👋 Para que el conductor llegue exactamente '
-                        'donde estás, por favor toca este enlace y activa '
-                        'tu GPS (solo tarda un segundo):\n$link',
-                      );
-                      final uri = Uri.parse('https://wa.me/?text=$mensaje');
-                      if (await canLaunchUrl(uri)) {
-                        await launchUrl(uri,
-                            mode: LaunchMode.externalApplication);
-                      }
-                    },
+                    onPressed: () => pedirUbicacionCliente(servicio),
                   ),
                 ),
+                // Estado: esperando / exacta / aproximada / poco precisa
+                IndicadorUbicacionCliente(servicio),
               ],
               // ── FIN BOTÓN GPS ────────────────────────────────────────────────
               if (estado == 'pendiente' || estado == 'cotizacion') ...[

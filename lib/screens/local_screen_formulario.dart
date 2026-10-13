@@ -460,6 +460,17 @@ mixin _FormularioMixin on State<LocalScreen> {
       if (!context.mounted) return;
     }
 
+    // Recargos activos (lluvia / nocturno) que activó la central
+    Map<String, dynamic>? recargoActivo;
+    try {
+      final r = await Supabase.instance.client
+          .rpc('calcular_recargo_local', params: {'p_local_id': widget.usuario['id']});
+      if (r is List && r.isNotEmpty && r[0]['aplica_recargo'] == true) {
+        recargoActivo = Map<String, dynamic>.from(r[0] as Map);
+      }
+    } catch (_) {}
+    if (!context.mounted) return;
+
     final destinoController = TextEditingController();
     final tarifaController = TextEditingController();
     final notasController = TextEditingController();
@@ -483,13 +494,52 @@ mixin _FormularioMixin on State<LocalScreen> {
 
     // Modo dinámico: cotización si tarifa vacía, solicitar si tiene precio
     bool _esCot = true;
-    bool _esLluvia = false;
     void Function(VoidCallback)? _setDS;
+
+    // PRECIO AUTOMÁTICO (cotización automática): solo aparece si la central
+    // la activó para este local y la ruta ya es confiable. Si no, el pedido
+    // va a cotización como siempre (el local no fija precios).
+    Timer? debounceSugRuta;
+    int pedidoSugRuta = 0;
+    Map<String, dynamic>? sugRuta;
+    String pesosLocal(num v) {
+      final s = v.round().toString();
+      final b = StringBuffer();
+      for (int i = 0; i < s.length; i++) {
+        if (i > 0 && (s.length - i) % 3 == 0) b.write('.');
+        b.write(s[i]);
+      }
+      return '\$$b';
+    }
+    void buscarSugerenciaRuta(String texto) {
+      debounceSugRuta?.cancel();
+      final t = texto.trim();
+      if (t.length < 4) {
+        _setDS?.call(() => sugRuta = null);
+        return;
+      }
+      debounceSugRuta = Timer(const Duration(milliseconds: 700), () async {
+        final miPedido = ++pedidoSugRuta;
+        try {
+          final res = await Supabase.instance.client.rpc('fn_precio_cotizacion', params: {
+            'p_local_id': widget.usuario['id'],
+            'p_destino': t,
+            'p_tipo': _esMototaxi ? 'mototaxi' : _tipoDefecto,
+            'p_telefono': telefonoController.text.trim().isEmpty ? null : telefonoController.text.trim(),
+          });
+          if (miPedido != pedidoSugRuta) return; // llegó una respuesta vieja
+          // Solo se muestra cuando el automático aplica (ruta confiable + activado)
+          _setDS?.call(() => sugRuta = (res is Map && res['auto'] == true && res['precio'] != null)
+              ? Map<String, dynamic>.from(res)
+              : null);
+        } catch (_) {
+          if (miPedido == pedidoSugRuta) _setDS?.call(() => sugRuta = null);
+        }
+      });
+    }
     tarifaController.addListener(() {
       _setDS?.call(() {
         _esCot = tarifaController.text.trim().isEmpty;
-        // resetear lluvia si vuelve a modo cotización
-        if (_esCot) _esLluvia = false;
       });
     });
 
@@ -525,6 +575,7 @@ mixin _FormularioMixin on State<LocalScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (!esPuntoAPunto) const BannerAltaDemanda(),
                 Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(10),
@@ -835,6 +886,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                   ),
                   onChanged: (texto) {
                     if (esPuntoAPunto) return;
+                    buscarSugerenciaRuta(texto); // precio de servicios ya hechos
 
                     // ── Preservar precio si el usuario solo añade detalles ──
                     if (destinoBase != null &&
@@ -961,6 +1013,41 @@ mixin _FormularioMixin on State<LocalScreen> {
                       ],
                     ),
                   ),
+                // --- Precio automático (ruta confiable + automático activo) ---
+                if (!esPuntoAPunto && sugRuta != null)
+                  Builder(builder: (_) {
+                    final s = sugRuta!;
+                    final precio = (s['precio'] as num).toInt();
+                    final yaPuesto = tarifaController.text.replaceAll(RegExp(r'[^0-9]'), '') ==
+                        precio.toString();
+                    return Container(
+                      margin: const EdgeInsets.only(top: 8),
+                      padding: const EdgeInsets.fromLTRB(10, 8, 6, 8),
+                      decoration: BoxDecoration(
+                        color: Colors.green[50],
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.green[600]!),
+                      ),
+                      child: Row(children: [
+                        const Text('🤖', style: TextStyle(fontSize: 16)),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            'Precio ${pesosLocal(precio)}\nPuedes pedir el móvil directo, sin esperar cotización.',
+                            style: TextStyle(color: Colors.green[900], fontSize: 12, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                        if (!yaPuesto)
+                          TextButton(
+                            onPressed: () {
+                              tarifaController.text = pesosLocal(precio);
+                              setDialogState(() {});
+                            },
+                            child: const Text('USAR', style: TextStyle(fontWeight: FontWeight.bold)),
+                          ),
+                      ]),
+                    );
+                  }),
                 const SizedBox(height: 12),
 
                 // 4. TARIFA Y RELOJ
@@ -1038,43 +1125,28 @@ mixin _FormularioMixin on State<LocalScreen> {
                         ),
                         onSelected: (v) => _setDS?.call(() => _esMototaxi = v),
                       ),
-                      if (!_esCot)
-                        FilterChip(
-                          label: const Text('🌧️ Lluvia +\$1.000'),
-                          selected: _esLluvia,
-                          selectedColor: Colors.blue[100],
-                          checkmarkColor: Colors.blue[800],
-                          labelStyle: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                            color: _esLluvia ? Colors.blue[800] : Colors.black54,
-                          ),
-                          onSelected: (v) => _setDS?.call(() => _esLluvia = v),
-                        ),
                     ],
                   ),
-                  // Desglose lluvia
-                  if (_esLluvia && !_esCot) ...[
+                  // Recargos activos: los activa SOLO la central (lluvia a mano
+                  // o por clima; nocturno por horario o a mano). Se suman
+                  // solos al pedir; el local solo ve el aviso.
+                  if (recargoActivo != null) ...[
                     const SizedBox(height: 6),
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(
-                        color: Colors.blue[50],
+                        color: Colors.indigo[50],
                         borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: Colors.blue[200]!),
+                        border: Border.all(color: Colors.indigo[200]!),
                       ),
-                      child: () {
-                        final tarifaLimpiaDesglose = tarifaController.text
-                            .replaceAll('\$', '').replaceAll('.', '').replaceAll(',', '').trim();
-                        final double baseDesglose = double.tryParse(tarifaLimpiaDesglose) ?? 0.0;
-                        final double totalDesglose = baseDesglose + 1000;
-                        String fmt(double v) => '\$${v.toStringAsFixed(0).replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+$)'), (m) => '${m[1]}.')}';
-                        return Text(
-                          '${fmt(baseDesglose)} base  +  \$1.000 lluvia  =  ${fmt(totalDesglose)}',
-                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.blue[800]),
-                        );
-                      }(),
+                      child: Text(
+                        '${recargoActivo['lluvia_activa'] == true ? '🌧 ' : ''}'
+                        '${recargoActivo['nocturno_activo'] == true ? '🌙 ' : ''}'
+                        'Recargo activo +\$${recargoActivo['recargo_total']} '
+                        '(${recargoActivo['desglose'] ?? ''}). Se suma solo al pedir.',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.indigo[800]),
+                      ),
                     ),
                   ],
                   const SizedBox(height: 12),
@@ -1300,9 +1372,12 @@ mixin _FormularioMixin on State<LocalScreen> {
                         double tarifaNueva = (esPuntoAPunto || _esCot)
                             ? 0.0
                             : (double.tryParse(tarifaLimpia) ?? 0.0);
-                        if (_esLluvia && !_esCot && !esPuntoAPunto) {
-                          tarifaNueva += 1000;
-                        }
+                        // Precio base (sin recargos): sirve para comparar con
+                        // el precio calculado y para que las rutas aprendan
+                        // el valor real, no el inflado por lluvia/noche.
+                        final double tarifaBaseSinRecargo = tarifaNueva;
+                        // Lluvia y nocturno los suma _confirmarRecargoObligatorio
+                        // (los activa la central); el local ya no los agrega a mano.
                         final destinoNuevo = destinoController.text.trim();
 
                         // --- INTERCEPTOR DE RECARGO OBLIGATORIO ---
@@ -1556,9 +1631,11 @@ mixin _FormularioMixin on State<LocalScreen> {
                                   ? null
                                   : telefonoController.text.trim(),
                               'tarifa': tarifaNueva,
+                              'recargo_total': (tarifaNueva - tarifaBaseSinRecargo).round(),
                               'tarifa_detalle': {
                                 'total': tarifaNueva,
-                                'base': tarifaNueva,
+                                'base': tarifaBaseSinRecargo,
+                                'recargo': tarifaNueva - tarifaBaseSinRecargo,
                                 'fuente': 'local',
                               },
                               'observacion': observacionFinal,

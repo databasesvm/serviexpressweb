@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart';
+import 'package:serviexpress_app/utils/alta_demanda.dart';
 import 'package:serviexpress_app/utils/widgets_compartidos.dart';
 import 'package:serviexpress_app/utils/paradero_objetivo.dart';
 
@@ -387,11 +388,14 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
         break;
 
       case 'pendiente':
-        colorEstado = Colors.black54;
-        titulo = 'BUSCANDO MÓVIL';
-        descripcion =
-            'Tu pedido ya está en el radar de la Central. Buscando el Móvil disponible más cercano...';
-        icono = Icons.radar;
+        final asignadoDirecto =
+            (servicio['exclusivo_id']?.toString().trim() ?? '').isNotEmpty;
+        colorEstado = asignadoDirecto ? Colors.blue[600]! : Colors.black54;
+        titulo = asignadoDirecto ? 'MÓVIL ASIGNADO' : 'BUSCANDO MÓVIL';
+        descripcion = asignadoDirecto
+            ? 'Ya hay un Móvil asignado a tu pedido. Esperando que lo confirme...'
+            : 'Tu pedido ya está en el radar de la Central. Buscando el Móvil disponible más cercano...';
+        icono = asignadoDirecto ? Icons.assignment_ind_rounded : Icons.radar;
         break;
 
       case 'en_ruta_origen':
@@ -703,6 +707,9 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
                     ),
                     const Divider(height: 30),
 
+                    if (!['finalizado', 'finalizado_por_demora', 'finalizado_con_problema',
+                          'cancelado', 'caducado'].contains(estado))
+                      const BannerAltaDemanda(),
                     _construirEstadoVisual(estado, servicio),
 
                     // ── SECCIÓN CALIFICAR (solo invitados, solo finalizado) ──

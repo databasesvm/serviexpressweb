@@ -10,8 +10,12 @@ extension CentralScreenMonitor on _CentralScreenState {
     final double tarifaActual = (servicio['tarifa'] is num)
         ? (servicio['tarifa'] as num).toDouble()
         : 0.0;
+    // Si aún no tiene tarifa, arranca con el precio calculado por el sistema
+    final int? precioCalc = (servicio['precio_calculado'] as num?)?.toInt();
     final String textoInicial = (tarifaActual == 0.0)
-        ? ''
+        ? (estado == 'cotizacion' && precioCalc != null && precioCalc > 0
+            ? _formatearMonedaCentral(precioCalc.toDouble())
+            : '')
         : _formatearMonedaCentral(tarifaActual);
     final tarifaController = TextEditingController(text: textoInicial);
 
@@ -127,6 +131,9 @@ extension CentralScreenMonitor on _CentralScreenState {
                 destinoLat: (servicio['destino_lat'] as num?)?.toDouble(),
                 destinoLng: (servicio['destino_lng'] as num?)?.toDouble(),
                 tipoServicio: servicio['tipo_servicio']?.toString(),
+                // Precio calculado por el sistema (si hay): una sola sugerencia
+                precioSistema: estado == 'cotizacion' ? precioCalc : null,
+                desgloseSistema: servicio['precio_desglose']?.toString(),
                 onDetalleChanged: (d) => detalleCotizacion = d,
               ),
             ],
@@ -697,14 +704,8 @@ extension CentralScreenMonitor on _CentralScreenState {
                             _accionBtn('FUSIONAR', Colors.purple.shade700, Colors.white,
                                 () => _mostrarMenuFusion(context, servicio)),
                           if (!['finalizado', 'finalizado_por_demora', 'finalizado_con_problema', 'cancelado', 'caducado'].contains(estado))
-                            _accionBtnIcon(Icons.my_location, 'GPS', Colors.blue.shade700, Colors.white, () async {
-                              final link = 'https://oukiofdtargjrclualgm.supabase.co/functions/v1/capturar-ubicacion?id=$id';
-                              final mensaje = Uri.encodeComponent(
-                                'Hola 👋 Para que el conductor llegue exactamente donde estás, toca este enlace y activa tu GPS (un segundo):\n$link',
-                              );
-                              final uri = Uri.parse('https://wa.me/?text=$mensaje');
-                              if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
-                            }),
+                            _accionBtnIcon(Icons.my_location, 'GPS', Colors.blue.shade700, Colors.white,
+                                () => pedirUbicacionCliente(servicio)),
                           if (['cancelado', 'finalizado_por_demora', 'finalizado_con_problema', 'caducado'].contains(estado))
                             _accionBtn('REACTIVAR', const Color(0xff3AF500), Colors.black, () async {
                               await Supabase.instance.client
@@ -1555,7 +1556,12 @@ extension CentralScreenMonitor on _CentralScreenState {
 
   Future<void> _cotizarRapido(
       BuildContext context, Map<String, dynamic> servicio) async {
-    final TextEditingController precioCtrl = TextEditingController();
+    // Arranca con el precio calculado por el sistema (editable)
+    final int? calcRapido = (servicio['precio_calculado'] as num?)?.toInt();
+    final TextEditingController precioCtrl = TextEditingController(
+        text: (servicio['estado'] == 'cotizacion' && calcRapido != null && calcRapido > 0)
+            ? calcRapido.toString()
+            : '');
 
     await showModalBottomSheet(
       context: context,
@@ -1609,6 +1615,14 @@ extension CentralScreenMonitor on _CentralScreenState {
                   Text(
                     '👤 ${servicio["cliente_nombre"]}',
                     style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  ),
+                ],
+                if (calcRapido != null && calcRapido > 0) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    '🧮 Calculado por el sistema'
+                    '${(servicio['precio_desglose'] ?? '').toString().isNotEmpty ? ': ${servicio['precio_desglose']}' : ''}',
+                    style: TextStyle(fontSize: 12, color: Colors.blue[900]),
                   ),
                 ],
                 const SizedBox(height: 16),
@@ -1913,6 +1927,7 @@ extension CentralScreenMonitor on _CentralScreenState {
   Widget _chipEstadoMonitor(String estado, Color colorBase) {
     const labels = <String, String>{
       'pendiente': 'LIBRE',
+      'asignado_directo': 'ASIGNADO',
       'cotizacion': 'COTIZ.',
       'fn_renegociando': 'RENEG.',
       'cotizada': 'ENVIADA',
@@ -2166,8 +2181,36 @@ extension CentralScreenMonitor on _CentralScreenState {
                                     : Colors.grey[400],
                               ),
                             ),
-                          _chipEstadoMonitor(estado, colorBase),
+                          _chipEstadoMonitor(
+                              (estado == 'pendiente' &&
+                                      (servicio['exclusivo_id']?.toString().trim() ?? '')
+                                          .isNotEmpty)
+                                  ? 'asignado_directo'
+                                  : estado,
+                              colorBase),
                           const SizedBox(width: 5),
+                          // De dónde salió el precio (toque largo → detalle)
+                          if (servicio['precio_origen'] != null)
+                            Tooltip(
+                              message: '${switch (servicio['precio_origen']) {
+                                'automatico' => 'Precio automático (ruta confiable)',
+                                'confirmado' => 'Precio calculado, confirmado por la central',
+                                'editado' => 'Precio calculado ${fmtPeso(servicio['precio_calculado'])}, editado por la central',
+                                'manual' => 'Cotizado a mano por la central',
+                                _ => 'Precio puesto por el local',
+                              }}'
+                                  '${(servicio['precio_desglose'] ?? '').toString().isNotEmpty ? '\n${servicio['precio_desglose']}' : ''}',
+                              child: Text(
+                                switch (servicio['precio_origen']) {
+                                  'automatico' => '🤖 ',
+                                  'confirmado' => '✅ ',
+                                  'editado' => '✏️ ',
+                                  'manual' => '✍️ ',
+                                  _ => '',
+                                },
+                                style: const TextStyle(fontSize: 11),
+                              ),
+                            ),
                           if (servicio['es_vip'] == true)
                             const Text('👑 ', style: TextStyle(fontSize: 11)),
                           Expanded(

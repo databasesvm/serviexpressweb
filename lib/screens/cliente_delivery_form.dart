@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:serviexpress_app/utils/paradero_objetivo.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart'; // <-- RUTA CORREGIDA
+import 'package:serviexpress_app/utils/alta_demanda.dart';
 
 class ClienteDeliveryForm extends StatefulWidget {
   final Map<String, dynamic> usuario;
@@ -428,6 +429,7 @@ class _ClienteDeliveryFormState extends State<ClienteDeliveryForm> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            const BannerAltaDemanda(),
             _construirHistorial(),
             _construirBloque(
               titulo: '¿Dónde recogemos?',

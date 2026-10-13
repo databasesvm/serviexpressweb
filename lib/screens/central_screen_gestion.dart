@@ -160,13 +160,16 @@ extension CentralScreenGestion on _CentralScreenState {
                 subtitulo: 'Ordena al móvil que envíe su posición ahora mismo',
                 onTap: () {
                   Navigator.pop(ctx);
-                  MotorNotificaciones.dispararMisil(
-                    idDestino: m['id'].toString(),
-                    titulo: '📍',
-                    mensaje: '',
-                    urgente: false,
-                    data: {'tipo': 'force_gps_update'},
-                  );
+                  // Forzar: la app del móvil ve gps_forzado_at y envía su
+                  // ubicación al instante (sin preguntarle nada).
+                  () async {
+                    try {
+                      await Supabase.instance.client
+                          .from('usuarios')
+                          .update({'gps_forzado_at': DateTime.now().toUtc().toIso8601String()})
+                          .eq('id', m['id']);
+                    } catch (_) {}
+                  }();
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text('📡 GPS solicitado a ${_formatearNombreCentral(m)}'),
@@ -838,7 +841,7 @@ extension CentralScreenGestion on _CentralScreenState {
   Widget _paraderoMovilLeading(Map<String, dynamic> m, Color colorBase) {
     final esFn = m['tiene_fn'] == true;
     final enLinea = m['en_linea'] == true;
-    return CircleAvatar(
+    final avatar = CircleAvatar(
       radius: 12,
       backgroundColor: (esFn && enLinea) ? const Color(0xFF002DA2) : colorBase,
       child: Text(
@@ -847,6 +850,20 @@ extension CentralScreenGestion on _CentralScreenState {
             color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
       ),
     );
+    // Hoy es su día de descanso (puede trabajar si quiere): marca 🏖️
+    if (!_esDescansoHoy(m)) return avatar;
+    return Stack(clipBehavior: Clip.none, children: [
+      avatar,
+      const Positioned(right: -6, bottom: -4, child: Text('🏖️', style: TextStyle(fontSize: 10))),
+    ]);
+  }
+
+  /// ¿Hoy es el día de descanso fijo del móvil? (0=Dom … 6=Sáb, hora Colombia)
+  bool _esDescansoHoy(Map<String, dynamic> m) {
+    final d = m['dia_descanso_semanal'];
+    if (d == null) return false;
+    final hoyCol = DateTime.now().toUtc().subtract(const Duration(hours: 5)).weekday % 7;
+    return d == hoyCol;
   }
 
   // ── Ping helper — estado de conexión real basado en ultimo_ping ────────────

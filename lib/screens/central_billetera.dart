@@ -42,7 +42,7 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
       final results = await Future.wait([
         _db
             .from('usuarios')
-            .select('id, auth_id, nombre, usuario, rango_movil, puntuacion, activo, tipo_plan_movil, numero_movil, saldo_wallet, comision_pct, wallet_bloqueado, recargo_mora_activo, tiene_fn, tiene_se, pago_semana_exonerado')
+            .select('id, auth_id, nombre, usuario, rango_movil, puntuacion, activo, tipo_plan_movil, numero_movil, saldo_wallet, comision_pct, wallet_bloqueado, recargo_mora_activo, multa_pendiente, tiene_fn, tiene_se, pago_semana_exonerado')
             .eq('rol', 'movil')
             .order('usuario', ascending: true),
         _db
@@ -195,7 +195,12 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
     final tipoSolicitud = s['tipo_solicitud']?.toString() ?? '';
     final esSemanal = tipoSolicitud == 'pago_semanal';
     final esConRecargo = tipoSolicitud == 'pago_semanal_con_recargo';
-    final esPagoSemanal = esSemanal || esConRecargo;
+    final esMulta = tipoSolicitud == 'pago_multa'; // solo la multa (semana ya aceptada)
+    final esPagoSemanal = esSemanal || esConRecargo || esMulta;
+    // ¿El móvil dice que incluyó la multa? (solicitudes viejas sin desglose → sí)
+    final bool multaIncluida = esConRecargo &&
+        (s['monto_semana'] == null ||
+            ((s['monto_multa'] as num?)?.toDouble() ?? 0) >= 20000);
     // Descuento semanal (solo aplica a pago_semanal, no a pago_semanal_con_recargo)
     final int descuentoPct = esSemanal
         ? ((movilData?['descuento_semana_pct'] as int?) ?? 0)
@@ -213,12 +218,12 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
         ? '${fecha.day.toString().padLeft(2,'0')}/${fecha.month.toString().padLeft(2,'0')} ${fecha.hour.toString().padLeft(2,'0')}:${fecha.minute.toString().padLeft(2,'0')}'
         : '';
 
-    final borderColor = esConRecargo
+    final borderColor = (esConRecargo || esMulta)
         ? Colors.red[700]!.withValues(alpha: 0.6)
         : esSemanal
             ? Colors.orange[700]!.withValues(alpha: 0.5)
             : Colors.amber[700]!.withValues(alpha: 0.4);
-    final bgColor = esConRecargo
+    final bgColor = (esConRecargo || esMulta)
         ? Colors.red[900]!.withValues(alpha: 0.2)
         : esSemanal
             ? Colors.orange[900]!.withValues(alpha: 0.15)
@@ -260,6 +265,18 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                 child: const Text('⚠️ MORA',
                     style: TextStyle(color: Colors.red, fontSize: 9, fontWeight: FontWeight.bold)),
               )
+            else if (esMulta)
+              Container(
+                margin: const EdgeInsets.only(right: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.red.withValues(alpha: 0.25),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: Colors.red.withValues(alpha: 0.6)),
+                ),
+                child: const Text('MULTA',
+                    style: TextStyle(color: Colors.red, fontSize: 9, fontWeight: FontWeight.bold)),
+              )
             else if (esSemanal)
               Container(
                 margin: const EdgeInsets.only(right: 6),
@@ -274,8 +291,64 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
               ),
             Text(fechaStr, style: const TextStyle(color: Colors.white38, fontSize: 10)),
           ]),
-          // ── Aviso mora ───────────────────────────────────────────────────
-          if (esConRecargo) ...[
+          // ── Desglose del pago semanal (semana + multa) ───────────────────
+          if (esMulta) ...[
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.red.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red.withValues(alpha: 0.4)),
+              ),
+              child: Text(
+                'Pago de la MULTA por mora \$${monto.toStringAsFixed(0)}. '
+                'La semana ya fue aceptada antes. Si el comprobante está bien, '
+                'al aprobar se desbloquea la billetera.',
+                style: const TextStyle(color: Colors.white, fontSize: 11),
+              ),
+            ),
+          ] else if (esPagoSemanal && s['monto_semana'] != null) ...[
+            const SizedBox(height: 8),
+            Builder(builder: (_) {
+              final semana = (s['monto_semana'] as num?)?.toDouble() ?? 0;
+              final multa = (s['monto_multa'] as num?)?.toDouble() ?? 0;
+              final sinMulta = esConRecargo && !multaIncluida;
+              return Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: (sinMulta ? Colors.amber : esConRecargo ? Colors.red : Colors.white)
+                      .withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                      color: (sinMulta ? Colors.amber : esConRecargo ? Colors.red : Colors.white24)
+                          .withValues(alpha: 0.4)),
+                ),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(
+                    !esConRecargo
+                        ? 'Semana \$${semana.toStringAsFixed(0)}'
+                        : sinMulta
+                            ? 'Semana \$${semana.toStringAsFixed(0)} — Multa: NO incluida'
+                            : 'Semana \$${semana.toStringAsFixed(0)} + Multa \$${multa.toStringAsFixed(0)} ✔ = \$${monto.toStringAsFixed(0)}',
+                    style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                  ),
+                  if (esConRecargo) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      sinMulta
+                          ? '⚠️ El móvil pagó solo la semana. Puedes ACEPTAR LA SEMANA: queda bloqueado hasta que pague la multa de \$20.000.'
+                          : 'Revisa que el comprobante sea por el total. Si solo pagó la semana, usa "ACEPTAR SEMANA — FALTA MULTA".',
+                      style: TextStyle(color: sinMulta ? Colors.amber : Colors.white54, fontSize: 10),
+                    ),
+                  ],
+                ]),
+              );
+            }),
+          ] else if (esConRecargo) ...[
+            // Solicitudes viejas (sin desglose)
             const SizedBox(height: 8),
             Container(
               width: double.infinity,
@@ -286,7 +359,7 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                 border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
               ),
               child: const Text(
-                'Pago con recargo por mora. Monto mínimo esperado: \$80.000 (\$60.000 semana + \$20.000 recargo).',
+                'Pago con recargo por mora. Esperado: \$80.000 (\$60.000 semana + \$20.000 multa).',
                 style: TextStyle(color: Colors.red, fontSize: 10),
               ),
             ),
@@ -407,7 +480,9 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                   MotorNotificaciones.dispararMisil(
                     idDestino: s['movil_id'].toString(),
                     titulo: '❌ Soporte rechazado',
-                    mensaje: esPagoSemanal
+                    mensaje: esMulta
+                        ? 'Tu comprobante de la multa fue rechazado. Tu billetera sigue bloqueada: revisa el pago y envíalo de nuevo, o comunícate con la Central.'
+                        : esPagoSemanal
                         ? activarRecargo
                             ? 'Tu comprobante fue rechazado y se activó recargo por mora. Debes pagar \$80.000. Comunícate con la Central.'
                             : 'Tu comprobante de pago semanal fue rechazado. Comunícate con la Central.'
@@ -419,11 +494,14 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                 child: const Text('RECHAZAR', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
               ),
             ),
+            // Si el móvil NO incluyó la multa, no se ofrece aprobar todo:
+            // solo rechazar o aceptar la semana (queda bloqueado por la multa).
+            if (!(esConRecargo && !multaIncluida)) ...[
             const SizedBox(width: 8),
             Expanded(
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: esConRecargo
+                  backgroundColor: (esConRecargo || esMulta)
                       ? Colors.red[700]
                       : esSemanal ? Colors.orange : const Color(0xFF22C55E),
                   foregroundColor: Colors.white,
@@ -433,45 +511,66 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                 onPressed: () async {
                   try {
                     final comprUrlAp = s['comprobante_url']?.toString();
+                    // 1) Resolver la solicitud PRIMERO (solo si sigue pendiente):
+                    //    así nunca queda colgada con "Aprobar / Rechazar" aunque
+                    //    falle un paso posterior, y no se aprueba dos veces.
+                    final resuelta = await _db
+                        .from('solicitudes_recarga_wallet')
+                        .update({
+                          'estado': 'aprobada', 'revisado_por': 'central',
+                          'revisado_at': DateTime.now().toUtc().toIso8601String(),
+                        })
+                        .eq('id', s['id'])
+                        .eq('estado', 'pendiente')
+                        .select('id');
+                    if ((resuelta as List).isEmpty) {
+                      _cargar(); // ya la había resuelto otra central
+                      return;
+                    }
+                    // 2) Desbloquear / acreditar
                     if (esPagoSemanal) {
                       await _db.from('usuarios').update({
                         'wallet_bloqueado': false,
-                        if (esConRecargo) 'recargo_mora_activo': false,
+                        if (esConRecargo || esMulta) 'recargo_mora_activo': false,
+                        'multa_pendiente': false,
                         // Limpiar descuento al aprobar — ya fue utilizado
                         if (esSemanal && descuentoPct > 0) 'descuento_semana_pct': 0,
                       }).eq('id', s['movil_id']);
-                      await _db.from('wallet_movimientos').insert({
-                        'movil_id': s['movil_id'],
-                        'tipo': esConRecargo ? 'pago_semanal_con_recargo' : 'pago_semanal',
-                        'monto': monto,
-                        'concepto': esConRecargo
-                            ? 'Pago semanal con recargo aprobado — billetera desbloqueada'
-                            : 'Pago semanal aprobado — billetera desbloqueada',
-                        'registrado_por': 'central',
-                        if (comprUrlAp != null) 'comprobante_url': comprUrlAp,
-                      });
                     } else {
-                      await _db.from('wallet_movimientos').insert({
-                        'movil_id': s['movil_id'],
-                        'tipo': 'recarga',
-                        'monto': monto,
-                        'concepto': 'Recarga aprobada',
-                        'registrado_por': 'central',
-                        if (comprUrlAp != null) 'comprobante_url': comprUrlAp,
-                      });
                       await _db.rpc('fn_wallet_ajuste_saldo', params: {
                         'p_movil_id': s['movil_id'],
                         'p_monto': monto,
                       });
                     }
-                    await _db.from('solicitudes_recarga_wallet').update({
-                      'estado': 'aprobada', 'revisado_por': 'central',
-                      'revisado_at': DateTime.now().toUtc().toIso8601String(),
-                    }).eq('id', s['id']);
+                    // 3) Registrar el movimiento (si fallara, no bloquea lo anterior)
+                    try {
+                      await _db.from('wallet_movimientos').insert({
+                        'movil_id': s['movil_id'],
+                        'tipo': esMulta
+                            ? 'pago_multa'
+                            : esPagoSemanal
+                            ? (esConRecargo ? 'pago_semanal_con_recargo' : 'pago_semanal')
+                            : 'recarga',
+                        'monto': monto,
+                        'concepto': esMulta
+                            ? 'Multa por mora pagada — billetera desbloqueada'
+                            : esPagoSemanal
+                            ? (esConRecargo
+                                ? 'Pago semanal con recargo aprobado — billetera desbloqueada'
+                                : 'Pago semanal aprobado — billetera desbloqueada')
+                            : 'Recarga aprobada',
+                        'registrado_por': 'central',
+                        if (comprUrlAp != null) 'comprobante_url': comprUrlAp,
+                      });
+                    } catch (e) {
+                      debugPrint('wallet_movimientos (aprobar): $e');
+                    }
                     MotorNotificaciones.dispararMisil(
                       idDestino: s['movil_id'].toString(),
                       titulo: esPagoSemanal ? '🔓 Billetera desbloqueada' : '✅ Recarga aprobada',
-                      mensaje: esConRecargo
+                      mensaje: esMulta
+                          ? 'Recibimos el pago de tu multa. Tu billetera está activa nuevamente.'
+                          : esConRecargo
                           ? 'Tu pago semanal con recargo fue aprobado. Tu billetera está activa nuevamente.'
                           : esSemanal && descuentoPct == 100
                               ? '🏆 ¡Premio semanal! Tu semana fue GRATIS. Billetera desbloqueada.'
@@ -487,17 +586,20 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                     );
                     _cargar();
                     if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                      content: Text(esConRecargo
+                      content: Text(esMulta
+                          ? '🔓 Multa aprobada — $nombre desbloqueado'
+                          : esConRecargo
                           ? '🔓 Pago con recargo aprobado — $nombre desbloqueado'
                           : esSemanal
                               ? '🔓 Pago semanal aprobado — $nombre desbloqueado'
                               : '✅ Recarga de \$${monto.toStringAsFixed(0)} aprobada para $nombre'),
-                      backgroundColor: esConRecargo
+                      backgroundColor: (esConRecargo || esMulta)
                           ? Colors.red[700]
                           : esSemanal ? Colors.orange : const Color(0xFF22C55E),
                       behavior: SnackBarBehavior.floating,
                     ));
                   } catch (e) {
+                    _cargar(); // refrescar: la solicitud pudo quedar resuelta
                     if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                       content: Text('Error: $e'), backgroundColor: Colors.red,
                       behavior: SnackBarBehavior.floating,
@@ -505,15 +607,200 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                   }
                 },
                 child: Text(
-                  esPagoSemanal ? 'APROBAR Y DESBLOQUEAR' : 'APROBAR',
+                  esConRecargo
+                      ? 'APROBAR TODO Y DESBLOQUEAR'
+                      : esPagoSemanal ? 'APROBAR Y DESBLOQUEAR' : 'APROBAR',
                   style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
                 ),
               ),
             ),
+            ], // fin aprobar todo
           ]),
+          // ── Aprobar a medias: semana sí, multa no ─────────────────────────
+          if (esConRecargo) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.amber[800],
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                icon: const Icon(Icons.lock_clock, size: 16),
+                label: const Text('ACEPTAR SEMANA — FALTA MULTA',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                onPressed: () => _aceptarSemanaFaltaMulta(s, nombre),
+              ),
+            ),
+          ],
         ]),
       ),
     );
+  }
+
+  // ── Aprobar a medias: se acepta la semana pero falta la multa ────────────
+  // La solicitud se cierra, el móvil SIGUE bloqueado con multa_pendiente=true
+  // y se le avisa que solo le falta pagar la multa para desbloquearse.
+  Future<void> _aceptarSemanaFaltaMulta(Map<String, dynamic> s, String nombre) async {
+    const double multaCompleta = 20000;
+    final double semana = (s['monto_semana'] as num?)?.toDouble() ?? 60000;
+    String pesos(double v) {
+      final t = v.toStringAsFixed(0);
+      final b = StringBuffer();
+      for (int i = 0; i < t.length; i++) {
+        if (i > 0 && (t.length - i) % 3 == 0) b.write('.');
+        b.write(t[i]);
+      }
+      return '\$$b';
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        title: const Text('Aceptar semana — falta multa',
+            style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
+        content: Text(
+          'Se registra el pago de la semana (${pesos(semana)}) de $nombre.\n\n'
+          'La billetera SIGUE BLOQUEADA hasta que pague la multa de ${pesos(multaCompleta)}. '
+          'Al móvil le llegará un aviso diciéndole exactamente eso.',
+          style: const TextStyle(color: Colors.white70, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('CANCELAR', style: TextStyle(color: Colors.white38)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.amber[800], foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('ACEPTAR SEMANA', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      // 1) Cerrar la solicitud primero (solo si sigue pendiente)
+      final resuelta = await _db
+          .from('solicitudes_recarga_wallet')
+          .update({
+            'estado': 'aprobada', 'revisado_por': 'central',
+            'revisado_at': DateTime.now().toUtc().toIso8601String(),
+          })
+          .eq('id', s['id'])
+          .eq('estado', 'pendiente')
+          .select('id');
+      if ((resuelta as List).isEmpty) {
+        _cargar();
+        return;
+      }
+      // 2) Sigue bloqueado; ahora solo debe la multa
+      await _db.from('usuarios').update({
+        'wallet_bloqueado': true,
+        'recargo_mora_activo': true,
+        'multa_pendiente': true,
+      }).eq('id', s['movil_id']);
+      // 3) Movimiento de la semana
+      try {
+        await _db.from('wallet_movimientos').insert({
+          'movil_id': s['movil_id'],
+          'tipo': 'pago_semanal',
+          'monto': semana,
+          'concepto': 'Semana aceptada — falta multa por mora (${pesos(multaCompleta)})',
+          'registrado_por': 'central',
+          if (s['comprobante_url'] != null) 'comprobante_url': s['comprobante_url'],
+        });
+      } catch (e) {
+        debugPrint('wallet_movimientos (semana sin multa): $e');
+      }
+      // 4) Aviso claro al móvil
+      MotorNotificaciones.dispararMisil(
+        idDestino: s['movil_id'].toString(),
+        titulo: '✅ Recibimos tu semana — falta la multa',
+        mensaje: 'Ya tenemos tus ${pesos(semana)}. Para desbloquear tu billetera falta la multa '
+            'por mora de ${pesos(multaCompleta)}. Entra a la app, toca PAGAR MULTA y adjunta el comprobante.',
+        urgente: false,
+        sonido: Sonidos.movilConfirmar,
+        canalAndroidId: MotorNotificaciones.canalConfirmacionId,
+        data: {'tipo': 'billetera'},
+      );
+      _cargar();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Semana aceptada — $nombre sigue bloqueado hasta pagar la multa'),
+        backgroundColor: Colors.amber[800],
+        behavior: SnackBarBehavior.floating,
+      ));
+    } catch (e) {
+      _cargar();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Error: $e'), backgroundColor: Colors.red,
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
+  }
+
+  // ── Desbloquear sin pago (exoneración o activación manual de la central) ──
+  // Desbloquea YA, quita la mora, resuelve cualquier comprobante pendiente de
+  // esa semana (para que no quede colgado), registra el movimiento y avisa.
+  Future<void> _desbloquearSinPago(
+    Map<String, dynamic> u, {
+    required String tipo,       // 'exoneracion_semana' | 'activacion_manual'
+    required String concepto,
+    required String titulo,
+    required String mensaje,
+  }) async {
+    try {
+      await _db.from('usuarios').update({
+        'wallet_bloqueado': false,
+        'recargo_mora_activo': false,
+        'multa_pendiente': false,
+      }).eq('id', u['id']);
+      await _db.from('solicitudes_recarga_wallet').update({
+        'estado': 'aprobada', 'revisado_por': 'central',
+        'revisado_at': DateTime.now().toUtc().toIso8601String(),
+      })
+          .eq('movil_id', u['id'])
+          .eq('estado', 'pendiente')
+          .inFilter('tipo_solicitud', ['pago_semanal', 'pago_semanal_con_recargo', 'pago_multa']);
+      try {
+        await _db.from('wallet_movimientos').insert({
+          'movil_id': u['id'],
+          'tipo': tipo,
+          'monto': 0,
+          'concepto': concepto,
+          'registrado_por': 'central',
+        });
+      } catch (e) {
+        debugPrint('wallet_movimientos ($tipo): $e');
+      }
+      MotorNotificaciones.dispararMisil(
+        idDestino: u['id'].toString(),
+        titulo: titulo,
+        mensaje: mensaje,
+        urgente: false,
+        sonido: Sonidos.movilConfirmar,
+        canalAndroidId: MotorNotificaciones.canalConfirmacionId,
+        data: {'tipo': 'billetera'},
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('🔓 ${movilLabel(u)} desbloqueado'),
+          backgroundColor: const Color(0xFF22C55E),
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Error: $e'), backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    }
+    _cargar();
   }
 
   // ── Tarjeta individual de móvil ────────────────────────────────────────────
@@ -607,7 +894,9 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                               title: const Text('Exonerar recargo',
                                   style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
                               content: Text(
-                                  '¿Exonerar el recargo por mora de $nombre?\nPodrá pagar \$60.000 en lugar de \$80.000.',
+                                  u['multa_pendiente'] == true
+                                      ? '$nombre ya pagó la semana y solo le falta la multa.\n¿Perdonar la multa y desbloquear su billetera ahora?'
+                                      : '¿Exonerar el recargo por mora de $nombre?\nPodrá pagar \$60.000 en lugar de \$80.000.',
                                   style: const TextStyle(color: Colors.white70, fontSize: 13)),
                               actions: [
                                 TextButton(onPressed: () => Navigator.pop(ctx, false),
@@ -621,7 +910,16 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                               ],
                             ),
                           );
-                          if (ok == true) {
+                          if (ok == true && u['multa_pendiente'] == true) {
+                            // Solo debía la multa → perdonarla = desbloquear ya
+                            await _desbloquearSinPago(
+                              u,
+                              tipo: 'exoneracion_recargo',
+                              concepto: 'Multa por mora perdonada por central — billetera desbloqueada',
+                              titulo: '🔓 Multa perdonada',
+                              mensaje: 'La central perdonó tu multa por mora. Tu billetera está activa nuevamente.',
+                            );
+                          } else if (ok == true) {
                             await _db.from('usuarios')
                                 .update({'recargo_mora_activo': false}).eq('id', u['id']);
                             await _db.from('wallet_movimientos').insert({
@@ -636,6 +934,9 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                               titulo: '✅ Recargo exonerado',
                               mensaje: 'Tu recargo por mora fue exonerado. Puedes pagar tu semana por \$60.000.',
                               urgente: false,
+                              sonido: Sonidos.movilConfirmar,
+                              canalAndroidId: MotorNotificaciones.canalConfirmacionId,
+                              data: {'tipo': 'billetera'},
                             );
                             _cargar();
                           }
@@ -661,10 +962,11 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                           context: context,
                           builder: (ctx) => AlertDialog(
                             backgroundColor: const Color(0xFF1A1A1A),
-                            title: const Text('Activar semana',
+                            title: const Text('Desbloquear sin pago',
                                 style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
                             content: Text(
-                                '¿Activar la semana de $nombre manualmente sin comprobante?\n\nUsar solo cuando haya razones externas conocidas por la central.',
+                                '¿Desbloquear a $nombre sin comprobante de pago?\n\n'
+                                'Se quita también la mora si la tiene. Usar solo cuando haya razones conocidas por la central.',
                                 style: const TextStyle(color: Colors.white70, fontSize: 13)),
                             actions: [
                               TextButton(onPressed: () => Navigator.pop(ctx, false),
@@ -673,33 +975,22 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                                 style: ElevatedButton.styleFrom(
                                     backgroundColor: Colors.orange, foregroundColor: Colors.black),
                                 onPressed: () => Navigator.pop(ctx, true),
-                                child: const Text('ACTIVAR SEMANA', style: TextStyle(fontWeight: FontWeight.bold)),
+                                child: const Text('DESBLOQUEAR', style: TextStyle(fontWeight: FontWeight.bold)),
                               ),
                             ],
                           ),
                         );
                         if (ok == true) {
-                          await _db.from('usuarios').update({
-                            'wallet_bloqueado': false,
-                            'recargo_mora_activo': false,
-                          }).eq('id', u['id']);
-                          await _db.from('wallet_movimientos').insert({
-                            'movil_id': u['id'],
-                            'tipo': 'activacion_manual',
-                            'monto': 0,
-                            'concepto': 'Semana activada manualmente por central',
-                            'registrado_por': 'central',
-                          });
-                          MotorNotificaciones.dispararMisil(
-                            idDestino: u['id'].toString(),
-                            titulo: '🔓 Semana activada',
-                            mensaje: 'Tu semana fue activada por la central. Ya puedes conectarte.',
-                            urgente: false,
+                          await _desbloquearSinPago(
+                            u,
+                            tipo: 'activacion_manual',
+                            concepto: 'Desbloqueo sin pago por la central',
+                            titulo: '🔓 Billetera desbloqueada',
+                            mensaje: 'La central desbloqueó tu billetera. Ya puedes conectarte.',
                           );
-                          _cargar();
                         }
                       },
-                      child: const Text('ACTIVAR SEMANA',
+                      child: const Text('DESBLOQUEAR SIN PAGO',
                           style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold)),
                     ),
                   ),
@@ -781,7 +1072,9 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                     size: 14,
                   ),
                   label: Text(
-                    exonerado ? 'Exonerado' : 'Exonerar',
+                    bloqueado
+                        ? 'Exonerar y desbloquear'
+                        : (exonerado ? 'Exonerado (próx. lunes)' : 'Exonerar'),
                     style: const TextStyle(fontSize: 11),
                   ),
                   style: OutlinedButton.styleFrom(
@@ -795,6 +1088,44 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                         borderRadius: BorderRadius.circular(8)),
                   ),
                   onPressed: () async {
+                    // Bloqueado ahora → exonerar ESTA semana y desbloquear ya
+                    if (bloqueado) {
+                      final okYa = await showDialog<bool>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          backgroundColor: const Color(0xFF1A1A1A),
+                          title: const Text('Exonerar y desbloquear',
+                              style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
+                          content: Text(
+                            '$nombre está bloqueado.\n\n¿Exonerar el pago de esta semana'
+                            '${recargo ? ' y la multa por mora' : ''} y desbloquearlo ahora?',
+                            style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                          actions: [
+                            TextButton(onPressed: () => Navigator.pop(ctx, false),
+                                child: const Text('CANCELAR', style: TextStyle(color: Colors.grey))),
+                            ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.green[700], foregroundColor: Colors.white),
+                              onPressed: () => Navigator.pop(ctx, true),
+                              child: const Text('EXONERAR Y DESBLOQUEAR',
+                                  style: TextStyle(fontWeight: FontWeight.bold)),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (okYa == true) {
+                        await _desbloquearSinPago(
+                          u,
+                          tipo: 'exoneracion_semana',
+                          concepto: recargo
+                              ? 'Semana y multa por mora exoneradas por la central'
+                              : 'Semana exonerada por la central',
+                          titulo: '✅ Semana exonerada',
+                          mensaje: 'La central exoneró tu pago de esta semana. Tu billetera está desbloqueada.',
+                        );
+                      }
+                      return;
+                    }
                     final nuevoEstado = !exonerado;
                     final ok = await showDialog<bool>(
                       context: context,
@@ -811,7 +1142,7 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                         ),
                         content: Text(
                           nuevoEstado
-                              ? '¿Exonerar a $nombre del cobro semanal del próximo lunes?\n\nEl cron no lo bloqueará.'
+                              ? '¿Exonerar a $nombre del cobro semanal del próximo lunes?\n\nEse lunes no se bloqueará. La exoneración vale solo por esa semana.'
                               : '¿Quitar la exoneración de $nombre?\n\nVolverá a estar sujeto al cobro del lunes.',
                           style: const TextStyle(
                               color: Colors.white70, fontSize: 13),
@@ -1110,7 +1441,7 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
       final monto = (mv['monto'] as num?)?.toDouble() ?? 0.0;
       final mid   = mv['movil_id'] as int?;
       if (mid == null) continue;
-      if ((tipo == 'pago_semanal' || tipo == 'pago_semanal_con_recargo') && monto > 0) {
+      if ((tipo == 'pago_semanal' || tipo == 'pago_semanal_con_recargo' || tipo == 'pago_multa') && monto > 0) {
         pagosPorMovil[mid] = (pagosPorMovil[mid] ?? 0) + monto;
       }
     }
@@ -1501,7 +1832,7 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
           future: Future.wait([
             _db
                 .from('solicitudes_recarga_wallet')
-                .select('id, movil_id, monto_solicitado, nota, comprobante_url, estado, tipo_solicitud, created_at, usuarios(nombre, usuario, numero_movil, tipo_plan_movil, descuento_semana_pct, puntos_semana)')
+                .select('id, movil_id, monto_solicitado, monto_semana, monto_multa, nota, comprobante_url, estado, tipo_solicitud, created_at, usuarios(nombre, usuario, numero_movil, tipo_plan_movil, descuento_semana_pct, puntos_semana)')
                 .eq('estado', 'pendiente')
                 .order('created_at', ascending: false),
             _db.from('config_sistema').select('info_recarga_wallet').eq('id', 1).maybeSingle(),
@@ -1596,14 +1927,17 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                 // ── SOLICITUDES PENDIENTES ───────────────────────────────
                 () {
                   final conMora = solicitudes
-                      .where((s) => (s as Map)['tipo_solicitud'] == 'pago_semanal_con_recargo')
+                      .where((s) {
+                        final t = (s as Map)['tipo_solicitud'];
+                        return t == 'pago_semanal_con_recargo' || t == 'pago_multa';
+                      })
                       .toList();
                   final semsol = solicitudes
                       .where((s) => (s as Map)['tipo_solicitud'] == 'pago_semanal')
                       .toList();
                   final recargas = solicitudes.where((s) {
                     final tipo = (s as Map)['tipo_solicitud']?.toString() ?? '';
-                    return tipo != 'pago_semanal' && tipo != 'pago_semanal_con_recargo';
+                    return tipo != 'pago_semanal' && tipo != 'pago_semanal_con_recargo' && tipo != 'pago_multa';
                   }).toList();
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1645,11 +1979,13 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                       'descuento_servicio'       => Icons.remove_circle_outline_rounded,
                       'pago_semanal'             => Icons.lock_open_rounded,
                       'pago_semanal_con_recargo' => Icons.lock_open_rounded,
+                      'pago_multa'               => Icons.lock_open_rounded,
                       'bloqueo_semanal'          => Icons.lock_rounded,
                       'recarga'                  => Icons.add_circle_outline_rounded,
                       'desbloqueo_manual'        => Icons.admin_panel_settings_rounded,
                       'activacion_manual'        => Icons.check_circle_outline_rounded,
                       'exoneracion_recargo'      => Icons.remove_moderator_rounded,
+                      'exoneracion_semana'       => Icons.shield_rounded,
                       _                          => Icons.swap_horiz_rounded,
                     };
                     final fecha = m['created_at'] != null

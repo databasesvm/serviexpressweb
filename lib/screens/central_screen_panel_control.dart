@@ -49,6 +49,13 @@ extension CentralScreenPanelControl on _CentralScreenState {
                             .map((m) => m['id'].toString())
                             .toList();
                         if (ids.isNotEmpty) {
+                          // Forzar GPS: cada app conectada ve gps_forzado_at
+                          // y envía su ubicación al instante.
+                          await Supabase.instance.client
+                              .from('usuarios')
+                              .update({'gps_forzado_at': DateTime.now().toUtc().toIso8601String()})
+                              .inFilter('id', ids);
+                          // Respaldo para apps viejas (sin el aviso por Realtime)
                           await MotorNotificaciones.dispararSilencioso(
                             idsDestinos: ids,
                             data: {'tipo': 'force_gps_update'},
@@ -174,9 +181,11 @@ extension CentralScreenPanelControl on _CentralScreenState {
                         .toList()
                       ..sort(sortAscMovil);
 
-                    // De descanso: día fijo semanal == hoy
+                    // De descanso: día fijo semanal == hoy (hora Colombia)
                     // 0=Dom, 1=Lun, 2=Mar, 3=Mié, 4=Jue, 5=Vie, 6=Sáb
-                    final hoyDow = DateTime.now().weekday % 7;
+                    // Pueden conectarse y trabajar si quieren: los conectados
+                    // van primero y se ve dónde están.
+                    final hoyDow = DateTime.now().toUtc().subtract(const Duration(hours: 5)).weekday % 7;
                     final enDescanso = moviles
                         .where((m) =>
                             m['activo'] == true &&
@@ -185,7 +194,33 @@ extension CentralScreenPanelControl on _CentralScreenState {
                             m['dia_descanso_semanal'] != null &&
                             m['dia_descanso_semanal'] == hoyDow)
                         .toList()
-                      ..sort(sortAscMovil);
+                      ..sort((a, b) {
+                        final ca = a['en_linea'] == true ? 0 : 1;
+                        final cb = b['en_linea'] == true ? 0 : 1;
+                        if (ca != cb) return ca - cb;
+                        return sortAscMovil(a, b);
+                      });
+                    final descansoConectados =
+                        enDescanso.where((m) => m['en_linea'] == true).length;
+                    // Estado del móvil de descanso: dónde está o cuándo se conectó
+                    String estadoDescanso(Map<String, dynamic> m) {
+                      if (m['en_linea'] == true) {
+                        if (movilesEnServicioIds.contains(m['id'])) return '🟢 Conectado · con servicio en curso';
+                        final p = m['paradero_actual']?.toString();
+                        if (p != null && p.isNotEmpty) return '🟢 Conectado · en paradero $p';
+                        return '🟢 Conectado · sin fila';
+                      }
+                      final raw = m['ultimo_ping'] ?? m['ultima_ubicacion_at'];
+                      final t = raw == null ? null : DateTime.tryParse(raw.toString());
+                      if (t == null) return '⚫ Desconectado';
+                      final mins = DateTime.now().toUtc().difference(t.toUtc()).inMinutes;
+                      final hoyCol = DateTime.now().toUtc().subtract(const Duration(hours: 5));
+                      final tCol = t.toUtc().subtract(const Duration(hours: 5));
+                      final mismoDia = tCol.year == hoyCol.year && tCol.month == hoyCol.month && tCol.day == hoyCol.day;
+                      if (!mismoDia) return '⚫ Desconectado · sin conexión hoy';
+                      if (mins < 60) return '⚫ Desconectado · última conexión hace $mins min';
+                      return '⚫ Desconectado · última conexión hace ${mins ~/ 60} h';
+                    }
 
                     final desconectados = moviles
                         .where(
@@ -577,7 +612,8 @@ extension CentralScreenPanelControl on _CentralScreenState {
                                           crossAxisAlignment: CrossAxisAlignment.start,
                                           children: [
                                             Text(
-                                              movil['nombre'].toString().toUpperCase(),
+                                              '${movil['nombre'].toString().toUpperCase()}'
+                                              '${_esDescansoHoy(movil) ? '  🏖️ descanso' : ''}',
                                               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
                                             ),
                                             const SizedBox(height: 1),
@@ -928,7 +964,7 @@ extension CentralScreenPanelControl on _CentralScreenState {
                                 const SizedBox(width: 6),
                                 Expanded(
                                   child: Text(
-                                    '🏖️ DE DESCANSO HOY (${enDescanso.length})',
+                                    '🏖️ DE DESCANSO HOY (${enDescanso.length} · $descansoConectados conectado${descansoConectados == 1 ? '' : 's'})',
                                     style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.greenAccent, fontSize: 11),
                                   ),
                                 ),
@@ -950,12 +986,21 @@ extension CentralScreenPanelControl on _CentralScreenState {
                               color: const Color(0xFF022C22),
                               child: ListTile(
                                 dense: true,
-                                leading: _paraderoMovilLeading(movil, Colors.green[700]!),
+                                leading: _paraderoMovilLeading(
+                                    movil, movil['en_linea'] == true ? Colors.green[700]! : Colors.grey[600]!),
                                 title: Text(
                                   movil['nombre'] ?? 'Desconocido',
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.greenAccent),
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12,
+                                      color: movil['en_linea'] == true ? Colors.greenAccent : Colors.white54),
                                 ),
-                                subtitle: const Text('Día de descanso fijo', style: TextStyle(color: Colors.green, fontSize: 10)),
+                                subtitle: Text(
+                                  'Día de descanso · ${estadoDescanso(movil)}',
+                                  style: TextStyle(
+                                      color: movil['en_linea'] == true ? Colors.green[300] : Colors.white38,
+                                      fontSize: 10),
+                                ),
                                 trailing: _movilTrailing(movil),
                                 onTap: () => _abrirMenuAccionesMovil(context, movil),
                               ),

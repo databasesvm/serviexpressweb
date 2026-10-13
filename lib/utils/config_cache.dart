@@ -84,5 +84,6 @@ class ConfigCache {
   /// Clave del estado de billetera del perfil: si cambia, se re-consulta.
   static String estadoBilletera(Map<String, dynamic> perfil) =>
       '${perfil['wallet_bloqueado']}|${perfil['saldo_wallet']}|'
-      '${perfil['tipo_plan_movil']}|${perfil['recargo_mora_activo']}';
+      '${perfil['tipo_plan_movil']}|${perfil['recargo_mora_activo']}|'
+      '${perfil['multa_pendiente']}';
 }

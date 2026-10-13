@@ -18,6 +18,7 @@ import 'package:serviexpress_app/screens/cliente_perfil_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:serviexpress_app/utils/paradero_objetivo.dart';
 import 'package:serviexpress_app/utils/textos_push.dart';
+import 'package:serviexpress_app/utils/alta_demanda.dart';
 
 class ClienteScreen extends StatefulWidget {
   final Map<String, dynamic> usuario;
@@ -941,10 +942,14 @@ class _ClienteScreenState extends State<ClienteScreen>
           );
           break;
         case 'pendiente':
-          colorEstado = Colors.black54;
-          titulo = 'BUSCANDO MÓVIL';
-          descripcion = 'Pedido en el radar. Buscando el Móvil más cercano...';
-          icono = Icons.radar;
+          final asignadoDirecto =
+              (servicio['exclusivo_id']?.toString().trim() ?? '').isNotEmpty;
+          colorEstado = asignadoDirecto ? Colors.blue[600]! : Colors.black54;
+          titulo = asignadoDirecto ? 'MÓVIL ASIGNADO' : 'BUSCANDO MÓVIL';
+          descripcion = asignadoDirecto
+              ? 'Ya hay un Móvil asignado a tu pedido. Esperando que lo confirme...'
+              : 'Pedido en el radar. Buscando el Móvil más cercano...';
+          icono = asignadoDirecto ? Icons.assignment_ind_rounded : Icons.radar;
           acciones = Padding(
             padding: const EdgeInsets.only(top: 16),
             child: SizedBox(
@@ -1330,6 +1335,7 @@ class _ClienteScreenState extends State<ClienteScreen>
                             ),
                           ),
                           const SizedBox(height: 12),
+                          const BannerAltaDemanda(),
                           _construirEstadoVisual(servicio['estado'], servicio),
                         ],
                       ),

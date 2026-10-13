@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:serviexpress_app/utils/paradero_objetivo.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart';
+import 'package:serviexpress_app/utils/alta_demanda.dart';
 
 class ClienteMototaxiForm extends StatefulWidget {
   final Map<String, dynamic> usuario;
@@ -422,6 +423,7 @@ class _ClienteMototaxiFormState extends State<ClienteMototaxiForm> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            const BannerAltaDemanda(),
             _construirHistorial(),
             _construirBloque(
               titulo: 'Pasajero',

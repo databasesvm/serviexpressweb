@@ -2719,6 +2719,15 @@ extension CentralScreenFormularios on _CentralScreenState {
   ) async {
     if (!mounted) return false;
 
+    // PRECIO CALCULADO POR EL SISTEMA (rutas, lista del local, km por sector).
+    // La central lo ve ya escrito con su explicación, lo puede EDITAR y lo
+    // confirma. El servidor registra si fue confirmado sin cambios (suma
+    // confianza a la ruta) o editado (la ruta vuelve a cero).
+    final int? calculado = (servicio['precio_calculado'] as num?)?.toInt();
+    if (calculado != null && calculado > 0) {
+      return _confirmarPrecioCalculado(context, servicio, calculado);
+    }
+
     final String origen  = servicio['creador']?.toString() ?? '';
     final String destino = servicio['destino']?.toString()  ?? '';
     final String? tipo   = servicio['tipo_servicio']?.toString();
@@ -2870,6 +2879,157 @@ extension CentralScreenFormularios on _CentralScreenState {
             duration: const Duration(seconds: 2),
           ),
         );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al cotizar: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+    return true;
+  }
+
+  /// Diálogo de confirmación del precio calculado por el sistema.
+  /// Devuelve true si quedó resuelto (enviado o cancelado), false para abrir
+  /// el diálogo completo ("Revisar completo").
+  Future<bool> _confirmarPrecioCalculado(
+    BuildContext context,
+    Map<String, dynamic> servicio,
+    int calculado,
+  ) async {
+    final ctrl = TextEditingController(text: calculado.toString());
+    final String desglose = servicio['precio_desglose']?.toString() ?? '';
+    // Recargos activos del local (lluvia / nocturno): se suman aparte
+    int recargo = 0;
+    String recargoTxt = '';
+    if (servicio['local_id'] != null) {
+      try {
+        final r = await Supabase.instance.client
+            .rpc('calcular_recargo_local', params: {'p_local_id': servicio['local_id']});
+        if (r is List && r.isNotEmpty && r[0]['aplica_recargo'] == true) {
+          recargo = (r[0]['recargo_total'] as num?)?.toInt() ?? 0;
+          recargoTxt = r[0]['desglose']?.toString() ?? '';
+        }
+      } catch (_) {}
+    }
+    if (!mounted) return false;
+    final String fuente = servicio['precio_fuente']?.toString() ?? '';
+    final bool seguro = servicio['precio_seguro'] == true;
+    final String etiquetaFuente = switch (fuente) {
+      'fijado' => 'Precio fijado por la central',
+      'lista_local' => 'Lista de precios del local',
+      'historial' => 'Servicios anteriores a este destino',
+      'km' => 'Calculado por km y sector',
+      _ => 'Calculado por el sistema',
+    };
+
+    final bool? accion = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) {
+          final int? escrito = int.tryParse(ctrl.text.replaceAll(RegExp(r'[^0-9]'), ''));
+          final bool editado = escrito != null && escrito != calculado;
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            title: Text('Cotización #${servicio['id']}',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('${servicio['creador'] ?? ''} → ${servicio['destino'] ?? ''}',
+                    style: const TextStyle(fontSize: 13, color: Colors.black54)),
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.blue[50],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.blue[200]!),
+                  ),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('🧮 $etiquetaFuente',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.blue[900])),
+                    if (desglose.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(desglose, style: TextStyle(fontSize: 12, color: Colors.blue[900])),
+                    ],
+                    const SizedBox(height: 4),
+                    Text(
+                      seguro
+                          ? '✔ Ruta confiable'
+                          : 'Si lo envías sin cambiarlo, esta ruta suma confianza (3 seguidas = automática).',
+                      style: TextStyle(fontSize: 11, color: seguro ? Colors.green[800] : Colors.black45),
+                    ),
+                  ]),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: ctrl,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  onChanged: (_) => setD(() {}),
+                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                  decoration: InputDecoration(
+                    prefixText: '\$ ',
+                    labelText: editado ? 'Precio base (editado)' : 'Precio base calculado',
+                    helperText: editado ? 'Calculado: ${_formatearMonedaCentral(calculado.toDouble())}' : null,
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+                if (recargo > 0) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    '+ Recargo ${_formatearMonedaCentral(recargo.toDouble())} ($recargoTxt) → total '
+                    '${_formatearMonedaCentral(((escrito ?? calculado) + recargo).toDouble())}',
+                    style: TextStyle(fontSize: 12, color: Colors.orange[800], fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, null),
+                child: const Text('Revisar completo', style: TextStyle(color: Colors.black45)),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: editado ? Colors.orange[800] : Colors.green[700],
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: (escrito == null || escrito <= 0) ? null : () => Navigator.pop(ctx, true),
+                child: Text(editado ? 'ENVIAR PRECIO EDITADO' : 'CONFIRMAR Y ENVIAR',
+                    style: const TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (accion == null) return false; // abrir diálogo completo
+    final int precio = int.tryParse(ctrl.text.replaceAll(RegExp(r'[^0-9]'), '')) ?? calculado;
+    final int total = precio + recargo;
+    try {
+      await Supabase.instance.client.from('servicios').update({
+        'tarifa': total,
+        'recargo_total': recargo,
+        'tarifa_detalle': {
+          'total': total,
+          'base': precio,
+          'recargo': recargo,
+          'fuente': precio == calculado ? 'sistema_$fuente' : 'central_editado',
+        },
+        'estado': 'cotizada',
+      }).eq('id', servicio['id']).eq('estado', 'cotizacion');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Cotización enviada: ${_formatearMonedaCentral(total.toDouble())}'),
+          backgroundColor: Colors.green[700],
+          duration: const Duration(seconds: 2),
+        ));
       }
     } catch (e) {
       if (mounted) {

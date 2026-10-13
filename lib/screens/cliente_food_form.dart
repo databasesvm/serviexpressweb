@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart'; // <-- RUTA CORREGIDA
+import 'package:serviexpress_app/utils/alta_demanda.dart';
 
 class ClienteFoodForm extends StatefulWidget {
   final Map<String, dynamic> usuario;
@@ -404,6 +405,7 @@ class _ClienteFoodFormState extends State<ClienteFoodForm> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            const BannerAltaDemanda(),
             _construirHistorial(),
             _construirBloque(
               titulo: '¿Dónde buscamos?',
