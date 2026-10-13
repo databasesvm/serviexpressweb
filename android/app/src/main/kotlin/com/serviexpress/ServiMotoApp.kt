@@ -136,7 +136,8 @@ class ServiMotoApp : Application() {
             crearCanal(CHANNEL_FN_COTIZACION_ID,  "Respuesta Cotización",    "Central respondió tu cotización.",              MED, uri("fn_cotizacion")),
 
             // ── AVISOS SIN SONIDO (alta demanda) ────────────────────────────
-            NotificationChannel(CHANNEL_AVISOS_ID, "Avisos", "Avisos informativos sin sonido.", MED).apply {
+            NotificationChannel(CHANNEL_AVISOS_ID, "Avisos", MED).apply {
+                description = "Avisos informativos sin sonido."
                 setSound(null, null)
                 enableVibration(false)
                 setShowBadge(true)
