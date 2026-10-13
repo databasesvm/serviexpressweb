@@ -1159,6 +1159,24 @@ class _CentralScreenState extends State<CentralScreen>
                   tooltip: 'Enviar link de pedido al cliente',
                   onPressed: () => _enviarLinkInvitado(context),
                 ),
+                // Pantalla grande: accesos que en celular están en el menú lateral
+                IconButton(
+                  icon: const Icon(Icons.pentagon_rounded, color: Colors.amber),
+                  tooltip: 'Sectores y tarifa por km (dibujar sectores)',
+                  onPressed: () => Navigator.push(
+                      context, MaterialPageRoute(builder: (_) => const SectoresTarifaScreen())),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.alt_route_rounded, color: Colors.amber),
+                  tooltip: 'Rutas y precios aprendidos',
+                  onPressed: () => Navigator.push(
+                      context, MaterialPageRoute(builder: (_) => const RutasAprendidasScreen())),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.warning_amber_rounded, color: Colors.orange),
+                  tooltip: 'Alta demanda (aviso a locales y clientes)',
+                  onPressed: () => abrirControlAltaDemanda(context),
+                ),
                 const SizedBox(width: 6),
                 Stack(
                   clipBehavior: Clip.none,
