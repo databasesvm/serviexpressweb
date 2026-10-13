@@ -50,27 +50,66 @@ class MotorNotificaciones {
   static const String canalMasterId        = 'serviexpress_master_v1';
   // Inactividad 5h45min (movil_inactividad.mp3)
   static const String canalInactividadId   = 'serviexpress_inactividad_v1';
-  // ── TRANSICIÓN DE CANALES ─────────────────────────────────────────────
-  // Android NO muestra un push si el teléfono no tiene el canal. Los canales
-  // nuevos solo existen en la app nueva, así que mientras los móviles van
-  // actualizando se usan los canales viejos (false). Cuando TODOS tengan la
-  // app nueva → poner true (y avisar para cambiar también el servidor).
-  static const bool canalesNuevosActivos = false;
-
+  // ── CANALES NUEVOS (solo existen en la app nueva) ─────────────────────
+  // Android NO muestra un push si el teléfono no tiene el canal. Por eso
+  // dispararMisil revisa si el DESTINATARIO ya tiene la app nueva
+  // (usuarios.canales_v2) y, si no, usa el canal viejo equivalente.
   // Chat hacia el móvil (movil_chat_central.mp3) — v2: el v1 no tenía sonido
-  static const String canalChatMovilId = canalesNuevosActivos
-      ? 'serviexpress_chat_movil_v2'
-      : 'serviexpress_chat_movil_v1';
+  static const String canalChatMovilId     = 'serviexpress_chat_movil_v2';
   // Transferencias entre móviles (transferencia_movil.mp3)
-  static const String canalTransferenciaId = canalesNuevosActivos
-      ? 'serviexpress_transferencia_v1'
-      : _canalAlarmaId;
+  static const String canalTransferenciaId = 'serviexpress_transferencia_v1';
   // Confirmaciones al móvil: activación, billetera, descanso (movil_confirmar.mp3)
-  static const String canalConfirmacionId = canalesNuevosActivos
-      ? 'serviexpress_confirmacion_v1'
-      : _canalAlarmaId;
+  static const String canalConfirmacionId  = 'serviexpress_confirmacion_v1';
   // Expulsión del paradero (expulsion_paradero.mp3) — lo usa el servidor
-  static const String canalExpulsionId = 'serviexpress_expulsion_v1';
+  static const String canalExpulsionId     = 'serviexpress_expulsion_v1';
+
+  // Canal nuevo → su equivalente en la app vieja
+  static const Map<String, String> _canalViejoDe = {
+    canalChatMovilId: 'serviexpress_chat_movil_v1',
+    canalTransferenciaId: _canalAlarmaId,
+    canalConfirmacionId: _canalAlarmaId,
+    canalExpulsionId: _canalAlarmaId,
+  };
+
+  // ¿El usuario ya tiene la app nueva? Cache 10 min (puede actualizar).
+  static final Map<String, (bool, DateTime)> _cacheV2 = {};
+  static Future<bool> _tieneCanalesV2(String id) async {
+    final c = _cacheV2[id];
+    if (c != null && DateTime.now().difference(c.$2).inMinutes < 10) {
+      return c.$1;
+    }
+    bool v2 = false;
+    try {
+      final u = await Supabase.instance.client
+          .from('usuarios')
+          .select('canales_v2')
+          .eq('id', id)
+          .maybeSingle();
+      v2 = u?['canales_v2'] == true;
+    } catch (_) {}
+    _cacheV2[id] = (v2, DateTime.now());
+    return v2;
+  }
+
+  /// Canal a usar para un destinatario: si el canal es de los nuevos y su
+  /// app todavía es la vieja, devuelve el canal viejo equivalente.
+  static Future<String> _canalParaDestino(String id, String canal) async {
+    final viejo = _canalViejoDe[canal];
+    if (viejo == null) return canal; // canal que existe en todas las versiones
+    return await _tieneCanalesV2(id) ? canal : viejo;
+  }
+
+  /// La app nueva marca a su usuario: desde ahora le llegan los canales nuevos.
+  static Future<void> marcarCanalesV2(dynamic userId) async {
+    if (userId == null) return;
+    try {
+      await Supabase.instance.client
+          .from('usuarios')
+          .update({'canales_v2': true})
+          .eq('id', userId)
+          .eq('canales_v2', false);
+    } catch (_) {}
+  }
   // Chat hacia la central (central_chat.mp3)
   static const String canalChatCentralId   = 'serviexpress_chat_central_v1';
   // Chat hacia el local (local_chat.mp3)
@@ -137,6 +176,8 @@ class MotorNotificaciones {
     Map<String, dynamic>? data,
   }) async {
     if (idDestino == 'null' || idDestino.isEmpty) return;
+    final canal =
+        await _canalParaDestino(idDestino, canalAndroidId ?? _canalAlarmaId);
     await _enviarPush(
       body: {
         'app_id': _appId,
@@ -146,7 +187,7 @@ class MotorNotificaciones {
         'priority': 10,
         'android_sound': sonido,
         'ios_sound': '$sonido.mp3',
-        'existing_android_channel_id': canalAndroidId ?? _canalAlarmaId,
+        'existing_android_channel_id': canal,
         if (data != null) 'data': data,
       },
     );

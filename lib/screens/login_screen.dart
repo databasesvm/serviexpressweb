@@ -35,6 +35,7 @@ import 'package:serviexpress_app/screens/guest_home_screen.dart';
 import 'package:serviexpress_app/screens/guest_tracking_screen.dart';
 import 'package:serviexpress_app/services/ota_updater.dart';
 import 'package:serviexpress_app/utils/deeplink_service.dart';
+import 'package:serviexpress_app/utils/onesignal_api.dart'; // marcarCanalesV2
 import 'package:serviexpress_app/screens/pedidos_cliente_screen.dart';
 import 'package:serviexpress_app/screens/sede_fn_screen.dart';
 import 'package:serviexpress_app/screens/supervisor_fn_screen.dart';
@@ -473,6 +474,11 @@ class _LoginScreenState extends State<LoginScreen>
     final rol = usuario['rol'];
 
     if (!mounted) return;
+
+    // Esta app ya tiene los canales de sonido nuevos: marcar al usuario para
+    // que los push le lleguen por ellos (los teléfonos viejos siguen por los
+    // canales de antes). Solo Android/iOS: la web no usa canales.
+    if (!kIsWeb) MotorNotificaciones.marcarCanalesV2(usuario['id']);
 
     // VINCULAR EXTERNAL USER ID EN ONESIGNAL ─────────────────────────────────
     // Sin OneSignal.login(id), el dispositivo queda registrado de forma
