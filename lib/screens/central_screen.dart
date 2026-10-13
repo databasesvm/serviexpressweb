@@ -1159,24 +1159,6 @@ class _CentralScreenState extends State<CentralScreen>
                   tooltip: 'Enviar link de pedido al cliente',
                   onPressed: () => _enviarLinkInvitado(context),
                 ),
-                // Pantalla grande: accesos que en celular están en el menú lateral
-                IconButton(
-                  icon: const Icon(Icons.pentagon_rounded, color: Colors.amber),
-                  tooltip: 'Sectores y tarifa por km (dibujar sectores)',
-                  onPressed: () => Navigator.push(
-                      context, MaterialPageRoute(builder: (_) => const SectoresTarifaScreen())),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.alt_route_rounded, color: Colors.amber),
-                  tooltip: 'Rutas y precios aprendidos',
-                  onPressed: () => Navigator.push(
-                      context, MaterialPageRoute(builder: (_) => const RutasAprendidasScreen())),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.warning_amber_rounded, color: Colors.orange),
-                  tooltip: 'Alta demanda (aviso a locales y clientes)',
-                  onPressed: () => abrirControlAltaDemanda(context),
-                ),
                 const SizedBox(width: 6),
                 Stack(
                   clipBehavior: Clip.none,
@@ -1509,9 +1491,6 @@ class _CentralScreenState extends State<CentralScreen>
             ),
             _item(Icons.add_box_rounded, 'Nuevo servicio', const Color(0xff3AF500), () => _abrirFormularioDespacho(context)),
             _item(Icons.share_rounded, 'Enviar link al cliente', const Color(0xff25D366), () => _enviarLinkInvitado(context)),
-            _item(Icons.alt_route_rounded, 'Rutas y precios aprendidos', Colors.amber, () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RutasAprendidasScreen()))),
-            _item(Icons.pentagon_rounded, 'Sectores y tarifa por km', Colors.amber, () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SectoresTarifaScreen()))),
-            _item(Icons.warning_amber_rounded, 'Alta demanda (aviso a locales y clientes)', Colors.orange, () => abrirControlAltaDemanda(context)),
 
             const Divider(color: Colors.white10, height: 20),
 

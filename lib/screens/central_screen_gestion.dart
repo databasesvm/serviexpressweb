@@ -1071,6 +1071,33 @@ extension CentralScreenGestion on _CentralScreenState {
                       onTap: _abrirGestorParaderos,
                     ),
                     _tarjetaGestion(
+                      icono: Icons.pentagon_rounded,
+                      color: Colors.amber[700]!,
+                      titulo: 'Sectores y tarifa por km',
+                      subtitulo: 'Dibujar sectores, mínimas, locales y tarifa automática',
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const SectoresTarifaScreen()),
+                      ),
+                    ),
+                    _tarjetaGestion(
+                      icono: Icons.alt_route_rounded,
+                      color: Colors.amber[700]!,
+                      titulo: 'Rutas y precios aprendidos',
+                      subtitulo: 'Precios por destino que aprende el sistema',
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const RutasAprendidasScreen()),
+                      ),
+                    ),
+                    _tarjetaGestion(
+                      icono: Icons.warning_amber_rounded,
+                      color: Colors.orange[800]!,
+                      titulo: 'Alta demanda',
+                      subtitulo: 'Aviso a locales, clientes e invitados',
+                      onTap: () => abrirControlAltaDemanda(context),
+                    ),
+                    _tarjetaGestion(
                       icono: Icons.delivery_dining,
                       color: const Color(0xff3AF500),
                       titulo: 'Monitor Domicilios',
