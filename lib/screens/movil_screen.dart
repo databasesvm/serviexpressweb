@@ -12268,22 +12268,30 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     // Fallback si GPS/OSRM no responde: FN usa 20 min (umbral oficial de sede),
     // servicios normales usan 10 min.
     final bool esFnParaEta = servicio['tipo_fn'] == true;
-    int tiempoAlOrigen = esFnParaEta ? 20 : 10;
-    try {
-      Position? pos = await _obtenerPosicionSegura();
-      if (pos != null &&
-          servicio['origen_lat'] != null &&
-          servicio['origen_lng'] != null) {
-        final ruta = await MotorRutas.calcularRuta(
-          latOrigen: pos.latitude,
-          lngOrigen: pos.longitude,
-          latDestino: (servicio['origen_lat'] as num).toDouble(),
-          lngDestino: (servicio['origen_lng'] as num).toDouble(),
-        );
-        if (ruta != null) tiempoAlOrigen = (ruta['tiempo_minutos'] as int) + 3;
-      }
-    } catch (_) {}
-    setState(() => _procesando = false);
+    final int etaPorDefecto = esFnParaEta ? 20 : 10;
+    // El ETA es "agradable de tener": como máximo se esperan 4 s (GPS + rutas).
+    // Si no responde a tiempo, se acepta igual con el tiempo por defecto —
+    // ACEPTAR nunca queda colgado por un servidor externo.
+    Future<int> calcularEta() async {
+      try {
+        final Position? pos = await _obtenerPosicionSegura();
+        if (pos != null &&
+            servicio['origen_lat'] != null &&
+            servicio['origen_lng'] != null) {
+          final ruta = await MotorRutas.calcularRuta(
+            latOrigen: pos.latitude,
+            lngOrigen: pos.longitude,
+            latDestino: (servicio['origen_lat'] as num).toDouble(),
+            lngDestino: (servicio['origen_lng'] as num).toDouble(),
+          );
+          if (ruta != null) return (ruta['tiempo_minutos'] as int) + 3;
+        }
+      } catch (_) {}
+      return etaPorDefecto;
+    }
+    int tiempoAlOrigen = await calcularEta()
+        .timeout(const Duration(seconds: 4), onTimeout: () => etaPorDefecto);
+    if (mounted) setState(() => _procesando = false);
     // ---------------------------------------------
 
     final String destinoActual = servicio['destino']?.toString().trim() ?? '';

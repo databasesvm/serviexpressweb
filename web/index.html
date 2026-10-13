@@ -177,10 +177,31 @@
           });
         }
       });
+      // Recargar UNA sola vez por cambio de versión (antes podía recargar en
+      // bucle — p. ej. cuando el service worker de OneSignal toma el control —
+      // y la app se quedaba en el logo).
       navigator.serviceWorker.addEventListener('controllerchange', function() {
+        if (sessionStorage.getItem('sw_recargado')) return;
+        sessionStorage.setItem('sw_recargado', '1');
         window.location.reload();
       });
     }
+
+    // Respaldo: si a los 25 s la app todavía no arrancó (conexión lenta o
+    // descarga atascada), mostrar un botón para recargar en vez del logo fijo.
+    setTimeout(function() {
+      // Ya arrancó si Flutter puso su vista en la página
+      if (document.querySelector('flutter-view, flt-glass-pane')) return;
+      var d = document.createElement('div');
+      d.id = 'carga-lenta';
+      d.style.cssText = 'position:fixed;left:50%;bottom:12%;transform:translateX(-50%);' +
+        'text-align:center;font-family:sans-serif;color:#ccc;font-size:14px;z-index:9999';
+      d.innerHTML = 'La app está tardando en cargar…<br><br>' +
+        '<button style="background:#3AF500;color:#000;border:0;border-radius:8px;' +
+        'padding:12px 22px;font-weight:bold;font-size:15px" ' +
+        'onclick="sessionStorage.removeItem(\'sw_recargado\');location.reload()">RECARGAR</button>';
+      document.body.appendChild(d);
+    }, 25000);
   </script>
 
   <script src="flutter_bootstrap.js" async=""></script>

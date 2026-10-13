@@ -16,13 +16,15 @@ class MotorRutas {
         'https://nominatim.openstreetmap.org/search?q=$query&format=json&limit=1',
       );
 
+      // Límite de 6 s: el buscador público puede tardar o no responder, y
+      // nunca debe dejar la app colgada.
       final response = await http.get(
         url,
         headers: {
           'User-Agent':
               'ServiexpressApp/1.0', // El radar libre nos exige identificarnos
         },
-      );
+      ).timeout(const Duration(seconds: 6));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -53,7 +55,8 @@ class MotorRutas {
         'https://router.project-osrm.org/route/v1/driving/$lngOrigen,$latOrigen;$lngDestino,$latDestino?overview=false',
       );
 
-      final response = await http.get(url);
+      // Límite de 4 s: el servidor público de rutas a veces no responde.
+      final response = await http.get(url).timeout(const Duration(seconds: 4));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
