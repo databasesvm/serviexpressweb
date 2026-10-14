@@ -873,13 +873,12 @@ mixin _DialogsMixin on State<LocalScreen> {
                           style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
                         ),
                         onPressed: () async {
-                          String numero = cliente['telefono'].toString().replaceAll(
-                            RegExp(r'[^0-9]'), '');
-                          if (numero.length == 10) numero = '57$numero';
-                          final uri = Uri.parse(
-                            'https://wa.me/$numero?text=${Uri.encodeComponent('¡Hola! Tenemos promociones especiales para ti hoy en ${widget.usuario['nombre']} 🍔🎁')}',
+                          // Número o @usuario de WhatsApp
+                          final uri = uriWhatsApp(
+                            cliente['telefono']?.toString(),
+                            texto: '¡Hola! Tenemos promociones especiales para ti hoy en ${widget.usuario['nombre']} 🍔🎁',
                           );
-                          if (await canLaunchUrl(uri)) {
+                          if (uri != null && await canLaunchUrl(uri)) {
                             await launchUrl(uri, mode: LaunchMode.externalApplication);
                           }
                         },

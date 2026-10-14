@@ -835,8 +835,8 @@ extension CentralScreenMonitor on _CentralScreenState {
                 _campoEdicion('Destino 🏁', destinoCtrl, maxLines: 2),
                 const SizedBox(height: 10),
                 // Teléfono receptor
-                _campoEdicion('Teléfono receptor 📞', telefonoCtrl,
-                    tipo: TextInputType.phone),
+                _campoEdicion('WhatsApp receptor (número o @usuario)', telefonoCtrl,
+                    tipo: TextInputType.text),
                 const SizedBox(height: 10),
                 // Método de pago
                 const Text('Método de pago 💳',
@@ -908,7 +908,7 @@ extension CentralScreenMonitor on _CentralScreenState {
 
                 final newOrigen  = origenCtrl.text.trim();
                 final newDestino = destinoCtrl.text.trim();
-                final newTel     = telefonoCtrl.text.trim();
+                final newTel     = normalizarWhatsApp(telefonoCtrl.text);
                 final newInstruc = instrucCtrl.text.trim();
                 final newInstrEsp = instrEspCtrl.text.trim();
                 final newObs     = obsCtrl.text.trim();

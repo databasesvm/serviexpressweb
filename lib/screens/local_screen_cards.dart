@@ -786,8 +786,10 @@ mixin _CardsMixin on State<LocalScreen> {
     final int recargo = (servicio['recargo_total'] as num?)?.toInt() ?? 0;
 
     Future<void> contactarCliente(BuildContext ctx) async {
-      final dig = telCliente.replaceAll(RegExp(r'[^0-9]'), '');
-      final wa = dig.startsWith('57') ? dig : '57$dig';
+      // Número o @usuario de WhatsApp. Con @usuario no se puede llamar.
+      final Uri? uriTel = uriLlamada(telCliente);
+      final Uri? uriWa = uriWhatsApp(telCliente);
+      final bool esUsuario = esUsuarioWhatsApp(telCliente);
       await showModalBottomSheet(
         context: ctx,
         backgroundColor: _tFondo,
@@ -796,25 +798,28 @@ mixin _CardsMixin on State<LocalScreen> {
             ListTile(
               title: Text('Cliente · $telCliente', style: const TextStyle(color: Colors.white)),
             ),
-            ListTile(
-              leading: const Icon(Icons.call, color: Colors.lightBlueAccent),
-              title: const Text('Llamar', style: TextStyle(color: Colors.white)),
-              onTap: () async {
-                Navigator.pop(bs);
-                await launchUrl(Uri.parse('tel:$dig'));
-              },
-            ),
-            ListTile(
-              leading: const Icon(iconoWhatsApp, color: verdeWhatsApp),
-              title: const Text('WhatsApp', style: TextStyle(color: Colors.white)),
-              onTap: () async {
-                Navigator.pop(bs);
-                await launchUrl(Uri.parse('https://wa.me/$wa'), mode: LaunchMode.externalApplication);
-              },
-            ),
+            if (uriTel != null)
+              ListTile(
+                leading: const Icon(Icons.call, color: Colors.lightBlueAccent),
+                title: const Text('Llamar', style: TextStyle(color: Colors.white)),
+                onTap: () async {
+                  Navigator.pop(bs);
+                  await launchUrl(uriTel);
+                },
+              ),
+            if (uriWa != null)
+              ListTile(
+                leading: const Icon(iconoWhatsApp, color: verdeWhatsApp),
+                title: const Text('WhatsApp', style: TextStyle(color: Colors.white)),
+                onTap: () async {
+                  Navigator.pop(bs);
+                  await launchUrl(uriWa, mode: LaunchMode.externalApplication);
+                },
+              ),
             ListTile(
               leading: const Icon(Icons.copy_rounded, color: Colors.white70),
-              title: const Text('Copiar número', style: TextStyle(color: Colors.white)),
+              title: Text(esUsuario ? 'Copiar usuario' : 'Copiar número',
+                  style: const TextStyle(color: Colors.white)),
               onTap: () {
                 Clipboard.setData(ClipboardData(text: telCliente));
                 Navigator.pop(bs);
@@ -2330,9 +2335,13 @@ mixin _CardsMixin on State<LocalScreen> {
             const SizedBox(height: 10),
             TextField(
               controller: telefonoCtrl,
-              keyboardType: TextInputType.phone,
+              keyboardType: TextInputType.text,
+              autocorrect: false,
+              enableSuggestions: false,
+              inputFormatters: formatoWhatsApp,
               decoration: const InputDecoration(
-                labelText: 'Teléfono receptor (opcional)',
+                labelText: 'WhatsApp receptor (opcional)',
+                helperText: 'Número o @usuario de WhatsApp',
                 border: OutlineInputBorder(),
                 isDense: true,
                 prefixIcon: Icon(Icons.phone_outlined),
@@ -2370,7 +2379,7 @@ mixin _CardsMixin on State<LocalScreen> {
                   'exclusivo_id': moto['id'].toString(),
                   'ruta_grupo_id': servicio['id'],
                   if (telefonoCtrl.text.trim().isNotEmpty)
-                    'telefono_receptor': telefonoCtrl.text.trim(),
+                    'telefono_receptor': normalizarWhatsApp(telefonoCtrl.text),
                 });
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(

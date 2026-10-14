@@ -33,6 +33,7 @@ import 'package:flutter/services.dart' show Clipboard, ClipboardData, FilteringT
 import 'package:serviexpress_app/utils/cascada_config.dart'; // CONFIG-CASCADA-EXT
 import 'package:serviexpress_app/utils/config_cache.dart'; // Caché de consultas repetidas (wallet)
 import 'package:serviexpress_app/utils/iconos.dart'; // Logo de WhatsApp
+import 'package:serviexpress_app/utils/whatsapp_contacto.dart'; // WhatsApp: número o @usuario
 import 'package:serviexpress_app/utils/errores_servidor.dart'; // Mensajes del candado de estados
 
 part 'movil_widgets.dart';
@@ -2400,6 +2401,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
 
     // Activo de nuevo (p. ej. liberado o reactivado por la central).
     _idsDescartados.remove(id);
+    if (newRec['estado'] == 'pendiente') _yaAceptadosIds.remove(id);
 
     // Activo: reemplazar la fila (o agregarla en orden id desc, máx. 50).
     final fila = Map<String, dynamic>.from(newRec);
@@ -2449,6 +2451,29 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
 
   /// Llamar cuando el servidor dice que un servicio ya no está disponible
   /// (cancelado, completado o tomado por otro): la tarjeta se quita YA.
+  /// Aceptación confirmada por el servidor: la tarjeta pasa YA de
+  /// "disponibles" a "mis servicios" (sin esperar el aviso en tiempo real,
+  /// que a veces tarda) y se pide una copia fresca al servidor.
+  void _marcarAceptadoLocal(dynamic rawId) {
+    final id = rawId is num ? rawId.toInt() : int.tryParse('$rawId');
+    if (id == null) return;
+    _yaAceptadosIds.add(id);
+    if (_cacheServicios != null) {
+      final lista = _cacheServicios!.map((s) {
+        if ((s['id'] as num?)?.toInt() != id) return s;
+        return Map<String, dynamic>.from(s)
+          ..['estado'] = 'en_ruta_origen'
+          ..['movil_id'] = widget.usuario['id']
+          ..['paradero_ofrecido_id'] = null
+          ..['paradero_ofrecido_at'] = null;
+      }).toList();
+      _emitirServicios(lista);
+      _radarTick.value++;
+    }
+    if (_ofertaF2Abierta == id.toString()) _cerrarVentanaOferta();
+    _cargarServiciosActivos();
+  }
+
   void _descartarServicio(dynamic rawId) {
     final id = rawId is num ? rawId.toInt() : int.tryParse('$rawId');
     if (id == null || _cacheServicios == null) return;
@@ -2470,6 +2495,10 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
           .limit(50);
       if (!mounted) return;
       _idsDescartados.clear();
+      // Foto fiel del servidor: si un servicio que gané fue liberado y vuelve
+      // a estar disponible, se puede aceptar de nuevo (el servidor manda).
+      _yaAceptadosIds.removeWhere((id) => data.any((s) =>
+          (s['id'] as num?)?.toInt() == id && s['estado'] == 'pendiente'));
       _emitirServicios(List<Map<String, dynamic>>.from(data));
       _revisarAutoasignacion();
     } catch (e) {
@@ -9604,9 +9633,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                             : servicio['creador'].toString();
 
                         void abrirWa(String numero) async {
-                          String num =
-                              numero.replaceAll(RegExp(r'[^0-9]'), '');
-                          if (num.length == 10) num = '57$num';
+                          // Número o @usuario de WhatsApp (ver whatsapp_contacto.dart)
                           // Nombre del local o cliente que pidió el servicio.
                           // Si lo creó la central, se usa el origen (el local).
                           final String quienPidio = esCreadoPorCentral
@@ -9616,8 +9643,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                               : nombreNegocio;
                           final String textoWa =
                               'Hola, soy el móvil asignado para entregar su servicio de $quienPidio.';
-                          final Uri url = Uri.parse(
-                              'https://wa.me/$num?text=${Uri.encodeComponent(textoWa)}');
+                          final Uri? url = uriWhatsApp(numero, texto: textoWa);
+                          if (url == null) return;
                           if (!await launchUrl(url,
                               mode: LaunchMode.externalApplication)) {
                             if (context.mounted) {
@@ -12567,20 +12594,94 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     }
   }
 
+  // Servicios que se están aceptando ahora mismo (evita el doble toque).
+  final Set<String> _aceptandoIds = {};
+  // Servicios que ESTE móvil ya ganó: un toque más no vuelve al servidor.
+  final Set<int> _yaAceptadosIds = {};
+
+  /// Ventana "Aceptando…" encima de todo mientras el servidor responde.
+  /// Devuelve una función para cerrarla.
+  VoidCallback _mostrarAceptando() {
+    BuildContext? ctxCarga;
+    bool cerrada = false;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        ctxCarga = ctx;
+        return const PopScope(
+          canPop: false,
+          child: Center(
+            child: Card(
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 28, vertical: 22),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(strokeWidth: 3)),
+                  SizedBox(width: 16),
+                  Text('Aceptando…',
+                      style: TextStyle(
+                          fontSize: 16, fontWeight: FontWeight.bold)),
+                ]),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+    return () {
+      if (cerrada) return;
+      cerrada = true;
+      final c = ctxCarga;
+      if (c != null && c.mounted) {
+        final ruta = ModalRoute.of(c);
+        if (ruta != null && ruta.isActive) Navigator.of(c).removeRoute(ruta);
+      }
+    };
+  }
+
   Future<void> _aceptarServicioConCandado(
     BuildContext context,
     Map<String, dynamic> servicio,
   ) async {
-    setState(() => _procesando = true);
+    // Doble toque: si ya se está aceptando este servicio, no hacer nada.
+    final String idAceptando = servicio['id'].toString();
+    if (_aceptandoIds.contains(idAceptando)) return;
+    // Ya lo ganó (la tarjeta aún no se había movido): no volver a pedirlo.
+    if (_yaAceptadosIds.contains(int.tryParse(idAceptando))) {
+      _marcarAceptadoLocal(servicio['id']);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('✅ El servicio #${servicio['id']} ya es tuyo'),
+        backgroundColor: Colors.green[700],
+        duration: const Duration(seconds: 2),
+      ));
+      return;
+    }
 
-    // --- MOTOR TÁCTICO: CALCULAR ETA AL ORIGEN ---
-    // Fallback si GPS/OSRM no responde: FN usa 20 min (umbral oficial de sede),
-    // servicios normales usan 10 min.
+    // Aceptación confirmada (o "ya es tuyo"): mover la tarjeta y avisar.
+    void confirmarAceptado() {
+      _marcarAceptadoLocal(servicio['id']);
+      if (mounted) {
+        ScaffoldMessenger.of(this.context).showSnackBar(SnackBar(
+          content: Text('✅ Servicio #${servicio['id']} aceptado'),
+          backgroundColor: Colors.green[700],
+          duration: const Duration(seconds: 2),
+        ));
+      }
+    }
+
+    // ¿Era MI turno (oferta F2)? Para el mensaje si llega tarde.
+    final bool eraMiTurno = (servicio['paradero_ofrecido_id']?.toString() ?? '') ==
+        widget.usuario['id'].toString();
+
+    // --- ETA AL ORIGEN ---
+    // ACEPTAR va PRIMERO al servidor (cada segundo cuenta en la cascada).
+    // La ruta se calcula DESPUÉS de ganar el servicio y se guarda aparte.
+    // Mientras tanto se usa el tiempo por defecto: FN 20 min, normales 10.
     final bool esFnParaEta = servicio['tipo_fn'] == true;
     final int etaPorDefecto = esFnParaEta ? 20 : 10;
-    // El ETA es "agradable de tener": como máximo se esperan 4 s (GPS + rutas).
-    // Si no responde a tiempo, se acepta igual con el tiempo por defecto —
-    // ACEPTAR nunca queda colgado por un servidor externo.
     Future<int> calcularEta() async {
       try {
         final Position? pos = await _obtenerPosicionSegura();
@@ -12598,9 +12699,31 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       } catch (_) {}
       return etaPorDefecto;
     }
-    int tiempoAlOrigen = await calcularEta()
-        .timeout(const Duration(seconds: 4), onTimeout: () => etaPorDefecto);
-    if (mounted) setState(() => _procesando = false);
+    final int tiempoAlOrigen = etaPorDefecto;
+
+    // Después de ganar: calcular la ruta real y actualizar el tiempo estimado
+    // (en segundo plano, sin hacer esperar al móvil).
+    void actualizarEtaEnSegundoPlano() {
+      () async {
+        try {
+          final eta = await calcularEta().timeout(
+              const Duration(seconds: 15),
+              onTimeout: () => etaPorDefecto);
+          if (eta != etaPorDefecto) {
+            await Supabase.instance.client
+                .from('servicios')
+                .update({'tiempo_estimado_minutos': eta})
+                .eq('id', servicio['id'])
+                .eq('movil_id', widget.usuario['id']);
+          }
+        } catch (_) {}
+      }();
+    }
+
+    // Texto cuando otro móvil lo tomó primero.
+    String textoTomadoPor(String ganador) => eraMiTurno
+        ? '⏱️ Se acabó tu turno — el servicio #${servicio['id']} lo tomó $ganador'
+        : '🏍️ Servicio #${servicio['id']} fue tomado por $ganador';
     // ---------------------------------------------
 
     final String destinoActual = servicio['destino']?.toString().trim() ?? '';
@@ -12642,24 +12765,50 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
               style: ElevatedButton.styleFrom(backgroundColor: Colors.black),
               onPressed: () async {
                 if (destinoCtrl.text.trim().length > 3) {
+                  if (_aceptandoIds.contains(idAceptando)) return;
+                  _aceptandoIds.add(idAceptando);
+                  final cerrarCarga = _mostrarAceptando();
                   // CANDADO ATÓMICO: la función SQL bloquea la fila del
                   // moto y verifica límite de rango + disponibilidad del
                   // servicio en una sola transacción. Ver francotirador_candado.sql
-                  final resultado = await Supabase.instance.client.rpc(
-                    'tomar_servicio_candado',
-                    params: {
-                      'p_servicio_id': servicio['id'],
-                      'p_movil_id': widget.usuario['id'],
-                      'p_destino_nuevo': destinoCtrl.text.trim().toUpperCase(),
-                      'p_tiempo_estimado': tiempoAlOrigen,
-                    },
-                  );
+                  final dynamic resultado;
+                  try {
+                    resultado = await Supabase.instance.client.rpc(
+                      'tomar_servicio_candado',
+                      params: {
+                        'p_servicio_id': servicio['id'],
+                        'p_movil_id': widget.usuario['id'],
+                        'p_destino_nuevo':
+                            destinoCtrl.text.trim().toUpperCase(),
+                        'p_tiempo_estimado': tiempoAlOrigen,
+                      },
+                    );
+                  } catch (e) {
+                    cerrarCarga();
+                    _aceptandoIds.remove(idAceptando);
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text(
+                            'No se pudo aceptar (revisa tu conexión): ${textoError(e)}'),
+                        backgroundColor: Colors.red[700],
+                      ));
+                    }
+                    return;
+                  }
+                  cerrarCarga();
+                  _aceptandoIds.remove(idAceptando);
                   final fila = (resultado as List).isNotEmpty
                       ? resultado[0] as Map<String, dynamic>
                       : null;
                   final bool exito = fila?['exito'] == true;
 
                   if (ctx.mounted) Navigator.pop(ctx);
+
+                  // Toque repetido sobre un servicio que ya es suyo
+                  if (!exito && fila?['motivo']?.toString() == 'ya_es_tuyo') {
+                    confirmarAceptado();
+                    return;
+                  }
 
                   if (!exito) {
                     final String motivo = fila?['motivo']?.toString() ?? '';
@@ -12704,8 +12853,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                             }
                           } catch (_) {}
                         }
-                        mensaje =
-                            '🏍️ Servicio #${servicio['id']} fue tomado por $ganador';
+                        mensaje = textoTomadoPor(ganador);
                       }
                     }
                     if (context.mounted) {
@@ -12721,6 +12869,11 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                     }
                     return;
                   }
+
+                  // Ganó: la tarjeta pasa YA a "mis servicios" y se calcula
+                  // la ruta real en segundo plano.
+                  confirmarAceptado();
+                  actualizarEtaEnSegundoPlano();
 
                   // Solo sale del paradero si ganó el servicio.
                   // También se limpia paradero_oferta_expira_at para que el
@@ -12788,18 +12941,43 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       // CANDADO ATÓMICO: la función SQL bloquea la fila del moto y
       // verifica límite de rango + disponibilidad del servicio en una
       // sola transacción. Ver francotirador_candado.sql
-      final resultado = await Supabase.instance.client.rpc(
-        'tomar_servicio_candado',
-        params: {
-          'p_servicio_id': servicio['id'],
-          'p_movil_id': widget.usuario['id'],
-          'p_tiempo_estimado': tiempoAlOrigen,
-        },
-      );
+      // Se marca ANTES de cualquier espera: un segundo toque no hace nada.
+      _aceptandoIds.add(idAceptando);
+      final cerrarCarga = _mostrarAceptando();
+      final dynamic resultado;
+      try {
+        resultado = await Supabase.instance.client.rpc(
+          'tomar_servicio_candado',
+          params: {
+            'p_servicio_id': servicio['id'],
+            'p_movil_id': widget.usuario['id'],
+            'p_tiempo_estimado': tiempoAlOrigen,
+          },
+        );
+      } catch (e) {
+        cerrarCarga();
+        _aceptandoIds.remove(idAceptando);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(
+                'No se pudo aceptar (revisa tu conexión): ${textoError(e)}'),
+            backgroundColor: Colors.red[700],
+          ));
+        }
+        return;
+      }
+      cerrarCarga();
+      _aceptandoIds.remove(idAceptando);
       final fila = (resultado as List).isNotEmpty
           ? resultado[0] as Map<String, dynamic>
           : null;
       final bool exito = fila?['exito'] == true;
+
+      // Toque repetido sobre un servicio que ya es suyo
+      if (!exito && fila?['motivo']?.toString() == 'ya_es_tuyo') {
+        confirmarAceptado();
+        return;
+      }
 
       if (!exito) {
         final String motivo = fila?['motivo']?.toString() ?? '';
@@ -12843,8 +13021,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                 }
               } catch (_) {}
             }
-            mensaje =
-                '🏍️ Servicio #${servicio['id']} fue tomado por $ganador';
+            mensaje = textoTomadoPor(ganador);
           }
         }
         if (mounted) {
@@ -12860,6 +13037,11 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         }
         return;
       }
+
+      // Ganó: la tarjeta pasa YA a "mis servicios" y se calcula la ruta
+      // real en segundo plano.
+      confirmarAceptado();
+      actualizarEtaEnSegundoPlano();
 
       // Solo sale del paradero si ganó el servicio.
       // También se limpia paradero_oferta_expira_at para que el

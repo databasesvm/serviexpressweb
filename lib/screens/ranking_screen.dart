@@ -109,41 +109,26 @@ class _RankingScreenState extends State<RankingScreen> {
 
         if (rol == 'movil') {
           final puntajes = puntajesPorMovil[u['id']] ?? [];
-          double promedio = puntajes.isNotEmpty
-              ? (puntajes.reduce((a, b) => a + b) / puntajes.length)
-              : 0.0;
 
-          String? rangoManual = u['rango_movil'];
-          String rangoNombre;
-          bool esManual = false;
-
-          // MASTER: puntaje fijo 5.0, rango inmune a revocación automática
-          final bool esMaster = rangoManual?.toUpperCase() == 'MASTER';
-
-          // El rango lo asigna SOLO la Central. Esta pantalla ya no lo borra
-          // (antes lo hacía desde el teléfono de quien abría el ranking).
-
-          if (esMaster) {
-            rangoNombre = 'MASTER';
-            promedio = 5.0; // Puntaje fijo para Masters
-            esManual = true;
-          } else if (rangoManual != null && rangoManual.isNotEmpty) {
-            rangoNombre = rangoManual;
-            esManual = true;
-          } else {
-            if (puntajes.isEmpty) {
-              rangoNombre = 'NOVATO';
-            } else if (promedio >= 4.3) {
-              // LEYENDA (≥4.8) requiere autorización manual de la central.
-              // Sin rango_movil = 'LEYENDA' en BD el móvil se mantiene en ÉLITE
-              // aunque supere el umbral, hasta que la central lo autorice.
-              rangoNombre = 'ÉLITE';
-            } else if (promedio >= 3.8) {
-              rangoNombre = 'PRO';
-            } else {
-              rangoNombre = 'NOVATO';
-            }
-          }
+          // Calificación y rango vienen del SERVIDOR (recalcular_puntuacion_movil):
+          // +0,1 por servicio finalizado (tope 5,0). Rango automático:
+          // NOVATO <3,8 · PRO ≥3,8 · ÉLITE ≥4,3. LEYENDA (≥4,8) solo con
+          // autorización de la central; MASTER solo manual.
+          final String rangoBD =
+              (u['rango_movil']?.toString() ?? '').toUpperCase().trim();
+          final bool esMaster = rangoBD == 'MASTER';
+          final double promedio = esMaster
+              ? 5.0
+              : ((u['puntuacion'] as num?)?.toDouble() ?? 0.0);
+          // Distintivo azul: rangos que da la central (LEYENDA / MASTER)
+          final bool esManual = esMaster || rangoBD == 'LEYENDA';
+          final String rangoNombre = switch (rangoBD) {
+            'MASTER' => 'MASTER',
+            'LEYENDA' => 'LEYENDA',
+            'ELITE' || 'ÉLITE' => 'ÉLITE',
+            'PRO' => 'PRO',
+            _ => 'NOVATO',
+          };
 
           String rangoIcono;
           if (rangoNombre == 'MASTER') {
@@ -320,9 +305,16 @@ class _RankingScreenState extends State<RankingScreen> {
                                   ),
                                 ],
                               ),
-                              if (puntActual > 0)
+                              if (!esManual && puntActual < 5.0)
                                 Text(
-                                  'Puntuación acumulada: ${puntActual.toStringAsFixed(2)}',
+                                  // Cada servicio limpio vale +0,02 (servidor)
+                                  puntActual < 3.8
+                                      ? 'Faltan ${(((3.8 - puntActual) * 100).round() / 2).ceil()} servicios para PRO'
+                                      : puntActual < 4.3
+                                          ? 'Faltan ${(((4.3 - puntActual) * 100).round() / 2).ceil()} servicios para ÉLITE'
+                                          : puntActual < 4.8
+                                              ? 'Faltan ${(((4.8 - puntActual) * 100).round() / 2).ceil()} servicios para LEYENDA'
+                                              : 'Puede ser LEYENDA (la central lo autoriza)',
                                   style: const TextStyle(color: Colors.white30, fontSize: 10),
                                 ),
                             ],
@@ -331,17 +323,15 @@ class _RankingScreenState extends State<RankingScreen> {
                             mainAxisAlignment: MainAxisAlignment.center,
                             crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
-                              const Text('SEMANA', style: TextStyle(fontSize: 9, color: Colors.grey)),
+                              const Text('CALIFICACIÓN', style: TextStyle(fontSize: 9, color: Colors.grey)),
                               Text(
-                                puntSemanal > 0 ? puntSemanal.toStringAsFixed(1) : '—',
+                                puntSemanal.toStringAsFixed(2),
                                 style: TextStyle(
                                   fontSize: 18,
                                   fontWeight: FontWeight.bold,
                                   color: puntSemanal >= 4.8
                                       ? Colors.green[400]
-                                      : (puntSemanal > 0 && puntSemanal < 3.8
-                                            ? Colors.red[400]
-                                            : Colors.white54),
+                                      : rangoColor,
                                 ),
                               ),
                               const SizedBox(height: 2),

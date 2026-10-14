@@ -655,9 +655,13 @@ mixin _FormularioMixin on State<LocalScreen> {
                 if (!esPuntoAPunto) ...[
                   TextField(
                     controller: telefonoController,
-                    keyboardType: TextInputType.phone,
+                    keyboardType: TextInputType.text,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    inputFormatters: formatoWhatsApp,
                     decoration: InputDecoration(
                       labelText: 'WhatsApp del cliente (*)',
+                      helperText: 'Número o @usuario de WhatsApp',
                       border: const OutlineInputBorder(),
                       prefixIcon: buscandoCliente
                           ? const Padding(
@@ -673,10 +677,10 @@ mixin _FormularioMixin on State<LocalScreen> {
                           : const Icon(Icons.phone_android),
                     ),
                     onChanged: (val) async {
-                      if (val.length >= 10) {
+                      if (whatsAppListoParaBuscar(val)) {
                         setDialogState(() => buscandoCliente = true);
                         final resultado = await _buscarDireccionesPorTelefono(
-                          val,
+                          normalizarWhatsApp(val),
                         );
                         setDialogState(() {
                           direccionesHistoricasCliente = resultado;
@@ -1307,6 +1311,15 @@ mixin _FormularioMixin on State<LocalScreen> {
                         );
                         return;
                       }
+                      if (!esPuntoAPunto && !_esCot) {
+                        final errWa = validarWhatsApp(telefonoController.text);
+                        if (errWa != null) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text(errWa), backgroundColor: Colors.red),
+                          );
+                          return;
+                        }
+                      }
 
                       setDialogState(() => procesando = true);
                       _sonidos.reproducirSuave(
@@ -1629,7 +1642,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                                   : null,
                               'telefono_receptor': esPuntoAPunto
                                   ? null
-                                  : telefonoController.text.trim(),
+                                  : normalizarWhatsApp(telefonoController.text),
                               'tarifa': tarifaNueva,
                               'recargo_total': (tarifaNueva - tarifaBaseSinRecargo).round(),
                               'tarifa_detalle': {

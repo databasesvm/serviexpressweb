@@ -466,14 +466,18 @@ extension CentralScreenFormularios on _CentralScreenState {
 
                 TextField(
                   controller: telReceptorController,
-                  keyboardType: TextInputType.phone,
+                  keyboardType: TextInputType.text,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  inputFormatters: formatoWhatsApp,
                   textInputAction: TextInputAction.next,
                   decoration: InputDecoration(
                     labelText: tipoServicio == 'MOTOTAXI'
-                        ? 'Teléfono del Pasajero'
+                        ? 'WhatsApp del Pasajero'
                         : tipoServicio == 'PAQUETERÍA'
-                        ? 'Teléfono de quien recibe'
-                        : 'Teléfono de Contacto',
+                        ? 'WhatsApp de quien recibe'
+                        : 'WhatsApp de Contacto',
+                    helperText: 'Número o @usuario de WhatsApp',
                     border: const OutlineInputBorder(),
                     isDense: true,
                     prefixIcon: const Icon(Icons.phone_android, size: 18),
@@ -561,6 +565,13 @@ extension CentralScreenFormularios on _CentralScreenState {
                         );
                         return;
                       }
+                      final errWa = validarWhatsApp(telReceptorController.text);
+                      if (errWa != null) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text(errWa), backgroundColor: Colors.red),
+                        );
+                        return;
+                      }
 
                       setDialogState(() => procesando = true);
 
@@ -571,7 +582,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                           .trim();
                       double tarifaFinal = double.tryParse(tarifaLimpia) ?? 0.0;
 
-                      String telReceptor = telReceptorController.text.trim();
+                      String telReceptor = normalizarWhatsApp(telReceptorController.text);
                       String telEmisor = telEmisorController.text.trim();
                       String detalles = detallesController.text.trim();
                       String observacionFinal = '';
@@ -2700,11 +2711,12 @@ extension CentralScreenFormularios on _CentralScreenState {
       }
       return;
     }
-    String numero = telefono.replaceAll(RegExp(r'[^0-9]'), '');
-    if (numero.length == 10) numero = '57$numero';
-    final Uri url = Uri.parse(
-      'https://wa.me/$numero?text=${Uri.encodeComponent('Central ServiExpress 📡 | Sobre la Orden #$idPedido: ')}',
+    // Número o @usuario de WhatsApp
+    final Uri? url = uriWhatsApp(
+      telefono,
+      texto: 'Central ServiExpress 📡 | Sobre la Orden #$idPedido: ',
     );
+    if (url == null) return;
     if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

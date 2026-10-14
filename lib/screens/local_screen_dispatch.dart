@@ -222,9 +222,13 @@ mixin _DispatchMixin on State<LocalScreen> {
 
                 TextField(
                   controller: telefonoCtrl,
-                  keyboardType: TextInputType.phone,
+                  keyboardType: TextInputType.text,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  inputFormatters: formatoWhatsApp,
                   decoration: const InputDecoration(
                     labelText: 'WhatsApp de Contacto (*)',
+                    helperText: 'Número o @usuario de WhatsApp',
                     border: OutlineInputBorder(),
                     prefixIcon: Icon(Icons.phone, size: 18),
                     isDense: true,
@@ -258,10 +262,11 @@ mixin _DispatchMixin on State<LocalScreen> {
               onPressed: procesando
                   ? null
                   : () async {
-                      if (telefonoCtrl.text.trim().isEmpty) {
+                      final errWa = validarWhatsApp(telefonoCtrl.text, obligatorio: true);
+                      if (errWa != null) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('El WhatsApp es obligatorio.'),
+                          SnackBar(
+                            content: Text(errWa),
                             backgroundColor: Colors.red,
                           ),
                         );
@@ -288,7 +293,7 @@ mixin _DispatchMixin on State<LocalScreen> {
                             .update({
                               'estado': 'cotizacion_aprobada',
                               'observacion': nuevaObs,
-                              'telefono_receptor': telefonoCtrl.text.trim(),
+                              'telefono_receptor': normalizarWhatsApp(telefonoCtrl.text),
                               'ticket_factura': ticketCtrl.text.trim().isEmpty
                                   ? null
                                   : ticketCtrl.text.trim(),

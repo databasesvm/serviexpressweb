@@ -15,6 +15,7 @@ import 'package:serviexpress_app/screens/rutas_aprendidas_screen.dart'; // Rutas
 import 'package:serviexpress_app/screens/sectores_tarifa_screen.dart'; // Sectores y tarifa por km
 import 'package:serviexpress_app/utils/alta_demanda.dart'; // Alta demanda SE
 import 'package:serviexpress_app/utils/iconos.dart'; // Logo de WhatsApp
+import 'package:serviexpress_app/utils/whatsapp_contacto.dart'; // WhatsApp: número o @usuario
 import 'package:serviexpress_app/utils/hora_servidor.dart'; // Reloj alineado con el servidor
 import 'package:serviexpress_app/utils/cascada_config.dart'; // Tiempos de la cascada SE
 import 'package:serviexpress_app/screens/chat_screen.dart';
@@ -438,11 +439,15 @@ class _CentralScreenState extends State<CentralScreen>
                   _movilesCache.where((m) => m['id'] != idBorrado).toList();
               if (_movilesCache.length == antes) return;
             } else {
-              final esMovil = upd['rol'] == 'movil' || upd['es_dual'] == true;
+              // Eliminado desde Gestión de usuarios (baja lógica): se trata
+              // igual que si ya no fuera móvil → sale del panel al instante.
+              final esMovil = (upd['rol'] == 'movil' || upd['es_dual'] == true) &&
+                  upd['eliminado'] != true;
               final idx =
                   _movilesCache.indexWhere((m) => m['id'] == upd['id']);
               if (!esMovil) {
-                // Dejó de ser móvil/dual → sacarlo; si nunca lo fue, ignorar.
+                // Dejó de ser móvil/dual (o fue eliminado) → sacarlo; si nunca
+                // estuvo en la lista, ignorar.
                 if (idx < 0) return;
                 _movilesCache = List<Map<String, dynamic>>.from(_movilesCache)
                   ..removeAt(idx);
@@ -823,7 +828,9 @@ class _CentralScreenState extends State<CentralScreen>
       final data = await Supabase.instance.client
           .from('usuarios')
           .select()
-          .or('rol.eq.movil,es_dual.eq.true');
+          .or('rol.eq.movil,es_dual.eq.true')
+          // Los eliminados desde Gestión de usuarios no se muestran
+          .not('eliminado', 'is', true);
       if (!mounted) return;
       _movilesCache = List<Map<String, dynamic>>.from(data);
       if (!_ctrlUsuariosMoviles.isClosed) {

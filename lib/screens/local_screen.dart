@@ -26,6 +26,7 @@ import 'package:serviexpress_app/utils/textos_push.dart'; // Textos únicos de p
 import 'package:serviexpress_app/utils/ubicacion_cliente.dart'; // Ubicación GPS del cliente
 import 'package:serviexpress_app/utils/alta_demanda.dart'; // Franja de alta demanda
 import 'package:serviexpress_app/utils/iconos.dart'; // Logo de WhatsApp
+import 'package:serviexpress_app/utils/whatsapp_contacto.dart'; // WhatsApp: número o @usuario
 import 'package:serviexpress_app/utils/errores_servidor.dart'; // Mensajes del candado de estados
 
 part 'local_screen_dispatch.dart';

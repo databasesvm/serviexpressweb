@@ -11,14 +11,18 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'whatsapp_contacto.dart';
 
 const String _urlCaptura =
     'https://oukiofdtargjrclualgm.supabase.co/functions/v1/capturar-ubicacion';
 
-/// Número de WhatsApp del cliente (receptor o cliente). Null si no hay.
+/// WhatsApp del cliente (receptor o cliente): número "57..." o usuario
+/// "@usuario". Null si no hay.
 String? telefonoWhatsAppServicio(Map<String, dynamic> servicio) {
   for (final campo in ['telefono_receptor', 'numero_cliente']) {
-    final d = (servicio[campo]?.toString() ?? '').replaceAll(RegExp(r'[^0-9]'), '');
+    final crudo = servicio[campo]?.toString().trim() ?? '';
+    if (esUsuarioWhatsApp(crudo) && crudo != 'null') return crudo;
+    final d = crudo.replaceAll(RegExp(r'[^0-9]'), '');
     if (d.length == 10 && d.startsWith('3')) return '57$d';
     if (d.length == 12 && d.startsWith('57')) return d;
   }
@@ -42,15 +46,12 @@ Future<void> pedirUbicacionCliente(Map<String, dynamic> servicio) async {
   if (token == null || token.isEmpty) return;
 
   final link = '$_urlCaptura?id=$id&t=$token';
-  final mensaje = Uri.encodeComponent(
-    'Hola 👋 Para que el conductor llegue exactamente donde estás, '
-    'activa el GPS de tu teléfono, toca este enlace y luego el botón verde '
-    '(solo tarda unos segundos):\n$link',
-  );
+  final texto = 'Hola 👋 Para que el conductor llegue exactamente donde estás, '
+      'activa el GPS de tu teléfono, toca este enlace y luego el botón verde '
+      '(solo tarda unos segundos):\n$link';
   final tel = telefonoWhatsAppServicio(servicio);
-  final uri = Uri.parse(tel != null
-      ? 'https://wa.me/$tel?text=$mensaje'
-      : 'https://wa.me/?text=$mensaje');
+  final uri = uriWhatsApp(tel, texto: texto) ??
+      Uri.parse('https://wa.me/?text=${Uri.encodeComponent(texto)}');
 
   // Marca que se pidió → el card muestra "Esperando ubicación del cliente…"
   try {
