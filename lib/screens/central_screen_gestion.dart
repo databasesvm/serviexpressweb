@@ -180,6 +180,19 @@ extension CentralScreenGestion on _CentralScreenState {
                 },
               ),
 
+            // CAMBIAR ORDEN EN LA FILA — solo si está en un paradero
+            if (m['paradero_actual'] != null && m['ingreso_fila'] != null)
+              _opcionMenuAccion(
+                icono: Icons.swap_vert_rounded,
+                color: Colors.blue[800]!,
+                titulo: 'Mover a posición…',
+                subtitulo: 'Cambiar su puesto en la fila de ${m['paradero_actual']}',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _elegirPosicionFila(m);
+                },
+              ),
+
             // ACCIÓN DESTRUCTIVA — separada visualmente de las demás.
             // Solo aplica si el moto realmente está en una fila — no
             // tiene sentido mostrarlo para alguien En Servicio, Libre,
@@ -639,6 +652,168 @@ extension CentralScreenGestion on _CentralScreenState {
           ),
         );
       }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  // ── ORDEN DE LA FILA DEL PARADERO (solo central) ───────────────────────
+  // El servidor (fn_central_mover_fila) reordena y todos — cascada, app del
+  // móvil y este panel — ven el mismo orden. Los móviles con ticket de
+  // prioridad siguen arriba: no se pueden cruzar con los que no tienen.
+
+  /// Fila actual del paradero, en el mismo orden que usa el servidor.
+  Future<List<Map<String, dynamic>>> _leerFilaParadero(String paradero) async {
+    final rows = await Supabase.instance.client
+        .from('usuarios')
+        .select('id, nombre, usuario, rol, numero_movil, ticket_prioridad, ingreso_fila, suspendido')
+        .eq('paradero_actual', paradero)
+        .eq('en_linea', true)
+        .not('ingreso_fila', 'is', null);
+    final fila = List<Map<String, dynamic>>.from(rows)
+        .where((m) => m['suspendido'] != true)
+        .toList();
+    fila.sort((a, b) {
+      final ta = a['ticket_prioridad'] == true ? 1 : 0;
+      final tb = b['ticket_prioridad'] == true ? 1 : 0;
+      if (ta != tb) return tb.compareTo(ta);
+      final c = DateTime.parse(a['ingreso_fila'].toString())
+          .compareTo(DateTime.parse(b['ingreso_fila'].toString()));
+      if (c != 0) return c;
+      return ((a['id'] as num?) ?? 0).compareTo((b['id'] as num?) ?? 0);
+    });
+    return fila;
+  }
+
+  /// Menú "Mover a posición…": muestra solo las posiciones permitidas.
+  Future<void> _elegirPosicionFila(Map<String, dynamic> m) async {
+    final paradero = m['paradero_actual']?.toString();
+    if (paradero == null) return;
+    List<Map<String, dynamic>> fila;
+    try {
+      fila = await _leerFilaParadero(paradero);
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No se pudo leer la fila: $e'), backgroundColor: Colors.red),
+        );
+      }
+      return;
+    }
+    final actual = fila.indexWhere((x) => x['id'] == m['id']) + 1;
+    if (actual == 0) return;
+    final conTicket = m['ticket_prioridad'] == true;
+    final k = fila.where((x) => x['ticket_prioridad'] == true).length;
+    final desde = conTicket ? 1 : k + 1;
+    final hasta = conTicket ? k : fila.length;
+    if (!context.mounted) return;
+
+    if (hasta - desde < 1) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(conTicket
+            ? 'Solo se puede mover entre los móviles con ticket.'
+            : 'No hay otra posición disponible en la fila.'),
+      ));
+      return;
+    }
+
+    final elegida = await showDialog<int>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: Text('Mover ${_formatearNombreCentral(m)}\n$paradero',
+            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+        children: [
+          for (int p = desde; p <= hasta; p++)
+            SimpleDialogOption(
+              onPressed: p == actual ? null : () => Navigator.pop(ctx, p),
+              child: Row(children: [
+                Icon(p == actual ? Icons.radio_button_checked : Icons.radio_button_off,
+                    size: 18, color: p == actual ? Colors.grey : Colors.blue[800]),
+                const SizedBox(width: 10),
+                Text('#$p',
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: p == actual ? Colors.grey : Colors.black87)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    p == actual
+                        ? '(actual)'
+                        : 'ahora: ${_formatearNombreCentral(fila[p - 1])}',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ]),
+            ),
+          if (k > 0)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
+              child: Text(
+                conTicket
+                    ? 'Tiene ticket: solo se mueve entre los que tienen ticket.'
+                    : 'Los móviles con ticket siguen arriba.',
+                style: TextStyle(fontSize: 11, color: Colors.purple[700]),
+              ),
+            ),
+        ],
+      ),
+    );
+    if (elegida == null) return;
+    await _moverEnFila(m, elegida, paradero);
+  }
+
+  /// Llama al servidor para mover al móvil a [posicion] (#1 = primero).
+  Future<void> _moverEnFila(
+    Map<String, dynamic> m,
+    int posicion,
+    String paradero, {
+    bool confirmar = true,
+  }) async {
+    if (confirmar) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          title: const Text('Cambiar orden de la fila'),
+          content: Text('¿Mover ${_formatearNombreCentral(m)} a #$posicion en $paradero?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.blue[800]),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('MOVER', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
+    try {
+      final r = await Supabase.instance.client.rpc('fn_central_mover_fila',
+          params: {'p_movil': m['id'], 'p_posicion': posicion});
+      final res = r?.toString() ?? '';
+      if (!context.mounted) return;
+      final textos = {
+        'ok': '${_formatearNombreCentral(m)} ahora es #$posicion en $paradero',
+        'no_autorizado': 'Solo la central puede cambiar el orden.',
+        'no_en_fila': 'Ese móvil ya no está en la fila.',
+        'posicion_invalida': 'La fila cambió. Intenta de nuevo.',
+        'cruza_ticket': 'No se puede cruzar con los móviles que tienen ticket de prioridad.',
+      };
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(textos[res] ?? 'No se pudo mover ($res)'),
+        backgroundColor: res == 'ok' ? Colors.blue[800] : Colors.red[700],
+        duration: const Duration(seconds: 2),
+      ));
+      if (res == 'ok') setState(() {});
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

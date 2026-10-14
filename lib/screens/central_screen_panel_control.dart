@@ -530,7 +530,39 @@ extension CentralScreenPanelControl on _CentralScreenState {
                                                 ],
                                               );
                                             }),
-                                            trailing: _movilTrailing(m),
+                                            trailing: Builder(builder: (_) {
+                                              // Flechas ▲▼: solo dentro del mismo grupo
+                                              // (con ticket / sin ticket).
+                                              final puedeSubir = idx > 1 &&
+                                                  (fila[idx - 2]['ticket_prioridad'] == true) == conTicket;
+                                              final puedeBajar = idx < fila.length &&
+                                                  (fila[idx]['ticket_prioridad'] == true) == conTicket;
+                                              Widget flecha(IconData ic, bool activa, int destino) => SizedBox(
+                                                    width: 28,
+                                                    height: 28,
+                                                    child: IconButton(
+                                                      padding: EdgeInsets.zero,
+                                                      iconSize: 22,
+                                                      tooltip: activa ? 'Mover a #$destino' : null,
+                                                      icon: Icon(ic,
+                                                          color: activa ? color : Colors.black12),
+                                                      onPressed: activa
+                                                          ? () => _moverEnFila(m, destino, nombre)
+                                                          : null,
+                                                    ),
+                                                  );
+                                              return Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  if (fila.length > 1) ...[
+                                                    flecha(Icons.arrow_drop_up, puedeSubir, idx - 1),
+                                                    flecha(Icons.arrow_drop_down, puedeBajar, idx + 1),
+                                                    const SizedBox(width: 4),
+                                                  ],
+                                                  _movilTrailing(m),
+                                                ],
+                                              );
+                                            }),
                                             onTap: () => _abrirMenuAccionesMovil(context, m),
                                           ),
                                         );
