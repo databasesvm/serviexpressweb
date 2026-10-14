@@ -7,6 +7,7 @@ import 'package:serviexpress_app/utils/onesignal_api.dart';
 import 'package:serviexpress_app/utils/alta_demanda.dart';
 import 'package:serviexpress_app/utils/widgets_compartidos.dart';
 import 'package:serviexpress_app/utils/paradero_objetivo.dart';
+import 'package:serviexpress_app/utils/errores_servidor.dart';
 
 class GuestTrackingScreen extends StatefulWidget {
   const GuestTrackingScreen({super.key});
@@ -294,7 +295,7 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
                         setDialogState(() => procesando = false);
                         if (ctx.mounted) {
                           ScaffoldMessenger.of(ctx).showSnackBar(
-                            SnackBar(content: Text('Error: $e')),
+                            SnackBar(content: Text(textoError(e))),
                           );
                         }
                       }

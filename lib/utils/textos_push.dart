@@ -18,13 +18,13 @@ class TextosPush {
   // ── F1 (T=0): solo Masters ────────────────────────────────────────────────
   static const String f1Titulo = '👑 F1 · Turno Master';
   static String f1Mensaje(String ruta) =>
-      'Tienes 30 s de prioridad como Master. $ruta. Abre el radar para aceptarlo.';
+      'Tienes prioridad como Master. $ruta. Abre el radar para aceptarlo.';
 
   // ── Servicio liberado por un móvil (la cascada vuelve a empezar en F1) ────
   static const String liberadoTitulo = '🔄 F1 · Servicio liberado';
   static String liberadoMensaje(String ruta) =>
       'Un móvil soltó este servicio y la cascada vuelve a empezar. $ruta. '
-      'Tienes 30 s de prioridad como Master.';
+      'Tienes prioridad como Master.';
 
   // ── Asignación directa (exclusivo) ────────────────────────────────────────
   static const String asignadoTitulo = '📌 Servicio asignado a ti';

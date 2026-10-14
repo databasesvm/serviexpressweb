@@ -987,7 +987,7 @@ mixin _DialogsMixin on State<LocalScreen> {
                   setDs(() => guardando = false);
                   if (dCtx.mounted) {
                     ScaffoldMessenger.of(dCtx).showSnackBar(
-                      SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+                      SnackBar(content: Text(textoError(e)), backgroundColor: Colors.red),
                     );
                   }
                 }
@@ -1382,7 +1382,7 @@ mixin _DialogsMixin on State<LocalScreen> {
                 } catch (e) {
                   if (ctx.mounted) {
                     ScaffoldMessenger.of(ctx).showSnackBar(
-                        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+                        SnackBar(content: Text(textoError(e)), backgroundColor: Colors.red));
                   }
                 }
               },
@@ -1688,7 +1688,7 @@ mixin _DialogsMixin on State<LocalScreen> {
         if (context.mounted)
           ScaffoldMessenger.of(
             context,
-          ).showSnackBar(SnackBar(content: Text('Error: $e')));
+          ).showSnackBar(SnackBar(content: Text(textoError(e))));
       }
     }
   }

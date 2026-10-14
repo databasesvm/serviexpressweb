@@ -1248,9 +1248,74 @@ extension CentralScreenGestion on _CentralScreenState {
                       color: const Color(0xFF1565C0),
                       titulo: '⏱️ Cascada de Notificaciones',
                       subtitulo:
-                          'SE: F2 ${_cascadaSeF2Seg}s · F3 ${_cascadaSeF3Seg}s · F4 ${_cascadaSeF4Seg}s'
-                          '  |  FN: F2 ${_cascadaFnF2Seg}s (⏰${_cascadaFnF2TimeoutSeg}s) · F3 ${_cascadaFnF3Seg}s · F4 ${_cascadaFnF4Seg}s',
+                          'SE: Master ${_cascadaSeF2Seg}s · #1 ${_cascadaSeF2VentanaSeg}s · F3 ${_cascadaSeF3Seg}s · F4 ${_cascadaSeF4Seg}s'
+                          '  |  FN: Master ${_cascadaFnF2Seg}s (⏰${_cascadaFnF2TimeoutSeg}s) · F3 ${_cascadaFnF3Seg}s · F4 ${_cascadaFnF4Seg}s',
                       onTap: () => _abrirDialogoCascada(context),
+                    ),
+
+                    // ── Interruptor: cascada FN en el servidor ───────────────
+                    Container(
+                      margin: const EdgeInsets.only(top: 10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1A1A1A),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: _fnCascadaServidor
+                              ? Colors.indigoAccent.withValues(alpha: 0.5)
+                              : Colors.white12,
+                        ),
+                      ),
+                      child: SwitchListTile(
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                        secondary: Icon(Icons.dns_outlined,
+                            color: _fnCascadaServidor ? Colors.indigoAccent : Colors.white38),
+                        title: const Text(
+                          'Cascada FN en el servidor',
+                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                        ),
+                        subtitle: Text(
+                          _fnCascadaServidor
+                              ? '🟢 El servidor avisa y asigna cada fase FN (cada 5 s)'
+                              : '⚪ La cascada FN la arma el teléfono que crea el servicio',
+                          style: TextStyle(
+                            color: _fnCascadaServidor ? Colors.indigo[200] : Colors.white38,
+                            fontSize: 11,
+                          ),
+                        ),
+                        value: _fnCascadaServidor,
+                        activeColor: Colors.indigoAccent,
+                        onChanged: (val) async {
+                          final ok = await showDialog<bool>(
+                            context: context,
+                            builder: (ctx) => AlertDialog(
+                              backgroundColor: const Color(0xFF1A1A1A),
+                              title: Text(
+                                val ? 'Activar cascada FN en el servidor' : 'Volver a la cascada FN del teléfono',
+                                style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+                              ),
+                              content: Text(
+                                val
+                                    ? 'Actívalo solo cuando TODOS (móviles, sedes y central) tengan la versión nueva. '
+                                      'Las apps viejas siguen enviando sus propios avisos y llegarían dobles. ¿Confirmar?'
+                                    : 'Las apps volverán a armar la cascada FN como antes. ¿Confirmar?',
+                                style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
+                              ),
+                              actions: [
+                                TextButton(onPressed: () => Navigator.pop(ctx, false),
+                                    child: const Text('CANCELAR', style: TextStyle(color: Colors.white38))),
+                                ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.indigo, foregroundColor: Colors.white),
+                                  onPressed: () => Navigator.pop(ctx, true),
+                                  child: Text(val ? 'ACTIVAR' : 'DESACTIVAR',
+                                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (ok == true) _toggleFnCascadaServidor(val);
+                        },
+                      ),
                     ),
 
                   ]),
@@ -1560,6 +1625,7 @@ extension CentralScreenGestion on _CentralScreenState {
 
   Future<void> _abrirDialogoCascada(BuildContext ctx) async {
     final seF2c  = TextEditingController(text: _cascadaSeF2Seg.toString());
+    final seF2Wc = TextEditingController(text: _cascadaSeF2VentanaSeg.toString());
     final seF3c  = TextEditingController(text: _cascadaSeF3Seg.toString());
     final seF4c  = TextEditingController(text: _cascadaSeF4Seg.toString());
     final fnF2c  = TextEditingController(text: _cascadaFnF2Seg.toString());
@@ -1588,7 +1654,8 @@ extension CentralScreenGestion on _CentralScreenState {
               mainAxisSize: MainAxisSize.min,
               children: [
                 const Text(
-                  'Todos los valores son segundos desde T=0 (creación del servicio).',
+                  'Segundos desde T=0 (creación o liberación del servicio). '
+                  'Los cambios aplican de inmediato en el servidor.',
                   style: TextStyle(color: Colors.white38, fontSize: 11, height: 1.4),
                 ),
                 const SizedBox(height: 16),
@@ -1596,18 +1663,24 @@ extension CentralScreenGestion on _CentralScreenState {
                 // ── SERVIEXPRESS ─────────────────────────────────────────
                 _cascadaSeccionLabel('🟢 ServiExpress'),
                 _cascadaCampo(
-                  label: 'Fase 2 — Auto-asigna #1 del paradero',
-                  hint: 'aplica de inmediato a servicios en vuelo',
+                  label: 'Fase 1 — Tiempo exclusivo de los Masters',
+                  hint: 'al terminar empieza la Fase 2 (5–300 s)',
                   ctrl: seF2c,
                 ),
                 _cascadaCampo(
+                  label: '⏰ Fase 2 — Tiempo del #1 del paradero para aceptar',
+                  hint: 'si no acepta sale del paradero (10–120 s)',
+                  ctrl: seF2Wc,
+                  accentColor: Colors.orange,
+                ),
+                _cascadaCampo(
                   label: 'Fase 3 — Push radio 1km del punto de recogida',
-                  hint: 'aplica a servicios creados después de guardar',
+                  hint: 'mínimo: Master + tiempo del #1',
                   ctrl: seF3c,
                 ),
                 _cascadaCampo(
                   label: 'Fase 4 — Push todos los disponibles',
-                  hint: 'aplica a servicios creados después de guardar',
+                  hint: 'mínimo: 5 s después de la Fase 3',
                   ctrl: seF4c,
                 ),
 
@@ -1616,24 +1689,24 @@ extension CentralScreenGestion on _CentralScreenState {
                 // ── FN LA CASCADA ─────────────────────────────────────────
                 _cascadaSeccionLabel('🔵 FN La Cascada'),
                 _cascadaCampo(
-                  label: 'Fase 2 — Ofrece al móvil más cercano a la sede',
-                  hint: 'aplica de inmediato a servicios en vuelo',
+                  label: 'Fase 1 — Tiempo exclusivo de los Masters',
+                  hint: 'al terminar se ofrece al más cercano (5–300 s)',
                   ctrl: fnF2c,
                 ),
                 _cascadaCampo(
                   label: '⏰ Tiempo para aceptar antes de liberar a F3',
-                  hint: 'aplica de inmediato a servicios en vuelo',
+                  hint: '10–120 s',
                   ctrl: fnToc,
                   accentColor: Colors.orange,
                 ),
                 _cascadaCampo(
                   label: 'Fase 3 — Push no-Masters dentro de 2km de la sede',
-                  hint: 'aplica a servicios creados después de guardar',
+                  hint: 'mínimo: 5 s después del tiempo Master · aplica a servicios nuevos',
                   ctrl: fnF3c,
                 ),
                 _cascadaCampo(
                   label: 'Fase 4 — Push global a todos los disponibles',
-                  hint: 'aplica a servicios creados después de guardar',
+                  hint: 'mínimo: 5 s después de la Fase 3 · aplica a servicios nuevos',
                   ctrl: fnF4c,
                 ),
 
@@ -1662,6 +1735,7 @@ extension CentralScreenGestion on _CentralScreenState {
                       .from('config_sistema')
                       .update({
                         'cascada_se_f2_seg':         int.tryParse(seF2c.text) ?? 30,
+                        'cascada_se_f2_ventana_seg': int.tryParse(seF2Wc.text) ?? 30,
                         'cascada_se_f3_seg':         int.tryParse(seF3c.text) ?? 60,
                         'cascada_se_f4_seg':         int.tryParse(seF4c.text) ?? 90,
                         'cascada_fn_f2_seg':         int.tryParse(fnF2c.text) ?? 30,
@@ -1674,7 +1748,15 @@ extension CentralScreenGestion on _CentralScreenState {
                   await _cargarBloqueoInactividad(); // recarga todos los campos de config
                   if (dlgCtx.mounted) Navigator.pop(dlgCtx);
                 } catch (e) {
-                  setDlg(() { guardando = false; errorGuardando = 'Error al guardar: $e'; });
+                  // El servidor valida el orden de las fases y devuelve el motivo.
+                  final t = e.toString();
+                  final m = RegExp(r'cascada_invalida: ([^"\n]+)').firstMatch(t);
+                  setDlg(() {
+                    guardando = false;
+                    errorGuardando = m != null
+                        ? '⚠️ ${m.group(1)!.trim()}'
+                        : 'Error al guardar: $e';
+                  });
                 }
               },
               child: guardando
@@ -1687,7 +1769,7 @@ extension CentralScreenGestion on _CentralScreenState {
       ),
     );
 
-    seF2c.dispose(); seF3c.dispose(); seF4c.dispose();
+    seF2c.dispose(); seF2Wc.dispose(); seF3c.dispose(); seF4c.dispose();
     fnF2c.dispose(); fnToc.dispose(); fnF3c.dispose(); fnF4c.dispose();
   }
 

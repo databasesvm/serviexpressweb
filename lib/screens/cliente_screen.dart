@@ -20,6 +20,7 @@ import 'package:serviexpress_app/utils/paradero_objetivo.dart';
 import 'package:serviexpress_app/utils/textos_push.dart';
 import 'package:serviexpress_app/utils/alta_demanda.dart';
 import 'package:serviexpress_app/utils/iconos.dart';
+import 'package:serviexpress_app/utils/errores_servidor.dart';
 
 class ClienteScreen extends StatefulWidget {
   final Map<String, dynamic> usuario;
@@ -312,7 +313,7 @@ class _ClienteScreenState extends State<ClienteScreen>
                         if (mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
-                                content: Text('Error: $e'),
+                                content: Text(textoError(e)),
                                 backgroundColor: Colors.red),
                           );
                         }
@@ -1137,7 +1138,7 @@ class _ClienteScreenState extends State<ClienteScreen>
         if (context.mounted) {
           ScaffoldMessenger.of(
             context,
-          ).showSnackBar(SnackBar(content: Text('Error: $e')));
+          ).showSnackBar(SnackBar(content: Text(textoError(e))));
         }
       }
     }
@@ -1711,7 +1712,7 @@ class _ClienteScreenState extends State<ClienteScreen>
                         setDialogState(() => procesando = false);
                         if (ctx.mounted) {
                           ScaffoldMessenger.of(ctx).showSnackBar(
-                            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+                            SnackBar(content: Text(textoError(e)), backgroundColor: Colors.red),
                           );
                         }
                       }

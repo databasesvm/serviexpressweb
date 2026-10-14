@@ -2019,6 +2019,9 @@ extension CentralScreenFormularios on _CentralScreenState {
                             }
 
                             final ahora = DateTime.now().toUtc().toIso8601String();
+                            // Cascada FN en el servidor: la app no avisa ni programa
+                            // fases; el servidor elige al #1 del paradero en F2.
+                            final bool srvFnP = (await CascadaConfig.cargar()).fnServidor;
 
                             // 1. Cargar todos los móviles FN online
                             final movilesDataP = await Supabase.instance.client
@@ -2102,7 +2105,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                                 .toList();
 
                             // ── FASE 1 (T=0): heads-up exclusivo a MASTERS ──
-                            if (masterIdsP.isNotEmpty) {
+                            if (!srvFnP && masterIdsP.isNotEmpty) {
                               await MotorNotificaciones.dispararRafa(
                                 idsDestinos: masterIdsP,
                                 titulo: '👑 TURNO FN — MASTER',
@@ -2155,7 +2158,7 @@ extension CentralScreenFormularios on _CentralScreenState {
 
                             // ── FASE 3 (T+60s): zona 2km ─────────────────────
                             String? notifFase3P;
-                            if (fase3IdsP.isNotEmpty) {
+                            if (!srvFnP && fase3IdsP.isNotEmpty) {
                               notifFase3P = await MotorNotificaciones.programarMisilRetardado(
                                 externalIds: fase3IdsP,
                                 titulo: '🔵 TURNO FN CERCA',
@@ -2167,7 +2170,7 @@ extension CentralScreenFormularios on _CentralScreenState {
 
                             // ── FASE 4 (T+cascadaFnF4Seg): global ────────────
                             String? notifFase4P;
-                            if (fase4IdsP.isNotEmpty) {
+                            if (!srvFnP && fase4IdsP.isNotEmpty) {
                               notifFase4P = await MotorNotificaciones.programarMisilRetardado(
                                 externalIds: fase4IdsP,
                                 titulo: '🔵 TURNO FN SIN TOMAR',
@@ -2179,7 +2182,7 @@ extension CentralScreenFormularios on _CentralScreenState {
 
                             // ── FASE 4b (T+cascadaFnF4Seg): re-alerta Masters ──
                             String? notifFase4bP;
-                            if (masterIdsP.isNotEmpty) {
+                            if (!srvFnP && masterIdsP.isNotEmpty) {
                               notifFase4bP = await MotorNotificaciones.programarMisilRetardado(
                                 externalIds: masterIdsP,
                                 titulo: '🚨 FN SIN CUBRIR',
@@ -2206,7 +2209,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   content: Text(
-                                    'FN Paradero · Masters avisados, $paraderoMovilNombre se auto-asigna en 30s',
+                                    'FN Paradero · Masters avisados. Al terminar su tiempo se le ofrece al #1 del paradero ($paraderoMovilNombre)',
                                   ),
                                   backgroundColor: Colors.teal[700],
                                 ),
@@ -2227,6 +2230,9 @@ extension CentralScreenFormularios on _CentralScreenState {
                             // ══════════════════════════════════════════════════
                             final ahora =
                                 DateTime.now().toUtc().toIso8601String();
+                            // Cascada FN en el servidor: la app no avisa ni programa
+                            // fases; el servidor elige al más cercano en F2.
+                            final bool srvFnR = (await CascadaConfig.cargar()).fnServidor;
 
                             // 1. Cargar todos los móviles FN online
                             final movilesData = await Supabase.instance
@@ -2332,7 +2338,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                                 .toList();
 
                             // ── FASE 1 (T=0): heads-up exclusivo a MASTERS ──
-                            if (masterIds.isNotEmpty) {
+                            if (!srvFnR && masterIds.isNotEmpty) {
                               await MotorNotificaciones.dispararRafa(
                                 idsDestinos: masterIds,
                                 titulo: '👑 TURNO FN — MASTER',
@@ -2403,7 +2409,7 @@ extension CentralScreenFormularios on _CentralScreenState {
 
                             // ── FASE 3 (T+60s): zona 2km de la sede ─────────
                             String? notifFase3;
-                            if (fase3Ids.isNotEmpty) {
+                            if (!srvFnR && fase3Ids.isNotEmpty) {
                               notifFase3 = await MotorNotificaciones
                                   .programarMisilRetardado(
                                 externalIds: fase3Ids,
@@ -2417,7 +2423,7 @@ extension CentralScreenFormularios on _CentralScreenState {
 
                             // ── FASE 4 (T+cascadaFnF4Seg): global ───────────
                             String? notifFase4;
-                            if (fase4Ids.isNotEmpty) {
+                            if (!srvFnR && fase4Ids.isNotEmpty) {
                               notifFase4 = await MotorNotificaciones
                                   .programarMisilRetardado(
                                 externalIds: fase4Ids,
@@ -2431,7 +2437,7 @@ extension CentralScreenFormularios on _CentralScreenState {
 
                             // ── FASE 4b (T+cascadaFnF4Seg): re-alerta Masters ──
                             String? notifFase4b;
-                            if (masterIds.isNotEmpty) {
+                            if (!srvFnR && masterIds.isNotEmpty) {
                               notifFase4b = await MotorNotificaciones
                                   .programarMisilRetardado(
                                 externalIds: masterIds,

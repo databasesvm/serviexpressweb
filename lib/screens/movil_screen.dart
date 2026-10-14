@@ -34,6 +34,7 @@ import 'package:flutter/services.dart' show Clipboard, ClipboardData, FilteringT
 import 'package:serviexpress_app/utils/cascada_config.dart'; // CONFIG-CASCADA-EXT
 import 'package:serviexpress_app/utils/config_cache.dart'; // Caché de consultas repetidas (wallet)
 import 'package:serviexpress_app/utils/iconos.dart'; // Logo de WhatsApp
+import 'package:serviexpress_app/utils/errores_servidor.dart'; // Mensajes del candado de estados
 
 part 'movil_widgets.dart';
 
@@ -215,7 +216,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
   (String, String) _textoSancionLocal(int vez, DateTime? hasta) {
     return (
       '⚠️ Saliste del paradero',
-      'No aceptaste tu turno de #1 en 30 s. Puedes volver a registrarte en el paradero cuando quieras.',
+      'No aceptaste tu turno de #1 en ${_cfgCascada.seF2VentanaSeg} s. Puedes volver a registrarte en el paradero cuando quieras.',
     );
   }
 
@@ -314,6 +315,32 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
   // lo usa para saber si debe vigilar la geocerca, sin tener que
   // consultar la BD en cada tick de posición.
   String? _miParaderoCache;
+
+  // Tiempos de las fases de la cascada (Gestión de la central). El radar
+  // decide qué servicios ve cada móvil con estos valores, igual que el
+  // servidor. Se refrescan al abrir y en el chequeo de 30 s (caché 5 min).
+  CascadaConfig _cfgCascada = const CascadaConfig();
+  void _refrescarCfgCascada() {
+    CascadaConfig.cargar().then((c) {
+      if (mounted) _cfgCascada = c;
+    }).catchError((_) {});
+  }
+
+  /// El paradero del móvil SIEMPRE es el que dice el servidor. Se llama con
+  /// cada dato fresco de mi perfil (realtime, carga inicial y chequeo de
+  /// 30 s). Así, si me sacan de la fila desde otro lado (central, sanción,
+  /// reporte, servicio en 2º plano), el teléfono se entera y deja de
+  /// actuar como si siguiera en la fila.
+  void _sincronizarParaderoDesdeServidor(Map<String, dynamic> perfil) {
+    if (!perfil.containsKey('paradero_actual')) return;
+    final p = perfil['paradero_actual']?.toString();
+    final enServidor = (p == null || p.isEmpty) ? null : p;
+    if (enServidor == _miParaderoCache) return;
+    _miParaderoCache = enServidor;
+    // Mi paradero cambió: refrescar la fila para que la UI quede igual
+    // que el servidor (bandera de reportar, "Eres #N", etc.).
+    if (mounted) _recargarFila();
+  }
   // -------------------------------------------------
 
   final Map<int, bool> _alertasPrecaucion = {};
@@ -656,6 +683,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     _miParaderoCache = widget.usuario['paradero_actual']?.toString();
 
     _cargarZonasParadero(); // PARADEROS-E: carga geocercas desde BD
+    _refrescarCfgCascada(); // tiempos de fases configurados en Gestión
     _construirStreams(); // primera vez — luego se reconstruyen solos
     _iniciarVigilanteDeConexion();
     // Fix #3: escalonar operaciones de red del arranque para no saturar
@@ -1012,7 +1040,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+            SnackBar(content: Text(textoError(e)), backgroundColor: Colors.red));
       }
     }
   }
@@ -1305,7 +1333,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+            SnackBar(content: Text(textoError(e)), backgroundColor: Colors.red));
       }
     }
   }
@@ -2057,6 +2085,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         .then((data) {
       if (data != null) {
         _cacheMiPerfil = data;
+        _sincronizarParaderoDesdeServidor(data);
         if (!_ctrlMiPerfil.isClosed) _ctrlMiPerfil.add(data);
       }
     }).catchError((_) {});
@@ -2071,6 +2100,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       (data) {
         if (data.isNotEmpty) {
           _cacheMiPerfil = data.first;
+          _sincronizarParaderoDesdeServidor(data.first);
           if (!_ctrlMiPerfil.isClosed) _ctrlMiPerfil.add(data.first);
           // GPS FORZADO (reporte de ausencia o la central): el servidor marca
           // gps_forzado_at y este teléfono manda su ubicación al instante,
@@ -2386,11 +2416,15 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
           final myUser = await Supabase.instance.client
               .from('usuarios')
               .select('suspendido, en_linea, rechazos_paradero_hoy, '
-                  'fecha_rechazos, suspendido_hasta')
+                  'fecha_rechazos, suspendido_hasta, paradero_actual')
               .eq('id', widget.usuario['id'])
               .maybeSingle()
               .timeout(const Duration(seconds: 5));
           if (!mounted || myUser == null) return;
+          // Respaldo por si el realtime se cayó: el paradero siempre es el
+          // que dice el servidor.
+          _sincronizarParaderoDesdeServidor(myUser);
+          _refrescarCfgCascada(); // tiempos de fases (caché de 5 min)
 
           // Respaldo del banner de sanción: si subió el contador de rechazos
           // de hoy (hora Colombia) y el push no llegó, mostrar el banner igual.
@@ -2861,7 +2895,13 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         return;
       }
 
-      final hora = DateTime.now().hour;
+      // Hora Colombia (UTC−5) según el reloj del servidor, no el del teléfono
+      // — si el teléfono tiene la hora corrida, elegiría el paradero
+      // nocturno/diurno equivocado.
+      await HoraServidor.sincronizar();
+      final hora = HoraServidor.ahoraUtc()
+          .subtract(const Duration(hours: 5))
+          .hour;
       String? nuevoParadero;
 
       // PARADEROS-E: evaluación dinámica desde BD (reemplaza hardcoding por nombre)
@@ -3511,10 +3551,16 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       ));
     } catch (e) {
       if (mounted) {
+        // El servidor valida con la fila real: quien reporta y el reportado
+        // deben estar en ese paradero en este momento.
+        final err = e.toString();
+        final String texto = err.contains('no_estas_en_paradero')
+            ? 'Solo puedes reportar si estás en la fila de $paradero.'
+            : err.contains('reportado_no_esta_en_fila')
+                ? '$reportadoNombre ya no está en la fila de $paradero.'
+                : 'Error al procesar reporte: $e';
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text('Error al procesar reporte: $e'),
-              backgroundColor: Colors.red),
+          SnackBar(content: Text(texto), backgroundColor: Colors.red),
         );
       }
     }
@@ -4104,7 +4150,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       if (mounted)
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Error: $e')));
+        ).showSnackBar(SnackBar(content: Text(textoError(e))));
     } finally {
       setState(() => _procesando = false);
     }
@@ -4317,7 +4363,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     } catch (e) {
       if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(content: Text(textoError(e)), backgroundColor: Colors.red),
         );
     } finally {
       if (mounted) setState(() => _procesando = false);
@@ -7608,7 +7654,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                         if (ctx.mounted) {
                           ScaffoldMessenger.of(ctx).showSnackBar(
                             SnackBar(
-                                content: Text('Error: $e'),
+                                content: Text(textoError(e)),
                                 backgroundColor: Colors.red),
                           );
                         }
@@ -7778,7 +7824,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                         if (ctx.mounted) {
                           ScaffoldMessenger.of(ctx).showSnackBar(
                             SnackBar(
-                                content: Text('Error: $e'),
+                                content: Text(textoError(e)),
                                 backgroundColor: Colors.red),
                           );
                         }
@@ -7851,11 +7897,15 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     // Resumen para el encabezado colapsado: cuántos en total, y mi
     // propia posición si estoy en una de las filas.
     String miResumen = '';
+    // Mi paradero según la fila EN VIVO del servidor (no la caché del
+    // teléfono). Decide quién ve la bandera de reportar.
+    String? miParaderoVivo;
     final miIndexGlobal = enFila.indexWhere(
       (u) => u['id'].toString() == widget.usuario['id'].toString(),
     );
     if (miIndexGlobal != -1) {
       final miParadero = enFila[miIndexGlobal]['paradero_actual'];
+      miParaderoVivo = miParadero?.toString();
       final miFilaLocal =
           enFila.where((u) => u['paradero_actual'] == miParadero).toList();
       final miPos = miFilaLocal.indexWhere(
@@ -8085,9 +8135,11 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                                       fontSize: 10),
                                                 ),
                                               ),
-                                            // Botón de reporte: solo si NO soy yo y estoy en el MISMO paradero
+                                            // Botón de reporte: solo si NO soy yo y estoy en el MISMO
+                                            // paradero según la fila en vivo del servidor.
                                             if (!soyYo &&
-                                                _miParaderoCache ==
+                                                miParaderoVivo != null &&
+                                                miParaderoVivo ==
                                                     nombreParadero)
                                               GestureDetector(
                                                 onTap: () =>
@@ -12785,11 +12837,26 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
 
       if (confirmar != true || !mounted) return;
 
-      // 5. Guardar solicitud en BD
+      // 5. Guardar solicitud — el servidor valida que el servicio sea mío,
+      //    siga en curso, no haya otra pendiente y el receptor tenga cupo.
       final nuevoId = seleccionado['id'] as int;
-      await Supabase.instance.client.from('servicios').update({
-        'transferencia_a_movil_id': nuevoId.toString(),
-      }).eq('id', servicio['id']);
+      final res = await Supabase.instance.client.rpc(
+        'fn_transferencia_solicitar',
+        params: {
+          'p_servicio': servicio['id'],
+          'p_destino': nuevoId,
+          'p_yo': widget.usuario['id'], // respaldo si la cuenta no migró a Auth
+        },
+      );
+      if (res?.toString() != 'ok') {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(_textoMotivoTransferencia(res?.toString())),
+            backgroundColor: Colors.orange[800],
+          ));
+        }
+        return;
+      }
 
       // 6. Notificar al receptor
       await MotorNotificaciones.dispararMisil(
@@ -12824,6 +12891,22 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       if (mounted) setState(() => _procesando = false);
     }
   }
+
+  // Texto claro para los motivos que devuelve el servidor en
+  // transferencias y reasignaciones.
+  String _textoMotivoTransferencia(String? motivo) => switch (motivo) {
+        'no_es_tuyo' => 'Este servicio ya no está asignado a ti.',
+        'no_en_curso' => 'El servicio ya no está en curso.',
+        'ya_pendiente' => 'Ya hay una transferencia pendiente para este servicio.',
+        'ya_no_vigente' => 'Esta transferencia ya no está vigente.',
+        'destino_sin_cupo' => 'Ese móvil no tiene cupo según su rango.',
+        'sin_cupo' => 'No puedes aceptarla: alcanzaste tu límite de servicios.',
+        'destino_desconectado' => 'Ese móvil ya no está en línea.',
+        'destino_suspendido' => 'Ese móvil está suspendido.',
+        'solo_master' => 'Solo un Master puede reasignar.',
+        'no_existe' => 'El servicio ya no existe.',
+        _ => 'No se pudo completar. Intenta de nuevo.',
+      };
 
   // Revisa si algún servicio tiene transferencia_a_movil_id apuntando a este móvil.
   // Se llama cada vez que llegan datos del stream.
@@ -12900,18 +12983,47 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       ),
     );
 
-    if (decision == true) {
-      // Aceptar: asignarme el servicio + guardar auditoría
-      await Supabase.instance.client.from('servicios').update({
-        'movil_id': int.parse(widget.usuario['id'].toString()),
-        'estado': 'en_ruta_origen',
-        'accepted_at': DateTime.now().toUtc().toIso8601String(),
-        'transferencia_a_movil_id': null,
-        'transferido': true,
-        'transferido_de_movil_id': servicio['movil_id']?.toString(),
-        'transferido_at': DateTime.now().toUtc().toIso8601String(),
-      }).eq('id', servicio['id']);
+    // El servidor decide en una sola operación: solo si la transferencia
+    // sigue vigente y, al aceptar, si tengo cupo según mi rango.
+    String resultado = '';
+    try {
+      final res = await Supabase.instance.client.rpc(
+        'fn_transferencia_responder',
+        params: {
+          'p_servicio': servicio['id'],
+          'p_acepta': decision == true,
+          'p_yo': widget.usuario['id'], // respaldo si la cuenta no migró a Auth
+        },
+      );
+      resultado = res?.toString() ?? '';
+    } catch (e) {
+      resultado = 'error';
+    }
 
+    if (resultado != 'aceptada' && resultado != 'rechazada') {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(_textoMotivoTransferencia(resultado)),
+          backgroundColor: Colors.orange[800],
+        ));
+      }
+      // Sin cupo: el servidor cerró la solicitud — avisar al que la envió.
+      if (resultado == 'sin_cupo' && deMovilId != null) {
+        await MotorNotificaciones.dispararMisil(
+          idDestino: deMovilId.toString(),
+          titulo: '❌ Transferencia no realizada',
+          mensaje: '${movilLabel(widget.usuario)} no tiene cupo para tu servicio #${servicio['id']}',
+          urgente: false,
+          sonido: Sonidos.transferenciaMovil,
+          canalAndroidId: MotorNotificaciones.canalTransferenciaId,
+          data: {'tipo': 'transferencia_movil'},
+        );
+      }
+      if (mounted) setState(() => _dialogoTransferenciaActivo = false);
+      return;
+    }
+
+    if (resultado == 'aceptada') {
       // Avisar al que lo cedió
       if (deMovilId != null) {
         await MotorNotificaciones.dispararMisil(
@@ -12926,14 +13038,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         );
       }
     } else {
-      // Rechazar: limpiar campo + guardar auditoría de rechazo
-      await Supabase.instance.client.from('servicios').update({
-        'transferencia_a_movil_id': null,
-        'transferencia_rechazada': true,
-        'transferencia_rechazada_por': widget.usuario['id'].toString(),
-        'transferencia_rechazada_at': DateTime.now().toUtc().toIso8601String(),
-      }).eq('id', servicio['id']);
-
+      // Rechazada (el servidor ya limpió la solicitud y guardó la auditoría).
       // Avisar al que lo cedió
       if (deMovilId != null) {
         await MotorNotificaciones.dispararMisil(
@@ -13089,13 +13194,26 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
 
       if (confirmar != true || !mounted) return;
 
-      // 5. Actualizar BD
+      // 5. Reasignar en el servidor — valida que sea Master, dueño del
+      //    servicio, que siga en curso y que el receptor tenga cupo.
       final nuevoId = seleccionado['id'] as int;
-      await Supabase.instance.client.from('servicios').update({
-        'movil_id': nuevoId,
-        'estado': 'en_ruta_origen',
-        'accepted_at': DateTime.now().toUtc().toIso8601String(),
-      }).eq('id', servicio['id']);
+      final res = await Supabase.instance.client.rpc(
+        'fn_reasignar_servicio',
+        params: {
+          'p_servicio': servicio['id'],
+          'p_destino': nuevoId,
+          'p_yo': widget.usuario['id'], // respaldo si la cuenta no migró a Auth
+        },
+      );
+      if (res?.toString() != 'ok') {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(_textoMotivoTransferencia(res?.toString())),
+            backgroundColor: Colors.orange[800],
+          ));
+        }
+        return;
+      }
 
       // 6. Headsup al nuevo móvil
       await MotorNotificaciones.dispararServicioDirecto(
@@ -13192,6 +13310,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         'onesignal_5m': null,
         // FN: reinicio completo de escalamiento
         if (esFnLiberar) 'fn_radar_t0': ahoraLibera,
+        // Vuelve a la cascada abierta (si venía pre-asignado quedaba 'directo_presel')
+        if (esFnLiberar) 'fn_asignacion_tipo': 'radar',
         if (esFnLiberar) 'fn_fase2_movil_id': null,
         if (esFnLiberar) 'fn_fase2_at': null,
         if (esFnLiberar) 'fn_fase3_at': null,
@@ -13211,7 +13331,12 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
 
       final servicioId = servicio['id'] as int;
 
-      if (esFnLiberar) {
+      // Cascada FN en el servidor: el update de arriba ya reinició fn_radar_t0;
+      // el servidor avisa y asigna en cada fase. La app no programa nada.
+      final bool fnEnServidor =
+          esFnLiberar && (await CascadaConfig.cargar()).fnServidor;
+
+      if (esFnLiberar && !fnEnServidor) {
         // ══════════════════════════════════════════════════════════════════
         // CASCADA FN — reinicio limpio, 3 fases separadas de Serviexpress.
         // fn_radar_t0 ya fue actualizado a NOW() en el update anterior.
@@ -13387,7 +13512,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
             if (notifFase4Lib != null) 'fn_notif_fase4': notifFase4Lib,
           }).eq('id', servicioId);
         }
-      } else {
+      } else if (!esFnLiberar) {
         // ══════════════════════════════════════════════════════════════════
         // CASCADA SERVIEXPRESS NORMAL — sin cambios
         // T=0: Masters, T=30s: paradero #1, T=60s: zona 1km, T=90s: todos
@@ -13477,7 +13602,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(content: Text(textoError(e)), backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -13598,7 +13723,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(content: Text(textoError(e)), backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -14112,7 +14237,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                         setDs(() => _subiendo = false);
                         if (mounted)
                           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                            content: Text('Error: $e'),
+                            content: Text(textoError(e)),
                             backgroundColor: Colors.red,
                             behavior: SnackBarBehavior.floating,
                           ));
@@ -14760,7 +14885,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(content: Text(textoError(e)), backgroundColor: Colors.red),
         );
       }
     }
@@ -14826,7 +14951,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         if (context.mounted)
           ScaffoldMessenger.of(
             context,
-          ).showSnackBar(SnackBar(content: Text('Error: $e')));
+          ).showSnackBar(SnackBar(content: Text(textoError(e))));
       }
     }
   }
@@ -15675,21 +15800,30 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                                                   .inSeconds
                                                               : 0;
 
-                                                          if (segFn < 30) {
+                                                          // Tiempos configurados en Gestión (antes 30/60/90 fijos)
+                                                          if (segFn <
+                                                              _cfgCascada.fnF2Seg) {
                                                             // FASE 1 (0-30s): exclusivo de MASTER
                                                             // Masters ven la card con detalles completos y
                                                             // botón de aceptar. Nadie más puede ver el servicio.
                                                             puedeVer = esMaster;
                                                           } else if (segFn <
-                                                              60) {
-                                                            // FASE 2 (30-60s): el más cercano es auto-asignado
-                                                            // por pg_cron (fn-auto-asignar-fase2). Los Masters
-                                                            // siguen viéndolo como fallback mientras llega el cron.
-                                                            // El fn_fase2_movil_id NO ve la card — ya está siendo
-                                                            // asignado automáticamente sin necesidad de aceptar.
-                                                            puedeVer = esMaster;
+                                                              _cfgCascada.fnF3Seg) {
+                                                            // FASE 2: OFERTA (no se auto-asigna). El elegido
+                                                            // (más cercano o #1 del paradero = fn_fase2_movil_id)
+                                                            // ve la tarjeta y decide si acepta; si no, sigue
+                                                            // F3/F4 sin sanción. Los Masters la siguen viendo.
+                                                            final String f2Elegido =
+                                                                s['fn_fase2_movil_id']
+                                                                        ?.toString() ??
+                                                                    '';
+                                                            puedeVer = esMaster ||
+                                                                (f2Elegido.isNotEmpty &&
+                                                                    f2Elegido ==
+                                                                        widget.usuario['id']
+                                                                            .toString());
                                                           } else if (segFn <
-                                                              90) {
+                                                              _cfgCascada.fnF4Seg) {
                                                             // FASE 3 (60-90s): zona 2km alrededor de la sede.
                                                             // Muestra card con botón ACEPTAR a los no-masters cercanos.
                                                             if (esMaster) {
@@ -15808,11 +15942,12 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                                         // F2 = turno del #1 paradero (exclusivo).
                                                         // F3 = turno de no-Masters en 1km (exclusivo).
                                                         if (esMaster) {
-                                                          if (segundos < 30) {
+                                                          if (segundos <
+                                                              _cfgCascada.seF2Seg) {
                                                             // F1: Masters ven y reciben push
                                                             puedeVer = true;
                                                           } else if (segundos <
-                                                              60) {
+                                                              _cfgCascada.seF3Seg) {
                                                             // F2: solo el #1 del paradero ve la tarjeta.
                                                             // Master no ve a menos que no haya paradero activo.
                                                             final String ofrecidoF2 =
@@ -15823,7 +15958,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                                             puedeVer =
                                                                 ofrecidoF2.isEmpty;
                                                           } else if (segundos <
-                                                              90) {
+                                                              _cfgCascada.seF4Seg) {
                                                             // F3: exclusivo de no-Masters en 1km. Master no ve.
                                                             puedeVer = false;
                                                           } else {
@@ -15831,14 +15966,15 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                                             puedeVer = true;
                                                           }
                                                         }
-                                                        // 5. EMBUDO DE TIEMPO — 4 FASES DE 30s (total 2 min)
+                                                        // 5. EMBUDO DE TIEMPO — 4 FASES (tiempos de Gestión)
                                                         else {
-                                                          if (segundos < 30) {
+                                                          if (segundos <
+                                                              _cfgCascada.seF2Seg) {
                                                             // FASE 1 (0–29s): exclusivo del Master.
                                                             // Nadie más lo ve. Masters tienen 30s para aceptar.
                                                             puedeVer = false;
                                                           } else if (segundos <
-                                                              60) {
+                                                              _cfgCascada.seF3Seg) {
                                                             // FASE 2 (30–59s): Solo el #1 del paradero ve la card.
                                                             // fn-auto-asignar-fase2 ya guardó su ID en
                                                             // paradero_ofrecido_id. Acepta voluntariamente
@@ -15857,7 +15993,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                                                             'id']
                                                                         .toString();
                                                           } else if (segundos <
-                                                              90) {
+                                                              _cfgCascada.seF4Seg) {
                                                             // FASE 3 (60–89s): Zona 1km desde el origen.
                                                             // Excluye al #1 penalizado (paradero_auto_movil_id).
                                                             final String
@@ -16742,6 +16878,13 @@ class _BarraCascadaSEState extends State<_BarraCascadaSE> {
   Timer? _timer;
   int _tick = 0; // fuerza rebuild cada segundo
   int _f2Seg = 30, _f3Seg = 60, _f4Seg = 90;
+  int _f2VentanaSeg = 30; // tiempo del #1 para aceptar (Gestión)
+
+  // 125 → "2:05"
+  static String _mmss(int seg) {
+    final s = seg < 0 ? 0 : seg;
+    return '${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')}';
+  }
 
   @override
   void initState() {
@@ -16764,6 +16907,7 @@ class _BarraCascadaSEState extends State<_BarraCascadaSE> {
       if (mounted) {
         setState(() {
           _f2Seg = c.seF2Seg;
+          _f2VentanaSeg = c.seF2VentanaSeg;
           _f3Seg = c.seF3Seg;
           _f4Seg = c.seF4Seg;
         });
@@ -16808,9 +16952,12 @@ class _BarraCascadaSEState extends State<_BarraCascadaSE> {
             ? '👑 Sé el primero — ${r}s'
             : '⏱️ Disponible — ${r}s';
       } else {
-        // Push ya llegó (o está llegando) — countdown de tu turno en paradero
-        final int restantes = (_f3Seg - elapsed).clamp(0, _f2Seg);
-        progreso = _f2Seg > 0 ? restantes / _f2Seg : 0.0;
+        // Push ya llegó — cuenta regresiva de TU turno: dura el "tiempo del
+        // #1" de Gestión y termina justo cuando el servidor expulsa
+        // (T0 + tiempo Master + tiempo del #1).
+        final int finTurno = _f2Seg + _f2VentanaSeg;
+        final int restantes = (finTurno - elapsed).clamp(0, _f2VentanaSeg);
+        progreso = _f2VentanaSeg > 0 ? restantes / _f2VentanaSeg : 0.0;
         barColor = Colors.red[700]!;
         // Solo el verdadero #1 del paradero se arriesga a sanción. El #2, #3…
         // (varios servicios a la vez) y el "más cercano" no se sancionan.
@@ -16850,7 +16997,7 @@ class _BarraCascadaSEState extends State<_BarraCascadaSE> {
       final int transcurrido = elapsed - _f4Seg;
       progreso = 0.0;
       barColor = Colors.grey[500]!;
-      mensaje = 'En espera hace ${transcurrido}s';
+      mensaje = 'En espera hace ${_mmss(transcurrido)}'; // desde que empezó F4
     }
 
     return Padding(

@@ -312,7 +312,7 @@ mixin _DispatchMixin on State<LocalScreen> {
                         if (context.mounted)
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
-                              content: Text('Error: $e'),
+                              content: Text(textoError(e)),
                               backgroundColor: Colors.red,
                             ),
                           );

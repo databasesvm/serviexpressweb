@@ -10,6 +10,8 @@ import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:serviexpress_app/utils/sonido_manager.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart';
 import 'package:serviexpress_app/utils/iconos.dart';
+import 'package:serviexpress_app/utils/errores_servidor.dart';
+import 'package:serviexpress_app/utils/hora_servidor.dart';
 import 'package:serviexpress_app/screens/login_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -68,6 +70,7 @@ class _SedeFnScreenState extends State<SedeFnScreen>
   @override
   void initState() {
     super.initState();
+    HoraServidor.sincronizar(); // reloj alineado (regla de 5 min para cancelar)
     _tab = TabController(length: 3, vsync: this, animationDuration: Duration.zero);
     // Activa la carga del historial solo cuando el usuario toca esa pestaña (tab 2)
     _tab.addListener(() {
@@ -1035,6 +1038,10 @@ class _FormularioTabState extends State<_FormularioTab> {
     double? sLng,
   }) async {
     try {
+      // Cascada FN en el servidor: el INSERT ya dejó fn_radar_t0 +
+      // fn_asignacion_tipo='radar'; el servidor avisa y asigna en cada fase.
+      if ((await CascadaConfig.cargar()).fnServidor) return;
+
       // 1. Móviles FN online
       final movilesData = await _db
           .from('usuarios')
@@ -2443,6 +2450,24 @@ class _ActivosTabState extends State<_ActivosTab> {
         return;
       }
 
+      // Cascada FN en el servidor: solo pasar a pendiente y marcar el radar.
+      if ((await CascadaConfig.cargar()).fnServidor) {
+        final consecSrv = s['fn_consecutivo']?.toString() ?? '#${s['id']}';
+        await _db.from('servicios').update({
+          'estado': 'pendiente',
+          'fn_radar_t0': DateTime.now().toUtc().toIso8601String(),
+          'fn_asignacion_tipo': 'radar',
+        }).eq('id', s['id']);
+        await MotorNotificaciones.dispararACentral(
+          titulo: '✅ Cotización aprobada — $consecSrv',
+          mensaje: '${_labelSede(s)} aprobó. Enviando al radar FN.',
+          urgente: false,
+          sonido: Sonidos.fnCotizacion,
+          canalAndroidId: MotorNotificaciones.canalFnCotizacionId,
+        );
+        return;
+      }
+
       // 1. Móviles FN disponibles en línea
       final movilesRaw = await _db
           .from('usuarios')
@@ -3006,8 +3031,9 @@ class _ActivosTabState extends State<_ActivosTab> {
     final raw = s['updated_at']?.toString();
     if (raw == null) return false;
     try {
-      final dt = DateTime.parse(raw).toLocal();
-      return DateTime.now().difference(dt).inMinutes < 5;
+      // Reloj alineado con el servidor (updated_at lo pone el servidor).
+      final dt = DateTime.parse(raw).toUtc();
+      return HoraServidor.ahoraUtc().difference(dt).inMinutes < 5;
     } catch (_) {
       return false;
     }
@@ -3901,7 +3927,7 @@ class _HistorialTabState extends State<_HistorialTab> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error: $e')));
+            .showSnackBar(SnackBar(content: Text(textoError(e))));
       }
     } finally {
       if (mounted) setState(() => _cargando = false);

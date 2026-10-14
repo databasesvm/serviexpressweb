@@ -6,10 +6,12 @@ Al liberar el servicio se reinicia el servicio y las notificaciones
 
 Con los servicios de FN La Cascada es asi:
 T=0: Push a Masters (aceptan voluntariamente). 
-T+30s: Verifica si el móvil mas cercano está libre, y lo auto-asigna. Si está ocupado, lo salta — el servicio queda para FASE 3/4
+T+30s: OFERTA (nunca se auto-asigna) al móvil no-Master más cercano a la sede (o al #1 del paradero si la central eligió modo paradero). Recibe el aviso y ve la tarjeta; tiene el "tiempo para aceptar" de Gestión. Si no lo acepta pasa a FASE 3/4, SIN sanción.
 T+60s: Push a no-Masters dentro de 2km (excl. fase2)
 T+90s: Push al resto global
-Al auto-asignar, el pg_cron cancela fn_notif_fase3 y fn_notif_fase4 para que no lleguen notificaciones innecesarias
+
+REGLA GENERAL: ningún servicio (SE, FN ni paradero) se auto-asigna. Siempre es una oferta que el móvil acepta voluntariamente. La única excepción es la asignación directa que hace a propósito la central, el local o la sede.
+Los tiempos de todas las fases se configuran en Gestión (central).
 
 
 Con los servicios SE Debe funcionar asi:

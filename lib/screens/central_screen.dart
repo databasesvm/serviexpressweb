@@ -87,7 +87,9 @@ class _CentralScreenState extends State<CentralScreen>
 
   // ── CONFIG-CASCADA: tiempos de cascada configurables desde la UI ─────────
   // SE offsets desde T=0
-  int _cascadaSeF2Seg = 30; // auto-asigna #1 paradero (edge fn)
+  int _cascadaSeF2Seg = 30; // tiempo exclusivo Masters = inicio de F2
+  int _cascadaSeF2VentanaSeg = 30; // tiempo del #1 para aceptar (F2)
+  bool _fnCascadaServidor = false; // interruptor: cascada FN la maneja el servidor
   int _cascadaSeF3Seg = 60; // push radio 1km (misil OneSignal)
   int _cascadaSeF4Seg = 90; // push todos disponibles (misil OneSignal)
   // FN offsets desde T=0
@@ -615,13 +617,15 @@ class _CentralScreenState extends State<CentralScreen>
           .from('config_sistema')
           .select(
             'bloqueo_inactividad_activo, servicios_consecutivo_offset, '
-            'cascada_se_f2_seg, cascada_se_f3_seg, cascada_se_f4_seg, '
+            'cascada_se_f2_seg, cascada_se_f2_ventana_seg, cascada_se_f3_seg, cascada_se_f4_seg, '
             'cascada_fn_f2_seg, cascada_fn_f2_timeout_seg, '
-            'cascada_fn_f3_seg, cascada_fn_f4_seg',
+            'cascada_fn_f3_seg, cascada_fn_f4_seg, fn_cascada_servidor',
           )
           .eq('id', 1)
           .single();
       if (mounted) setState(() {
+        _cascadaSeF2VentanaSeg       = (row['cascada_se_f2_ventana_seg']  as int?) ?? 30;
+        _fnCascadaServidor           = row['fn_cascada_servidor'] == true;
         _bloqueoInactividadActivo    = row['bloqueo_inactividad_activo'] as bool? ?? false;
         _serviciosConsecutivoOffset  = (row['servicios_consecutivo_offset'] as int?) ?? 0;
         _cascadaSeF2Seg              = (row['cascada_se_f2_seg']          as int?) ?? 30;
@@ -637,6 +641,27 @@ class _CentralScreenState extends State<CentralScreen>
 
   /// Número de orden visible = id - offset (arranca desde 1 tras cada reset)
   int _consec(int id) => (id - _serviciosConsecutivoOffset).clamp(1, 999999);
+
+  // Interruptor "Cascada FN en el servidor". Encenderlo solo cuando TODOS los
+  // equipos (móviles, sedes, central) tengan la versión nueva: las apps viejas
+  // siguen programando sus propios avisos y llegarían dobles.
+  Future<void> _toggleFnCascadaServidor(bool nuevoValor) async {
+    setState(() => _fnCascadaServidor = nuevoValor);
+    try {
+      await Supabase.instance.client
+          .from('config_sistema')
+          .update({'fn_cascada_servidor': nuevoValor})
+          .eq('id', 1);
+      CascadaConfig.invalidar(); // esta central usa el modo nuevo al instante
+    } catch (e) {
+      if (mounted) setState(() => _fnCascadaServidor = !nuevoValor);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al actualizar: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
 
   Future<void> _toggleBloqueoInactividad(bool nuevoValor) async {
     setState(() => _bloqueoInactividadActivo = nuevoValor);

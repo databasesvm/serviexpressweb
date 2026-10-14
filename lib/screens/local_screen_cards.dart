@@ -299,7 +299,7 @@ mixin _CardsMixin on State<LocalScreen> {
                         if (context.mounted) {
                           ScaffoldMessenger.of(
                             context,
-                          ).showSnackBar(SnackBar(content: Text('Error: $e')));
+                          ).showSnackBar(SnackBar(content: Text(textoError(e))));
                         }
                       }
                     },

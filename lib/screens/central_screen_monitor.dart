@@ -1035,6 +1035,21 @@ extension CentralScreenMonitor on _CentralScreenState {
           () => _asignarMotoManual(context, servicio)));
     }
 
+    // 🔄 REINICIAR TURNO (FN) — solo con la cascada FN en el servidor y en F4.
+    // (En SE el botón está en la línea de fase de la tarjeta.)
+    if (estado == 'pendiente' &&
+        servicio['tipo_fn'] == true &&
+        servicio['movil_id'] == null &&
+        _fnCascadaServidor) {
+      final t0 = DateTime.tryParse(servicio['fn_radar_t0']?.toString() ?? '');
+      if (t0 != null &&
+          HoraServidor.ahoraUtc().difference(t0.toUtc()).inSeconds >=
+              _cascadaFnF4Seg) {
+        btns.add(_botonCard('REINICIAR TURNO', Icons.refresh,
+            Colors.purple[700]!, () => _reiniciarTurno(servicio)));
+      }
+    }
+
     // 🔄 REASIGNAR
     if (estado == 'programado') {
       btns.add(_botonCard('REASIGNAR', Icons.motorcycle, Colors.blue[600]!,
@@ -1541,6 +1556,58 @@ extension CentralScreenMonitor on _CentralScreenState {
           .eq('id', servicio['id']);
       _seleccionadoId.value = null;
     }
+  }
+
+  // 🔄 REINICIAR TURNO — servicio SE en F4 sin móvil: la cascada se repite
+  // completa (F1 Masters → F2 #1 paradero → F3 1 km → F4 todos). El servidor
+  // valida que sea la central y que el servicio siga pendiente y en F4.
+  Future<void> _reiniciarTurno(Map<String, dynamic> servicio) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('🔄 Reiniciar Turno'),
+        content: Text(
+          'El servicio #${servicio['id']} vuelve a empezar la cascada desde F1 '
+          '(Masters → #1 del paradero → 1 km → todos).',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('CANCELAR'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.purple[700], foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('REINICIAR TURNO',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    String res;
+    try {
+      final r = await Supabase.instance.client
+          .rpc('fn_reiniciar_turno', params: {'p_servicio': servicio['id']});
+      res = r?.toString() ?? '';
+    } catch (e) {
+      res = 'error';
+    }
+    if (!mounted) return;
+    final String texto = switch (res) {
+      'ok' => '🔄 Turno reiniciado — la cascada empieza de nuevo',
+      'no_en_f4' => 'El servicio todavía no está en F4.',
+      'ya_no_pendiente' => 'El servicio ya fue tomado o cerrado.',
+      'no_autorizado' => 'Solo la central puede reiniciar el turno.',
+      'fn_sin_servidor' =>
+        'Para FN, primero activa "Cascada FN en el servidor" en Gestión.',
+      _ => 'No se pudo reiniciar el turno. Intenta de nuevo.',
+    };
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(texto),
+      backgroundColor: res == 'ok' ? Colors.purple[700] : Colors.orange[800],
+    ));
   }
 
   Future<void> _reactivarServicio(Map<String, dynamic> servicio) async {
@@ -2339,6 +2406,7 @@ extension CentralScreenMonitor on _CentralScreenState {
                             );
                             return m.isEmpty ? null : m;
                           },
+                          onReiniciarTurno: () => _reiniciarTurno(servicio),
                         ),
                       ],
                       // ── FILA 3: sub-estado en curso ──────────────────────────
@@ -2986,7 +3054,13 @@ extension CentralScreenMonitor on _CentralScreenState {
 class _FaseCascadaCentral extends StatefulWidget {
   final Map<String, dynamic> servicio;
   final Map<String, dynamic>? Function(String? id) movilPorId;
-  const _FaseCascadaCentral({required this.servicio, required this.movilPorId});
+  /// Botón "Reiniciar Turno" — solo se muestra en F4.
+  final VoidCallback? onReiniciarTurno;
+  const _FaseCascadaCentral({
+    required this.servicio,
+    required this.movilPorId,
+    this.onReiniciarTurno,
+  });
 
   @override
   State<_FaseCascadaCentral> createState() => _FaseCascadaCentralState();
@@ -3092,17 +3166,37 @@ class _FaseCascadaCentralState extends State<_FaseCascadaCentral> {
       return _linea(Colors.orange[800]!, '🟠 F3 · móviles a 1 km — quedan ${_mmss(f4 - e)}');
     }
 
-    // F4: abierto a todos. Se cancela solo: PAP a los 20 min de creado,
-    // los demás a los 10 min sin móvil.
-    final esPap = s['es_punto_a_punto'] == true;
-    final limite = esPap
-        ? created.add(const Duration(minutes: 20))
-        : (lib ?? created).add(const Duration(minutes: 10));
-    final restan = limite.difference(HoraServidor.ahoraUtc()).inSeconds;
-    return _linea(
+    // F4: abierto a todos. Ya no se cancela solo: queda hasta que un móvil
+    // lo acepte o la central lo cancele. La central puede reiniciar el turno.
+    final linea = _linea(
       Colors.purple[700]!,
-      '🟣 F4 · todos — lleva ${_mmss(e - f4)}'
-      '${restan > 0 ? ' · se cancela solo en ${_mmss(restan)}' : ''}',
+      '🟣 F4 · todos — lleva ${_mmss(e - f4)}',
+    );
+    if (widget.onReiniciarTurno == null) return linea;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Flexible(child: linea),
+        const SizedBox(width: 6),
+        InkWell(
+          onTap: widget.onReiniciarTurno,
+          borderRadius: BorderRadius.circular(4),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: Colors.purple[700],
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: const Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.refresh, size: 11, color: Colors.white),
+              SizedBox(width: 3),
+              Text('Reiniciar Turno',
+                  style: TextStyle(
+                      fontSize: 9, fontWeight: FontWeight.bold, color: Colors.white)),
+            ]),
+          ),
+        ),
+      ],
     );
   }
 }

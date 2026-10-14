@@ -26,6 +26,7 @@ import 'package:serviexpress_app/utils/textos_push.dart'; // Textos únicos de p
 import 'package:serviexpress_app/utils/ubicacion_cliente.dart'; // Ubicación GPS del cliente
 import 'package:serviexpress_app/utils/alta_demanda.dart'; // Franja de alta demanda
 import 'package:serviexpress_app/utils/iconos.dart'; // Logo de WhatsApp
+import 'package:serviexpress_app/utils/errores_servidor.dart'; // Mensajes del candado de estados
 
 part 'local_screen_dispatch.dart';
 part 'local_screen_cards.dart';
@@ -430,7 +431,7 @@ class _LocalScreenState extends State<LocalScreen>
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+            SnackBar(content: Text(textoError(e)), backgroundColor: Colors.red));
       }
     }
   }
@@ -929,7 +930,7 @@ class _LocalScreenState extends State<LocalScreen>
                                       if (mounted) {
                                         ScaffoldMessenger.of(context).showSnackBar(
                                             SnackBar(
-                                                content: Text('Error: $e'),
+                                                content: Text(textoError(e)),
                                                 backgroundColor: Colors.red));
                                       }
                                     }
@@ -1249,7 +1250,7 @@ class _LocalScreenState extends State<LocalScreen>
                                               if (context.mounted) {
                                                 ScaffoldMessenger.of(context).showSnackBar(
                                                   SnackBar(
-                                                      content: Text('Error: $e'),
+                                                      content: Text(textoError(e)),
                                                       backgroundColor: Colors.red),
                                                 );
                                               }

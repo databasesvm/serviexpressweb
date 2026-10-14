@@ -14,8 +14,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 class CascadaConfig {
   // ── ServiExpress ──────────────────────────────────────────────────────────
-  /// T=0 + seF2Seg → auto-asigna #1 del paradero (edge fn)
+  /// Tiempo exclusivo de los Masters (F1). A T=0 + seF2Seg empieza F2
+  /// (#1 del paradero o el más cercano).
   final int seF2Seg;
+  /// Segundos que tiene el #1 (o el más cercano) para aceptar en F2.
+  final int seF2VentanaSeg;
   /// T=0 + seF3Seg → push a todos dentro de 1km del punto de recogida
   final int seF3Seg;
   /// T=0 + seF4Seg → push a todos los disponibles (sin límite de distancia)
@@ -31,14 +34,22 @@ class CascadaConfig {
   /// T=0 + fnF4Seg → push global a todos los disponibles conectados
   final int fnF4Seg;
 
+  /// Interruptor de Gestión: la cascada FN la maneja el SERVIDOR.
+  /// true  → la app solo marca el servicio para el radar (fn_radar_t0 +
+  ///         fn_asignacion_tipo); el servidor elige y avisa en cada fase.
+  /// false → la app arma la cascada como antes (apps viejas conviviendo).
+  final bool fnServidor;
+
   const CascadaConfig({
     this.seF2Seg       = 30,
+    this.seF2VentanaSeg = 30,
     this.seF3Seg       = 60,
     this.seF4Seg       = 90,
     this.fnF2Seg       = 30,
     this.fnF2TimeoutSeg = 30,
     this.fnF3Seg       = 60,
     this.fnF4Seg       = 90,
+    this.fnServidor    = false,
   });
 
   /// Carga los tiempos desde config_sistema. Si falla, retorna los defaults
@@ -67,20 +78,23 @@ class CascadaConfig {
       final row = await Supabase.instance.client
           .from('config_sistema')
           .select(
-            'cascada_se_f2_seg, cascada_se_f3_seg, cascada_se_f4_seg, '
+            'cascada_se_f2_seg, cascada_se_f2_ventana_seg, '
+            'cascada_se_f3_seg, cascada_se_f4_seg, '
             'cascada_fn_f2_seg, cascada_fn_f2_timeout_seg, '
-            'cascada_fn_f3_seg, cascada_fn_f4_seg',
+            'cascada_fn_f3_seg, cascada_fn_f4_seg, fn_cascada_servidor',
           )
           .eq('id', 1)
           .single();
       return CascadaConfig(
         seF2Seg:        (row['cascada_se_f2_seg']          as int?) ?? 30,
+        seF2VentanaSeg: (row['cascada_se_f2_ventana_seg']  as int?) ?? 30,
         seF3Seg:        (row['cascada_se_f3_seg']          as int?) ?? 60,
         seF4Seg:        (row['cascada_se_f4_seg']          as int?) ?? 90,
         fnF2Seg:        (row['cascada_fn_f2_seg']          as int?) ?? 30,
         fnF2TimeoutSeg: (row['cascada_fn_f2_timeout_seg']  as int?) ?? 30,
         fnF3Seg:        (row['cascada_fn_f3_seg']          as int?) ?? 60,
         fnF4Seg:        (row['cascada_fn_f4_seg']          as int?) ?? 90,
+        fnServidor:     row['fn_cascada_servidor'] == true,
       );
     } catch (_) {
       // Si hay error de red o BD, usa defaults (comportamiento original)
