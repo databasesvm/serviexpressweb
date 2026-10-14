@@ -162,26 +162,11 @@ class _LoginScreenState extends State<LoginScreen>
           return;
         }
 
-        // --- Restaurar sesión Supabase Auth en auto-login ---
-        // Si el SDK ya restauró una sesión válida desde localStorage, todo OK.
-        // Si auth_id es null, el usuario nunca completó PASO 5 — forzamos
-        // login manual para que PASO 5 corra y cree la sesión Supabase Auth.
-        // Sin sesión, los INSERT/UPDATE/DELETE fallan por RLS (authenticated-only).
-        final storedAuthId = (usuarioActualizado ?? usuario)['auth_id']?.toString();
-        if (storedAuthId == null || storedAuthId.isEmpty) {
-          if (Supabase.instance.client.auth.currentSession == null) {
-            // Primera vez con RLS activo — el usuario debe hacer login manual
-            // para ejecutar PASO 5 y obtener sesión Supabase Auth.
-            debugPrint('[AUTO-LOGIN] auth_id null y sin sesión Supabase — forzando login manual (PASO 5).');
-            await prefs.remove('sesion_usuario_json');
-            // Rellenamos el campo usuario para que no tenga que escribirlo
-            if (mounted) {
-              final id = usuario['usuario']?.toString() ?? usuario['telefono']?.toString() ?? '';
-              setState(() => _telefonoController.text = id);
-            }
-            return; // Queda en LoginScreen, usuario debe ingresar contraseña
-          }
-        }
+        // (Se quitó la regla que obligaba a escribir la contraseña de nuevo
+        //  cuando la cuenta no tenía sesión Supabase Auth: la app funciona
+        //  igual sin ella, y sacaba de la sesión en cada recarga del
+        //  navegador o al reabrir la app. La sesión guardada ya no lleva
+        //  datos sensibles.)
 
         if (mounted) {
           _navegarSegunRol(usuarioActualizado ?? sinDatosSensibles(usuario));

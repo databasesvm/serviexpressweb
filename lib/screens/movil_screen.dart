@@ -2817,28 +2817,58 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
   }
 
   Future<Position?> _obtenerPosicionSegura() async {
-    if (_gpsEnProceso) return null;
+    // Si otra lectura de GPS está en curso (p. ej. el vigilante del radar),
+    // esperar a que termine en vez de rendirse de una vez.
+    if (_gpsEnProceso) {
+      for (int i = 0; i < 30 && _gpsEnProceso; i++) {
+        await Future.delayed(const Duration(milliseconds: 500));
+      }
+      if (_gpsEnProceso) return _ultimaPosicionConocida;
+      final p = _ultimaPosicionConocida;
+      if (p != null && DateTime.now().difference(p.timestamp).inSeconds < 45) {
+        return p;
+      }
+    }
     _gpsEnProceso = true;
 
     try {
-      Position? ultima = await Geolocator.getLastKnownPosition();
-      if (ultima != null &&
-          DateTime.now().difference(ultima.timestamp).inSeconds < 20) {
-        _gpsEnProceso = false;
-        return ultima;
+      // "Última ubicación conocida" NO existe en el navegador (Safari/Chrome):
+      // daba error al instante y se mostraba "Escaneando satélites" sin
+      // siquiera pedir el GPS. En web se pide la ubicación directamente.
+      if (!kIsWeb) {
+        try {
+          final ultima = await Geolocator.getLastKnownPosition();
+          if (ultima != null &&
+              DateTime.now().difference(ultima.timestamp).inSeconds < 20) {
+            return ultima;
+          }
+        } catch (_) {}
       }
 
-      final pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          timeLimit: Duration(seconds: 7),
-        ),
-      );
-      _gpsEnProceso = false;
-      return pos;
+      try {
+        return await Geolocator.getCurrentPosition(
+          locationSettings: LocationSettings(
+            accuracy: LocationAccuracy.high,
+            // El GPS del navegador (sobre todo Safari en iPhone) tarda más
+            // la primera vez.
+            timeLimit: Duration(seconds: kIsWeb ? 15 : 7),
+          ),
+        );
+      } catch (_) {
+        if (!kIsWeb) return null;
+        // Respaldo en web: precisión normal (Wi-Fi/antenas) si el GPS fino
+        // no respondió a tiempo.
+        return await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.medium,
+            timeLimit: Duration(seconds: 10),
+          ),
+        );
+      }
     } catch (e) {
-      _gpsEnProceso = false;
       return null;
+    } finally {
+      _gpsEnProceso = false;
     }
   }
 
@@ -2847,7 +2877,9 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
 
     late LocationSettings locationSettings;
 
-    if (defaultTargetPlatform == TargetPlatform.android) {
+    // En el navegador (aunque el celular sea Android) se usan los ajustes
+    // genéricos: los de Android solo existen en la app instalada.
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
       locationSettings = AndroidSettings(
         accuracy: LocationAccuracy.high,
         // distanceFilter: 8m → solo emite si el móvil se movió más de 8m.
@@ -3013,11 +3045,17 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         permission == LocationPermission.deniedForever) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text(
-              '⚠️ Permiso de ubicación denegado. Actívalo en Ajustes del teléfono.',
+              kIsWeb
+                  ? '⚠️ El navegador no tiene permiso de ubicación. En iPhone: '
+                      'Ajustes → Privacidad y seguridad → Localización → Sitios '
+                      'web de Safari → "Al usar la app", y en Safari "aA" → '
+                      'Configuración del sitio web → Ubicación → Permitir.'
+                  : '⚠️ Permiso de ubicación denegado. Actívalo en Ajustes del teléfono.',
             ),
             backgroundColor: Colors.red,
+            duration: Duration(seconds: kIsWeb ? 10 : 4),
           ),
         );
       }
@@ -3035,11 +3073,20 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       if (pos == null) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
+            SnackBar(
               content: Text(
-                '⏳ Escaneando satélites. Espera unos segundos e intenta de nuevo.',
+                kIsWeb
+                    // Navegador (sobre todo Safari en iPhone): casi siempre
+                    // es el permiso de ubicación del sitio o de Safari.
+                    ? '📍 No pudimos leer tu ubicación. En iPhone: Ajustes → '
+                        'Privacidad y seguridad → Localización → Sitios web de '
+                        'Safari → "Al usar la app". Luego en Safari toca "aA" → '
+                        'Configuración del sitio web → Ubicación → Permitir, y '
+                        'vuelve a intentarlo.'
+                    : '⏳ Escaneando satélites. Espera unos segundos e intenta de nuevo.',
               ),
               backgroundColor: Colors.orange,
+              duration: Duration(seconds: kIsWeb ? 10 : 4),
             ),
           );
         }
