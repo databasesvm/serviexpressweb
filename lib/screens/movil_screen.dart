@@ -33,6 +33,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData, FilteringTextInputFormatter;
 import 'package:serviexpress_app/utils/cascada_config.dart'; // CONFIG-CASCADA-EXT
 import 'package:serviexpress_app/utils/config_cache.dart'; // Caché de consultas repetidas (wallet)
+import 'package:serviexpress_app/utils/iconos.dart'; // Logo de WhatsApp
 
 part 'movil_widgets.dart';
 
@@ -1766,7 +1767,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                           padding: const EdgeInsets.symmetric(vertical: 8),
                         ),
-                        icon: const Icon(Icons.chat_outlined, size: 16),
+                        icon: const Icon(iconoWhatsApp, size: 16),
                         label: Text('WhatsApp a $nombreLocal', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                         onPressed: () {
                           final num = telLocal.replaceAll(RegExp(r'\D'), '');
@@ -8225,6 +8226,38 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
   bool _esMototaxi(dynamic tipo) =>
       tipo?.toString().toUpperCase() == 'MOTOTAXI';
 
+  // ── Ver la foto de la comanda en grande (con zoom) ───────────────────────
+  void _verFotoComanda(BuildContext ctx, String url) {
+    showDialog(
+      context: ctx,
+      builder: (d) => Dialog(
+        backgroundColor: Colors.black,
+        insetPadding: const EdgeInsets.all(10),
+        child: Stack(children: [
+          InteractiveViewer(
+            maxScale: 5,
+            child: Image.network(
+              url,
+              fit: BoxFit.contain,
+              errorBuilder: (_, __, ___) => const SizedBox(
+                height: 200,
+                child: Center(child: Icon(Icons.broken_image, color: Colors.grey, size: 48)),
+              ),
+            ),
+          ),
+          Positioned(
+            top: 6,
+            right: 6,
+            child: IconButton(
+              icon: const Icon(Icons.close, color: Colors.white),
+              onPressed: () => Navigator.pop(d),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // FOTO DE COMANDA — selección + compresión + upload + guardado de URL
   // ─────────────────────────────────────────────────────────────────────────
@@ -8276,9 +8309,10 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
             ),
           );
 
-      final url = Supabase.instance.client.storage
+      // ?v=… evita que se vea la foto vieja (misma ruta) al reemplazarla
+      final url = '${Supabase.instance.client.storage
           .from('comandas')
-          .getPublicUrl('$servicioId.jpg');
+          .getPublicUrl('$servicioId.jpg')}?v=${DateTime.now().millisecondsSinceEpoch}';
 
       // 4) Guardar URL en la fila del servicio
       await Supabase.instance.client
@@ -9021,8 +9055,10 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                 // (Chip "WA <teléfono>" eliminado: duplicaba el botón
                 // "WhatsApp Cliente" / "WA Cliente" de abajo.)
 
-                // Foto de comanda (solo en_origen y no mototaxi)
-                if (estado == 'en_origen' && !esMoto)
+                // Foto de comanda: disponible durante todo el servicio
+                // (en camino al local, en el local y en ruta de entrega).
+                // No aplica a mototaxi (no hay comanda).
+                if (!esMoto)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 10),
                     child: Builder(builder: (_) {
@@ -9030,7 +9066,9 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                           servicio['foto_comanda_url']?.toString();
                       if (fotoUrl != null && fotoUrl.isNotEmpty) {
                         return GestureDetector(
-                          onTap: () => _subirFotoComanda(servicio),
+                          // Tocar la foto la abre en grande; el botón
+                          // "Reemplazar" de abajo toma una nueva.
+                          onTap: () => _verFotoComanda(context, fotoUrl),
                           child: Container(
                             decoration: BoxDecoration(
                               border:
@@ -9065,11 +9103,24 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                             size: 14,
                                             color: Colors.green[700]),
                                         const SizedBox(width: 6),
-                                        Text(
-                                            'Foto de comanda cargada — toca para reemplazar',
-                                            style: TextStyle(
-                                                fontSize: 11,
-                                                color: Colors.green[800])),
+                                        Expanded(
+                                          child: Text(
+                                              'Foto de comanda · toca para ver',
+                                              style: TextStyle(
+                                                  fontSize: 11,
+                                                  color: Colors.green[800])),
+                                        ),
+                                        TextButton.icon(
+                                          style: TextButton.styleFrom(
+                                            foregroundColor: Colors.brown[800],
+                                            visualDensity: VisualDensity.compact,
+                                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                                          ),
+                                          onPressed: () => _subirFotoComanda(servicio),
+                                          icon: const Icon(Icons.photo_camera, size: 15),
+                                          label: const Text('Reemplazar',
+                                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                        ),
                                       ],
                                     ),
                                   ),
@@ -9304,9 +9355,15 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                           String num =
                               numero.replaceAll(RegExp(r'[^0-9]'), '');
                           if (num.length == 10) num = '57$num';
-                          final String textoWa = esClienteApp
-                              ? 'Hola, soy el Móvil de Serviexpress. Voy en camino hacia tu ubicación.'
-                              : 'Hola, soy el Móvil que te está haciendo el domicilio de $nombreNegocio. Voy en camino hacia tu dirección.';
+                          // Nombre del local o cliente que pidió el servicio.
+                          // Si lo creó la central, se usa el origen (el local).
+                          final String quienPidio = esCreadoPorCentral
+                              ? (servicio['origen']?.toString().trim().isNotEmpty == true
+                                  ? servicio['origen'].toString().trim()
+                                  : 'ServiExpress')
+                              : nombreNegocio;
+                          final String textoWa =
+                              'Hola, soy el móvil asignado para entregar su servicio de $quienPidio.';
                           final Uri url = Uri.parse(
                               'https://wa.me/$num?text=${Uri.encodeComponent(textoWa)}');
                           if (!await launchUrl(url,
@@ -9323,7 +9380,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
 
                         Widget botonWaLocal(String tel) => Expanded(
                               child: BotonTacticoAccion(
-                                icono: Icons.wechat,
+                                icono: iconoWhatsApp,
                                 texto: 'WA Local',
                                 colorBase: const Color(0xFF1B5E20),
                                 colorFondo: const Color(0xFFE8F5E9),
@@ -9336,7 +9393,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                         Widget botonWaClienteCompacto(String tel) =>
                             Expanded(
                               child: BotonTacticoAccion(
-                                icono: Icons.wechat,
+                                icono: iconoWhatsApp,
                                 texto: 'WA Cliente',
                                 colorBase: const Color(0xFF004D40),
                                 colorFondo: const Color(0xFFE0F2F1),
@@ -9364,7 +9421,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                   abrirWa(tel);
                                 },
                                 icon:
-                                    const Icon(Icons.wechat, size: 20),
+                                    const Icon(iconoWhatsApp, size: 20),
                                 label: const Text(
                                   'WhatsApp Cliente',
                                   style: TextStyle(
@@ -10947,8 +11004,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                             child: const Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Text('📱', style: TextStyle(fontSize: 14)),
-                                SizedBox(width: 3),
+                                Icon(iconoWhatsApp, size: 15, color: Colors.white),
+                                SizedBox(width: 4),
                                 Text('WA',
                                     style: TextStyle(
                                         fontSize: 14,
@@ -14551,9 +14608,42 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                             fontWeight: FontWeight.bold,
                                           ),
                                         ),
-                                        subtitle: Text(
-                                          servicio['observacion'] ??
-                                              'Operación finalizada sin novedades.',
+                                        subtitle: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              servicio['observacion'] ??
+                                                  'Operación finalizada sin novedades.',
+                                            ),
+                                            // Foto de la comanda que tomó el móvil
+                                            if ((servicio['foto_comanda_url']?.toString() ?? '').isNotEmpty)
+                                              Padding(
+                                                padding: const EdgeInsets.only(top: 6),
+                                                child: InkWell(
+                                                  onTap: () => _verFotoComanda(
+                                                      context, servicio['foto_comanda_url'].toString()),
+                                                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                                    ClipRRect(
+                                                      borderRadius: BorderRadius.circular(4),
+                                                      child: Image.network(
+                                                        servicio['foto_comanda_url'].toString(),
+                                                        width: 36,
+                                                        height: 36,
+                                                        fit: BoxFit.cover,
+                                                        errorBuilder: (_, __, ___) => const Icon(
+                                                            Icons.broken_image, size: 20, color: Colors.grey),
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 6),
+                                                    Text('📷 Ver comanda',
+                                                        style: TextStyle(
+                                                            color: Colors.brown[700],
+                                                            fontWeight: FontWeight.bold,
+                                                            fontSize: 12)),
+                                                  ]),
+                                                ),
+                                              ),
+                                          ],
                                         ),
                                         trailing: Column(
                                           mainAxisAlignment:

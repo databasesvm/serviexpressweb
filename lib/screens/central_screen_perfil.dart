@@ -295,7 +295,7 @@ extension CentralScreenPerfil on _CentralScreenState {
                                     }
                                   },
                                   icon:
-                                      const Icon(Icons.wechat, size: 15),
+                                      const Icon(iconoWhatsApp, size: 15),
                                   label: const Text('Abrir WhatsApp',
                                       style: TextStyle(
                                           fontWeight: FontWeight.bold,

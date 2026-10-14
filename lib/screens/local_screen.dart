@@ -25,6 +25,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:serviexpress_app/utils/textos_push.dart'; // Textos únicos de push SE
 import 'package:serviexpress_app/utils/ubicacion_cliente.dart'; // Ubicación GPS del cliente
 import 'package:serviexpress_app/utils/alta_demanda.dart'; // Franja de alta demanda
+import 'package:serviexpress_app/utils/iconos.dart'; // Logo de WhatsApp
 
 part 'local_screen_dispatch.dart';
 part 'local_screen_cards.dart';

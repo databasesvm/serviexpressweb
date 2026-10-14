@@ -9,6 +9,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:serviexpress_app/utils/sonido_manager.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart';
+import 'package:serviexpress_app/utils/iconos.dart';
 import 'package:serviexpress_app/screens/login_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -3404,7 +3405,7 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
                         child: const Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.chat,
+                            Icon(iconoWhatsApp,
                                 size: 13, color: Color(0xFF25D366)),
                             SizedBox(width: 4),
                             Text('WA Móvil',

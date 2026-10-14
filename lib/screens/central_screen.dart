@@ -14,6 +14,7 @@ import 'package:serviexpress_app/utils/ubicacion_cliente.dart'; // Ubicación GP
 import 'package:serviexpress_app/screens/rutas_aprendidas_screen.dart'; // Rutas y precios aprendidos
 import 'package:serviexpress_app/screens/sectores_tarifa_screen.dart'; // Sectores y tarifa por km
 import 'package:serviexpress_app/utils/alta_demanda.dart'; // Alta demanda SE
+import 'package:serviexpress_app/utils/iconos.dart'; // Logo de WhatsApp
 import 'package:serviexpress_app/utils/hora_servidor.dart'; // Reloj alineado con el servidor
 import 'package:serviexpress_app/utils/cascada_config.dart'; // Tiempos de la cascada SE
 import 'package:serviexpress_app/screens/chat_screen.dart';

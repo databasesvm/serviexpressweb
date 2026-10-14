@@ -38,6 +38,7 @@ dependencies:
   excel: ^4.0.6
   pdf: ^3.10.8
   printing: ^5.13.1
+  font_awesome_flutter: ^10.8.0  # logo de WhatsApp en los botones
 
 dev_dependencies:
   flutter_test:

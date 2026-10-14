@@ -664,7 +664,7 @@ mixin _CardsMixin on State<LocalScreen> {
                     ]),
                   ),
                   if (telefonoReal.isNotEmpty) ...[
-                    botonIcono(Icons.wechat, Colors.greenAccent, 'WhatsApp', () async {
+                    botonIcono(iconoWhatsApp, verdeWhatsApp, 'WhatsApp', () async {
                       final n = telefonoReal.startsWith('57') ? telefonoReal : '57$telefonoReal';
                       final uri = Uri.parse('https://wa.me/$n');
                       if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -805,7 +805,7 @@ mixin _CardsMixin on State<LocalScreen> {
               },
             ),
             ListTile(
-              leading: const Icon(Icons.wechat, color: Colors.greenAccent),
+              leading: const Icon(iconoWhatsApp, color: verdeWhatsApp),
               title: const Text('WhatsApp', style: TextStyle(color: Colors.white)),
               onTap: () async {
                 Navigator.pop(bs);
@@ -1581,7 +1581,7 @@ mixin _CardsMixin on State<LocalScreen> {
                                         horizontal: 2,
                                       ),
                                     ),
-                                    icon: const Icon(Icons.wechat, size: 16),
+                                    icon: const Icon(iconoWhatsApp, size: 16),
                                     // ---> INYECCIÓN: FittedBox encoge la letra si la pantalla es muy pequeña
                                     label: const FittedBox(
                                       fit: BoxFit.scaleDown,

@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart';
 import 'package:serviexpress_app/utils/sonido_manager.dart';
+import 'package:serviexpress_app/utils/iconos.dart';
 
 // ============================================================
 // CARTA LOCAL SCREEN — Gestión de menú y pedidos entrantes
@@ -1821,7 +1822,7 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
                   minimumSize: const Size(double.infinity, 40),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
-                icon: const Icon(Icons.chat_outlined, size: 16),
+                icon: const Icon(iconoWhatsApp, size: 16),
                 label: Text('WhatsApp a $nombreMovil', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                 onPressed: () {
                   final num = telMovil.replaceAll(RegExp(r'\D'), '');

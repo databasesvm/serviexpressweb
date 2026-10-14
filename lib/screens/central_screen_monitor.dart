@@ -2929,7 +2929,7 @@ extension CentralScreenMonitor on _CentralScreenState {
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
           ),
           onPressed: onWs,
-          icon: const Icon(Icons.wechat, size: 12, color: Colors.white),
+          icon: const Icon(iconoWhatsApp, size: 12, color: Colors.white),
           label: Text(wsLabel, style: const TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.bold)),
         ),
         const SizedBox(width: 6),

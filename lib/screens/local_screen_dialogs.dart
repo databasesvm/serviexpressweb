@@ -867,7 +867,7 @@ mixin _DialogsMixin on State<LocalScreen> {
                           backgroundColor: const Color(0xff25D366),
                           padding: const EdgeInsets.symmetric(vertical: 10),
                         ),
-                        icon: const Icon(Icons.wechat, color: Colors.white, size: 16),
+                        icon: const Icon(iconoWhatsApp, color: Colors.white, size: 16),
                         label: const Text(
                           'PROMO',
                           style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),

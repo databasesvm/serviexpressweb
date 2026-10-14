@@ -19,6 +19,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:serviexpress_app/utils/paradero_objetivo.dart';
 import 'package:serviexpress_app/utils/textos_push.dart';
 import 'package:serviexpress_app/utils/alta_demanda.dart';
+import 'package:serviexpress_app/utils/iconos.dart';
 
 class ClienteScreen extends StatefulWidget {
   final Map<String, dynamic> usuario;
@@ -746,7 +747,7 @@ class _ClienteScreenState extends State<ClienteScreen>
                             ),
                             onPressed: () =>
                                 _abrirWhatsApp(telefono.toString(), servicio['id']),
-                            child: const Icon(Icons.wechat, size: 22),
+                            child: const Icon(iconoWhatsApp, size: 22),
                           ),
                         ),
                       ],
