@@ -39,22 +39,34 @@ Future<void> initBackgroundService() async {
     ),
     foregroundTaskOptions: ForegroundTaskOptions(
       eventAction: ForegroundTaskEventAction.repeat(15000),
-      autoRunOnBoot: false,
+      // Si el teléfono se reinicia estando conectado, el servicio arranca
+      // solo. onStart decide si reconecta (reinicio rápido) o no.
+      autoRunOnBoot: true,
       autoRunOnMyPackageReplaced: true,
       allowWakeLock: true,
     ),
   );
 }
 
-Future<void> startForegroundService(String userId) async {
-  if (await FlutterForegroundTask.isRunningService) return;
-  final prefs = await SharedPreferences.getInstance();
-  await prefs.setString(kBgUserId, userId);
-  await FlutterForegroundTask.startService(
-    notificationTitle: 'ServiExpress activo',
-    notificationText: 'Conectado · recibiendo servicios',
-    callback: _startCallback,
-  );
+/// Arranca el servicio en segundo plano. Devuelve true si quedó corriendo.
+/// Antes fallaba en silencio (faltaba declararlo en AndroidManifest.xml) y
+/// nadie se enteraba: ahora la app puede avisarle al móvil.
+Future<bool> startForegroundService(String userId) async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(kBgUserId, userId);
+    if (await FlutterForegroundTask.isRunningService) return true;
+    await FlutterForegroundTask.startService(
+      notificationTitle: 'ServiExpress activo',
+      notificationText: 'Conectado · recibiendo servicios',
+      callback: _startCallback,
+    );
+  } catch (_) {}
+  try {
+    return await FlutterForegroundTask.isRunningService;
+  } catch (_) {
+    return false;
+  }
 }
 
 Future<void> stopForegroundService() async {
@@ -70,11 +82,13 @@ Future<void> updateForegroundNotification(String texto) async {
 /// Relanza el foreground service si Android lo mató mientras el moto
 /// estaba "en línea". Llámalo en AppLifecycleState.resumed para recuperación
 /// silenciosa sin acción del moto. No hace nada si el servicio ya corre.
-Future<void> asegurarServicioActivo(String userId) async {
+Future<bool> asegurarServicioActivo(String userId) async {
   try {
-    if (await FlutterForegroundTask.isRunningService) return;
-    await startForegroundService(userId);
-  } catch (_) {}
+    if (await FlutterForegroundTask.isRunningService) return true;
+    return await startForegroundService(userId);
+  } catch (_) {
+    return false;
+  }
 }
 
 /// Solicita al OS que exima la app de la optimización de batería.
@@ -117,6 +131,38 @@ class _ServiMotoTaskHandler extends TaskHandler {
         publishableKey: 'sb_publishable_rWZ5Ti_oNMnkrwZL8Wp1Sw_YGoSPK0D',
       );
     } catch (_) {}
+
+    // Arranque por reinicio del teléfono: solo se reconecta si fue un
+    // reinicio rápido (última señal hace menos de 15 min). Si el teléfono
+    // estuvo apagado más tiempo (p. ej. terminó el turno sin desconectarse),
+    // NO se pone en línea solo: se detiene el servicio.
+    if (starter == TaskStarter.system) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final userId = prefs.getString(kBgUserId);
+        if (userId == null) {
+          await FlutterForegroundTask.stopService();
+          return;
+        }
+        final u = await Supabase.instance.client
+            .from('usuarios')
+            .select('ultimo_ping, suspendido')
+            .eq('id', userId)
+            .maybeSingle();
+        final ping = DateTime.tryParse(u?['ultimo_ping']?.toString() ?? '');
+        final reciente = ping != null &&
+            DateTime.now().toUtc().difference(ping.toUtc()).inMinutes < 15;
+        if (reciente && u?['suspendido'] != true) {
+          await Supabase.instance.client.from('usuarios').update({
+            'en_linea': true,
+            'ultimo_ping': DateTime.now().toUtc().toIso8601String(),
+          }).eq('id', userId);
+        } else {
+          await prefs.remove(kBgUserId);
+          await FlutterForegroundTask.stopService();
+        }
+      } catch (_) {}
+    }
   }
 
   @override
@@ -196,13 +242,27 @@ class _ServiMotoTaskHandler extends TaskHandler {
             final permission = await Geolocator.checkPermission();
             if (permission == LocationPermission.always ||
                 permission == LocationPermission.whileInUse) {
-              final pos = await Geolocator.getCurrentPosition(
-                locationSettings: AndroidSettings(
-                  accuracy: LocationAccuracy.high,
-                  timeLimit: const Duration(seconds: 10),
-                  intervalDuration: const Duration(seconds: 5),
-                ),
-              );
+              // Si el GPS no responde en 10 s, usar la última ubicación
+              // conocida del teléfono (si tiene menos de 3 min) para no
+              // perder la "ubicación reciente" que usa la cascada.
+              Position? posLeida;
+              try {
+                posLeida = await Geolocator.getCurrentPosition(
+                  locationSettings: AndroidSettings(
+                    accuracy: LocationAccuracy.high,
+                    timeLimit: const Duration(seconds: 10),
+                    intervalDuration: const Duration(seconds: 5),
+                  ),
+                );
+              } catch (_) {
+                final ultima = await Geolocator.getLastKnownPosition();
+                if (ultima != null &&
+                    DateTime.now().difference(ultima.timestamp).inMinutes < 3) {
+                  posLeida = ultima;
+                }
+              }
+              if (posLeida == null) return;
+              final pos = posLeida;
               await Supabase.instance.client.from('usuarios').update({
                 'latitud': pos.latitude,
                 'longitud': pos.longitude,

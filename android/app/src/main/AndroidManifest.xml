@@ -12,10 +12,15 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <!-- Opción B2: requerido en Android 14+ para foreground service tipo dataSync -->
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Servicio en segundo plano tipo UBICACIÓN (Android 14+). Se usa
+         "location" y no "dataSync": en Android 15 dataSync solo puede correr
+         6 h al día y un móvil trabaja más que eso. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Relanzar el servicio en segundo plano si el teléfono se reinicia
+         estando conectado (autoRunOnBoot). -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.VIBRATE"/>
 
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
@@ -81,6 +86,16 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+        <!-- Servicio en segundo plano de flutter_foreground_task (notificación
+             fija "ServiExpress activo"). Sin esta declaración Android NO lo
+             deja arrancar: la app dejaba de mandar la señal de vida con la
+             pantalla apagada y el servidor desconectaba al móvil a los 5 min.
+             No cambiar el nombre del servicio. -->
+        <service
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+            android:foregroundServiceType="location"
+            android:exported="false" />
 
     </application>
     <queries>

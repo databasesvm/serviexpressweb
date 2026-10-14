@@ -17,13 +17,13 @@
 //   entre el login manual y el auto-login.
 
 import 'dart:convert';
+import 'dart:math' show Random;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:serviexpress_app/utils/auth_helper.dart'; // <-- SEGURIDAD: hash de contraseñas
-import 'package:flutter/services.dart';
+import 'package:serviexpress_app/utils/sesion_segura.dart'; // sesión sin datos sensibles
 import 'central_screen.dart';
 import 'movil_screen.dart';
 import 'dual_mode_screen.dart';
@@ -124,9 +124,11 @@ class _LoginScreenState extends State<LoginScreen>
                 .timeout(const Duration(seconds: 6));
             if (check != null) {
               existe = true;
-              usuarioActualizado = check;
+              // Sin contraseña/cédula/documento: no se guardan en el teléfono
+              usuarioActualizado = sinDatosSensibles(check);
               // Actualizar la sesión guardada con los datos más recientes
-              await prefs.setString('sesion_usuario_json', jsonEncode(check));
+              await prefs.setString(
+                  'sesion_usuario_json', jsonEncode(usuarioActualizado));
             }
           } catch (_) {
             // Sin red — usar datos locales como respaldo.
@@ -181,7 +183,9 @@ class _LoginScreenState extends State<LoginScreen>
           }
         }
 
-        if (mounted) _navegarSegunRol(usuarioActualizado ?? usuario);
+        if (mounted) {
+          _navegarSegunRol(usuarioActualizado ?? sinDatosSensibles(usuario));
+        }
         return;
       } catch (_) {
         await prefs.remove('sesion_usuario_json');
@@ -193,61 +197,23 @@ class _LoginScreenState extends State<LoginScreen>
     // este cambio (solo tenían usuario+hash, no el usuario completo).
     // Si funciona, se guarda ya en el formato nuevo para que la
     // próxima vez entre por el camino rápido sin tocar la red.
+    // Ya no se entra con la contraseña cifrada guardada en el teléfono (la
+    // validación es en el servidor y necesita la contraseña real): solo se
+    // deja el usuario escrito y se borran las llaves viejas.
     final idGuardado = prefs.getString('saved_phone');
-    final hashGuardado = prefs.getString('saved_hash');
-    if (idGuardado != null && hashGuardado != null) {
+    if (idGuardado != null) {
       setState(() {
         _telefonoController.text = idGuardado;
         _guardarCredenciales = true;
       });
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _autoLoginSilenciosoLegacy(idGuardado, hashGuardado);
-      });
     }
+    await prefs.remove('saved_hash');
+    await prefs.remove('saved_password');
   }
 
   // =========================================================================
-  // AUTO-LOGIN LEGACY — solo corre una vez por dispositivo, para migrar
-  // sesiones viejas al modelo nuevo. Con timeout: si la red se cuelga,
-  // no deja la pantalla esperando para siempre (el bug original).
-  // =========================================================================
-  Future<void> _autoLoginSilenciosoLegacy(
-    String identificador,
-    String hash,
-  ) async {
-    setState(() => _cargando = true);
-    try {
-      final respuesta = await Supabase.instance.client
-          .from('usuarios')
-          .select()
-          .or('telefono.eq."$identificador",usuario.ilike."$identificador"')
-          .eq('contrasena', hash)
-          .timeout(const Duration(seconds: 8));
-
-      if (respuesta.isEmpty) {
-        // El hash no coincide (clave cambiada desde otro dispositivo).
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setBool('auto_login', false);
-        return;
-      }
-
-      final usuario = _filtrarUsuarioValido(respuesta, identificador);
-      if (usuario == null || usuario['activo'] == false) return;
-
-      // Migramos al formato nuevo — la próxima apertura ya es instantánea.
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('sesion_usuario_json', jsonEncode(usuario));
-
-      if (mounted) _navegarSegunRol(usuario);
-    } catch (_) {
-      // Fallo de red o timeout: el usuario verá la pantalla de login normal.
-    } finally {
-      if (mounted) setState(() => _cargando = false);
-    }
-  }
-
-  // =========================================================================
-  // LOGIN MANUAL — Hashea, compara, migra y enruta
+  // LOGIN MANUAL — la contraseña se valida en el SERVIDOR (fn_login).
+  // El teléfono ya no lee ni compara la contraseña cifrada.
   // =========================================================================
   Future<void> _iniciarSesion() async {
     setState(() {
@@ -264,56 +230,41 @@ class _LoginScreenState extends State<LoginScreen>
         return;
       }
 
-      final claveHash = hashContrasena(claveTexto);
+      // --- PASO 1: el SERVIDOR valida usuario/teléfono + contraseña ---
+      // (fn_login: compara la contraseña cifrada en la tabla protegida,
+      // migra contraseñas antiguas en texto plano y frena intentos repetidos).
+      // Devuelve las cuentas que coinciden SIN contraseña/cédula/documento.
+      final res = await Supabase.instance.client.rpc(
+        'fn_login',
+        params: {'p_identificador': identificador, 'p_clave': claveTexto},
+      ).timeout(const Duration(seconds: 8));
+      final Map<String, dynamic> resMap =
+          res is Map ? Map<String, dynamic>.from(res) : <String, dynamic>{};
 
-      // --- PASO 1: Intentamos con hash (flujo normal para cuentas nuevas/migradas) ---
-      // Excluimos cuentas eliminadas para que re-registros no choquen con historial
-      var respuesta = await Supabase.instance.client
-          .from('usuarios')
-          .select()
-          .or('telefono.eq."$identificador",usuario.ilike."$identificador"')
-          .eq('contrasena', claveHash)
-          .or('eliminado.is.null,eliminado.eq.false')
-          .timeout(const Duration(seconds: 8));
-
-      // --- PASO 2: MIGRACIÓN SILENCIOSA para cuentas con contraseña en texto plano ---
-      bool esMigracion = false;
-      if (respuesta.isEmpty) {
-        final respuestaLegacy = await Supabase.instance.client
-            .from('usuarios')
-            .select()
-            .or('telefono.eq."$identificador",usuario.ilike."$identificador"')
-            .eq('contrasena', claveTexto) // Comparación legacy con texto plano
-            .or('eliminado.is.null,eliminado.eq.false')
-            .timeout(const Duration(seconds: 8));
-
-        if (respuestaLegacy.isNotEmpty) {
-          respuesta = respuestaLegacy;
-          esMigracion = true; // Marcamos para actualizar la BD al final
-        }
+      if (resMap['ok'] != true) {
+        setState(() => _mensajeError = switch (resMap['motivo']?.toString()) {
+              'bloqueado_temporal' =>
+                'Demasiados intentos fallidos. Espera 15 minutos o usa "Olvidé mi contraseña".',
+              'campos_vacios' => 'Completa todos los campos.',
+              _ =>
+                'Datos incorrectos. Puedes entrar con tu celular o tu número de '
+                    'móvil (ej: 57). Si olvidaste la contraseña, toca '
+                    '"¿Olvidaste tu contraseña?".',
+            });
+        return;
       }
-
+      final List<dynamic> respuesta =
+          (resMap['usuarios'] as List<dynamic>?) ?? const [];
       if (respuesta.isEmpty) {
         setState(() => _mensajeError = 'Usuario o contraseña incorrectos.');
         return;
       }
 
-      // --- PASO 3: Filtro de roles ---
+      // --- PASO 3: el servidor ya encontró la cuenta (acepta celular,
+      // número de móvil "57"/"movil57", usuario o correo, en cualquier forma).
       final usuario = _filtrarUsuarioValido(respuesta, identificador);
-
       if (usuario == null) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'ACCESO RESTRINGIDO: El personal (Móviles/Locales) '
-                'debe iniciar sesión con su USUARIO, no con su teléfono.',
-              ),
-              backgroundColor: Colors.red,
-              duration: Duration(seconds: 5),
-            ),
-          );
-        }
+        setState(() => _mensajeError = 'Usuario o contraseña incorrectos.');
         return;
       }
 
@@ -325,16 +276,8 @@ class _LoginScreenState extends State<LoginScreen>
         return;
       }
 
-      // --- PASO 4: Si es migración, actualizamos la BD al hash ---
-      if (esMigracion) {
-        try {
-          await Supabase.instance.client
-              .from('usuarios')
-              .update({'contrasena': claveHash}).eq('id', usuario['id']);
-        } catch (_) {
-          // Si falla la migración, no bloqueamos el acceso. Se intentará en el próximo login.
-        }
-      }
+      // (PASO 4 — migración de contraseñas en texto plano — ahora la hace
+      //  el servidor dentro de fn_login.)
 
       // --- PASO 5: Supabase Auth — migración on-the-fly ---
       // El email interno siempre usa el identificador canónico del registro
@@ -404,7 +347,8 @@ class _LoginScreenState extends State<LoginScreen>
       //   true  → "mantener sesión" — nunca se borra, indestructible.
       //   false → se borra al cerrar la app completa, pero no al minimizar.
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('sesion_usuario_json', jsonEncode(usuario));
+      await prefs.setString(
+          'sesion_usuario_json', jsonEncode(sinDatosSensibles(usuario)));
       await prefs.setBool('auto_login', _guardarCredenciales);
       // Llaves del modelo viejo — ya no se usan, las limpiamos.
       await prefs.remove('saved_phone');
@@ -454,18 +398,19 @@ class _LoginScreenState extends State<LoginScreen>
     List<dynamic> lista,
     String identificador,
   ) {
-    for (var u in lista) {
-      final loginUsuario = u['usuario']?.toString().toLowerCase() ?? '';
-      final loginTelefono = u['telefono']?.toString() ?? '';
-
-      // Coincidencia por usuario exacto
-      if (loginUsuario == identificador.toLowerCase()) return u;
-      // Coincidencia por número de teléfono (todos los roles)
-      if (loginTelefono.isNotEmpty && loginTelefono == identificador) return u;
-      // Clientes: aceptan cualquier identificador (ya cubierto por la query)
-      if (u['rol'] == 'cliente') return u;
+    // El servidor (fn_login) ya filtró: solo devuelve la(s) cuenta(s) que
+    // corresponden a lo escrito y con la contraseña correcta. Si hubiera
+    // más de una, se prefiere la que coincide exacto con el usuario.
+    if (lista.isEmpty) return null;
+    for (final u in lista) {
+      if (u is Map &&
+          (u['usuario']?.toString().toLowerCase() ?? '') ==
+              identificador.toLowerCase()) {
+        return Map<String, dynamic>.from(u);
+      }
     }
-    return null;
+    final primero = lista.first;
+    return primero is Map ? Map<String, dynamic>.from(primero) : null;
   }
 
   /// Enrutador central: decide a qué pantalla va cada rol.
@@ -787,6 +732,13 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
+  // Contraseña aleatoria (32 caracteres) para cuentas creadas con Google.
+  String _claveAleatoria() {
+    const c = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    final r = Random.secure();
+    return List.generate(32, (_) => c[r.nextInt(c.length)]).join();
+  }
+
   // =========================================================================
   // GOOGLE SIGN-IN
   // =========================================================================
@@ -819,7 +771,7 @@ class _LoginScreenState extends State<LoginScreen>
 
       if (res != null) {
         // Cuenta existente → login con su rol real (móvil, local, central, etc.)
-        usuario = Map<String, dynamic>.from(res);
+        usuario = sinDatosSensibles(Map<String, dynamic>.from(res));
       } else {
         // No existe → preguntar qué tipo de cuenta quiere crear
         if (!mounted) return;
@@ -858,14 +810,23 @@ class _LoginScreenState extends State<LoginScreen>
               'usuario': usuarioGen,
               'rol': 'cliente',
               'telefono': '',
-              'contrasena': hashContrasena('google_$correo'),
+              // Sin contraseña calculable: antes era hash('google_'+correo) y
+              // cualquiera que supiera el correo podía entrar. Se pone una
+              // aleatoria en el servidor (entra siempre con el botón de Google
+              // o con "Olvidé mi contraseña").
               'activo': true,
               'foto_perfil_url': foto,
               'google_auth': true,
             })
             .select()
             .single();
-        usuario = Map<String, dynamic>.from(filaInsert);
+        usuario = sinDatosSensibles(Map<String, dynamic>.from(filaInsert));
+        try {
+          await db.rpc('fn_establecer_clave_inicial', params: {
+            'p_usuario_id': usuario['id'],
+            'p_clave': _claveAleatoria(),
+          });
+        } catch (_) {}
       }
 
       if (usuario['activo'] == false) {
@@ -904,54 +865,20 @@ class _LoginScreenState extends State<LoginScreen>
   // =========================================================================
   // RECUPERAR CONTRASEÑA
   // =========================================================================
+  // Sin pasar por la central: el código llega al CORREO REGISTRADO de la
+  // cuenta, enviado desde serviexpress.soporte@gmail.com (edge function
+  // enviar-codigo-recuperacion). El servidor valida el código
+  // (fn_restablecer_con_codigo): vence en 15 min, 1 uso, máx. 5 intentos.
   Future<void> _mostrarRecuperarContrasena() async {
-    // ── Próximamente ─────────────────────────────────────────────────────────
-    await showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1A1A),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        title: const Text('🔒 Recuperar contraseña',
-            style: TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.bold)),
-        content: const Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.construction_rounded,
-                color: Color(0xFFF59E0B), size: 48),
-            SizedBox(height: 14),
-            Text(
-              'Esta función estará disponible próximamente.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white70, fontSize: 14),
-            ),
-            SizedBox(height: 10),
-            Text(
-              'Por ahora, contacta a la Central Operativa para restablecer tu acceso.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white38, fontSize: 12),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: Navigator.of(ctx).pop,
-            child: const Text('ENTENDIDO',
-                style: TextStyle(
-                    color: Color(0xff3AF500), fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
-    );
-    return;
-    // ignore: dead_code
-    final correoCtrl = TextEditingController();
+    final correoCtrl = TextEditingController(); // usuario, teléfono o correo
     final codigoCtrl = TextEditingController();
     final nuevaClaveCtrl = TextEditingController();
-    bool paso2 = false; // false=pide correo, true=pide código+nueva clave
+    bool paso2 = false; // false=pide la cuenta, true=pide código+nueva clave
     bool enviando = false;
+    String correoMascara = '';
+    if (_telefonoController.text.trim().isNotEmpty) {
+      correoCtrl.text = _telefonoController.text.trim();
+    }
 
     await showDialog(
       // ignore: use_build_context_synchronously
@@ -973,7 +900,7 @@ class _LoginScreenState extends State<LoginScreen>
               ),
             ),
             content: paso2
-                ? _contenidoPaso2(codigoCtrl, nuevaClaveCtrl)
+                ? _contenidoPaso2(codigoCtrl, nuevaClaveCtrl, correoMascara)
                 : _contenidoPaso1(correoCtrl),
             actions: [
               TextButton(
@@ -995,28 +922,54 @@ class _LoginScreenState extends State<LoginScreen>
                     ? null
                     : () async {
                         if (!paso2) {
-                          // PASO 1: enviar código
-                          final correo = correoCtrl.text.trim();
-                          if (correo.isEmpty || !correo.contains('@')) {
+                          // PASO 1: enviar código al correo registrado
+                          final ident = correoCtrl.text.trim();
+                          if (ident.isEmpty) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
-                                content: Text('Escribe un correo válido'),
+                                content: Text(
+                                    'Escribe tu usuario, teléfono o correo'),
                                 backgroundColor: Colors.orange,
                               ),
                             );
                             return;
                           }
                           setDlg(() => enviando = true);
+                          Map<String, dynamic> r = {};
                           try {
-                            await Supabase.instance.client.functions.invoke(
-                              'recuperar-contrasena',
-                              body: {'correo': correo},
-                            );
+                            final resp = await Supabase.instance.client
+                                .functions
+                                .invoke('enviar-codigo-recuperacion',
+                                    body: {'identificador': ident});
+                            if (resp.data is Map) {
+                              r = Map<String, dynamic>.from(resp.data as Map);
+                            }
                           } catch (_) {}
-                          setDlg(() {
-                            enviando = false;
-                            paso2 = true;
-                          });
+                          setDlg(() => enviando = false);
+                          if (r['ok'] == true) {
+                            setDlg(() {
+                              correoMascara = r['correo']?.toString() ?? '';
+                              paso2 = true;
+                            });
+                          } else if (context.mounted) {
+                            final msg = switch (r['motivo']?.toString()) {
+                              'no_encontrado' =>
+                                'No encontramos una cuenta con ese dato.',
+                              'sin_correo' =>
+                                'Tu cuenta no tiene correo registrado. Contacta a la central para restablecer tu contraseña.',
+                              'espera' =>
+                                'Ya pediste varios códigos. Espera 15 minutos y revisa tu correo (también Spam).',
+                              _ =>
+                                'No se pudo enviar el código. Intenta de nuevo en unos minutos.',
+                            };
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(msg),
+                                backgroundColor: Colors.orange[800],
+                                duration: const Duration(seconds: 6),
+                              ),
+                            );
+                          }
                         } else {
                           // PASO 2: verificar código y cambiar clave
                           final codigo = codigoCtrl.text.trim();
@@ -1043,7 +996,7 @@ class _LoginScreenState extends State<LoginScreen>
                           }
                           setDlg(() => enviando = true);
                           final ok = await _verificarYCambiarClave(
-                            correo: correoCtrl.text.trim(),
+                            identificador: correoCtrl.text.trim(),
                             codigo: codigo,
                             nuevaClave: nuevaClave,
                           );
@@ -1088,7 +1041,8 @@ class _LoginScreenState extends State<LoginScreen>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Escribe el correo asociado a tu cuenta. Te enviaremos un código de 6 dígitos.',
+          'Escribe tu usuario, teléfono o correo. Te enviaremos un código de '
+          '6 dígitos al correo que tienes registrado.',
           style: TextStyle(color: Colors.grey[400], fontSize: 13, height: 1.4),
         ),
         const SizedBox(height: 14),
@@ -1097,10 +1051,10 @@ class _LoginScreenState extends State<LoginScreen>
           keyboardType: TextInputType.emailAddress,
           style: const TextStyle(color: Colors.white, fontSize: 14),
           decoration: InputDecoration(
-            hintText: 'tu@correo.com',
+            hintText: 'Usuario, teléfono o correo',
             hintStyle: const TextStyle(color: Colors.white38),
             prefixIcon: const Icon(
-              Icons.email_outlined,
+              Icons.person_outline,
               color: Colors.white38,
               size: 18,
             ),
@@ -1119,6 +1073,7 @@ class _LoginScreenState extends State<LoginScreen>
   Widget _contenidoPaso2(
     TextEditingController codigoCtrl,
     TextEditingController nuevaClaveCtrl,
+    String correoMascara,
   ) {
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -1140,7 +1095,9 @@ class _LoginScreenState extends State<LoginScreen>
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Código enviado a tu correo. Válido por 15 minutos.',
+                  correoMascara.isNotEmpty
+                      ? 'Código enviado a $correoMascara. Válido por 15 minutos. Si no lo ves, revisa Spam.'
+                      : 'Código enviado a tu correo. Válido por 15 minutos. Si no lo ves, revisa Spam.',
                   style: TextStyle(color: Colors.green[300], fontSize: 12),
                 ),
               ),
@@ -1197,55 +1154,39 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Future<bool> _verificarYCambiarClave({
-    required String correo,
+    required String identificador,
     required String codigo,
     required String nuevaClave,
   }) async {
     try {
-      final db = Supabase.instance.client;
+      // El SERVIDOR valida el código (cifrado, 15 min, 1 uso, 5 intentos)
+      // y cambia la contraseña. El teléfono nunca ve el código guardado.
+      final r = await Supabase.instance.client.rpc(
+        'fn_restablecer_con_codigo',
+        params: {
+          'p_identificador': identificador,
+          'p_codigo': codigo,
+          'p_nueva': nuevaClave,
+        },
+      );
+      final res = r?.toString() ?? '';
+      if (res == 'ok') return true;
 
-      // Verificar código vigente
-      final res = await db
-          .from('usuarios')
-          .select('id, reset_token, reset_token_exp')
-          .eq('correo', correo.toLowerCase())
-          .eq('reset_token', codigo)
-          .maybeSingle();
-
-      if (res == null) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Código incorrecto'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-        return false;
+      if (mounted) {
+        final (String msg, Color color) = switch (res) {
+          'codigo_invalido' => ('Código incorrecto.', Colors.red),
+          'codigo_vencido' =>
+            ('El código venció o ya se usó. Solicita uno nuevo.', Colors.orange),
+          'demasiados_intentos' =>
+            ('Demasiados intentos. Solicita un código nuevo.', Colors.orange),
+          'nueva_muy_corta' => ('La contraseña es muy corta.', Colors.orange),
+          _ => ('No se pudo cambiar la contraseña. Intenta de nuevo.', Colors.red),
+        };
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(msg), backgroundColor: color),
+        );
       }
-
-      final exp = res['reset_token_exp']?.toString();
-      if (exp != null && DateTime.parse(exp).isBefore(DateTime.now().toUtc())) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('El código ha expirado. Solicita uno nuevo.'),
-              backgroundColor: Colors.orange,
-            ),
-          );
-        }
-        return false;
-      }
-
-      // Cambiar contraseña y limpiar token
-      final nuevoHash = hashContrasena(nuevaClave);
-      await db.from('usuarios').update({
-        'contrasena': nuevoHash,
-        'reset_token': null,
-        'reset_token_exp': null,
-      }).eq('id', res['id']);
-
-      return true;
+      return false;
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1370,7 +1311,7 @@ class _LoginScreenState extends State<LoginScreen>
                               ),
                               const SizedBox(height: 4),
                               const Text(
-                                'Ingresa tu usuario o numero de celular.',
+                                'Entra con tu celular, tu número de móvil o tu usuario.',
                                 style: TextStyle(
                                   color: Colors.black45,
                                   fontSize: 12,
@@ -1381,10 +1322,10 @@ class _LoginScreenState extends State<LoginScreen>
                               TextField(
                                 controller: _telefonoController,
                                 decoration: InputDecoration(
-                                  labelText: 'Celular o usuario',
-                                  hintText: '3001234567  ó  sedefn01',
+                                  labelText: 'Celular, número de móvil o usuario',
+                                  hintText: '3001234567',
                                   helperText:
-                                      'Móviles usar: Movil+Numero como Usuario ej: Movil05',
+                                      'Ej: 3001234567 · 57 · movil57',
                                   helperStyle: const TextStyle(
                                       fontSize: 11, color: Colors.black45),
                                   filled: true,
@@ -1404,37 +1345,11 @@ class _LoginScreenState extends State<LoginScreen>
                                       width: 1.5,
                                     ),
                                   ),
-                                  prefixIcon: IntrinsicWidth(
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 12),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          const Text('🇨🇴',
-                                              style: TextStyle(fontSize: 17)),
-                                          const SizedBox(width: 6),
-                                          const Text(
-                                            '+57',
-                                            style: TextStyle(
-                                              fontWeight: FontWeight.bold,
-                                              fontSize: 14,
-                                              color: Colors.black87,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 8),
-                                          Container(
-                                            width: 1,
-                                            height: 20,
-                                            color: Colors.black26,
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                  prefixIconConstraints: const BoxConstraints(
-                                    minWidth: 0,
-                                    minHeight: 0,
+                                  // Ícono neutro: el campo acepta celular,
+                                  // número de móvil (57 / movil57) o usuario.
+                                  prefixIcon: const Icon(
+                                    Icons.person_outline,
+                                    color: Colors.black45,
                                   ),
                                 ),
                                 keyboardType: TextInputType.text,
@@ -1442,12 +1357,8 @@ class _LoginScreenState extends State<LoginScreen>
                                 onSubmitted: (_) => FocusScope.of(
                                   context,
                                 ).requestFocus(_passwordFocus),
-                                inputFormatters: [
-                                  FilteringTextInputFormatter.deny(
-                                      RegExp(r'[^\x00-\x7F]')),
-                                  FilteringTextInputFormatter.deny(
-                                      RegExp(r'\s')),
-                                ],
+                                // Se permiten tildes y espacios ("Móvil 57",
+                                // "300 123 4567"): el servidor los entiende.
                               ),
                               const SizedBox(height: 14),
                               TextField(

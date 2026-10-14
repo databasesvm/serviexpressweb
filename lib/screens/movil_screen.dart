@@ -26,7 +26,6 @@ import 'package:latlong2/latlong.dart'
 import 'package:image_picker/image_picker.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:serviexpress_app/utils/auth_helper.dart'; // hashContrasena — cambio de contraseña
 import 'package:serviexpress_app/utils/widgets_compartidos.dart'; // PulsingPanicoButton y otros widgets compartidos
 import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart';
@@ -315,6 +314,149 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
   // lo usa para saber si debe vigilar la geocerca, sin tener que
   // consultar la BD en cada tick de posición.
   String? _miParaderoCache;
+
+  // ── POSICIÓN DE LOS SERVICIOS EN EL RADAR ─────────────────────────────────
+  // Solo cambia DÓNDE se ven las tarjetas, no lo que muestran:
+  //  • Al llegar servicios disponibles, la fila del paradero se recoge (y se
+  //    dibuja debajo del radar) para que no haya que hacer scroll.
+  //  • La oferta del #1 del paradero (F2) se muestra con la MISMA tarjeta,
+  //    en una ventana encima de todo. No se puede cerrar: se quita sola al
+  //    aceptar o cuando se acaba su tiempo (el servidor retira la oferta).
+  int _ultimaCantPendientes = 0;
+  String? _ofertaF2Mostrada; // id del servicio cuya ventana ya se abrió
+  String? _ofertaF2Abierta; // id del servicio con la ventana abierta ahora
+  BuildContext? _ctxVentanaOferta;
+
+  Widget _vigilarOfertaYFila(
+    List<Map<String, dynamic>> pendientes, {
+    required bool esMaster,
+    required bool tieneCapacidad,
+    required int limite,
+    required String rango,
+  }) {
+    final int cant = pendientes.length;
+    final bool llegaronServicios = _ultimaCantPendientes == 0 && cant > 0;
+    _ultimaCantPendientes = cant;
+
+    final String miId = widget.usuario['id'].toString();
+    Map<String, dynamic>? oferta;
+    for (final s in pendientes) {
+      if (s['tipo_fn'] != true &&
+          (s['paradero_ofrecido_id']?.toString() ?? '') == miId) {
+        oferta = s;
+        break;
+      }
+    }
+    final String? idOferta = oferta?['id']?.toString();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (llegaronServicios && _filaVirtualExpandida) {
+        setState(() => _filaVirtualExpandida = false);
+      }
+      // La oferta ya no está (aceptada, vencida o tomada) → cerrar la ventana
+      if (_ofertaF2Abierta != null && _ofertaF2Abierta != idOferta) {
+        _cerrarVentanaOferta();
+      }
+      // Oferta nueva para mí → abrir la ventana una sola vez
+      if (oferta != null && idOferta != _ofertaF2Mostrada) {
+        _ofertaF2Mostrada = idOferta;
+        _abrirVentanaOferta(oferta,
+            esMaster: esMaster,
+            tieneCapacidad: tieneCapacidad,
+            limite: limite,
+            rango: rango);
+      }
+    });
+    return const SizedBox.shrink();
+  }
+
+  void _abrirVentanaOferta(
+    Map<String, dynamic> servicio, {
+    required bool esMaster,
+    required bool tieneCapacidad,
+    required int limite,
+    required String rango,
+  }) {
+    final String id = servicio['id'].toString();
+    _ofertaF2Abierta = id;
+    showDialog<void>(
+      context: context,
+      // No se puede cerrar tocando afuera ni con "atrás": solo se quita
+      // al aceptar o cuando se acaba su tiempo (_cerrarVentanaOferta).
+      barrierDismissible: false,
+      builder: (ctx) {
+        _ctxVentanaOferta = ctx;
+        return PopScope(
+          canPop: false,
+          child: Dialog(
+            insetPadding:
+                const EdgeInsets.symmetric(horizontal: 10, vertical: 24),
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            child: SingleChildScrollView(
+              child: _construirTarjetaPendiente(
+                servicio,
+                esMaster: esMaster,
+                tieneCapacidad: tieneCapacidad,
+                activos: _serviciosActivosData.length,
+                limite: limite,
+                rango: rango,
+              ),
+            ),
+          ),
+        );
+      },
+    ).then((_) {
+      if (_ofertaF2Abierta == id) {
+        _ofertaF2Abierta = null;
+        _ctxVentanaOferta = null;
+      }
+    });
+  }
+
+  void _cerrarVentanaOferta() {
+    final ctx = _ctxVentanaOferta;
+    _ofertaF2Abierta = null;
+    _ctxVentanaOferta = null;
+    if (ctx == null || !ctx.mounted) return;
+    // Se quita SOLO esta ventana (si encima hay otro diálogo, p. ej. la
+    // confirmación de aceptar, ese no se toca).
+    final ruta = ModalRoute.of(ctx);
+    if (ruta != null && ruta.isActive) Navigator.of(ctx).removeRoute(ruta);
+  }
+
+  // Servicio en segundo plano (notificación fija "ServiExpress activo"): es
+  // lo que mantiene la señal de vida con la pantalla apagada. Si no logra
+  // arrancar, el servidor desconecta al móvil a los 5 min → avisarle.
+  DateTime? _avisoServicioFallo;
+  bool _servicioSegundoPlanoOk = false;
+  Future<void> _asegurarServicioSegundoPlano() async {
+    if (kIsWeb || !_estaEnLinea) return;
+    bool ok = false;
+    try {
+      ok = await asegurarServicioActivo(widget.usuario['id'].toString());
+    } catch (_) {}
+    final cambio = ok != _servicioSegundoPlanoOk;
+    _servicioSegundoPlanoOk = ok;
+    // Si cambió, reiniciar el GPS para quitar/poner su notificación de respaldo
+    if (cambio && mounted && _estaEnLinea) _iniciarRastreoGps();
+    if (ok || !mounted) return;
+    // Máximo un aviso cada 10 min
+    final ahora = DateTime.now();
+    if (_avisoServicioFallo != null &&
+        ahora.difference(_avisoServicioFallo!).inMinutes < 10) return;
+    _avisoServicioFallo = ahora;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text(
+        '⚠️ ServiExpress no pudo quedar activo en segundo plano. '
+        'Si apagas la pantalla podrías desconectarte. Revisa que la app '
+        'tenga ubicación "Permitir siempre" y sin ahorro de batería.',
+      ),
+      backgroundColor: Colors.deepOrange,
+      duration: Duration(seconds: 8),
+    ));
+  }
 
   // Tiempos de las fases de la cascada (Gestión de la central). El radar
   // decide qué servicios ve cada móvil con estos valores, igual que el
@@ -2483,8 +2625,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
             if (!kIsWeb) {
               // Si Android mató el foreground service mientras la app seguía
               // "en línea" en memoria, relanzarlo silenciosamente.
-              asegurarServicioActivo(widget.usuario['id'].toString())
-                  .catchError((_) {});
+              _asegurarServicioSegundoPlano();
               if (!_notifReconexionActiva) {
                 updateForegroundNotification(
                     'Conectado · recibiendo servicios');
@@ -2668,6 +2809,9 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       if (_estaEnLinea) {
         _iniciarRastreoGps();
         _iniciarHeartbeatUbicacion();
+        // App reabierta estando "en línea": el servicio en segundo plano no
+        // se relanzaba en el arranque en frío (solo al volver de background).
+        _asegurarServicioSegundoPlano();
       }
     }
   }
@@ -2715,11 +2859,18 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         // cuando el móvil está en movimiento. 10s beneficia teléfonos
         // de bajos recursos y baterías defectuosas.
         intervalDuration: const Duration(seconds: 10),
-        foregroundNotificationConfig: const ForegroundNotificationConfig(
-          notificationText: "ServiExpress está ejecutándose en segundo plano.",
-          notificationTitle: "Radar ServiExpress Activo",
-          enableWakeLock: true,
-        ),
+        // Una sola notificación fija: si nuestro servicio en segundo plano
+        // (tipo ubicación, "ServiExpress activo") está corriendo, él mantiene
+        // vivo el GPS. Solo si NO logró arrancar, el GPS abre su propio
+        // servicio como respaldo.
+        foregroundNotificationConfig: _servicioSegundoPlanoOk
+            ? null
+            : const ForegroundNotificationConfig(
+                notificationText:
+                    "ServiExpress está ejecutándose en segundo plano.",
+                notificationTitle: "Radar ServiExpress Activo",
+                enableWakeLock: true,
+              ),
       );
     } else {
       // iOS y Web: LocationSettings genérico
@@ -4132,7 +4283,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       if (!kIsWeb) {
         try {
           if (nuevoEstado) {
-            await startForegroundService(widget.usuario['id'].toString());
+            await _asegurarServicioSegundoPlano();
             // Solicita exención de optimización de batería al conectarse.
             // Aparece el diálogo del sistema solo si aún no está exenta.
             // Evita que ROMs agresivos (Xiaomi, Samsung, Huawei) maten
@@ -7783,16 +7934,19 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                       }
                       setDialogState(() => guardando = true);
                       try {
-                        final fila = await Supabase.instance.client
-                            .from('usuarios')
-                            .select('contrasena')
-                            .eq('id', movilId)
-                            .single();
-                        final hashActualGuardado =
-                            fila['contrasena']?.toString() ?? '';
-                        final hashIngresado = hashContrasena(actualCtrl.text);
+                        // El SERVIDOR verifica la actual y guarda la nueva
+                        // (el teléfono ya no lee la contraseña cifrada).
+                        final r = await Supabase.instance.client.rpc(
+                          'fn_cambiar_mi_contrasena',
+                          params: {
+                            'p_usuario_id': movilId,
+                            'p_actual': actualCtrl.text,
+                            'p_nueva': nuevaCtrl.text,
+                          },
+                        );
+                        final resCambio = r?.toString() ?? '';
 
-                        if (hashIngresado != hashActualGuardado) {
+                        if (resCambio == 'actual_incorrecta') {
                           setDialogState(() => guardando = false);
                           if (ctx.mounted) {
                             ScaffoldMessenger.of(ctx).showSnackBar(
@@ -7805,10 +7959,9 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                           }
                           return;
                         }
-
-                        await Supabase.instance.client.from('usuarios').update({
-                          'contrasena': hashContrasena(nuevaCtrl.text)
-                        }).eq('id', movilId);
+                        if (resCambio != 'ok') {
+                          throw Exception('No se pudo cambiar ($resCambio)');
+                        }
 
                         if (ctx.mounted) {
                           Navigator.pop(ctx);
@@ -16484,11 +16637,31 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                                                 ],
                                                               ),
                                                             ),
-                                                            _construirFilaVirtual(
-                                                                enFila),
-                                                            const SizedBox(
-                                                                height: 10),
+                                                            // Con servicios disponibles, la fila va
+                                                            // DEBAJO del radar (más abajo) para que
+                                                            // los servicios queden a la vista.
+                                                            if (pendientes
+                                                                .isEmpty) ...[
+                                                              _construirFilaVirtual(
+                                                                  enFila),
+                                                              const SizedBox(
+                                                                  height: 10),
+                                                            ],
                                                           ],
+                                                          // Recoge la fila al llegar servicios y abre
+                                                          // la ventana de la oferta del #1 (no dibuja nada).
+                                                          _vigilarOfertaYFila(
+                                                            pendientes,
+                                                            esMaster: esMaster,
+                                                            tieneCapacidad:
+                                                                tieneCapacidad,
+                                                            limite: limiteRango,
+                                                            rango: (miPerfilEnVivo[
+                                                                        'rango_movil'] ??
+                                                                    'NOVATO')
+                                                                .toString()
+                                                                .toUpperCase(),
+                                                          ),
 
                                                           // ---- TARJETA DOMICILIO ACTIVO ----
                                                           if (_pedidoDomicilioActivo !=
@@ -16630,6 +16803,17 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                                                   ),
                                                                 ),
                                                               ),
+                                                            // Fila del paradero DEBAJO de los
+                                                            // servicios disponibles (recogida).
+                                                            if (_serviciosActivosData
+                                                                    .isEmpty &&
+                                                                pendientes
+                                                                    .isNotEmpty) ...[
+                                                              const SizedBox(
+                                                                  height: 6),
+                                                              _construirFilaVirtual(
+                                                                  enFila),
+                                                            ],
                                                           ] else if (_serviciosActivosData
                                                                   .isEmpty &&
                                                               !radarAbierto) ...[

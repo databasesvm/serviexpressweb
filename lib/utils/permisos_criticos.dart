@@ -26,6 +26,7 @@
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart' show Geolocator;
 import 'package:permission_handler/permission_handler.dart';
 
 // =========================================================================
@@ -204,20 +205,100 @@ class _PermisosCriticosScreenState extends State<PermisosCriticosScreen>
     return true;
   }
 
+  // ── Si Android no muestra la ventana del permiso (ya lo rechazaron antes,
+  //    eligieron "Solo esta vez", o el teléfono no estaba listo), en vez de
+  //    quedarse sin hacer nada se explica el paso y se abren los ajustes.
+  Future<void> _avisarYAbrirAjustes(String pasos) async {
+    if (!mounted) return;
+    final abrir = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        title: const Text('Actívalo en los ajustes',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: Text(
+          'Tu teléfono no mostró la ventana del permiso. Te abrimos los '
+          'ajustes de ServiExpress:\n\n$pasos\n\nLuego vuelve a la app.',
+          style: const TextStyle(color: Colors.white70, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('CANCELAR', style: TextStyle(color: Colors.white38)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xff3AF500)),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('ABRIR AJUSTES',
+                style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+    if (abrir == true) await openAppSettings();
+  }
+
   Future<void> _pedirNotificaciones() async {
-    await Permission.notification.request();
+    final st = await Permission.notification.request();
+    if (!st.isGranted) {
+      await _avisarYAbrirAjustes('Toca Notificaciones → Permitir.');
+    }
     _verificarTodo();
   }
 
   Future<void> _pedirUbicacion() async {
-    await Permission.locationWhenInUse.request();
-    if (!mounted) return;
-    await Permission.locationAlways.request();
-    _verificarTodo();
+    try {
+      // 1. GPS del teléfono apagado → abrir el interruptor de ubicación
+      if (!await Geolocator.isLocationServiceEnabled()) {
+        await Geolocator.openLocationSettings();
+        return; // al volver, didChangeAppLifecycleState vuelve a verificar
+      }
+
+      // 2. "Mientras se usa la app"
+      var enUso = await Permission.locationWhenInUse.status;
+      if (!enUso.isGranted) {
+        if (enUso.isPermanentlyDenied) {
+          await _avisarYAbrirAjustes(
+              'Toca Permisos → Ubicación → Permitir todo el tiempo.');
+          return;
+        }
+        enUso = await Permission.locationWhenInUse.request();
+        if (!enUso.isGranted) {
+          await _avisarYAbrirAjustes(
+              'Toca Permisos → Ubicación → Permitir todo el tiempo.');
+          return;
+        }
+      }
+
+      // 3. "Permitir siempre". Pausa para que Android devuelva el control a
+      //    la app tras la primera ventana (si se pide de inmediato, algunos
+      //    teléfonos ignoran la solicitud en silencio).
+      await Future.delayed(const Duration(milliseconds: 600));
+      if (!mounted) return;
+      var siempre = await Permission.locationAlways.status;
+      if (!siempre.isGranted) {
+        if (!siempre.isPermanentlyDenied) {
+          siempre = await Permission.locationAlways.request();
+        }
+        if (!siempre.isGranted) {
+          await _avisarYAbrirAjustes(
+              'Toca Permisos → Ubicación → "Permitir todo el tiempo".');
+        }
+      }
+    } catch (_) {
+      await _avisarYAbrirAjustes(
+          'Toca Permisos → Ubicación → "Permitir todo el tiempo".');
+    } finally {
+      _verificarTodo();
+    }
   }
 
   Future<void> _pedirBateria() async {
-    await Permission.ignoreBatteryOptimizations.request();
+    final st = await Permission.ignoreBatteryOptimizations.request();
+    if (!st.isGranted) {
+      await _avisarYAbrirAjustes(
+          'Toca Batería → "Sin restricciones" (o desactiva la optimización).');
+    }
     _verificarTodo();
   }
 

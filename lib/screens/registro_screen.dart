@@ -24,7 +24,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/gestures.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:serviexpress_app/utils/auth_helper.dart';
+import 'package:serviexpress_app/utils/sesion_segura.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -455,14 +455,13 @@ class _RegistroScreenState extends State<RegistroScreen> {
       // Suscripción: requiere verificación de Central.
       final bool entraActivo = _rolSeleccionado == 'cliente' ||
           (_rolSeleccionado == 'movil' && _tipoMovil != 'suscripcion');
-      final passwordHash = hashContrasena(password);
-
+      // La contraseña ya NO se envía en el INSERT: se guarda en el servidor
+      // (tabla protegida) con fn_establecer_clave_inicial, justo después.
       final Map<String, dynamic> datosInsert = {
         'nombre': nombre.toUpperCase(),
         'usuario': usuarioText,
         'telefono': telefono,
         'correo': correo,
-        'contrasena': passwordHash,
         'rol': _rolSeleccionado,
         'activo': entraActivo,
         'terminos_aceptados_at': DateTime.now().toUtc().toIso8601String(),
@@ -487,11 +486,21 @@ class _RegistroScreenState extends State<RegistroScreen> {
         }
       }
 
-      final filaInsertada = await Supabase.instance.client
+      final filaInsertadaRaw = await Supabase.instance.client
           .from('usuarios')
           .insert(datosInsert)
           .select()
           .single();
+      final filaInsertada = sinDatosSensibles(filaInsertadaRaw);
+
+      // Contraseña inicial: el servidor la cifra y la guarda protegida.
+      final resClave = await Supabase.instance.client.rpc(
+        'fn_establecer_clave_inicial',
+        params: {'p_usuario_id': filaInsertada['id'], 'p_clave': password},
+      );
+      if (resClave?.toString() != 'ok') {
+        throw Exception('No se pudo guardar la contraseña ($resClave)');
+      }
 
       // ── Subir documentos para móviles ──────────────────────────────────────
       if (_rolSeleccionado == 'movil' && _fotoPerfil != null) {
@@ -521,14 +530,23 @@ class _RegistroScreenState extends State<RegistroScreen> {
         if (docUrls.isNotEmpty) {
           final Map<String, dynamic> urlsMap = {};
           if (docUrls.containsKey('perfil')) urlsMap['doc_perfil_url'] = docUrls['perfil'];
-          if (docUrls.containsKey('cedula')) urlsMap['doc_cedula_url'] = docUrls['cedula'];
           if (docUrls.containsKey('licencia')) urlsMap['doc_licencia_url'] = docUrls['licencia'];
           if (docUrls.containsKey('soat')) urlsMap['doc_soat_url'] = docUrls['soat'];
           try {
-            await Supabase.instance.client
-                .from('usuarios')
-                .update(urlsMap)
-                .eq('id', filaInsertada['id']);
+            if (urlsMap.isNotEmpty) {
+              await Supabase.instance.client
+                  .from('usuarios')
+                  .update(urlsMap)
+                  .eq('id', filaInsertada['id']);
+            }
+            // La foto de la cédula es dato privado: va a la tabla protegida.
+            if (docUrls.containsKey('cedula')) {
+              await Supabase.instance.client.rpc('fn_guardar_doc_cedula_registro',
+                  params: {
+                    'p_usuario_id': filaInsertada['id'],
+                    'p_path': docUrls['cedula'],
+                  });
+            }
           } catch (_) {}
         }
       }

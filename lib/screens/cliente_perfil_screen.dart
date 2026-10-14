@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:serviexpress_app/utils/sesion_segura.dart';
 
 class ClientePerfilScreen extends StatefulWidget {
   final Map<String, dynamic> usuario;
@@ -62,7 +63,26 @@ class _ClientePerfilScreenState extends State<ClientePerfilScreen> {
     }
 
     for (final ctrl in [_nombreCtrl, _telefonoCtrl, _cedulaCtrl]) {
-      ctrl.addListener(() => setState(() => _cambios = true));
+      ctrl.addListener(() {
+        if (_cargandoCedula) return;
+        setState(() => _cambios = true);
+      });
+    }
+    _cargarCedula();
+  }
+
+  // La cédula es dato privado: no viaja en la sesión, se pide al servidor.
+  bool _cargandoCedula = false;
+  Future<void> _cargarCedula() async {
+    try {
+      final r = await _db.rpc('fn_leer_mi_cedula',
+          params: {'p_usuario_id': widget.usuario['id']});
+      if (!mounted || r == null) return;
+      _cargandoCedula = true;
+      _cedulaCtrl.text = r.toString();
+      _cargandoCedula = false;
+    } catch (_) {
+      _cargandoCedula = false;
     }
   }
 
@@ -91,19 +111,25 @@ class _ClientePerfilScreenState extends State<ClientePerfilScreen> {
 
     setState(() => _guardando = true);
     try {
-      final updated = await _db
+      final updatedRaw = await _db
           .from('usuarios')
           .update({
             'nombre': nombre,
             'telefono': telefono,
-            'cedula': cedula.isEmpty ? null : cedula,
             'direcciones_guardadas': _direcciones,
           })
           .eq('id', widget.usuario['id'])
           .select()
           .single();
+      final updated = sinDatosSensibles(updatedRaw);
 
-      // Actualizar sesión local
+      // Cédula: se guarda en el servidor (tabla protegida)
+      await _db.rpc('fn_guardar_mi_cedula', params: {
+        'p_usuario_id': widget.usuario['id'],
+        'p_cedula': cedula,
+      });
+
+      // Actualizar sesión local (sin datos sensibles)
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('sesion_usuario_json', jsonEncode(updated));
 

@@ -29,7 +29,6 @@ import 'package:serviexpress_app/services/ota_updater.dart'; // OTA updates
 import 'package:serviexpress_app/screens/fn_panel_screen.dart'; // Panel FN Farmanorte
 import 'package:serviexpress_app/screens/fn_facturacion_screen.dart'; // Facturación FN
 import 'package:serviexpress_app/screens/fn_red_direcciones_screen.dart'; // Red de direcciones FN
-import 'package:serviexpress_app/utils/auth_helper.dart'; // hashContrasena
 import 'package:serviexpress_app/screens/historial_servicios_screen.dart'; // Historial de servicios
 part 'central_panel_precios.dart';
 part 'central_corte_financiero.dart';

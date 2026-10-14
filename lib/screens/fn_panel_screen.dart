@@ -2,7 +2,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:dio/dio.dart';
-import 'package:serviexpress_app/utils/auth_helper.dart'; // hashContrasena
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Panel FN – tres pestañas:
@@ -769,35 +768,44 @@ class _UsuarioSedeDialogState extends State<_UsuarioSedeDialog> {
 
     setState(() => _guardando = true);
     try {
-      // Hash SHA-256 — mismo algoritmo que usa login_screen / registro_screen
-      String? hash;
-      if (_passCtrl.text.trim().isNotEmpty) {
-        hash = hashContrasena(_passCtrl.text.trim());
-      }
+      // La contraseña la cifra y guarda el SERVIDOR (fn_central_cambiar_contrasena),
+      // nunca se envía en el insert/update de la tabla.
+      final String clave = _passCtrl.text.trim();
+      dynamic idUsuario;
 
       if (_esEdicion) {
         // Editar usuario existente
-        final update = <String, dynamic>{
+        idUsuario = widget.usuarioExistente!['id'];
+        await _db.from('usuarios').update({
           'nombre': _nombreCtrl.text.trim(),
           'usuario': _usuarioCtrl.text.trim(),
           'activo': _activo,
-          if (hash != null) 'contrasena': hash,
-        };
-        await _db
-            .from('usuarios')
-            .update(update)
-            .eq('id', widget.usuarioExistente!['id']);
+        }).eq('id', idUsuario);
       } else {
         // Crear usuario nuevo
-        await _db.from('usuarios').insert({
-          'nombre': _nombreCtrl.text.trim(),
-          'usuario': _usuarioCtrl.text.trim(),
-          'contrasena': hash ?? _passCtrl.text.trim(),
-          'rol': _esSupervisor ? 'supervisor_fn' : 'sede_fn',
-          if (!_esSupervisor) 'fn_sede_id': widget.sedeId,
-          'activo': _activo,
-          'tiene_fn': true,
-        });
+        final fila = await _db
+            .from('usuarios')
+            .insert({
+              'nombre': _nombreCtrl.text.trim(),
+              'usuario': _usuarioCtrl.text.trim(),
+              'rol': _esSupervisor ? 'supervisor_fn' : 'sede_fn',
+              if (!_esSupervisor) 'fn_sede_id': widget.sedeId,
+              'activo': _activo,
+              'tiene_fn': true,
+            })
+            .select('id')
+            .single();
+        idUsuario = fila['id'];
+      }
+
+      if (clave.isNotEmpty) {
+        final r = await _db.rpc('fn_central_cambiar_contrasena',
+            params: {'p_usuario_id': idUsuario, 'p_nueva': clave});
+        if (r?.toString() != 'ok') {
+          throw Exception(r?.toString() == 'no_autorizado'
+              ? 'Tu sesión de central no está activa. Cierra sesión y vuelve a entrar.'
+              : 'No se pudo guardar la contraseña (${r ?? ''})');
+        }
       }
 
       if (mounted) Navigator.pop(context);

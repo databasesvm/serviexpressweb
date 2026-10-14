@@ -52,7 +52,7 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
             .select('id, nombre, usuario, correo, telefono, direccion_local, tipo_negocio, zona_cobertura, created_at')
             .eq('rol', 'local').eq('estado_local', 'pendiente').order('created_at'),
         _db.from('usuarios')
-            .select('id, nombre, usuario, rol, telefono, correo, activo, suspendido, created_at, numero_movil, tipo_plan_movil, doc_perfil_url, doc_cedula_url, doc_licencia_url, doc_soat_url')
+            .select('id, nombre, usuario, rol, telefono, correo, activo, suspendido, created_at, numero_movil, tipo_plan_movil, doc_perfil_url, doc_licencia_url, doc_soat_url')
             .eq('activo', false)
             .neq('rol', 'local')   // locales van en "Solicitudes", no aquí
             .or('suspendido.is.null,suspendido.eq.false')
@@ -751,9 +751,18 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                 }
                 setSt(() => guardando = true);
                 try {
-                  await _db.from('usuarios')
-                      .update({'contrasena': hashContrasena(pass)})
-                      .eq('id', usuario['id']);
+                  // El servidor verifica que sea la central y guarda cifrado.
+                  final r = await _db.rpc('fn_central_cambiar_contrasena',
+                      params: {'p_usuario_id': usuario['id'], 'p_nueva': pass});
+                  final resCambio = r?.toString() ?? '';
+                  if (resCambio != 'ok') {
+                    throw Exception(switch (resCambio) {
+                      'no_autorizado' =>
+                        'Tu sesión de central no está activa. Cierra sesión y vuelve a entrar.',
+                      'nueva_muy_corta' => 'Mínimo 4 caracteres.',
+                      _ => 'No se pudo cambiar ($resCambio)',
+                    });
+                  }
                   if (ctx.mounted) {
                     Navigator.pop(ctx);
                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -1153,7 +1162,13 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
   void _verRegistroDialog(Map<String, dynamic> u) async {
     // Pre-cargar URLs firmadas antes de abrir el dialog (bucket privado)
     final perfilUrl  = await _getSignedUrl(u['doc_perfil_url']?.toString());
-    final cedulaUrl  = await _getSignedUrl(u['doc_cedula_url']?.toString());
+    // La foto de la cédula es dato privado: se pide al servidor (solo central)
+    String? pathCedula;
+    try {
+      final priv = await _db.rpc('fn_datos_privados', params: {'p_usuario_id': u['id']});
+      if (priv is Map) pathCedula = priv['doc_cedula_url']?.toString();
+    } catch (_) {}
+    final cedulaUrl  = await _getSignedUrl(pathCedula);
     final licenciaUrl = await _getSignedUrl(u['doc_licencia_url']?.toString());
     final soatUrl    = await _getSignedUrl(u['doc_soat_url']?.toString());
     if (!mounted) return;
