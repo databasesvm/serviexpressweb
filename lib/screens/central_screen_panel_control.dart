@@ -1632,9 +1632,10 @@ extension CentralScreenPanelControl on _CentralScreenState {
                 }
                 final todos = snapshot.data ?? [];
 
-                // Orden ascendente por ID en todas las listas (#16)
+                // Orden: el MÁS RECIENTE primero en todas las listas, para que
+                // la central no pierda de vista los servicios nuevos.
                 List<Map<String, dynamic>> _asc(Iterable<Map<String, dynamic>> it) =>
-                    it.toList()..sort((a, b) => ((a['id'] as int?) ?? 0).compareTo((b['id'] as int?) ?? 0));
+                    it.toList()..sort((a, b) => ((b['id'] as int?) ?? 0).compareTo((a['id'] as int?) ?? 0));
 
                 final problemas = _asc(todos.where((s) => s['estado'] == 'problema'));
                 final cotizaciones = _asc(todos.where((s) => s['estado'] == 'cotizacion'));
@@ -1675,7 +1676,7 @@ extension CentralScreenPanelControl on _CentralScreenState {
                   return DateTime.parse(updStr).toUtc().isBefore(_corte30);
                 }).toList()
                   ..sort((a, b) =>
-                      ((a['id'] as int?) ?? 0).compareTo((b['id'] as int?) ?? 0));
+                      ((b['id'] as int?) ?? 0).compareTo((a['id'] as int?) ?? 0));
 
                 // Contadores para chips toggle
                 final kpiFinalizados = finalizados.length +
