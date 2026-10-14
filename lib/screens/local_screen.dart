@@ -717,23 +717,44 @@ class _LocalScreenState extends State<LocalScreen>
                           color: const Color(0xFF141414),
                           child: Column(
                             children: [
-                              // Fila 1: NUEVO PEDIDO (ancho completo)
-                              SizedBox(
-                                width: double.infinity,
-                                child: ElevatedButton.icon(
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: const Color(0xff3AF500),
-                                    foregroundColor: Colors.black,
-                                    padding: const EdgeInsets.symmetric(vertical: 11),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              // Fila 1: NUEVO PEDIDO + PEDIR MÓVIL (rápido, sin formulario)
+                              Row(children: [
+                                Expanded(
+                                  flex: 3,
+                                  child: ElevatedButton.icon(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: const Color(0xff3AF500),
+                                      foregroundColor: Colors.black,
+                                      padding: const EdgeInsets.symmetric(vertical: 11),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                    ),
+                                    onPressed: () => _abrirFormularioPedido(context,
+                                        perfilEnVivo: perfilEnVivo),
+                                    icon: const Icon(Icons.motorcycle, size: 18),
+                                    label: const Text('NUEVO PEDIDO',
+                                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
                                   ),
-                                  onPressed: () => _abrirFormularioPedido(context,
-                                      perfilEnVivo: perfilEnVivo),
-                                  icon: const Icon(Icons.motorcycle, size: 18),
-                                  label: const Text('NUEVO PEDIDO',
-                                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
                                 ),
-                              ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  flex: 2,
+                                  child: ElevatedButton.icon(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.orange[800],
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(vertical: 11),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                    ),
+                                    onPressed: () => _solicitarMovilDirecto(context),
+                                    icon: const Icon(Icons.two_wheeler, size: 18),
+                                    label: const FittedBox(
+                                      fit: BoxFit.scaleDown,
+                                      child: Text('PEDIR MÓVIL',
+                                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                                    ),
+                                  ),
+                                ),
+                              ]),
                               // Fila 2: PUNTO A PUNTO + SOLICITAR MÓVIL (dos columnas)
                               // El bloque PAP solo aparece si la central lo habilitó para este local
                               if (tienePAP) ...[
@@ -759,20 +780,6 @@ class _LocalScreenState extends State<LocalScreen>
                                           style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
                                         ),
                                       ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    // ── TEMPORAL: solicitud directa al radar ──
-                                    ElevatedButton.icon(
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.orange[800],
-                                        foregroundColor: Colors.white,
-                                        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                      ),
-                                      onPressed: () => _solicitarMovilDirecto(context),
-                                      icon: const Icon(Icons.store, size: 16),
-                                      label: const Text('SOLICITAR MÓVIL',
-                                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                                     ),
                                   ],
                                 ),

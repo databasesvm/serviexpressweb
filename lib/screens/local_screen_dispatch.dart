@@ -45,36 +45,59 @@ mixin _DispatchMixin on State<LocalScreen> {
   // Crea un servicio RECOGIDA LOCAL sin destino, datos del cliente ni precio y
   // dispara la cascada SE completa (4 fases). Se elimina cuando el sistema
   // tenga el flujo adaptado definitivamente.
+  // ── PEDIR MÓVIL RÁPIDO ─────────────────────────────────────────────────────
+  // Solicitud directa al radar sin formulario: tipo RECOGIDA LOCAL, sin tarifa.
+  // El local le entrega los datos del servicio al móvil cuando llega.
+  // Dirección/nota opcional. Entra con la cascada SE normal (F1→F4).
   Future<void> _solicitarMovilDirecto(BuildContext ctx) async {
+    final notaCtrl = TextEditingController();
     final confirmar = await showDialog<bool>(
       context: ctx,
       barrierDismissible: true,
       builder: (d) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         title: const Row(children: [
-          Icon(Icons.motorcycle, color: Colors.black, size: 22),
+          Icon(Icons.two_wheeler, color: Colors.black, size: 22),
           SizedBox(width: 8),
-          Text('SOLICITAR MÓVIL', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+          Text('PEDIR MÓVIL', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
         ]),
-        content: Text(
-          '¿Enviar solicitud al radar para ${widget.usuario['nombre']}?\n\nSin dirección ni precio — recogida directa en el local.',
-          style: const TextStyle(fontSize: 13),
-        ),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text(
+            'El móvil viene al local y aquí le entregan los datos del servicio.',
+            style: TextStyle(fontSize: 13, color: Colors.black87),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: notaCtrl,
+            autofocus: true,
+            maxLines: 2,
+            minLines: 1,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: const InputDecoration(
+              labelText: 'Dirección o nota (opcional)',
+              hintText: 'Ej: Barrio Trapiches casa 5 · 2 pedidos',
+              border: OutlineInputBorder(),
+            ),
+          ),
+        ]),
         actionsAlignment: MainAxisAlignment.spaceBetween,
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(d, false),
             child: const Text('CANCELAR', style: TextStyle(color: Colors.grey)),
           ),
-          ElevatedButton(
+          ElevatedButton.icon(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.black),
             onPressed: () => Navigator.pop(d, true),
-            child: const Text('SOLICITAR',
+            icon: const Icon(Icons.radar, color: Color(0xff3AF500), size: 18),
+            label: const Text('PEDIR MÓVIL AHORA',
                 style: TextStyle(color: Color(0xff3AF500), fontWeight: FontWeight.bold)),
           ),
         ],
       ),
     );
+    final String nota = notaCtrl.text.trim();
+    notaCtrl.dispose();
     if (confirmar != true || !mounted) return;
 
     try {
@@ -89,10 +112,12 @@ mixin _DispatchMixin on State<LocalScreen> {
             'local_id': widget.usuario['id'],
             'tipo_servicio': 'RECOGIDA LOCAL',
             'origen': localNombre,
+            'destino': nota.isNotEmpty ? nota : 'Datos en el local',
             'estado': 'pendiente',
             'tarifa': 0,
             'creador': localNombre,
-            'observacion': '[ RECOGIDA LOCAL ] - Solicitud directa desde el local',
+            'observacion': '[ RECOGIDA LOCAL ] Pedido rápido — los datos se entregan en el local'
+                '${nota.isNotEmpty ? ' · $nota' : ''}',
             if (oLat != null) 'origen_lat': oLat,
             if (oLng != null) 'origen_lng': oLng,
           })
@@ -127,7 +152,7 @@ mixin _DispatchMixin on State<LocalScreen> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('✅ Solicitud enviada al radar. Masters avisados.'),
+          content: Text('✅ Móvil solicitado. Buscando móvil…'),
           backgroundColor: Colors.green,
           duration: Duration(seconds: 3),
         ));
