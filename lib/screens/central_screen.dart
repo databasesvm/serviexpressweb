@@ -516,7 +516,10 @@ class _CentralScreenState extends State<CentralScreen>
             .from('usuarios')
             .select('id')
             .eq('activo', false)
-            .not('rol', 'in', '("cliente")');
+            .not('rol', 'in', '("cliente")')
+            // Eliminados y suspendidos no son "por activar"
+            .not('eliminado', 'is', true)
+            .not('suspendido', 'is', true);
         _pendientesIds
           ..clear()
           ..addAll(pendientes.map((p) => p['id'].toString()));
@@ -733,7 +736,10 @@ class _CentralScreenState extends State<CentralScreen>
 
     if (esBorrado) {
       _pendientesIds.remove(id);
-    } else if (doc['rol']?.toString() == 'cliente') {
+    } else if (doc['rol']?.toString() == 'cliente' ||
+        doc['eliminado'] == true ||
+        doc['suspendido'] == true) {
+      // Clientes, eliminados y suspendidos no cuentan como "por activar"
       _pendientesIds.remove(id);
     } else if (doc['activo'] == true) {
       if (_pendientesIds.remove(id) && !kIsWeb) {
@@ -1168,10 +1174,9 @@ class _CentralScreenState extends State<CentralScreen>
                         backgroundColor: Colors.grey[850],
                         foregroundColor: Colors.white,
                       ),
-                      // Si hay pendientes de activación → ir directo a "Por Activar" (tab 1)
-                      onPressed: () => _usuariosPendientes > 0
-                          ? _abrirGestionUsuarios(context, tabInicial: 1)
-                          : _abrirPanelGestion(context),
+                      // Siempre abre el menú completo de Gestión; la tarjeta
+                      // "Gestión de Usuarios" muestra el contador de pendientes.
+                      onPressed: () => _abrirPanelGestion(context),
                       icon: const Icon(Icons.admin_panel_settings_rounded, size: 18),
                       label: const Text(
                         'GESTIÓN',
