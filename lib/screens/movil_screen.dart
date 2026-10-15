@@ -382,6 +382,19 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
   }) {
     final String id = servicio['id'].toString();
     _ofertaF2Abierta = id;
+    // En la web (Safari/iPhone sin push) el único aviso es este: que suene.
+    // En la app el push ya trae su sonido, no se duplica.
+    if (kIsWeb) _sonidos.reproducir(Sonidos.alerta);
+    // Le dice al servidor que la oferta SÍ se vio en pantalla: solo así se
+    // sanciona a un #1 sin push si la deja vencer (se_sancion_paradero_sql).
+    final int? idNum = int.tryParse(id);
+    if (idNum != null) {
+      Supabase.instance.client
+          .from('usuarios')
+          .update({'oferta_vista_srv': idNum})
+          .eq('id', widget.usuario['id'])
+          .then((_) {}, onError: (_) {});
+    }
     showDialog<void>(
       context: context,
       // No se puede cerrar tocando afuera ni con "atrás": solo se quita
@@ -415,6 +428,28 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         _ctxVentanaOferta = null;
       }
     });
+  }
+
+  /// push_activo = true si OneSignal tiene este teléfono suscrito.
+  /// En la web (Safari/iPhone) no hay push de la app → false.
+  bool? _pushActivoReportado;
+  Future<void> _reportarPushActivo() async {
+    if (!mounted) return;
+    bool activo = false;
+    if (!kIsWeb) {
+      try {
+        final sub = OneSignal.User.pushSubscription;
+        activo = (sub.optedIn ?? false) && (sub.id ?? '').isNotEmpty;
+      } catch (_) {}
+    }
+    if (activo == _pushActivoReportado) return;
+    try {
+      await Supabase.instance.client
+          .from('usuarios')
+          .update({'push_activo': activo})
+          .eq('id', widget.usuario['id']);
+      _pushActivoReportado = activo;
+    } catch (_) {}
   }
 
   void _cerrarVentanaOferta() {
@@ -661,6 +696,10 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       if (!kIsWeb && mounted) await OtaUpdater.verificar(context);
     });
 
+    // Informa al servidor si este teléfono puede recibir push. Un #1 del
+    // paradero SIN push que nunca vio la oferta no se sanciona.
+    Future.delayed(const Duration(seconds: 8), _reportarPushActivo);
+
     Future.microtask(() async {
       try {
         await OneSignal.login(widget.usuario['id'].toString());
@@ -828,10 +867,11 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
 
     _cargarZonasParadero(); // PARADEROS-E: carga geocercas desde BD
     _refrescarCfgCascada(); // tiempos de fases configurados en Gestión
-    // Tarjetas de servicios disponibles: cada 15 s se confirma con el
-    // servidor que sigan libres (por si se perdió el aviso en tiempo real).
+    // Tarjetas de servicios disponibles: cada 5 s se confirma con el
+    // servidor que sigan libres y si me ofrecieron el turno del #1 (por si se
+    // perdió el aviso en tiempo real). Solo consulta si hay tarjetas pendientes.
     _timerVerificarPendientes = Timer.periodic(
-        const Duration(seconds: 15), (_) => _verificarPendientesVisibles());
+        const Duration(seconds: 5), (_) => _verificarPendientesVisibles());
     // Podio de la semana (👑 🥈 🥉) para la fila del paradero: cada 2 min
     _refrescarPodioSemana();
     _timerPodioSemana = Timer.periodic(
@@ -2481,7 +2521,11 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     try {
       final rows = await Supabase.instance.client
           .from('servicios')
-          .select('id, estado, movil_id')
+          // Además de estado/móvil, trae la OFERTA del #1 del paradero: si el
+          // tiempo real se cayó (Safari/iPhone, mala señal) así igual se
+          // entera de que es su turno y se abre la ventana de la oferta.
+          .select('id, estado, movil_id, paradero_ofrecido_id, '
+              'paradero_ofrecido_at, se_f2_srv_tipo, se_cascade_t0')
           .inFilter('id', ids);
       if (!mounted || _cacheServicios == null) return;
       final Map<int, Map<String, dynamic>> actual = {
@@ -2504,7 +2548,25 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
           continue;
         }
         if (r['estado'] == 'pendiente') {
-          lista.add(s);
+          // ¿Cambió la oferta F2 (o el inicio de la cascada)? → actualizar
+          const camposOferta = [
+            'paradero_ofrecido_id',
+            'paradero_ofrecido_at',
+            'se_f2_srv_tipo',
+            'se_cascade_t0',
+          ];
+          final difiere = camposOferta.any(
+              (k) => (s[k]?.toString() ?? '') != (r[k]?.toString() ?? ''));
+          if (difiere) {
+            cambio = true;
+            final copia = Map<String, dynamic>.from(s);
+            for (final k in camposOferta) {
+              copia[k] = r[k];
+            }
+            lista.add(copia);
+          } else {
+            lista.add(s);
+          }
           continue;
         }
         // Ya no está libre: se actualiza su estado (si sigue activo, deja de
@@ -2735,6 +2797,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
           // Quitar ya las tarjetas de servicios que otro tomó mientras
           // la app estaba en segundo plano
           _verificarPendientesVisibles();
+          // ¿Cambió el permiso de notificaciones mientras estaba afuera?
+          _reportarPushActivo();
           if (_estaEnLinea) {
             _iniciarHeartbeat();
             if (!kIsWeb) {

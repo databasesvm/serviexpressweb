@@ -6,6 +6,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'whatsapp_contacto.dart';
+import 'alta_demanda.dart';
 
 // ── GPS ─────────────────────────────────────────────────────────────────────
 
@@ -77,37 +78,322 @@ Widget chipGpsGuardado({required VoidCallback onQuitar}) => Padding(
       ]),
     );
 
-/// Recuadro naranja "Cotización Obligatoria" (igual en todos los formularios).
+// ── Estilo visual de los formularios del invitado ───────────────────────────
+// Fondo negro + tarjetas claras. Cada servicio tiene su color de acento.
+
+const Color kFondoInvitado = Color(0xFF0D0D0D);
+
+class EstiloServicioInvitado {
+  final Color color;
+  final IconData icono;
+  final String titulo;
+  final String subtitulo;
+  final String textoBoton;
+  const EstiloServicioInvitado({
+    required this.color,
+    required this.icono,
+    required this.titulo,
+    required this.subtitulo,
+    required this.textoBoton,
+  });
+
+  /// Texto legible encima del color (negro sobre verde, blanco sobre azul…)
+  Color get sobreColor =>
+      ThemeData.estimateBrightnessForColor(color) == Brightness.dark
+          ? Colors.white
+          : Colors.black;
+
+  static const mototaxi = EstiloServicioInvitado(
+    color: Color(0xFF3AF500),
+    icono: Icons.two_wheeler,
+    titulo: 'Pedir Mototaxi',
+    subtitulo: 'Te recogemos donde estés',
+    textoBoton: 'PEDIR MOTOTAXI',
+  );
+  static const paqueteria = EstiloServicioInvitado(
+    color: Color(0xFF2F80ED),
+    icono: Icons.inventory_2,
+    titulo: 'Enviar un paquete',
+    subtitulo: 'Lo recogemos y lo entregamos',
+    textoBoton: 'SOLICITAR ENVÍO',
+  );
+  static const comida = EstiloServicioInvitado(
+    color: Color(0xFFFF8A00),
+    icono: Icons.restaurant,
+    titulo: 'Pedir comida',
+    subtitulo: 'Te la traemos a la puerta',
+    textoBoton: 'PEDIR COMIDA',
+  );
+  static const compras = EstiloServicioInvitado(
+    color: Color(0xFF9B51E0),
+    icono: Icons.shopping_cart,
+    titulo: 'Compras y mandados',
+    subtitulo: 'Compramos por ti y te lo llevamos',
+    textoBoton: 'SOLICITAR COMPRA',
+  );
+}
+
+/// Pantalla común: fondo negro, encabezado del servicio, contenido centrado
+/// (máx. 560 px en pantallas grandes) y botón fijo abajo. Responsive:
+/// márgenes más pequeños en celulares angostos y el botón fijo se esconde
+/// mientras el teclado está abierto (para no tapar los campos).
+class ScaffoldInvitado extends StatelessWidget {
+  final EstiloServicioInvitado estilo;
+  final List<Widget> children;
+  final bool procesando;
+  final VoidCallback onEnviar;
+  const ScaffoldInvitado({
+    super.key,
+    required this.estilo,
+    required this.children,
+    required this.procesando,
+    required this.onEnviar,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final mq = MediaQuery.of(context);
+    final ancho = mq.size.width;
+    final double margen = ancho < 380 ? 10 : 16;
+    final bool teclado = mq.viewInsets.bottom > 0;
+    final base = Theme.of(context);
+
+    return Theme(
+      data: base.copyWith(
+        colorScheme: base.colorScheme.copyWith(primary: estilo.color),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: const Color(0xFFF3F4F6),
+          isDense: true,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide.none,
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide.none,
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: estilo.color, width: 2),
+          ),
+          errorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Colors.red, width: 1.2),
+          ),
+          focusedErrorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Colors.red, width: 2),
+          ),
+          labelStyle: const TextStyle(color: Colors.black54, fontSize: 14),
+          floatingLabelStyle: const TextStyle(color: Colors.black87, fontWeight: FontWeight.w600),
+          helperStyle: const TextStyle(color: Colors.black45, fontSize: 11),
+          helperMaxLines: 2,
+          errorMaxLines: 2,
+        ),
+        textSelectionTheme: TextSelectionThemeData(cursorColor: estilo.color),
+      ),
+      child: Scaffold(
+        backgroundColor: kFondoInvitado,
+        appBar: AppBar(
+          backgroundColor: kFondoInvitado,
+          elevation: 0,
+          scrolledUnderElevation: 0,
+          iconTheme: const IconThemeData(color: Colors.white),
+          title: const Text('ServiExpress',
+              style: TextStyle(color: Colors.white70, fontSize: 15, fontWeight: FontWeight.w600)),
+        ),
+        body: SafeArea(
+          bottom: false,
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 560),
+              child: ListView(
+                keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                padding: EdgeInsets.fromLTRB(margen, 4, margen, 24),
+                children: [
+                  _EncabezadoServicio(estilo: estilo, compacto: ancho < 380),
+                  const SizedBox(height: 16),
+                  const BannerAltaDemanda(margin: EdgeInsets.only(bottom: 12)),
+                  ...children,
+                ],
+              ),
+            ),
+          ),
+        ),
+        bottomNavigationBar: teclado
+            ? null
+            : SafeArea(
+                child: Center(
+                  heightFactor: 1,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 560),
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(margen, 8, margen, 12),
+                      child: SizedBox(
+                        width: double.infinity,
+                        height: 54,
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: estilo.color,
+                            foregroundColor: estilo.sobreColor,
+                            disabledBackgroundColor: estilo.color.withValues(alpha: 0.5),
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          ),
+                          onPressed: procesando ? null : onEnviar,
+                          icon: procesando
+                              ? SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2.5, color: estilo.sobreColor),
+                                )
+                              : const Icon(Icons.send_rounded, size: 20),
+                          label: Text(
+                            procesando ? 'ENVIANDO…' : estilo.textoBoton,
+                            style: const TextStyle(
+                                fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: 1),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+      ),
+    );
+  }
+}
+
+class _EncabezadoServicio extends StatelessWidget {
+  final EstiloServicioInvitado estilo;
+  final bool compacto;
+  const _EncabezadoServicio({required this.estilo, required this.compacto});
+
+  @override
+  Widget build(BuildContext context) {
+    final double lado = compacto ? 52 : 60;
+    return Row(children: [
+      Container(
+        width: lado,
+        height: lado,
+        decoration: BoxDecoration(
+          color: estilo.color.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: estilo.color.withValues(alpha: 0.6)),
+        ),
+        child: Icon(estilo.icono, color: estilo.color, size: lado * 0.5),
+      ),
+      const SizedBox(width: 14),
+      Expanded(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(estilo.titulo,
+              style: TextStyle(
+                  color: Colors.white,
+                  fontSize: compacto ? 21 : 24,
+                  fontWeight: FontWeight.w800,
+                  height: 1.1)),
+          const SizedBox(height: 4),
+          Text(estilo.subtitulo,
+              style: const TextStyle(color: Colors.white60, fontSize: 13)),
+        ]),
+      ),
+    ]);
+  }
+}
+
+/// Tarjeta clara con número de paso, ícono y línea de color del servicio.
+class BloqueInvitado extends StatelessWidget {
+  final int paso;
+  final String titulo;
+  final IconData icono;
+  final Color color;
+  final List<Widget> hijos;
+  const BloqueInvitado({
+    super.key,
+    required this.paso,
+    required this.titulo,
+    required this.icono,
+    required this.color,
+    required this.hijos,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bool angosto = MediaQuery.of(context).size.width < 380;
+    final sobre = ThemeData.estimateBrightnessForColor(color) == Brightness.dark
+        ? Colors.white
+        : Colors.black;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+              color: color.withValues(alpha: 0.18), blurRadius: 18, offset: const Offset(0, 6)),
+        ],
+      ),
+      child: Padding(
+        padding: EdgeInsets.all(angosto ? 14 : 18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Container(
+                width: 28,
+                height: 28,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+                child: Text('$paso',
+                    style: TextStyle(color: sobre, fontWeight: FontWeight.w800, fontSize: 14)),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(titulo,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w800, fontSize: 16, color: Colors.black87)),
+              ),
+              Icon(icono, color: color, size: 22),
+            ]),
+            Container(
+              height: 3,
+              width: 40,
+              margin: const EdgeInsets.only(top: 10, bottom: 16, left: 38),
+              decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(2)),
+            ),
+            ...hijos,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Aviso corto: la Central envía el precio antes de despachar.
 class AvisoCotizacionInvitado extends StatelessWidget {
   const AvisoCotizacionInvitado({super.key});
 
   @override
   Widget build(BuildContext context) => Container(
         width: double.infinity,
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: Colors.orange[50],
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.orange[300]!),
+          color: const Color(0xFFFFF7E6),
+          borderRadius: BorderRadius.circular(12),
         ),
-        child: const Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(children: [
-              Icon(Icons.info_outline, color: Colors.orange, size: 20),
-              SizedBox(width: 8),
-              Text('Cotización Obligatoria',
-                  style: TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 14, color: Colors.orange)),
-            ]),
-            SizedBox(height: 8),
-            Text(
-              'Para garantizar un cobro justo, la Central revisará tu solicitud y te '
-              'enviará la tarifa exacta antes de despachar al conductor.',
-              style: TextStyle(fontSize: 12, color: Colors.black87, height: 1.3),
+        child: const Row(children: [
+          Text('💬', style: TextStyle(fontSize: 18)),
+          SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'La Central te envía el precio antes de despachar al conductor.',
+              style: TextStyle(fontSize: 12.5, color: Colors.black87, height: 1.3),
             ),
-          ],
-        ),
+          ),
+        ]),
       );
 }
 
@@ -261,8 +547,6 @@ class _CampoOrigenConLocalesState extends State<CampoOrigenConLocales> {
         onChanged: (_) => widget.onLocal(null), // escribió otra cosa
         decoration: InputDecoration(
           labelText: widget.label,
-          border: const OutlineInputBorder(),
-          isDense: true,
           prefixIcon: widget.icono != null ? Icon(widget.icono, size: 18) : null,
           suffixIcon: widget.suffixIcon,
         ),

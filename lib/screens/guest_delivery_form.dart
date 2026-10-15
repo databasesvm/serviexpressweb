@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart';
-import 'package:serviexpress_app/utils/alta_demanda.dart';
 import 'package:serviexpress_app/utils/whatsapp_contacto.dart';
 import 'package:serviexpress_app/utils/invitado_comun.dart';
 import 'package:serviexpress_app/screens/guest_tracking_screen.dart';
@@ -15,6 +14,8 @@ class GuestDeliveryForm extends StatefulWidget {
 }
 
 class _GuestDeliveryFormState extends State<GuestDeliveryForm> {
+  static const _estilo = EstiloServicioInvitado.paqueteria;
+
   final _formKey = GlobalKey<FormState>();
   bool _procesando = false;
 
@@ -190,49 +191,12 @@ class _GuestDeliveryFormState extends State<GuestDeliveryForm> {
     }
   }
 
-  Widget _construirBloque({
-    required String titulo,
-    required IconData icono,
-    required List<Widget> hijos,
-  }) {
-    return Card(
-      elevation: 0,
-      color: Colors.white,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: Colors.grey.shade200),
-      ),
-      margin: const EdgeInsets.only(bottom: 16),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(children: [
-              Icon(icono, color: Colors.black54, size: 20),
-              const SizedBox(width: 8),
-              Text(titulo,
-                  style: const TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black87)),
-            ]),
-            const Divider(height: 24),
-            ...hijos,
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _campoTelefono(TextEditingController c, String label) => TextFormField(
         controller: c,
         keyboardType: TextInputType.phone,
+        textInputAction: TextInputAction.next,
         inputFormatters: formatoWhatsApp,
-        decoration: InputDecoration(
-          labelText: label,
-          helperText: 'Ej: 3001234567',
-          border: const OutlineInputBorder(),
-          isDense: true,
-        ),
+        decoration: InputDecoration(labelText: label, helperText: 'Ej: 3001234567'),
         validator: validarTelefonoInvitado,
       );
 
@@ -248,130 +212,102 @@ class _GuestDeliveryFormState extends State<GuestDeliveryForm> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
-      appBar: AppBar(
-        title: const Text('Solicitar Domicilio',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        backgroundColor: Colors.black,
-        iconTheme: const IconThemeData(color: Colors.white),
-      ),
-      body: Form(
-        key: _formKey,
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            const BannerAltaDemanda(),
-            _construirBloque(
-              titulo: 'Tus Datos',
-              icono: Icons.person,
-              hijos: [
-                TextFormField(
-                  controller: _nombreCtrl,
-                  textCapitalization: TextCapitalization.words,
-                  decoration: const InputDecoration(
-                    labelText: 'Nombre y Apellido',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                  validator: validarRequerido,
+    final c = _estilo.color;
+    return Form(
+      key: _formKey,
+      child: ScaffoldInvitado(
+        estilo: _estilo,
+        procesando: _procesando,
+        onEnviar: _enviarPedido,
+        children: [
+          BloqueInvitado(
+            paso: 1,
+            titulo: 'Tus datos',
+            icono: Icons.person,
+            color: c,
+            hijos: [
+              TextFormField(
+                controller: _nombreCtrl,
+                textCapitalization: TextCapitalization.words,
+                textInputAction: TextInputAction.next,
+                decoration: const InputDecoration(labelText: 'Nombre y apellido'),
+                validator: validarRequerido,
+              ),
+            ],
+          ),
+          BloqueInvitado(
+            paso: 2,
+            titulo: '¿Dónde recogemos?',
+            icono: Icons.storefront,
+            color: c,
+            hijos: [
+              CampoOrigenConLocales(
+                controller: _dirOrigenCtrl,
+                label: 'Dirección o nombre del local',
+                onLocal: _alElegirLocal,
+                validator: (v) => _origenLat != null ? null : validarRequerido(v),
+                suffixIcon: IconButton(
+                  tooltip: 'Usar mi ubicación actual',
+                  icon: Icon(Icons.my_location, color: c),
+                  onPressed: () => _capturarUbicacion(true),
                 ),
-              ],
-            ),
-            _construirBloque(
-              titulo: '¿Dónde recogemos?',
-              icono: Icons.storefront,
-              hijos: [
-                CampoOrigenConLocales(
-                  controller: _dirOrigenCtrl,
-                  label: 'Dirección o nombre del local',
-                  onLocal: _alElegirLocal,
-                  validator: (v) => _origenLat != null ? null : validarRequerido(v),
+              ),
+              if (_origenLat != null && !_origenEsLocal)
+                chipGpsGuardado(onQuitar: () => setState(() {
+                      _origenLat = null;
+                      _origenLng = null;
+                    })),
+              const SizedBox(height: 12),
+              _campoTelefono(_telOrigenCtrl, 'WhatsApp / teléfono de quien entrega'),
+            ],
+          ),
+          BloqueInvitado(
+            paso: 3,
+            titulo: '¿Dónde entregamos?',
+            icono: Icons.flag_rounded,
+            color: c,
+            hijos: [
+              TextFormField(
+                controller: _dirDestinoCtrl,
+                onChanged: _alEditarDestino,
+                decoration: InputDecoration(
+                  labelText: 'Dirección de destino',
                   suffixIcon: IconButton(
                     tooltip: 'Usar mi ubicación actual',
-                    icon: const Icon(Icons.my_location, color: Colors.blue),
-                    onPressed: () => _capturarUbicacion(true),
+                    icon: Icon(Icons.my_location, color: c),
+                    onPressed: () => _capturarUbicacion(false),
                   ),
                 ),
-                if (_origenLat != null && !_origenEsLocal)
-                  chipGpsGuardado(onQuitar: () => setState(() {
-                        _origenLat = null;
-                        _origenLng = null;
-                      })),
-                const SizedBox(height: 12),
-                _campoTelefono(_telOrigenCtrl, 'WhatsApp / teléfono de quien entrega'),
-              ],
-            ),
-            _construirBloque(
-              titulo: '¿Dónde entregamos?',
-              icono: Icons.flag,
-              hijos: [
-                TextFormField(
-                  controller: _dirDestinoCtrl,
-                  onChanged: _alEditarDestino,
-                  decoration: InputDecoration(
-                    labelText: 'Dirección de destino',
-                    border: const OutlineInputBorder(),
-                    isDense: true,
-                    suffixIcon: IconButton(
-                      tooltip: 'Usar mi ubicación actual',
-                      icon: const Icon(Icons.my_location, color: Colors.blue),
-                      onPressed: () => _capturarUbicacion(false),
-                    ),
-                  ),
-                  validator: (v) => _destinoLat != null ? null : validarRequerido(v),
-                ),
-                if (_destinoLat != null)
-                  chipGpsGuardado(onQuitar: () => setState(() {
-                        _destinoLat = null;
-                        _destinoLng = null;
-                      })),
-                const SizedBox(height: 12),
-                _campoTelefono(_telDestinoCtrl, 'WhatsApp / teléfono de quien recibe'),
-              ],
-            ),
-            _construirBloque(
-              titulo: 'Detalles Finales',
-              icono: Icons.payments,
-              hijos: [
-                DropdownButtonFormField<String>(
-                  initialValue: _metodoPago,
-                  decoration: const InputDecoration(
-                    labelText: 'Método de Pago',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                  items: ['Efectivo', 'Transferencia']
-                      .map((e) => DropdownMenuItem(value: e, child: Text(e)))
-                      .toList(),
-                  onChanged: (val) => setState(() => _metodoPago = val ?? 'Efectivo'),
-                ),
-                const SizedBox(height: 16),
-                const AvisoCotizacionInvitado(),
-              ],
-            ),
-            const SizedBox(height: 20),
-            SizedBox(
-              height: 55,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xff3AF500),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-                onPressed: _procesando ? null : _enviarPedido,
-                child: _procesando
-                    ? const CircularProgressIndicator(color: Colors.black)
-                    : const Text('SOLICITAR MÓVIL AHORA',
-                        style: TextStyle(
-                            color: Colors.black,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 1)),
+                validator: (v) => _destinoLat != null ? null : validarRequerido(v),
               ),
-            ),
-            const SizedBox(height: 30),
-          ],
-        ),
+              if (_destinoLat != null)
+                chipGpsGuardado(onQuitar: () => setState(() {
+                      _destinoLat = null;
+                      _destinoLng = null;
+                    })),
+              const SizedBox(height: 12),
+              _campoTelefono(_telDestinoCtrl, 'WhatsApp / teléfono de quien recibe'),
+            ],
+          ),
+          BloqueInvitado(
+            paso: 4,
+            titulo: 'Pago',
+            icono: Icons.payments_rounded,
+            color: c,
+            hijos: [
+              DropdownButtonFormField<String>(
+                initialValue: _metodoPago,
+                decoration: const InputDecoration(labelText: '¿Cómo pagarás?'),
+                items: ['Efectivo', 'Transferencia']
+                    .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                    .toList(),
+                onChanged: (val) => setState(() => _metodoPago = val ?? 'Efectivo'),
+              ),
+              const SizedBox(height: 12),
+              const AvisoCotizacionInvitado(),
+            ],
+          ),
+        ],
       ),
     );
   }

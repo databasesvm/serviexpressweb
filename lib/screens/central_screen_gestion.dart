@@ -121,6 +121,31 @@ extension CentralScreenGestion on _CentralScreenState {
                 _abrirEstadisticasMovil(context, m);
               },
             ),
+            _opcionMenuAccion(
+              icono: Icons.pin_rounded,
+              color: Colors.lightBlue[800]!,
+              titulo: 'Cambiar número de móvil',
+              subtitulo: 'Asignarle otro número (y su usuario movilNN)',
+              onTap: () async {
+                Navigator.pop(ctx);
+                // Datos frescos del móvil (el panel no siempre trae todos)
+                Map<String, dynamic> u = Map<String, dynamic>.from(m);
+                try {
+                  final r = await Supabase.instance.client
+                      .from('usuarios')
+                      .select('id, nombre, usuario, numero_movil')
+                      .eq('id', m['id'])
+                      .maybeSingle();
+                  if (r != null) u = Map<String, dynamic>.from(r);
+                } catch (_) {}
+                if (!context.mounted) return;
+                await _PanelGestionUsuariosState.cambiarNumeroMovilCentral(
+                  context,
+                  u,
+                  alCambiar: _recargarMovilesCentral,
+                );
+              },
+            ),
 
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 8),

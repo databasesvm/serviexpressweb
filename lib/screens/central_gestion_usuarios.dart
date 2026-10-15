@@ -666,7 +666,16 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
   // ── Cambiar número de móvil ───────────────────────────────────────────────
   // Cambia numero_movil y el usuario (movilNN) juntos en el servidor
   // (fn_central_cambiar_numero_movil, solo central). No deja repetir números.
-  Future<void> _cambiarNumeroMovilDialog(Map<String, dynamic> usuario) async {
+  Future<void> _cambiarNumeroMovilDialog(Map<String, dynamic> usuario) =>
+      cambiarNumeroMovilCentral(context, usuario, alCambiar: _cargar);
+
+  /// Ventana "Cambiar número de móvil". Estática para poder abrirla también
+  /// desde el panel de control de la central (menú de acciones del móvil).
+  static Future<void> cambiarNumeroMovilCentral(
+    BuildContext context,
+    Map<String, dynamic> usuario, {
+    VoidCallback? alCambiar,
+  }) async {
     final numCtrl = TextEditingController();
     final actual = (usuario['numero_movil'] as num?)?.toInt();
     bool guardando = false;
@@ -686,7 +695,7 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
     Future<void> guardar(StateSetter setSt, BuildContext ctx, int n, {bool reemplazar = false}) async {
       setSt(() => guardando = true);
       try {
-        final r = await _db.rpc('fn_central_cambiar_numero_movil', params: {
+        final r = await Supabase.instance.client.rpc('fn_central_cambiar_numero_movil', params: {
           'p_usuario_id': usuario['id'],
           'p_numero': n,
           'p_reemplazar': reemplazar,
@@ -694,15 +703,15 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
         final res = r is Map ? Map<String, dynamic>.from(r) : <String, dynamic>{};
         if (res['ok'] == true) {
           if (ctx.mounted) Navigator.pop(ctx);
-          if (mounted) {
+          if (context.mounted) {
             ScaffoldMessenger.of(context).showSnackBar(SnackBar(
               content: Text(reemplazar
                   ? '✅ Ahora es Móvil $n. El móvil anterior quedó sin número (usuario ${res['usuario_anterior_queda']}).'
                   : '✅ Ahora es Móvil $n (usuario movil$n). Se le avisó al móvil.'),
               backgroundColor: Colors.green[700],
             ));
-            _cargar();
           }
+          alCambiar?.call();
           return;
         }
         final err = res['error']?.toString() ?? '';
@@ -1827,6 +1836,7 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
               // ── Botones de acción ─────────────────────────────────────────
               final esDual = u['es_dual'] == true;
               final botones = Row(mainAxisSize: MainAxisSize.min, children: [
+                _botonAccion(Icons.pin_rounded, Colors.lightBlueAccent, 'Número', () => _cambiarNumeroMovilDialog(u)),
                 _botonAccion(Icons.military_tech_rounded, Colors.amber, 'Facción', () => _cambiarFaccionDialog(u)),
                 _botonAccion(Icons.credit_card_rounded, Colors.lightBlueAccent, 'Plan', () => _cambiarPlanDialog(u)),
                 _botonAccion(

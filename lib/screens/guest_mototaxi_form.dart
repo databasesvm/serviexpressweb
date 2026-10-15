@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart';
-import 'package:serviexpress_app/utils/alta_demanda.dart';
 import 'package:serviexpress_app/utils/whatsapp_contacto.dart';
 import 'package:serviexpress_app/utils/invitado_comun.dart';
 import 'package:serviexpress_app/screens/guest_tracking_screen.dart';
@@ -16,6 +15,8 @@ class GuestMototaxiForm extends StatefulWidget {
 }
 
 class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
+  static const _estilo = EstiloServicioInvitado.mototaxi;
+
   final _formKey = GlobalKey<FormState>();
   bool _procesando = false;
 
@@ -98,9 +99,8 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
       // Paradero más cercano al punto de recogida (para la F2 cuando se apruebe)
       final String? paraderoObjetivo = await paraderoMasCercano(_origenLat, _origenLng);
 
-      // Igual que los demás formularios: nace como COTIZACIÓN (antes salía
-      // 'pendiente' con tarifa 0). Al aprobarla el invitado (guest_tracking)
-      // arranca la cascada SE completa.
+      // Igual que los demás formularios: nace como COTIZACIÓN. Al aprobarla
+      // el invitado (guest_tracking) arranca la cascada SE completa.
       final response = await Supabase.instance.client
           .from('servicios')
           .insert({
@@ -161,39 +161,6 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
     }
   }
 
-  Widget _construirBloque({
-    required String titulo,
-    required IconData icono,
-    required List<Widget> hijos,
-  }) {
-    return Card(
-      elevation: 0,
-      color: Colors.white,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: Colors.grey.shade200),
-      ),
-      margin: const EdgeInsets.only(bottom: 16),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(children: [
-              Icon(icono, color: Colors.black54, size: 20),
-              const SizedBox(width: 8),
-              Text(titulo,
-                  style: const TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black87)),
-            ]),
-            const Divider(height: 24),
-            ...hijos,
-          ],
-        ),
-      ),
-    );
-  }
-
   @override
   void dispose() {
     _nombreCtrl.dispose();
@@ -205,123 +172,94 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF0D0D0D),
-      appBar: AppBar(
-        title: const Text('Pedir Mototaxi',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        backgroundColor: Colors.black,
-        iconTheme: const IconThemeData(color: Colors.white),
-      ),
-      body: Form(
-        key: _formKey,
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            const BannerAltaDemanda(),
-            _construirBloque(
-              titulo: 'Datos del Pasajero',
-              icono: Icons.person,
-              hijos: [
-                TextFormField(
-                  controller: _nombreCtrl,
-                  textCapitalization: TextCapitalization.words,
-                  decoration: const InputDecoration(
-                    labelText: 'Nombre y Apellido',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                  validator: validarRequerido,
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _telPasajeroCtrl,
-                  keyboardType: TextInputType.phone,
-                  inputFormatters: formatoWhatsApp,
-                  decoration: const InputDecoration(
-                    labelText: 'Tu WhatsApp / teléfono',
-                    helperText: 'Ej: 3001234567 — el conductor te escribe aquí',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                  validator: validarTelefonoInvitado,
-                ),
-              ],
-            ),
-            _construirBloque(
-              titulo: 'Ruta del Viaje',
-              icono: Icons.map,
-              hijos: [
-                CampoOrigenConLocales(
-                  controller: _origenCtrl,
-                  label: 'Punto de recogida',
-                  onLocal: _alElegirLocal,
-                  // Con GPS guardado la dirección escrita es opcional
-                  validator: (v) => _origenLat != null ? null : validarRequerido(v),
-                  suffixIcon: IconButton(
-                    tooltip: 'Usar mi ubicación actual',
-                    icon: const Icon(Icons.my_location, color: Colors.blue),
-                    onPressed: _capturarUbicacion,
-                  ),
-                ),
-                if (_origenLat != null && !_origenEsLocal)
-                  chipGpsGuardado(onQuitar: () => setState(() {
-                        _origenLat = null;
-                        _origenLng = null;
-                      })),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _destinoCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Punto de destino',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                  validator: validarRequerido,
-                ),
-              ],
-            ),
-            _construirBloque(
-              titulo: 'Detalles Finales',
-              icono: Icons.payments,
-              hijos: [
-                DropdownButtonFormField<String>(
-                  initialValue: _metodoPago,
-                  decoration: const InputDecoration(
-                    labelText: 'Método de Pago',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                  items: ['Efectivo', 'Transferencia']
-                      .map((e) => DropdownMenuItem(value: e, child: Text(e)))
-                      .toList(),
-                  onChanged: (val) => setState(() => _metodoPago = val ?? 'Efectivo'),
-                ),
-                const SizedBox(height: 16),
-                const AvisoCotizacionInvitado(),
-              ],
-            ),
-            SizedBox(
-              height: 55,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xff3AF500),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-                onPressed: _procesando ? null : _enviarPedido,
-                child: _procesando
-                    ? const CircularProgressIndicator(color: Colors.black)
-                    : const Text('PEDIR MOTOTAXI AHORA',
-                        style: TextStyle(
-                            color: Colors.black,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 1)),
+    final c = _estilo.color;
+    // El verde de la marca es muy claro para íconos sobre blanco: se usa un
+    // verde más oscuro solo para el ícono del GPS.
+    const iconoGps = Color(0xFF1E8E00);
+    return Form(
+      key: _formKey,
+      child: ScaffoldInvitado(
+        estilo: _estilo,
+        procesando: _procesando,
+        onEnviar: _enviarPedido,
+        children: [
+          BloqueInvitado(
+            paso: 1,
+            titulo: 'Datos del pasajero',
+            icono: Icons.person,
+            color: c,
+            hijos: [
+              TextFormField(
+                controller: _nombreCtrl,
+                textCapitalization: TextCapitalization.words,
+                textInputAction: TextInputAction.next,
+                decoration: const InputDecoration(labelText: 'Nombre y apellido'),
+                validator: validarRequerido,
               ),
-            ),
-            const SizedBox(height: 30),
-          ],
-        ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _telPasajeroCtrl,
+                keyboardType: TextInputType.phone,
+                textInputAction: TextInputAction.next,
+                inputFormatters: formatoWhatsApp,
+                decoration: const InputDecoration(
+                  labelText: 'Tu WhatsApp / teléfono',
+                  helperText: 'Ej: 3001234567 — el conductor te escribe aquí',
+                ),
+                validator: validarTelefonoInvitado,
+              ),
+            ],
+          ),
+          BloqueInvitado(
+            paso: 2,
+            titulo: 'Ruta del viaje',
+            icono: Icons.route_rounded,
+            color: c,
+            hijos: [
+              CampoOrigenConLocales(
+                controller: _origenCtrl,
+                label: 'Punto de recogida',
+                onLocal: _alElegirLocal,
+                // Con GPS guardado la dirección escrita es opcional
+                validator: (v) => _origenLat != null ? null : validarRequerido(v),
+                suffixIcon: IconButton(
+                  tooltip: 'Usar mi ubicación actual',
+                  icon: const Icon(Icons.my_location, color: iconoGps),
+                  onPressed: _capturarUbicacion,
+                ),
+              ),
+              if (_origenLat != null && !_origenEsLocal)
+                chipGpsGuardado(onQuitar: () => setState(() {
+                      _origenLat = null;
+                      _origenLng = null;
+                    })),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _destinoCtrl,
+                decoration: const InputDecoration(labelText: 'Punto de destino'),
+                validator: validarRequerido,
+              ),
+            ],
+          ),
+          BloqueInvitado(
+            paso: 3,
+            titulo: 'Pago',
+            icono: Icons.payments_rounded,
+            color: c,
+            hijos: [
+              DropdownButtonFormField<String>(
+                initialValue: _metodoPago,
+                decoration: const InputDecoration(labelText: '¿Cómo pagarás?'),
+                items: ['Efectivo', 'Transferencia']
+                    .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                    .toList(),
+                onChanged: (val) => setState(() => _metodoPago = val ?? 'Efectivo'),
+              ),
+              const SizedBox(height: 12),
+              const AvisoCotizacionInvitado(),
+            ],
+          ),
+        ],
       ),
     );
   }

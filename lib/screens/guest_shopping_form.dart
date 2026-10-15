@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart';
-import 'package:serviexpress_app/utils/alta_demanda.dart';
 import 'package:serviexpress_app/utils/whatsapp_contacto.dart';
 import 'package:serviexpress_app/utils/invitado_comun.dart';
 import 'package:serviexpress_app/screens/guest_tracking_screen.dart';
@@ -15,6 +14,8 @@ class GuestShoppingForm extends StatefulWidget {
 }
 
 class _GuestShoppingFormState extends State<GuestShoppingForm> {
+  static const _estilo = EstiloServicioInvitado.compras;
+
   final _formKey = GlobalKey<FormState>();
   bool _procesando = false;
 
@@ -147,39 +148,6 @@ class _GuestShoppingFormState extends State<GuestShoppingForm> {
     }
   }
 
-  Widget _construirBloque({
-    required String titulo,
-    required IconData icono,
-    required List<Widget> hijos,
-  }) {
-    return Card(
-      elevation: 0,
-      color: Colors.white,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: Colors.grey.shade200),
-      ),
-      margin: const EdgeInsets.only(bottom: 16),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(children: [
-              Icon(icono, color: Colors.black54, size: 20),
-              const SizedBox(width: 8),
-              Text(titulo,
-                  style: const TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black87)),
-            ]),
-            const Divider(height: 24),
-            ...hijos,
-          ],
-        ),
-      ),
-    );
-  }
-
   @override
   void dispose() {
     _nombreCtrl.dispose();
@@ -192,144 +160,115 @@ class _GuestShoppingFormState extends State<GuestShoppingForm> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
-      appBar: AppBar(
-        title: const Text('Compras y Mandados',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        backgroundColor: Colors.black,
-        iconTheme: const IconThemeData(color: Colors.white),
-      ),
-      body: Form(
-        key: _formKey,
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            const BannerAltaDemanda(),
-            _construirBloque(
-              titulo: 'Identificación',
-              icono: Icons.person,
-              hijos: [
-                TextFormField(
-                  controller: _nombreCtrl,
-                  textCapitalization: TextCapitalization.words,
-                  decoration: const InputDecoration(
-                    labelText: 'Tu nombre',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                  validator: validarRequerido,
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _telContactoCtrl,
-                  keyboardType: TextInputType.phone,
-                  inputFormatters: formatoWhatsApp,
-                  decoration: const InputDecoration(
-                    labelText: 'Tu WhatsApp / teléfono',
-                    helperText: 'Ej: 3001234567 — el conductor te escribe aquí',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                  validator: validarTelefonoInvitado,
-                ),
-              ],
-            ),
-            _construirBloque(
-              titulo: '¿Qué y dónde compramos?',
-              icono: Icons.shopping_cart,
-              hijos: [
-                CampoOrigenConLocales(
-                  controller: _tiendaCtrl,
-                  label: 'Lugar de compra (Ej: Éxito, Farmacia X)',
-                  onLocal: (l) => _local = l,
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _listaCtrl,
-                  maxLines: 6,
-                  decoration: const InputDecoration(
-                    labelText: 'Lista de productos',
-                    alignLabelWithHint: true,
-                    hintText: 'Ej: 2 leches Colanta deslactosada 1L,\n1 Arroz Roa 5kg...',
-                    border: OutlineInputBorder(),
-                  ),
-                  validator: (v) =>
-                      v == null || v.trim().isEmpty ? 'La lista no puede estar vacía' : null,
-                ),
-              ],
-            ),
-            _construirBloque(
-              titulo: 'Punto de Entrega',
-              icono: Icons.home,
-              hijos: [
-                TextFormField(
-                  controller: _destinoCtrl,
-                  onChanged: _alEditarDestino,
-                  decoration: InputDecoration(
-                    labelText: 'Dirección donde recibes',
-                    helperText: _destinoLat == null
-                        ? 'Toca 📍 para enviar tu ubicación exacta'
-                        : null,
-                    border: const OutlineInputBorder(),
-                    isDense: true,
-                    suffixIcon: IconButton(
-                      tooltip: 'Usar mi ubicación actual',
-                      icon: const Icon(Icons.my_location, color: Colors.blue),
-                      onPressed: _capturarDestinoGps,
-                    ),
-                  ),
-                  validator: (v) => _destinoLat != null ? null : validarRequerido(v),
-                ),
-                if (_destinoLat != null)
-                  chipGpsGuardado(onQuitar: () => setState(() {
-                        _destinoLat = null;
-                        _destinoLng = null;
-                      })),
-              ],
-            ),
-            _construirBloque(
-              titulo: 'Pago y Cotización',
-              icono: Icons.payments,
-              hijos: [
-                DropdownButtonFormField<String>(
-                  initialValue: _metodoPago,
-                  decoration: const InputDecoration(
-                    labelText: '¿Cómo pagarás el servicio?',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                  items: ['Efectivo', 'Transferencia']
-                      .map((e) => DropdownMenuItem(value: e, child: Text(e)))
-                      .toList(),
-                  onChanged: (val) => setState(() => _metodoPago = val ?? 'Efectivo'),
-                ),
-                const SizedBox(height: 16),
-                const AvisoCotizacionInvitado(),
-              ],
-            ),
-            const SizedBox(height: 10),
-            SizedBox(
-              height: 55,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xff3AF500),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-                onPressed: _procesando ? null : _enviarPedido,
-                child: _procesando
-                    ? const CircularProgressIndicator(color: Colors.black)
-                    : const Text('SOLICITAR COMPRA AHORA',
-                        style: TextStyle(
-                            color: Colors.black,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 1)),
+    final c = _estilo.color;
+    return Form(
+      key: _formKey,
+      child: ScaffoldInvitado(
+        estilo: _estilo,
+        procesando: _procesando,
+        onEnviar: _enviarPedido,
+        children: [
+          BloqueInvitado(
+            paso: 1,
+            titulo: 'Tus datos',
+            icono: Icons.person,
+            color: c,
+            hijos: [
+              TextFormField(
+                controller: _nombreCtrl,
+                textCapitalization: TextCapitalization.words,
+                textInputAction: TextInputAction.next,
+                decoration: const InputDecoration(labelText: 'Tu nombre'),
+                validator: validarRequerido,
               ),
-            ),
-            const SizedBox(height: 30),
-          ],
-        ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _telContactoCtrl,
+                keyboardType: TextInputType.phone,
+                textInputAction: TextInputAction.next,
+                inputFormatters: formatoWhatsApp,
+                decoration: const InputDecoration(
+                  labelText: 'Tu WhatsApp / teléfono',
+                  helperText: 'Ej: 3001234567 — el conductor te escribe aquí',
+                ),
+                validator: validarTelefonoInvitado,
+              ),
+            ],
+          ),
+          BloqueInvitado(
+            paso: 2,
+            titulo: '¿Qué compramos y dónde?',
+            icono: Icons.shopping_cart,
+            color: c,
+            hijos: [
+              CampoOrigenConLocales(
+                controller: _tiendaCtrl,
+                label: 'Lugar de compra (Ej: Éxito, Farmacia X)',
+                onLocal: (l) => _local = l,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _listaCtrl,
+                minLines: 4,
+                maxLines: 8,
+                decoration: const InputDecoration(
+                  labelText: 'Lista de productos',
+                  alignLabelWithHint: true,
+                  hintText: 'Ej: 2 leches deslactosadas 1L,\n1 arroz 5kg...',
+                ),
+                validator: (v) =>
+                    v == null || v.trim().isEmpty ? 'La lista no puede estar vacía' : null,
+              ),
+            ],
+          ),
+          BloqueInvitado(
+            paso: 3,
+            titulo: '¿Dónde lo entregamos?',
+            icono: Icons.home_rounded,
+            color: c,
+            hijos: [
+              TextFormField(
+                controller: _destinoCtrl,
+                onChanged: _alEditarDestino,
+                decoration: InputDecoration(
+                  labelText: 'Dirección donde recibes',
+                  helperText: _destinoLat == null
+                      ? 'Toca 📍 para enviar tu ubicación exacta'
+                      : null,
+                  suffixIcon: IconButton(
+                    tooltip: 'Usar mi ubicación actual',
+                    icon: Icon(Icons.my_location, color: c),
+                    onPressed: _capturarDestinoGps,
+                  ),
+                ),
+                validator: (v) => _destinoLat != null ? null : validarRequerido(v),
+              ),
+              if (_destinoLat != null)
+                chipGpsGuardado(onQuitar: () => setState(() {
+                      _destinoLat = null;
+                      _destinoLng = null;
+                    })),
+            ],
+          ),
+          BloqueInvitado(
+            paso: 4,
+            titulo: 'Pago',
+            icono: Icons.payments_rounded,
+            color: c,
+            hijos: [
+              DropdownButtonFormField<String>(
+                initialValue: _metodoPago,
+                decoration: const InputDecoration(labelText: '¿Cómo pagarás?'),
+                items: ['Efectivo', 'Transferencia']
+                    .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                    .toList(),
+                onChanged: (val) => setState(() => _metodoPago = val ?? 'Efectivo'),
+              ),
+              const SizedBox(height: 12),
+              const AvisoCotizacionInvitado(),
+            ],
+          ),
+        ],
       ),
     );
   }
