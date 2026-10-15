@@ -374,7 +374,11 @@ mixin _CardsMixin on State<LocalScreen> {
         textoEstado = 'PROGRAMADO';
         if (servicio['liberacion_at'] != null) {
           final diff = DateTime.parse(servicio['liberacion_at']).toLocal().difference(DateTime.now()).inMinutes;
-          textoEstado = diff > 0 ? 'PROGRAMADO · SALE EN $diff MIN' : 'LIBERANDO…';
+          textoEstado = diff > 60
+              ? 'PROGRAMADO · ${textoProgramado(DateTime.parse(servicio['liberacion_at'])).toUpperCase()}'
+              : diff > 0
+                  ? 'PROGRAMADO · SALE EN $diff MIN'
+                  : 'LIBERANDO…';
         }
         break;
       case 'pendiente':
@@ -665,9 +669,8 @@ mixin _CardsMixin on State<LocalScreen> {
                   ),
                   if (telefonoReal.isNotEmpty) ...[
                     botonIcono(iconoWhatsApp, verdeWhatsApp, 'WhatsApp', () async {
-                      final n = telefonoReal.startsWith('57') ? telefonoReal : '57$telefonoReal';
-                      final uri = Uri.parse('https://wa.me/$n');
-                      if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
+                      // En computador: WhatsApp Web en la pestaña de ServiExpress
+                      await abrirChatWhatsApp(telefonoReal);
                     }),
                     const SizedBox(width: 6),
                   ],
@@ -813,7 +816,7 @@ mixin _CardsMixin on State<LocalScreen> {
                 title: const Text('WhatsApp', style: TextStyle(color: Colors.white)),
                 onTap: () async {
                   Navigator.pop(bs);
-                  await launchUrl(uriWa, mode: LaunchMode.externalApplication);
+                  await abrirChatWhatsApp(telCliente);
                 },
               ),
             ListTile(
@@ -1008,6 +1011,13 @@ mixin _CardsMixin on State<LocalScreen> {
                       child: botonSecundario('PEDIR UBICACIÓN', Colors.lightBlueAccent,
                           () => pedirUbicacionCliente(servicio), ic: Icons.my_location),
                     ),
+                    const SizedBox(width: 8),
+                    // El cliente ya mandó su ubicación por WhatsApp: pegar el enlace
+                    Expanded(
+                      child: botonSecundario('PEGAR UBICACIÓN', Colors.tealAccent,
+                          () => pegarUbicacionEnServicio(context, servicio),
+                          ic: Icons.add_location_alt),
+                    ),
                     if (estado == 'pendiente' || estado == 'cotizacion') ...[
                       const SizedBox(width: 8),
                       Expanded(
@@ -1141,7 +1151,10 @@ mixin _CardsMixin on State<LocalScreen> {
         final ahora = DateTime.now();
         final diff = lib.difference(ahora).inMinutes;
 
-        if (diff > 0) {
+        if (diff > 60) {
+          // Programado a una hora: se muestra la hora exacta
+          textoEstado = 'PROGRAMADO · ${textoProgramado(lib).toUpperCase()}';
+        } else if (diff > 0) {
           textoEstado = 'PROGRAMADO (EN $diff MIN)';
         } else {
           textoEstado = 'LIBERANDO AL RADAR...';
@@ -1599,18 +1612,9 @@ mixin _CardsMixin on State<LocalScreen> {
                                       ),
                                     ),
                                     onPressed: () async {
-                                      final numero = telefonoReal.startsWith('57')
-                                          ? telefonoReal
-                                          : '57$telefonoReal';
-                                      final uri = Uri.parse(
-                                        'https://wa.me/$numero',
-                                      );
-                                      if (await canLaunchUrl(uri)) {
-                                        await launchUrl(
-                                          uri,
-                                          mode: LaunchMode.externalApplication,
-                                        );
-                                      }
+                                      // En computador: WhatsApp Web en la
+                                      // pestaña de ServiExpress
+                                      await abrirChatWhatsApp(telefonoReal);
                                     },
                                   ),
                                 ),
@@ -1979,6 +1983,25 @@ mixin _CardsMixin on State<LocalScreen> {
                           fontWeight: FontWeight.bold, fontSize: 11),
                     ),
                     onPressed: () => pedirUbicacionCliente(servicio),
+                  ),
+                ),
+                // El cliente ya mandó su ubicación por WhatsApp: pegar el enlace
+                const SizedBox(height: 6),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.teal[700],
+                      side: BorderSide(color: Colors.teal[300]!),
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                    ),
+                    icon: const Icon(Icons.add_location_alt, size: 16),
+                    label: const Text(
+                      'PEGAR UBICACIÓN QUE MANDÓ EL CLIENTE',
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 11),
+                    ),
+                    onPressed: () => pegarUbicacionEnServicio(context, servicio),
                   ),
                 ),
                 // Estado: esperando / exacta / aproximada / poco precisa

@@ -281,18 +281,10 @@ extension CentralScreenPerfil on _CentralScreenState {
                                         vertical: 6),
                                   ),
                                   onPressed: () async {
-                                    final tel =
-                                        movil['telefono'].toString();
-                                    final wa = tel.startsWith('57')
-                                        ? tel
-                                        : '57$tel';
-                                    final uri =
-                                        Uri.parse('https://wa.me/$wa');
-                                    if (await canLaunchUrl(uri)) {
-                                      await launchUrl(uri,
-                                          mode: LaunchMode
-                                              .externalApplication);
-                                    }
+                                    // En computador: WhatsApp Web en la
+                                    // pestaña de ServiExpress
+                                    await abrirChatWhatsApp(
+                                        movil['telefono']?.toString());
                                   },
                                   icon:
                                       const Icon(iconoWhatsApp, size: 15),

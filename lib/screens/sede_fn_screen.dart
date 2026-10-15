@@ -2,8 +2,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/services.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:serviexpress_app/utils/web_utils.dart';
+import 'package:serviexpress_app/utils/whatsapp_contacto.dart'; // WhatsApp Web en computador
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
@@ -14,7 +13,6 @@ import 'package:serviexpress_app/utils/errores_servidor.dart';
 import 'package:serviexpress_app/utils/hora_servidor.dart';
 import 'package:serviexpress_app/screens/login_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'fn_facturacion_screen.dart';
 import 'package:serviexpress_app/utils/cascada_config.dart'; // CONFIG-CASCADA-EXT
 
@@ -183,7 +181,7 @@ class _SedeFnScreenState extends State<SedeFnScreen>
         .eq('fn_sede_solicitante_id', sedeId)
         .order('id', ascending: false)
         // Los activos siempre están entre los más recientes; antes bajaba
-        // TODO el historial de la sede en cada (re)conexión.
+        // todo el historial de la sede en cada (re)conexión.
         .limit(50);
 
     _streamConError = false;
@@ -3407,16 +3405,9 @@ class _CardServicioActivoState extends State<_CardServicioActivo> {
                   // Botón WhatsApp del móvil asignado
                   if (_movilTelefono != null && _movilTelefono!.isNotEmpty)
                     GestureDetector(
-                      onTap: () {
-                        final tel =
-                            _movilTelefono!.replaceAll(RegExp(r'\D'), '');
-                        if (kIsWeb) {
-                          openWhatsAppTab('https://wa.me/57$tel');
-                        } else {
-                          launchUrl(Uri.parse('https://wa.me/57$tel'),
-                              mode: LaunchMode.externalApplication);
-                        }
-                      },
+                      // En computador: WhatsApp Web en la pestaña de
+                      // ServiExpress; en celular: la app de WhatsApp.
+                      onTap: () => abrirChatWhatsApp(_movilTelefono),
                       child: Container(
                         padding: const EdgeInsets.symmetric(
                             horizontal: 8, vertical: 4),

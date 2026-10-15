@@ -482,6 +482,8 @@ mixin _FormularioMixin on State<LocalScreen> {
     bool procesando = false;
     bool buscandoCliente = false;
     String tiempoPreparacion = 'Inmediato';
+    // Hora exacta elegida con "A una hora…" (sale a los móviles a esa hora)
+    DateTime? horaProgramada;
 
     List<Map<String, dynamic>> sugerenciasListaPrecios = [];
     String? destinoBase; // dirección exacta seleccionada (preserva precio al escribir detalles)
@@ -1090,23 +1092,41 @@ mixin _FormularioMixin on State<LocalScreen> {
                         isExpanded: true,
                         value: tiempoPreparacion,
                         icon: const Icon(Icons.timer, color: Colors.blue),
-                        items:
-                            ['Inmediato', 'En 15 min', 'En 30 min', 'En 45 min']
-                                .map(
-                                  (String v) => DropdownMenuItem(
-                                    value: v,
-                                    child: Text(
-                                      'Enviar móvil: $v',
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
+                        items: [
+                          'Inmediato',
+                          'En 15 min',
+                          'En 30 min',
+                          'En 45 min',
+                          'A una hora…',
+                        ]
+                            .map(
+                              (String v) => DropdownMenuItem(
+                                value: v,
+                                child: Text(
+                                  v == 'A una hora…' && horaProgramada != null
+                                      ? '📅 Enviar móvil: ${textoProgramado(horaProgramada!)}'
+                                      : 'Enviar móvil: $v',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
                                   ),
-                                )
-                                .toList(),
-                        onChanged: (val) {
-                          if (val != null)
-                            setDialogState(() => tiempoPreparacion = val);
+                                ),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (val) async {
+                          if (val == null) return;
+                          if (val == 'A una hora…') {
+                            // Hoy / Mañana + hora exacta
+                            final h = await elegirHoraProgramada(context,
+                                inicial: horaProgramada);
+                            if (h == null) return; // canceló: queda como estaba
+                            setDialogState(() {
+                              horaProgramada = h;
+                              tiempoPreparacion = val;
+                            });
+                            return;
+                          }
+                          setDialogState(() => tiempoPreparacion = val);
                         },
                       ),
                     ),
@@ -1347,6 +1367,16 @@ mixin _FormularioMixin on State<LocalScreen> {
                             .toUtc()
                             .add(Duration(minutes: retardoProgramado))
                             .toIso8601String();
+
+                        // "A una hora…": sale a los móviles a la hora EXACTA
+                        // elegida. Si ya pasó al enviar, sale de inmediato.
+                        if (tiempoPreparacion == 'A una hora…' &&
+                            horaProgramada != null &&
+                            horaProgramada!.isAfter(DateTime.now())) {
+                          retardoProgramado = 1; // > 0 → 'programado'
+                          liberacionCalculada =
+                              horaProgramada!.toUtc().toIso8601String();
+                        }
                         String estadoFinal = _esCot
                             ? 'cotizacion'
                             : (retardoProgramado > 0

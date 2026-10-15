@@ -103,9 +103,18 @@ extension CentralScreenPanelControl on _CentralScreenState {
                   initialData: _movilesCache,
                   builder: (context, snapshot) {
                     // Interceptor táctico para formatear la vista
+                    // Podio de la semana (👑 🥈 🥉) por puntos: se muestra junto
+                    // al nombre en todas las listas del panel (filas de
+                    // paraderos, libres, en servicio…) para que compitan.
+                    final podioSemana =
+                        calcularPodioSemana(snapshot.data ?? _movilesCache);
                     final moviles = (snapshot.data ?? _movilesCache).map((m) {
                       final map = Map<String, dynamic>.from(m);
-                      map['nombre'] = _formatearNombreCentral(map);
+                      final medalla =
+                          emojiPodio(podioSemana[(map['id'] as num?)?.toInt()]);
+                      map['nombre'] = medalla.isEmpty
+                          ? _formatearNombreCentral(map)
+                          : '$medalla ${_formatearNombreCentral(map)}';
                       return map;
                     }).toList();
 
@@ -501,7 +510,8 @@ extension CentralScreenPanelControl on _CentralScreenState {
                                             leading: _paraderoMovilLeading(m, color),
                                             title: Text(
                                               '#$idx. ${m['nombre'].toString().toUpperCase()}'
-                                              '${conTicket ? '  🎟️ TICKET' : ''}',
+                                              // Ticket de prioridad del PAP (turnos de #1 que le quedan)
+                                              '${conTicket ? '  🎟️ PAP ×${(m['tickets_prioridad'] as num?)?.toInt() ?? 1}' : ''}',
                                               style: TextStyle(
                                                 fontWeight: FontWeight.bold,
                                                 fontSize: 12,
@@ -509,7 +519,11 @@ extension CentralScreenPanelControl on _CentralScreenState {
                                               ),
                                             ),
                                             subtitle: Builder(builder: (_) {
-                                              final ubiStr = m['ultima_ubicacion_at'] as String?;
+                                              // Hora REAL de la lectura del GPS (versión nueva
+                                              // de la app). Si el teléfono manda una posición
+                                              // guardada, esta hora queda vieja → "GPS hace X".
+                                              // Apps viejas: hora de envío.
+                                              final ubiStr = (m['gps_fix_at'] ?? m['ultima_ubicacion_at']) as String?;
                                               final ubi = ubiStr != null ? DateTime.tryParse(ubiStr)?.toLocal() : null;
                                               final mins = ubi != null ? DateTime.now().difference(ubi).inMinutes : null;
                                               final stale = mins != null && mins >= 2;
@@ -1684,7 +1698,12 @@ extension CentralScreenPanelControl on _CentralScreenState {
                     s['estado'] == 'pendiente' &&
                     s['fn_asignacion_tipo'] != 'directo_presel'));
                 // ---> INYECCIÓN: EXTRAER LOS PROGRAMADOS <---
-                final programados = _asc(todos.where((s) => s['estado'] == 'programado'));
+                // Programados: el que sale primero arriba (por hora de salida)
+                final programados = todos
+                    .where((s) => s['estado'] == 'programado')
+                    .toList()
+                  ..sort((a, b) => (a['liberacion_at']?.toString() ?? '')
+                      .compareTo(b['liberacion_at']?.toString() ?? ''));
                 final enCurso = _asc(todos.where((s) => [
                       'en_ruta_origen',
                       'en_origen',

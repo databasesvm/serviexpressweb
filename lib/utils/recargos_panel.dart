@@ -97,6 +97,9 @@ class _RecargosPanelState extends State<RecargosPanel> {
   int _horaInicioNocturno = 0;
   int _horaFinNocturno = 6;
   bool _nocturnoManual = false; // encendido a mano por la central (fuera de horario)
+  // Modo del recargo nocturno (config_sistema.nocturno_modo):
+  //  'auto' = solo en el horario · 'encendido' = activo ya · 'apagado' = no se cobra
+  String _modoNocturno = 'auto';
 
   // --- Estado local ---
   bool _nocturno = false;
@@ -175,6 +178,8 @@ class _RecargosPanelState extends State<RecargosPanel> {
       _horaInicioNocturno = (row['hora_inicio_nocturno'] as num?)?.toInt() ?? 0;
       _horaFinNocturno = (row['hora_fin_nocturno'] as num?)?.toInt() ?? 6;
       _nocturnoManual = row['nocturno_manual'] as bool? ?? false;
+      _modoNocturno = row['nocturno_modo'] as String? ??
+          (_nocturnoManual ? 'encendido' : 'auto');
       _apiKey = nuevaClave?.trim();
       _apiActiva = apiAhora;
     });
@@ -204,8 +209,13 @@ class _RecargosPanelState extends State<RecargosPanel> {
 
   void _actualizarNocturno() {
     final hora = DateTime.now().toUtc().subtract(const Duration(hours: 5)).hour;
-    final esNocturno =
-        (hora >= _horaInicioNocturno && hora < _horaFinNocturno) || _nocturnoManual;
+    // Misma regla que el servidor (fn_nocturno_activo)
+    final bool enHorario = hora >= _horaInicioNocturno && hora < _horaFinNocturno;
+    final esNocturno = switch (_modoNocturno) {
+      'encendido' => true,
+      'apagado' => false,
+      _ => enHorario,
+    };
     if (esNocturno != _nocturno) {
       setState(() => _nocturno = esNocturno);
       _notificarPadre();
@@ -534,11 +544,18 @@ class _RecargosPanelState extends State<RecargosPanel> {
                 ),
               ),
               Text(
-                _nocturnoManual
-                    ? 'Encendido a mano por la central'
-                    : 'Automático · ${_horaInicioNocturno.toString().padLeft(2, '0')}:00 – '
-                        '${_horaFinNocturno.toString().padLeft(2, '0')}:00',
-                style: TextStyle(fontSize: 11, color: _nocturnoManual ? Colors.indigo : Colors.grey[500]),
+                switch (_modoNocturno) {
+                  'encendido' => 'Encendido a mano por la central',
+                  'apagado' => 'Apagado por la central (no se cobra)',
+                  _ => 'Automático · ${_horaInicioNocturno.toString().padLeft(2, '0')}:00 – '
+                      '${_horaFinNocturno.toString().padLeft(2, '0')}:00',
+                },
+                style: TextStyle(
+                  fontSize: 11,
+                  color: _modoNocturno == 'auto'
+                      ? Colors.grey[500]
+                      : (_modoNocturno == 'apagado' ? Colors.red[400] : Colors.indigo),
+                ),
               ),
               if (_nocturno)
                 Text(
@@ -568,29 +585,40 @@ class _RecargosPanelState extends State<RecargosPanel> {
                 ),
               ),
             ),
-            Row(mainAxisSize: MainAxisSize.min, children: [
-              const Text('Manual', style: TextStyle(fontSize: 10, color: Colors.black45)),
-              Switch(
-                value: _nocturnoManual,
-                activeColor: Colors.indigo,
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                onChanged: _guardando
-                    ? null
-                    : (v) async {
-                        setState(() => _guardando = true);
-                        try {
-                          await Supabase.instance.client
-                              .from('config_sistema')
-                              .update({'nocturno_manual': v}).eq('id', 1);
-                          setState(() => _nocturnoManual = v);
-                          _actualizarNocturno();
-                        } catch (e) {
-                          debugPrint('RecargosPanel: nocturno manual → $e');
-                        } finally {
-                          if (mounted) setState(() => _guardando = false);
-                        }
-                      },
-              ),
+            // Modo: Auto (horario) · Encendido · Apagado
+            const SizedBox(height: 4),
+            Wrap(spacing: 4, children: [
+              for (final op in const [
+                ('auto', 'Auto'),
+                ('encendido', 'Encender'),
+                ('apagado', 'Apagar'),
+              ])
+                ChoiceChip(
+                  label: Text(op.$2, style: const TextStyle(fontSize: 10)),
+                  selected: _modoNocturno == op.$1,
+                  visualDensity: VisualDensity.compact,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  selectedColor: op.$1 == 'apagado' ? Colors.red[100] : Colors.indigo[100],
+                  onSelected: _guardando || _modoNocturno == op.$1
+                      ? null
+                      : (_) async {
+                          setState(() => _guardando = true);
+                          try {
+                            await Supabase.instance.client
+                                .from('config_sistema')
+                                .update({'nocturno_modo': op.$1}).eq('id', 1);
+                            setState(() {
+                              _modoNocturno = op.$1;
+                              _nocturnoManual = op.$1 == 'encendido';
+                            });
+                            _actualizarNocturno();
+                          } catch (e) {
+                            debugPrint('RecargosPanel: modo nocturno → $e');
+                          } finally {
+                            if (mounted) setState(() => _guardando = false);
+                          }
+                        },
+                ),
             ]),
           ],
         ),

@@ -34,6 +34,7 @@ import 'package:serviexpress_app/utils/cascada_config.dart'; // CONFIG-CASCADA-E
 import 'package:serviexpress_app/utils/config_cache.dart'; // Caché de consultas repetidas (wallet)
 import 'package:serviexpress_app/utils/iconos.dart'; // Logo de WhatsApp
 import 'package:serviexpress_app/utils/whatsapp_contacto.dart'; // WhatsApp: número o @usuario
+import 'package:serviexpress_app/utils/competencia_semanal.dart'; // Podio semanal 👑 🥈 🥉
 import 'package:serviexpress_app/utils/errores_servidor.dart'; // Mensajes del candado de estados
 
 part 'movil_widgets.dart';
@@ -172,10 +173,10 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
             style: TextStyle(fontWeight: FontWeight.bold, color: Colors.purple)),
         content: const Text(
           'Este servicio no tiene cobro. Al terminarlo sin problemas ganas:\n\n'
-          '🎟️ Ticket de prioridad: la próxima vez que entres a un paradero '
-          'quedas de #1 (sirve para 1 servicio).\n'
-          '⭐ +2 puntos de la semana.\n'
-          '📈 +0.2 de calificación.',
+          '🎟️ 2 turnos de prioridad: al registrarte en un paradero quedas de #1. '
+          'Cada servicio que aceptes gasta 1 turno. Vencen a medianoche.\n'
+          '⚠️ Si quedas #1 y no aceptas tu turno, pierdes 1 turno.\n'
+          '⭐ +2 puntos de la semana.',
           style: TextStyle(fontSize: 14),
         ),
         actions: [
@@ -827,6 +828,14 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
 
     _cargarZonasParadero(); // PARADEROS-E: carga geocercas desde BD
     _refrescarCfgCascada(); // tiempos de fases configurados en Gestión
+    // Tarjetas de servicios disponibles: cada 15 s se confirma con el
+    // servidor que sigan libres (por si se perdió el aviso en tiempo real).
+    _timerVerificarPendientes = Timer.periodic(
+        const Duration(seconds: 15), (_) => _verificarPendientesVisibles());
+    // Podio de la semana (👑 🥈 🥉) para la fila del paradero: cada 2 min
+    _refrescarPodioSemana();
+    _timerPodioSemana = Timer.periodic(
+        const Duration(minutes: 2), (_) => _refrescarPodioSemana());
     _construirStreams(); // primera vez — luego se reconstruyen solos
     _iniciarVigilanteDeConexion();
     // Fix #3: escalonar operaciones de red del arranque para no saturar
@@ -2001,6 +2010,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _bannerSancionTimer?.cancel();
+    _timerPodioSemana?.cancel();
+    _timerVerificarPendientes?.cancel();
     _canalFila?.unsubscribe();
     _debounceFila?.cancel();
     _debounceRecargaSvc?.cancel();
@@ -2164,7 +2175,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       final data = await Supabase.instance.client
           .from('usuarios')
           .select('id, nombre, en_linea, paradero_actual, ingreso_fila, '
-              'ticket_prioridad, rango_movil, numero_movil, tiene_fn, tiene_se, puntos_semana')
+              'ticket_prioridad, tickets_prioridad, rango_movil, numero_movil, tiene_fn, tiene_se, puntos_semana, puntuacion')
           .eq('rol', 'movil')
           .eq('en_linea', true);
       _actualizarFilaNotifier(List<Map<String, dynamic>>.from(data));
@@ -2451,6 +2462,78 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
 
   /// Llamar cuando el servidor dice que un servicio ya no está disponible
   /// (cancelado, completado o tomado por otro): la tarjeta se quita YA.
+  /// Confirma con el servidor que las tarjetas de servicios DISPONIBLES
+  /// (pendientes) sigan libres. Si el aviso en tiempo real de "otro lo tomó"
+  /// se perdió (mala señal, app en segundo plano…), la tarjeta vieja se
+  /// quita aquí. Consulta liviana: solo id/estado/móvil de esos servicios.
+  /// Solo consulta si hay tarjetas pendientes.
+  Timer? _timerVerificarPendientes;
+  bool _verificandoPendientes = false;
+  Future<void> _verificarPendientesVisibles() async {
+    if (!mounted || _verificandoPendientes || _cacheServicios == null) return;
+    final ids = _cacheServicios!
+        .where((s) => s['estado'] == 'pendiente')
+        .map((s) => (s['id'] as num?)?.toInt())
+        .whereType<int>()
+        .toList();
+    if (ids.isEmpty) return;
+    _verificandoPendientes = true;
+    try {
+      final rows = await Supabase.instance.client
+          .from('servicios')
+          .select('id, estado, movil_id')
+          .inFilter('id', ids);
+      if (!mounted || _cacheServicios == null) return;
+      final Map<int, Map<String, dynamic>> actual = {
+        for (final r in List<Map<String, dynamic>>.from(rows))
+          (r['id'] as num).toInt(): r,
+      };
+      bool cambio = false;
+      final lista = <Map<String, dynamic>>[];
+      for (final s in _cacheServicios!) {
+        final id = (s['id'] as num?)?.toInt();
+        if (s['estado'] != 'pendiente' || id == null || !ids.contains(id)) {
+          lista.add(s);
+          continue;
+        }
+        final r = actual[id];
+        if (r == null) {
+          // Ya no existe (o no se puede ver): fuera
+          _idsDescartados.add(id);
+          cambio = true;
+          continue;
+        }
+        if (r['estado'] == 'pendiente') {
+          lista.add(s);
+          continue;
+        }
+        // Ya no está libre: se actualiza su estado (si sigue activo, deja de
+        // mostrarse como disponible; si terminó o se canceló, desaparece).
+        cambio = true;
+        if (_kEstadosActivosSvc.contains(r['estado']?.toString())) {
+          lista.add(Map<String, dynamic>.from(s)
+            ..['estado'] = r['estado']
+            ..['movil_id'] = r['movil_id']);
+        } else {
+          _idsDescartados.add(id);
+        }
+      }
+      if (cambio) {
+        _emitirServicios(lista);
+        _radarTick.value++;
+        // Si la ventana del #1 mostraba una oferta que ya no está, se cierra
+        final abierta = int.tryParse(_ofertaF2Abierta ?? '');
+        if (abierta != null && actual[abierta]?['estado'] != 'pendiente') {
+          _cerrarVentanaOferta();
+        }
+      }
+    } catch (_) {
+      // Sin señal: se reintenta en la próxima vuelta
+    } finally {
+      _verificandoPendientes = false;
+    }
+  }
+
   /// Aceptación confirmada por el servidor: la tarjeta pasa YA de
   /// "disponibles" a "mis servicios" (sin esperar el aviso en tiempo real,
   /// que a veces tarda) y se pide una copia fresca al servidor.
@@ -2649,6 +2732,9 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         if (mounted) {
           _construirStreams();
           _chequearPermisosCriticos();
+          // Quitar ya las tarjetas de servicios que otro tomó mientras
+          // la app estaba en segundo plano
+          _verificarPendientesVisibles();
           if (_estaEnLinea) {
             _iniciarHeartbeat();
             if (!kIsWeb) {
@@ -2962,6 +3048,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
               await Supabase.instance.client.from('usuarios').update({
                 'latitud': toWrite.latitude,
                 'longitud': toWrite.longitude,
+                // Hora real de la lectura del GPS (no la de envío)
+                'gps_fix_at': toWrite.timestamp.toUtc().toIso8601String(),
                 'ultima_ubicacion_at': DateTime.now().toUtc().toIso8601String(),
               }).eq('id', widget.usuario['id']);
               _ultimoEnvioUbicacion = DateTime.now();
@@ -3154,10 +3242,12 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         // Verificar si el móvil tiene Ticket de Prioridad por Punto a Punto
         final perfilActual = await Supabase.instance.client
             .from('usuarios')
-            .select('ticket_prioridad')
+            .select('ticket_prioridad, tickets_prioridad')
             .eq('id', widget.usuario['id'])
             .single();
         final bool tieneTicket = perfilActual['ticket_prioridad'] == true;
+        final int nTickets =
+            (perfilActual['tickets_prioridad'] as num?)?.toInt() ?? 1;
 
         await Supabase.instance.client.from('usuarios').update({
           'paradero_actual': nuevoParadero,
@@ -3169,6 +3259,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
           // muestre al móvil en el paradero, no en su última posición.
           'latitud': pos.latitude,
           'longitud': pos.longitude,
+          'gps_fix_at': pos.timestamp.toUtc().toIso8601String(),
         }).eq('id', widget.usuario['id']);
         _miParaderoCache = nuevoParadero; // sincroniza la caché de geocerca
 
@@ -3177,7 +3268,9 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
             SnackBar(
               content: Text(
                 tieneTicket
-                    ? '🎟️ ¡PRIORIDAD ACTIVA! Quedaste #1 en $nuevoParadero (Punto a Punto)'
+                    ? '🎟️ ¡PRIORIDAD ACTIVA! Quedaste #1 en $nuevoParadero (Punto a Punto). '
+                        'Te queda${nTickets == 1 ? '' : 'n'} $nTickets turno${nTickets == 1 ? '' : 's'}: '
+                        'se gasta 1 al aceptar un servicio.'
                     : '📍 Registrado en la fila: $nuevoParadero',
               ),
               backgroundColor: tieneTicket ? Colors.purple : Colors.blue[800],
@@ -3565,6 +3658,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
             .update({
               'latitud': pos.latitude,
               'longitud': pos.longitude,
+              'gps_fix_at': pos.timestamp.toUtc().toIso8601String(),
               'ultima_ubicacion_at': DateTime.now().toUtc().toIso8601String(),
             }).eq('id', widget.usuario['id']);
         _ultimoEnvioUbicacion = DateTime.now();
@@ -3632,6 +3726,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
               .update({
                 'latitud': pos.latitude,
                 'longitud': pos.longitude,
+                'gps_fix_at': pos.timestamp.toUtc().toIso8601String(),
                 'ultima_ubicacion_at': DateTime.now().toUtc().toIso8601String(),
               }).eq('id', widget.usuario['id']);
         } catch (_) {}
@@ -3661,6 +3756,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       await Supabase.instance.client.from('usuarios').update({
         'latitud': pos.latitude,
         'longitud': pos.longitude,
+        'gps_fix_at': pos.timestamp.toUtc().toIso8601String(),
         'ultima_ubicacion_at': DateTime.now().toUtc().toIso8601String(),
       }).eq('id', widget.usuario['id']);
       _ultimaPosicionConocida = pos;
@@ -4908,7 +5004,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         final dynamic calRaw = miPerfil['puntuacion'];
         final String calTexto = calRaw == null
             ? 'Sin calificar'
-            : '★ ${(calRaw as num).toDouble().toStringAsFixed(1)}';
+            : '★ ${(calRaw is num ? calRaw.toDouble() : (double.tryParse('$calRaw') ?? 0.0)).toStringAsFixed(2)}';
         final Color colorRango = rango == 'MASTER'
             ? const Color(0xFFE040FB)
             : rango == 'LEYENDA'
@@ -6379,7 +6475,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                   _perfilBancolombiaCtrl),
                               const SizedBox(height: 8),
                               _filaCuentaPago('Llave', const Color(0xFF00796B),
-                                  Colors.white, _perfilLlaveCtrl),
+                                  Colors.white, _perfilLlaveCtrl,
+                                  textoLibre: true),
                               const SizedBox(height: 12),
                               SizedBox(
                                 width: double.infinity,
@@ -6749,7 +6846,10 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                       onTap: () => Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (context) => const RankingScreen(),
+                          builder: (context) => RankingScreen(
+                            // para resaltar sus semanas ganadas en el histórico
+                            miMovilId: (widget.usuario['id'] as num?)?.toInt(),
+                          ),
                         ),
                       ),
                     ),
@@ -7434,8 +7534,10 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     String nombreApp,
     Color colorMarca,
     Color colorTexto,
-    TextEditingController controller,
-  ) {
+    TextEditingController controller, {
+    // Llave (Bre-B): letras, números y símbolos (@alias, correo, cédula…)
+    bool textoLibre = false,
+  }) {
     return Row(
       children: [
         Container(
@@ -7459,9 +7561,14 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
         Expanded(
           child: TextField(
             controller: controller,
-            keyboardType: TextInputType.phone,
-            decoration: const InputDecoration(
-              hintText: 'Número de cuenta (opcional)',
+            keyboardType:
+                textoLibre ? TextInputType.text : TextInputType.phone,
+            autocorrect: false,
+            enableSuggestions: !textoLibre,
+            decoration: InputDecoration(
+              hintText: textoLibre
+                  ? 'Tu llave: @alias, correo, celular… (opcional)'
+                  : 'Número de cuenta (opcional)',
               border: OutlineInputBorder(),
               isDense: true,
               contentPadding:
@@ -8251,13 +8358,23 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                 final dynamic calRaw = movil['puntuacion'];
                                 final String calTexto = calRaw == null
                                     ? '-'
-                                    : '★ ${(calRaw as num).toDouble().toStringAsFixed(1)}';
-                                final int cap = _limitePorRango(rango);
-                                final String texCap = cap >= 999 ? '∞' : '$cap';
+                                    : '★ ${(calRaw is num ? calRaw.toDouble() : (double.tryParse('$calRaw') ?? 0.0)).toStringAsFixed(2)}';
                                 return KeyedSubtree(
                                   key: ValueKey('fila_${movil['id']}'),
-                                  child: Padding(
-                                    padding: const EdgeInsets.only(bottom: 6),
+                                  // Con ticket de prioridad (PAP): fila resaltada en
+                                  // morado para que todos sepan por qué va de #1.
+                                  child: Container(
+                                    margin: const EdgeInsets.only(bottom: 6),
+                                    padding: tieneTicket
+                                        ? const EdgeInsets.fromLTRB(4, 4, 4, 4)
+                                        : EdgeInsets.zero,
+                                    decoration: tieneTicket
+                                        ? BoxDecoration(
+                                            color: Colors.purple[50],
+                                            borderRadius: BorderRadius.circular(8),
+                                            border: Border.all(color: Colors.purple[200]!),
+                                          )
+                                        : null,
                                     child: Column(
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
@@ -8389,8 +8506,9 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                               left: 28, top: 1),
                                           child: Row(
                                             children: [
+                                              // Rango con emoji · calificación · puntos de la semana
                                               Text(
-                                                rango,
+                                                '${emojiRango(rango)} $rango',
                                                 style: TextStyle(
                                                   fontSize: 10,
                                                   color: Colors.blue[700],
@@ -8409,48 +8527,51 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                                   style: TextStyle(
                                                       fontSize: 10,
                                                       color: Colors.black38)),
-                                              Text(
-                                                  '$texCap pedido${texCap == '1' ? '' : 's'}',
-                                                  style: const TextStyle(
-                                                      fontSize: 10,
-                                                      color: Colors.black45)),
-                                              if (tieneTicket) ...[
-                                                const Text(' · ',
-                                                    style: TextStyle(
-                                                        fontSize: 10,
-                                                        color: Colors.black38)),
-                                                const Text('Ticket prioridad (1 uso)',
-                                                    style: TextStyle(
-                                                        fontSize: 10,
-                                                        color: Colors.purple,
-                                                        fontWeight:
-                                                            FontWeight.bold)),
-                                              ],
-                                              if (soyYo) ...[
-                                                const Text(' · ',
-                                                    style: TextStyle(
-                                                        fontSize: 10,
-                                                        color: Colors.black38)),
-                                                () {
-                                                  final int miPts = (movil['puntos_semana'] as int?) ?? 0;
-                                                  final Color ptsColor = miPts >= 80
-                                                      ? Colors.green[700]!
-                                                      : miPts >= 50
-                                                          ? Colors.orange[700]!
-                                                          : Colors.black54;
-                                                  return Text(
-                                                    '${miPts >= 80 ? "⭐" : miPts >= 50 ? "🔥" : ""}$miPts pts',
-                                                    style: TextStyle(
-                                                      fontSize: 10,
-                                                      fontWeight: FontWeight.bold,
-                                                      color: ptsColor,
-                                                    ),
-                                                  );
-                                                }(),
-                                              ],
+                                              // Puntos de la semana: 👑 🥈 🥉 a los 3 que más
+                                              // llevan; ✅ si ya pasó de 80 (clasifica al premio)
+                                              () {
+                                                final int pts = (movil['puntos_semana'] as num?)?.toInt() ?? 0;
+                                                final int? puesto = _podioSemana[(movil['id'] as num?)?.toInt()];
+                                                final String medalla = emojiPodio(puesto);
+                                                final bool clasif = pts >= kPuntosPremioSemana;
+                                                return Text(
+                                                  '${medalla.isNotEmpty ? '$medalla ' : ''}$pts pts${clasif ? ' ✅' : ''}',
+                                                  style: TextStyle(
+                                                    fontSize: 10,
+                                                    fontWeight: puesto != null || clasif
+                                                        ? FontWeight.bold
+                                                        : FontWeight.w500,
+                                                    color: clasif
+                                                        ? Colors.green[700]
+                                                        : puesto == 1
+                                                            ? Colors.amber[900]
+                                                            : puesto != null
+                                                                ? Colors.orange[800]
+                                                                : Colors.black54,
+                                                  ),
+                                                );
+                                              }(),
                                             ],
                                           ),
                                         ),
+                                        // Por qué va de #1: ticket de prioridad del PAP
+                                        if (tieneTicket)
+                                          Padding(
+                                            padding: const EdgeInsets.only(left: 28, top: 2),
+                                            child: Text(
+                                              () {
+                                                final int n = (movil['tickets_prioridad'] as num?)?.toInt() ?? 1;
+                                                return soyYo
+                                                    ? '🎟️ Tienes $n turno${n == 1 ? '' : 's'} de prioridad #1 (Punto a Punto) · vencen a medianoche'
+                                                    : '🎟️ #1 por Punto a Punto · le queda${n == 1 ? '' : 'n'} $n';
+                                              }(),
+                                              style: TextStyle(
+                                                fontSize: 10,
+                                                color: Colors.purple[800],
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ),
                                         // Incentivo cuando está en zona de 50-79 pts
                                         if (soyYo) ...[
                                           () {
@@ -9643,10 +9764,9 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                               : nombreNegocio;
                           final String textoWa =
                               'Hola, soy el móvil asignado para entregar su servicio de $quienPidio.';
-                          final Uri? url = uriWhatsApp(numero, texto: textoWa);
-                          if (url == null) return;
-                          if (!await launchUrl(url,
-                              mode: LaunchMode.externalApplication)) {
+                          // En computador: WhatsApp Web en la pestaña de
+                          // ServiExpress; en celular: la app de WhatsApp.
+                          if (!await abrirChatWhatsApp(numero, texto: textoWa)) {
                             if (context.mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
@@ -12599,6 +12719,14 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
   // Servicios que ESTE móvil ya ganó: un toque más no vuelve al servidor.
   final Set<int> _yaAceptadosIds = {};
 
+  // Podio de la semana (id → 1/2/3) para mostrar 👑 🥈 🥉 en la fila
+  Map<int, int> _podioSemana = {};
+  Timer? _timerPodioSemana;
+  Future<void> _refrescarPodioSemana() async {
+    final p = await cargarPodioSemana();
+    if (mounted) setState(() => _podioSemana = p);
+  }
+
   /// Ventana "Aceptando…" encima de todo mientras el servidor responde.
   /// Devuelve una función para cerrarla.
   VoidCallback _mostrarAceptando() {
@@ -12805,7 +12933,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                   if (ctx.mounted) Navigator.pop(ctx);
 
                   // Toque repetido sobre un servicio que ya es suyo
-                  if (!exito && fila?['motivo']?.toString() == 'ya_es_tuyo') {
+                  // (el servidor responde éxito con motivo 'ya_es_tuyo')
+                  if (fila?['motivo']?.toString() == 'ya_es_tuyo') {
                     confirmarAceptado();
                     return;
                   }
@@ -12974,7 +13103,8 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       final bool exito = fila?['exito'] == true;
 
       // Toque repetido sobre un servicio que ya es suyo
-      if (!exito && fila?['motivo']?.toString() == 'ya_es_tuyo') {
+      // (el servidor responde éxito con motivo 'ya_es_tuyo')
+      if (fila?['motivo']?.toString() == 'ya_es_tuyo') {
         confirmarAceptado();
         return;
       }

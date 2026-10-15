@@ -6,7 +6,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'dart:async';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:serviexpress_app/screens/reporte_financiero_screen.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart';
 import 'package:serviexpress_app/utils/textos_push.dart'; // Textos únicos de push SE
@@ -16,6 +15,9 @@ import 'package:serviexpress_app/screens/sectores_tarifa_screen.dart'; // Sector
 import 'package:serviexpress_app/utils/alta_demanda.dart'; // Alta demanda SE
 import 'package:serviexpress_app/utils/iconos.dart'; // Logo de WhatsApp
 import 'package:serviexpress_app/utils/whatsapp_contacto.dart'; // WhatsApp: número o @usuario
+import 'package:serviexpress_app/utils/programacion.dart'; // Servicios programados a una hora
+import 'package:serviexpress_app/utils/competencia_semanal.dart'; // Podio semanal 👑 🥈 🥉
+import 'package:serviexpress_app/utils/ubicacion_desde_enlace.dart'; // Pegar ubicación de WhatsApp/Maps
 import 'package:serviexpress_app/utils/hora_servidor.dart'; // Reloj alineado con el servidor
 import 'package:serviexpress_app/utils/cascada_config.dart'; // Tiempos de la cascada SE
 import 'package:serviexpress_app/screens/chat_screen.dart';
@@ -1113,8 +1115,11 @@ class _CentralScreenState extends State<CentralScreen>
   // Formatea la calificación 1-5 para mostrar en UI
   String _formatCalificacion(dynamic val) {
     if (val == null) return 'Sin calificar';
-    final double v = (val as num).toDouble();
-    return '★ ${v.toStringAsFixed(1)}';
+    // Dos decimales: cada servicio suma 0,02 y así se nota el avance.
+    final double v = val is num
+        ? val.toDouble()
+        : (double.tryParse(val.toString()) ?? 0.0);
+    return '★ ${v.toStringAsFixed(2)}';
   }
 
   @override
@@ -1188,6 +1193,20 @@ class _CentralScreenState extends State<CentralScreen>
                   icon: const Icon(Icons.add_box),
                   label: const Text(
                     'NUEVO SERVICIO',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                // Punto a Punto creado por la central
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.purple,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: () => _abrirFormularioPAP(context),
+                  icon: const Text('🎁'),
+                  label: const Text(
+                    'PAP',
                     style: TextStyle(fontWeight: FontWeight.bold),
                   ),
                 ),
@@ -1527,6 +1546,7 @@ class _CentralScreenState extends State<CentralScreen>
               child: Text('OPERACIONES', style: TextStyle(color: Colors.white38, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
             ),
             _item(Icons.add_box_rounded, 'Nuevo servicio', const Color(0xff3AF500), () => _abrirFormularioDespacho(context)),
+            _item(Icons.card_giftcard_rounded, 'Punto a Punto (PAP)', Colors.purpleAccent, () => _abrirFormularioPAP(context)),
             _item(Icons.share_rounded, 'Enviar link al cliente', const Color(0xff25D366), () => _enviarLinkInvitado(context)),
 
             const Divider(color: Colors.white10, height: 20),

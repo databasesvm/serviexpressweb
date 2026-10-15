@@ -62,9 +62,15 @@ class CampoTarifaInteligente extends StatefulWidget {
   final int? precioSistema;
   final String? desgloseSistema;
 
+  /// ¿Sumar los recargos (nocturno/lluvia) al precio sugerido?
+  /// true  → cotizar a locales/clientes con precio de lista o por km.
+  /// false → servicio propio de la central: ella pone el precio final.
+  final bool sumarRecargos;
+
   const CampoTarifaInteligente({
     this.precioSistema,
     this.desgloseSistema,
+    this.sumarRecargos = true,
     super.key,
     required this.origenController,
     required this.destinoController,
@@ -94,6 +100,8 @@ class _CampoTarifaInteligenteState extends State<CampoTarifaInteligente> {
   // --- Recargos activos ---
   int _recargo = 0;
   bool _conRecargos = false;
+  // Recargo que de verdad se suma al precio (0 si es servicio de la central)
+  int get _recargoAplicado => widget.sumarRecargos ? _recargo : 0;
 
   // --- Debounce para no disparar RPC en cada tecla ---
   Timer? _debounce;
@@ -117,7 +125,7 @@ class _CampoTarifaInteligenteState extends State<CampoTarifaInteligente> {
       _confianza = 'sistema';
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        if (!_centralModificoManualmente) _preLlenarCampo(_precioSugerido! + _recargo);
+        if (!_centralModificoManualmente) _preLlenarCampo(_precioSugerido! + _recargoAplicado);
         _emitirDetalle();
       });
       return;
@@ -165,7 +173,7 @@ class _CampoTarifaInteligenteState extends State<CampoTarifaInteligente> {
     // Si el texto del campo ya no coincide con lo que el motor puso,
     // es porque Central lo cambió manualmente — respetamos esa decisión.
     final valorActual = _parsePeso(widget.tarifaController.text);
-    final valorMotor = (_precioSugerido ?? 0) + _recargo;
+    final valorMotor = (_precioSugerido ?? 0) + _recargoAplicado;
     if (valorActual != valorMotor && valorActual > 0) {
       _centralModificoManualmente = true;
       _emitirDetalle();
@@ -235,7 +243,7 @@ class _CampoTarifaInteligenteState extends State<CampoTarifaInteligente> {
 
       // Pre-llenamos solo si Central no ha escrito nada a mano
       if (!_centralModificoManualmente && sugerido != null) {
-        _preLlenarCampo(sugerido + _recargo);
+        _preLlenarCampo(sugerido + _recargoAplicado);
       }
       _emitirDetalle();
     } catch (e) {
@@ -273,7 +281,7 @@ class _CampoTarifaInteligenteState extends State<CampoTarifaInteligente> {
     // Actualiza el campo si el motor ya tiene una sugerencia
     // Y Central no lo ha tocado manualmente
     if (!_centralModificoManualmente && _precioSugerido != null) {
-      _preLlenarCampo(_precioSugerido! + nuevoRecargo);
+      _preLlenarCampo(_precioSugerido! + _recargoAplicado);
     }
     _emitirDetalle();
   }
@@ -307,9 +315,9 @@ class _CampoTarifaInteligenteState extends State<CampoTarifaInteligente> {
   void _emitirDetalle() {
     if (widget.onDetalleChanged == null) return;
     final int total = _parsePeso(widget.tarifaController.text);
-    final int base = _precioSugerido ?? (total - _recargo).clamp(0, total);
+    final int base = _precioSugerido ?? (total - _recargoAplicado).clamp(0, total);
     final int ajusteManual = _centralModificoManualmente
-        ? (total - base - _recargo).clamp(0, total)
+        ? (total - base - _recargoAplicado).clamp(0, total)
         : 0;
     final String fuente = _centralModificoManualmente
         ? 'manual'
@@ -321,7 +329,7 @@ class _CampoTarifaInteligenteState extends State<CampoTarifaInteligente> {
       'lluvia': _ultimoEstadoRecargos?.lluvia ?? false,
       'nocturno': _ultimoEstadoRecargos?.nocturno ?? false,
       'sobrecarga': _ultimoEstadoRecargos?.sobrecarga ?? false,
-      'recargo': _recargo,
+      'recargo': _recargoAplicado,
       'ajuste_manual': ajusteManual,
       'total': total,
       'fuente': fuente,
@@ -402,7 +410,7 @@ class _CampoTarifaInteligenteState extends State<CampoTarifaInteligente> {
                   child: TextButton(
                     onPressed: () {
                       _centralModificoManualmente = false;
-                      _preLlenarCampo(_precioSugerido! + _recargo);
+                      _preLlenarCampo(_precioSugerido! + _recargoAplicado);
                     },
                     child: const Text('↺ Volver al calculado', style: TextStyle(fontSize: 11)),
                   ),
@@ -477,7 +485,7 @@ class _CampoTarifaInteligenteState extends State<CampoTarifaInteligente> {
                     child: TextButton(
                       onPressed: () {
                         _centralModificoManualmente = false;
-                        _preLlenarCampo(_precioSugerido! + _recargo);
+                        _preLlenarCampo(_precioSugerido! + _recargoAplicado);
                       },
                       child: const Text(
                         '↺ Aplicar sugerencia',
@@ -522,7 +530,7 @@ class _CampoTarifaInteligenteState extends State<CampoTarifaInteligente> {
                 isDense: true,
                 prefixIcon: const Icon(Icons.attach_money, size: 18),
                 // Si hay recargo activo, lo mostramos como sufijo informativo
-                suffix: _conRecargos
+                suffix: _conRecargos && widget.sumarRecargos
                     ? Text(
                         '+\$${_formatearPeso(_recargo)} de recargo',
                         style: TextStyle(
@@ -533,7 +541,17 @@ class _CampoTarifaInteligenteState extends State<CampoTarifaInteligente> {
                     : null,
               ),
             ),
-            if (_conRecargos && _precioSugerido != null)
+            // Servicio propio de la central: el recargo NO se suma
+            if (_conRecargos && !widget.sumarRecargos)
+              Padding(
+                padding: const EdgeInsets.only(top: 4, left: 4),
+                child: Text(
+                  'Recargo activo (+${_formatearPeso(_recargo)}): se cobra a locales, clientes '
+                  'e invitados con precio de lista o por km. Aquí pones tú el precio final.',
+                  style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                ),
+              ),
+            if (_conRecargos && widget.sumarRecargos && _precioSugerido != null)
               Padding(
                 padding: const EdgeInsets.only(top: 4, left: 4),
                 child: Text(

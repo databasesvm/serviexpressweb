@@ -152,19 +152,14 @@ extension CentralScreenUtilidades on _CentralScreenState {
     final tel = telCtrl.text.trim().replaceAll(RegExp(r'\D'), '');
     if (tel.isEmpty) return;
 
-    // Número colombiano: prefijo 57 si no empieza con +
-    final numero = tel.startsWith('57') ? tel : '57$tel';
-    final mensaje = Uri.encodeComponent(
-      '¡Hola! 👋 Puedes hacer tu pedido de Serviexpress directamente desde aquí:\n'
-      '${_CentralScreenState._kUrlApp}\n\n'
-      'Solo abre el link, elige el tipo de servicio y nosotros te atendemos. '
-      '¡También puedes registrarte para guardar tus datos! 🛵',
+    // En computador: WhatsApp Web en la pestaña de ServiExpress
+    await abrirChatWhatsApp(
+      tel,
+      texto: '¡Hola! 👋 Puedes hacer tu pedido de Serviexpress directamente desde aquí:\n'
+          '${_CentralScreenState._kUrlApp}\n\n'
+          'Solo abre el link, elige el tipo de servicio y nosotros te atendemos. '
+          '¡También puedes registrarte para guardar tus datos! 🛵',
     );
-    final waUrl = Uri.parse('https://wa.me/$numero?text=$mensaje');
-
-    if (await canLaunchUrl(waUrl)) {
-      await launchUrl(waUrl, mode: LaunchMode.externalApplication);
-    }
   }
 
   // FIX #7: antes calculaba su propio ranking consultando el campo `puntuacion`

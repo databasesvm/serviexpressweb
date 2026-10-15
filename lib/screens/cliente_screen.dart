@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:serviexpress_app/utils/widgets_compartidos.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -21,6 +20,7 @@ import 'package:serviexpress_app/utils/textos_push.dart';
 import 'package:serviexpress_app/utils/alta_demanda.dart';
 import 'package:serviexpress_app/utils/iconos.dart';
 import 'package:serviexpress_app/utils/errores_servidor.dart';
+import 'package:serviexpress_app/utils/whatsapp_contacto.dart'; // WhatsApp Web en computador
 
 class ClienteScreen extends StatefulWidget {
   final Map<String, dynamic> usuario;
@@ -403,12 +403,11 @@ class _ClienteScreenState extends State<ClienteScreen>
   }
 
   Future<void> _abrirWhatsApp(String telefono, int idPedido) async {
-    String numero = telefono.replaceAll(RegExp(r'[^0-9]'), '');
-    if (numero.length == 10) numero = '57$numero';
-    final Uri url = Uri.parse(
-      'https://wa.me/$numero?text=${Uri.encodeComponent('Hola, soy el cliente del servicio #$idPedido de ServiExpress. Te escribo para coordinar.')}',
+    // En computador: WhatsApp Web en la pestaña de ServiExpress
+    await abrirChatWhatsApp(
+      telefono,
+      texto: 'Hola, soy el cliente del servicio #$idPedido de ServiExpress. Te escribo para coordinar.',
     );
-    await launchUrl(url, mode: LaunchMode.externalApplication);
   }
 
   Future<void> _enviarCalificacion(

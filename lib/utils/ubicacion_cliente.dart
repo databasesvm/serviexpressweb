@@ -61,7 +61,11 @@ Future<void> pedirUbicacionCliente(Map<String, dynamic> servicio) async {
         .eq('id', id);
   } catch (_) {}
 
-  if (await canLaunchUrl(uri)) {
+  // Con número/@usuario: en computador abre WhatsApp Web en la pestaña de
+  // ServiExpress. Sin número: el selector de chats de WhatsApp.
+  if (tel != null) {
+    await abrirChatWhatsApp(tel, texto: texto);
+  } else if (await canLaunchUrl(uri)) {
     await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 }

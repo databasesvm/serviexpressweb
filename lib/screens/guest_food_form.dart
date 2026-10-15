@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:geolocator/geolocator.dart';
-import 'package:serviexpress_app/utils/onesignal_api.dart'; // <-- RUTA CORREGIDA DE ONESIGNAL
+import 'package:serviexpress_app/utils/onesignal_api.dart';
 import 'package:serviexpress_app/utils/alta_demanda.dart';
+import 'package:serviexpress_app/utils/whatsapp_contacto.dart';
+import 'package:serviexpress_app/utils/invitado_comun.dart';
 import 'package:serviexpress_app/screens/guest_tracking_screen.dart';
 
 class GuestFoodForm extends StatefulWidget {
@@ -23,26 +24,30 @@ class _GuestFoodFormState extends State<GuestFoodForm> {
   final _pedidoCtrl = TextEditingController();
   final _telContactoCtrl = TextEditingController();
 
+  // Ubicación GPS del destino (se borra si el invitado cambia la dirección)
   double? _destinoLat;
   double? _destinoLng;
+  // Local registrado elegido en el origen (con su ubicación exacta)
+  LocalRegistrado? _local;
 
   String _metodoPago = 'Efectivo';
-  final bool _requiereCotizacion = true;
 
   @override
   void initState() {
     super.initState();
-    _precargarUbicaciones();
+    _precargar();
   }
 
-  Future<void> _precargarUbicaciones() async {
+  Future<void> _precargar() async {
     try {
+      final c = await cargarContactoInvitado();
       final prefs = await SharedPreferences.getInstance();
       if (!mounted) return;
       setState(() {
+        if (_nombreCtrl.text.isEmpty) _nombreCtrl.text = c.nombre ?? '';
+        if (_telContactoCtrl.text.isEmpty) _telContactoCtrl.text = c.telefono ?? '';
         final origen = prefs.getString('guest_ultima_origen');
-        if (origen != null && _restauranteCtrl.text.isEmpty)
-          _restauranteCtrl.text = origen;
+        if (origen != null && _restauranteCtrl.text.isEmpty) _restauranteCtrl.text = origen;
         final destino = prefs.getString('guest_ultimo_destino');
         if (destino != null && _destinoCtrl.text.isEmpty) {
           _destinoCtrl.text = destino;
@@ -53,41 +58,22 @@ class _GuestFoodFormState extends State<GuestFoodForm> {
     } catch (_) {}
   }
 
-  Future<void> _capturarDestinoGps() async {
-    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      if (mounted)
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('⚠️ Activa el GPS de tu celular.'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      return;
-    }
-    LocationPermission permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied ||
-          permission == LocationPermission.deniedForever)
-        return;
-    }
+  // Si el invitado cambia la dirección escrita, el GPS guardado deja de servir
+  void _alEditarDestino(String _) {
+    if (_destinoLat == null) return;
+    setState(() {
+      _destinoLat = null;
+      _destinoLng = null;
+    });
+  }
 
-    try {
-      Position pos = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-      );
-      setState(() {
-        _destinoLat = pos.latitude;
-        _destinoLng = pos.longitude;
-        _destinoCtrl.text = '📍 Mi Ubicación Actual';
-      });
-    } catch (e) {
-      if (mounted)
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Fallo satelital: $e')));
-    }
+  Future<void> _capturarDestinoGps() async {
+    final pos = await gpsInvitado(context);
+    if (pos == null || !mounted) return;
+    setState(() {
+      _destinoLat = pos.latitude;
+      _destinoLng = pos.longitude;
+    });
   }
 
   Future<void> _enviarPedido() async {
@@ -95,45 +81,53 @@ class _GuestFoodFormState extends State<GuestFoodForm> {
     setState(() => _procesando = true);
 
     try {
-      String notaFinal =
-          '[ COMIDA ] - 🍔 PEDIDO:\n${_pedidoCtrl.text.trim()}\n---\n📞 Contacto: ${_telContactoCtrl.text} | PAGO: $_metodoPago';
+      final tel = normalizarWhatsApp(_telContactoCtrl.text);
+      final destino = _destinoCtrl.text.trim().isNotEmpty
+          ? _destinoCtrl.text.trim().toUpperCase()
+          : 'UBICACIÓN GPS DEL CLIENTE';
+      final notaFinal =
+          '⚠️ SOLICITA COTIZACIÓN | [ COMIDA ] - 🍔 PEDIDO:\n${_pedidoCtrl.text.trim()}\n---\n📞 Contacto: $tel | PAGO: $_metodoPago';
 
-      // Cascada SE completa (antes el #1 recibía el pedido como exclusivo y
-      // nunca pasaba por F1/F2/F3/F4): F1 Masters aquí, F2 la resuelve el
-      // SERVIDOR (se_f2_huecos, #1 de paradero o el más cercano) y F3/F4 los
-      // edge functions desde se_cascade_t0.
-
-      // ---> INSERCIÓN EN BASE DE DATOS CON CANDADO VIP <---
+      // Nace como cotización. Al aprobarla el invitado (guest_tracking)
+      // arranca la cascada SE completa.
       final response = await Supabase.instance.client
           .from('servicios')
           .insert({
             'creador': 'Invitado: ${_nombreCtrl.text.trim()}',
             'tipo_servicio': 'COMIDA',
             'origen': _restauranteCtrl.text.trim().toUpperCase(),
-            'destino': _destinoCtrl.text.trim().toUpperCase(),
+            if (_local?.lat != null) 'origen_lat': _local!.lat,
+            if (_local?.lng != null) 'origen_lng': _local!.lng,
+            'destino': destino,
             'destino_lat': _destinoLat,
             'destino_lng': _destinoLng,
+            // GPS del invitado = ubicación exacta (VER MAPA para el móvil)
+            if (_destinoLat != null)
+              'destino_gps_at': DateTime.now().toUtc().toIso8601String(),
+            // WhatsApp del cliente → botón "WA Cliente" en la tarjeta del móvil
+            'telefono_receptor': tel,
             'tarifa': 0.0,
             'tarifa_detalle': {'total': 0.0, 'fuente': 'invitado'},
             'observacion': notaFinal,
-            'estado': _requiereCotizacion ? 'cotizacion' : 'pendiente',
-            if (!_requiereCotizacion)
-              'se_cascade_t0': DateTime.now().toUtc().toIso8601String(),
-            // F1 (Masters) lo manda el servidor (trg_se_f1_servidor)
-            if (!_requiereCotizacion) 'se_f1_motivo': 'nuevo',
+            'estado': 'cotizacion',
           })
-          .select('id') // solo se usa el id para el seguimiento
+          .select('id')
           .single();
 
-      // Guardamos el ID del pedido + origen/destino para próximos pedidos
+      // Recordar para el próximo pedido
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt('ultimo_pedido_invitado', response['id']);
       prefs.setString('guest_ultima_origen', _restauranteCtrl.text.trim().toUpperCase());
       prefs.setString('guest_ultimo_destino', _destinoCtrl.text.trim().toUpperCase());
-      if (_destinoLat != null) prefs.setDouble('guest_ultimo_destino_lat', _destinoLat!);
-      if (_destinoLng != null) prefs.setDouble('guest_ultimo_destino_lng', _destinoLng!);
+      if (_destinoLat != null) {
+        prefs.setDouble('guest_ultimo_destino_lat', _destinoLat!);
+        prefs.setDouble('guest_ultimo_destino_lng', _destinoLng!);
+      } else {
+        prefs.remove('guest_ultimo_destino_lat');
+        prefs.remove('guest_ultimo_destino_lng');
+      }
+      await guardarContactoInvitado(_nombreCtrl.text, _telContactoCtrl.text);
 
-      // ---> DISPARO A CENTRAL POR SEGMENTO (más confiable que por IDs) <---
       try {
         await MotorNotificaciones.dispararACentral(
           titulo: '🍔 COMIDA INVITADO',
@@ -144,8 +138,6 @@ class _GuestFoodFormState extends State<GuestFoodForm> {
         debugPrint('Error OneSignal: $e');
       }
 
-      // F1 (T=0): Masters → lo manda el servidor (se_f1_motivo en el insert).
-
       if (mounted) {
         Navigator.pushReplacement(
           context,
@@ -153,10 +145,11 @@ class _GuestFoodFormState extends State<GuestFoodForm> {
         );
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(content: Text(errorInvitado(e)), backgroundColor: Colors.red),
         );
+      }
     } finally {
       if (mounted) setState(() => _procesando = false);
     }
@@ -180,20 +173,13 @@ class _GuestFoodFormState extends State<GuestFoodForm> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Icon(icono, color: Colors.black54, size: 20),
-                const SizedBox(width: 8),
-                Text(
-                  titulo,
+            Row(children: [
+              Icon(icono, color: Colors.black54, size: 20),
+              const SizedBox(width: 8),
+              Text(titulo,
                   style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                    color: Colors.black87,
-                  ),
-                ),
-              ],
-            ),
+                      fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black87)),
+            ]),
             const Divider(height: 24),
             ...hijos,
           ],
@@ -215,14 +201,12 @@ class _GuestFoodFormState extends State<GuestFoodForm> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5), // FIX #6: grey[1] era casi negro, debe ser grey[100]
+      backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
-        title: Text(
-          'Pedir Comida',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-        ),
+        title: const Text('Pedir Comida',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         backgroundColor: Colors.black,
-        iconTheme: IconThemeData(color: Colors.white),
+        iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: Form(
         key: _formKey,
@@ -236,25 +220,26 @@ class _GuestFoodFormState extends State<GuestFoodForm> {
               hijos: [
                 TextFormField(
                   controller: _nombreCtrl,
+                  textCapitalization: TextCapitalization.words,
                   decoration: const InputDecoration(
                     labelText: 'Tu nombre',
                     border: OutlineInputBorder(),
                     isDense: true,
                   ),
-                  validator: (v) => v == null || v.isEmpty
-                      ? 'Requerido'
-                      : null, // <-- BLINDAJE NULL SAFETY
+                  validator: validarRequerido,
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _telContactoCtrl,
                   keyboardType: TextInputType.phone,
+                  inputFormatters: formatoWhatsApp,
                   decoration: const InputDecoration(
-                    labelText: 'Teléfono de contacto',
+                    labelText: 'Tu WhatsApp / teléfono',
+                    helperText: 'Ej: 3001234567 — el conductor te escribe aquí',
                     border: OutlineInputBorder(),
                     isDense: true,
                   ),
-                  validator: (v) => v == null || v.isEmpty ? 'Requerido' : null,
+                  validator: validarTelefonoInvitado,
                 ),
               ],
             ),
@@ -262,14 +247,10 @@ class _GuestFoodFormState extends State<GuestFoodForm> {
               titulo: '¿Dónde buscamos?',
               icono: Icons.restaurant,
               hijos: [
-                TextFormField(
+                CampoOrigenConLocales(
                   controller: _restauranteCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Nombre del Restaurante',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                  validator: (v) => v == null || v.isEmpty ? 'Requerido' : null,
+                  label: 'Nombre del Restaurante',
+                  onLocal: (l) => _local = l,
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
@@ -280,7 +261,7 @@ class _GuestFoodFormState extends State<GuestFoodForm> {
                     alignLabelWithHint: true,
                     border: OutlineInputBorder(),
                   ),
-                  validator: (v) => v == null || v.isEmpty ? 'Requerido' : null,
+                  validator: validarRequerido,
                 ),
               ],
             ),
@@ -290,17 +271,28 @@ class _GuestFoodFormState extends State<GuestFoodForm> {
               hijos: [
                 TextFormField(
                   controller: _destinoCtrl,
+                  onChanged: _alEditarDestino,
                   decoration: InputDecoration(
                     labelText: 'Dirección donde recibes',
+                    helperText: _destinoLat == null
+                        ? 'Toca 📍 para enviar tu ubicación exacta'
+                        : null,
                     border: const OutlineInputBorder(),
                     isDense: true,
                     suffixIcon: IconButton(
+                      tooltip: 'Usar mi ubicación actual',
                       icon: const Icon(Icons.my_location, color: Colors.blue),
                       onPressed: _capturarDestinoGps,
                     ),
                   ),
-                  validator: (v) => v == null || v.isEmpty ? 'Requerido' : null,
+                  // Con GPS guardado la dirección escrita es opcional
+                  validator: (v) => _destinoLat != null ? null : validarRequerido(v),
                 ),
+                if (_destinoLat != null)
+                  chipGpsGuardado(onQuitar: () => setState(() {
+                        _destinoLat = null;
+                        _destinoLng = null;
+                      })),
               ],
             ),
             _construirBloque(
@@ -317,53 +309,10 @@ class _GuestFoodFormState extends State<GuestFoodForm> {
                   items: ['Efectivo', 'Transferencia']
                       .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                       .toList(),
-                  onChanged: (val) => setState(
-                    () => _metodoPago = val ?? 'Efectivo',
-                  ), // <-- BLINDAJE NULL SAFETY
+                  onChanged: (val) => setState(() => _metodoPago = val ?? 'Efectivo'),
                 ),
                 const SizedBox(height: 16),
-                const SizedBox(height: 16),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.orange[50], // Fondo suave
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.orange[300]!),
-                  ),
-                  child: const Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.info_outline,
-                            color: Colors.orange,
-                            size: 20,
-                          ),
-                          SizedBox(width: 8),
-                          Text(
-                            'Cotización Obligatoria',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                              color: Colors.orange,
-                            ),
-                          ),
-                        ],
-                      ),
-                      SizedBox(height: 8),
-                      Text(
-                        'Para garantizar un cobro justo, la Central revisará tu solicitud y te enviará la tarifa exacta antes de despachar al conductor.',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.black87,
-                          height: 1.3,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                const AvisoCotizacionInvitado(),
               ],
             ),
             const SizedBox(height: 10),
@@ -372,22 +321,17 @@ class _GuestFoodFormState extends State<GuestFoodForm> {
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xff3AF500),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
                 onPressed: _procesando ? null : _enviarPedido,
                 child: _procesando
                     ? const CircularProgressIndicator(color: Colors.black)
-                    : const Text(
-                        'PEDIR COMIDA AHORA',
+                    : const Text('PEDIR COMIDA AHORA',
                         style: TextStyle(
-                          color: Colors.black,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 1,
-                        ),
-                      ),
+                            color: Colors.black,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1)),
               ),
             ),
             const SizedBox(height: 30),

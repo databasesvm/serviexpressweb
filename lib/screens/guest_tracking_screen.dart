@@ -2,12 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart';
 import 'package:serviexpress_app/utils/alta_demanda.dart';
 import 'package:serviexpress_app/utils/widgets_compartidos.dart';
 import 'package:serviexpress_app/utils/paradero_objetivo.dart';
 import 'package:serviexpress_app/utils/errores_servidor.dart';
+import 'package:serviexpress_app/utils/whatsapp_contacto.dart'; // WhatsApp Web en computador
 
 class GuestTrackingScreen extends StatefulWidget {
   const GuestTrackingScreen({super.key});
@@ -104,16 +104,11 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
   }
 
   Future<void> _abrirWhatsApp(String telefono, int idPedido) async {
-    String numero = telefono.replaceAll(RegExp(r'[^0-9]'), '');
-    if (numero.length == 10) numero = '57$numero';
-
-    final String mensaje =
-        'Hola, te envío el comprobante de pago del servicio #$idPedido de ServiExpress.';
-    final Uri url = Uri.parse(
-      'https://wa.me/$numero?text=${Uri.encodeComponent(mensaje)}',
+    // En computador: WhatsApp Web en la pestaña de ServiExpress
+    await abrirChatWhatsApp(
+      telefono,
+      texto: 'Hola, te envío el comprobante de pago del servicio #$idPedido de ServiExpress.',
     );
-
-    await launchUrl(url, mode: LaunchMode.externalApplication);
   }
 
   // Fila de cuenta de pago — nombre fijo de la app + número + botón

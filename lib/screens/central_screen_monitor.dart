@@ -706,6 +706,10 @@ extension CentralScreenMonitor on _CentralScreenState {
                           if (!['finalizado', 'finalizado_por_demora', 'finalizado_con_problema', 'cancelado', 'caducado'].contains(estado))
                             _accionBtnIcon(Icons.my_location, 'GPS', Colors.blue.shade700, Colors.white,
                                 () => pedirUbicacionCliente(servicio)),
+                          // Pegar el pin de ubicación que el cliente mandó por WhatsApp
+                          if (!['finalizado', 'finalizado_por_demora', 'finalizado_con_problema', 'cancelado', 'caducado'].contains(estado))
+                            _accionBtnIcon(Icons.add_location_alt, 'PEGAR UBIC.', Colors.teal.shade700, Colors.white,
+                                () => pegarUbicacionEnServicio(context, servicio)),
                           if (['cancelado', 'finalizado_por_demora', 'finalizado_con_problema', 'caducado'].contains(estado))
                             _accionBtn('REACTIVAR', const Color(0xff3AF500), Colors.black, () async {
                               await Supabase.instance.client
@@ -2547,9 +2551,11 @@ extension CentralScreenMonitor on _CentralScreenState {
                                     border: Border.all(color: Colors.teal[300]!),
                                   ),
                                   child: Text(
-                                    diff > 0
-                                        ? '⏰ Disparo en ${diff}min'
-                                        : '⏰ Liberando...',
+                                    diff > 60
+                                        ? '📅 Programado: ${textoProgramado(lib)}'
+                                        : diff > 0
+                                            ? '⏰ Sale en ${diff}min (${textoProgramado(lib)})'
+                                            : '⏰ Liberando...',
                                     style: TextStyle(
                                         color: Colors.teal[900],
                                         fontSize: 8,

@@ -4,11 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart';
 import 'package:serviexpress_app/utils/sonido_manager.dart';
 import 'package:serviexpress_app/utils/iconos.dart';
+import 'package:serviexpress_app/utils/whatsapp_contacto.dart'; // WhatsApp Web en computador
 
 // ============================================================
 // CARTA LOCAL SCREEN — Gestión de menú y pedidos entrantes
@@ -1825,11 +1825,12 @@ class _CartaLocalScreenState extends State<CartaLocalScreen>
                 icon: const Icon(iconoWhatsApp, size: 16),
                 label: Text('WhatsApp a $nombreMovil', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                 onPressed: () {
-                  final num = telMovil.replaceAll(RegExp(r'\D'), '');
-                  final tel = num.startsWith('57') ? num : '57$num';
                   final pedidoRef = p['id'].toString().substring(0, 8).toUpperCase();
-                  final msg = Uri.encodeComponent('Hola $nombreMovil, soy ${widget.localNombre}. Te escribo sobre el pedido #$pedidoRef.');
-                  launchUrl(Uri.parse('https://wa.me/$tel?text=$msg'), mode: LaunchMode.externalApplication);
+                  // En computador: WhatsApp Web en la pestaña de ServiExpress
+                  abrirChatWhatsApp(
+                    telMovil,
+                    texto: 'Hola $nombreMovil, soy ${widget.localNombre}. Te escribo sobre el pedido #$pedidoRef.',
+                  );
                 },
               ),
             );

@@ -663,6 +663,196 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
     }
   }
 
+  // ── Cambiar número de móvil ───────────────────────────────────────────────
+  // Cambia numero_movil y el usuario (movilNN) juntos en el servidor
+  // (fn_central_cambiar_numero_movil, solo central). No deja repetir números.
+  Future<void> _cambiarNumeroMovilDialog(Map<String, dynamic> usuario) async {
+    final numCtrl = TextEditingController();
+    final actual = (usuario['numero_movil'] as num?)?.toInt();
+    bool guardando = false;
+    String? error;
+    // Si el número ya lo tiene otro móvil: datos de ese móvil (aviso)
+    Map<String, dynamic>? conflicto;
+
+    String haceCuanto(String? iso) {
+      final t = DateTime.tryParse(iso ?? '');
+      if (t == null) return 'nunca se ha conectado';
+      final d = DateTime.now().difference(t.toLocal());
+      if (d.inMinutes < 60) return 'última conexión hace ${d.inMinutes} min';
+      if (d.inHours < 48) return 'última conexión hace ${d.inHours} h';
+      return 'última conexión hace ${d.inDays} días';
+    }
+
+    Future<void> guardar(StateSetter setSt, BuildContext ctx, int n, {bool reemplazar = false}) async {
+      setSt(() => guardando = true);
+      try {
+        final r = await _db.rpc('fn_central_cambiar_numero_movil', params: {
+          'p_usuario_id': usuario['id'],
+          'p_numero': n,
+          'p_reemplazar': reemplazar,
+        });
+        final res = r is Map ? Map<String, dynamic>.from(r) : <String, dynamic>{};
+        if (res['ok'] == true) {
+          if (ctx.mounted) Navigator.pop(ctx);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(reemplazar
+                  ? '✅ Ahora es Móvil $n. El móvil anterior quedó sin número (usuario ${res['usuario_anterior_queda']}).'
+                  : '✅ Ahora es Móvil $n (usuario movil$n). Se le avisó al móvil.'),
+              backgroundColor: Colors.green[700],
+            ));
+            _cargar();
+          }
+          return;
+        }
+        final err = res['error']?.toString() ?? '';
+        setSt(() {
+          guardando = false;
+          if (err == 'numero_en_uso') {
+            conflicto = res; // mostrar aviso con la opción de reemplazar
+            error = null;
+          } else {
+            error = switch (err) {
+              'usuario_en_uso' => 'Ya existe una cuenta con usuario movil$n',
+              'numero_invalido' => 'Número no válido (0 a 999)',
+              'no_autorizado' => 'Solo la central puede cambiarlo',
+              _ => 'No se pudo cambiar ($err)',
+            };
+          }
+        });
+      } catch (e) {
+        setSt(() {
+          guardando = false;
+          error = 'Error: $e';
+        });
+      }
+    }
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSt) {
+          final n = int.tryParse(numCtrl.text.trim());
+          return AlertDialog(
+            backgroundColor: const Color(0xFF1A1A1A),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: const Row(children: [
+              Icon(Icons.pin_rounded, color: Colors.lightBlueAccent, size: 18),
+              SizedBox(width: 8),
+              Text('Cambiar número de móvil',
+                  style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+            ]),
+            content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(
+                '${usuario['nombre'] ?? '—'}  •  @${usuario['usuario'] ?? ''}'
+                '${actual != null ? '  •  Móvil $actual' : ''}',
+                style: const TextStyle(color: Colors.white54, fontSize: 12),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: numCtrl,
+                keyboardType: TextInputType.number,
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(3),
+                ],
+                style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                onChanged: (_) => setSt(() {
+                  error = null;
+                  conflicto = null;
+                }),
+                decoration: InputDecoration(
+                  labelText: 'Número nuevo',
+                  labelStyle: const TextStyle(color: Colors.white54),
+                  prefixText: 'Móvil ',
+                  prefixStyle: const TextStyle(color: Colors.white70),
+                  errorText: error,
+                  enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                  focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.lightBlueAccent)),
+                ),
+              ),
+              if (n != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  '${actual != null ? 'Móvil $actual' : 'Este móvil'} pasará a ser Móvil $n.\n'
+                  'Usuario nuevo: movil$n\n'
+                  'Para iniciar sesión podrá escribir: $n · movil$n · Movil $n · MÓVIL-$n\n'
+                  'La contraseña, historial, billetera, puntos y calificación no cambian.',
+                  style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.4),
+                ),
+              ],
+              // ── AVISO: ese número ya existe ───────────────────────────
+              if (conflicto != null && n != null) ...[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.orange),
+                  ),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(
+                      '⚠️ El $n ya lo tiene ${conflicto!['otro_nombre'] ?? 'otro móvil'}',
+                      style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 13),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${conflicto!['otro_activo'] == true ? 'Cuenta activa' : 'Cuenta inactiva'} · '
+                      '${haceCuanto(conflicto!['otro_ultimo_ping']?.toString())}',
+                      style: const TextStyle(color: Colors.white70, fontSize: 11),
+                    ),
+                    if (conflicto!['otro_en_linea'] == true || conflicto!['otro_servicio_activo'] == true) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        conflicto!['otro_servicio_activo'] == true
+                            ? '🔴 Este móvil TIENE UN SERVICIO ACTIVO ahora mismo.'
+                            : '🔴 Este móvil está CONECTADO ahora mismo.',
+                        style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold, fontSize: 12),
+                      ),
+                    ],
+                    const SizedBox(height: 6),
+                    Text(
+                      'Si se lo quitas, ese móvil queda sin número (usuario movil${n}_anterior) '
+                      'y ya no podrá entrar con "$n". Su historial y billetera se conservan.',
+                      style: const TextStyle(color: Colors.white54, fontSize: 11, height: 1.3),
+                    ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(backgroundColor: Colors.orange[800]),
+                        onPressed: guardando ? null : () => guardar(setSt, ctx, n, reemplazar: true),
+                        child: const Text('QUITÁRSELO Y ASIGNARLO A ESTE MÓVIL',
+                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11)),
+                      ),
+                    ),
+                  ]),
+                ),
+              ],
+            ]),
+            actions: [
+              TextButton(
+                onPressed: guardando ? null : () => Navigator.pop(ctx),
+                child: const Text('CANCELAR', style: TextStyle(color: Colors.white38)),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.lightBlue[800]),
+                onPressed: (guardando || n == null || conflicto != null)
+                    ? null
+                    : () => guardar(setSt, ctx, n),
+                child: guardando
+                    ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Text('CAMBIAR', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   // ── Cambiar contraseña ────────────────────────────────────────────────────
   Future<void> _cambiarContrasenaDialog(Map<String, dynamic> usuario) async {
     final passCtrl = TextEditingController();
@@ -1773,11 +1963,20 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                     _chip(estado, estadoColor),
                   ]),
                 ]),
-                trailing: IconButton(
-                  tooltip: 'Cambiar contraseña',
-                  icon: const Icon(Icons.lock_reset_rounded, color: Colors.amber, size: 18),
-                  onPressed: () => _cambiarContrasenaDialog(u),
-                ),
+                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                  // Cambiar número de móvil (y su usuario movilNN)
+                  if (rol == 'movil' || u['es_dual'] == true)
+                    IconButton(
+                      tooltip: 'Cambiar número de móvil',
+                      icon: const Icon(Icons.pin_rounded, color: Colors.lightBlueAccent, size: 18),
+                      onPressed: () => _cambiarNumeroMovilDialog(u),
+                    ),
+                  IconButton(
+                    tooltip: 'Cambiar contraseña',
+                    icon: const Icon(Icons.lock_reset_rounded, color: Colors.amber, size: 18),
+                    onPressed: () => _cambiarContrasenaDialog(u),
+                  ),
+                ]),
               ),
             );
           },

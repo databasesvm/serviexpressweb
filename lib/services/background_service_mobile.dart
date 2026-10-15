@@ -266,6 +266,9 @@ class _ServiMotoTaskHandler extends TaskHandler {
               await Supabase.instance.client.from('usuarios').update({
                 'latitud': pos.latitude,
                 'longitud': pos.longitude,
+                // Hora real de la lectura del GPS (una posición guardada
+                // trae su hora vieja → la central ve que el GPS no actualiza)
+                'gps_fix_at': pos.timestamp.toUtc().toIso8601String(),
                 'ultima_ubicacion_at': ahora.toUtc().toIso8601String(),
               }).eq('id', userId);
 

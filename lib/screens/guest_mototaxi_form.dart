@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:geolocator/geolocator.dart';
-import 'package:serviexpress_app/utils/onesignal_api.dart'; // <-- RUTA CORREGIDA DE ONESIGNAL
+import 'package:serviexpress_app/utils/onesignal_api.dart';
 import 'package:serviexpress_app/utils/alta_demanda.dart';
+import 'package:serviexpress_app/utils/whatsapp_contacto.dart';
+import 'package:serviexpress_app/utils/invitado_comun.dart';
 import 'package:serviexpress_app/screens/guest_tracking_screen.dart';
 import 'package:serviexpress_app/utils/paradero_objetivo.dart';
 
@@ -25,22 +26,24 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
 
   double? _origenLat;
   double? _origenLng;
+  bool _origenEsLocal = false;
 
   String _metodoPago = 'Efectivo';
-  bool _requiereCotizacion = false;
-  double _tarifaSugerida = 0.0;
 
   @override
   void initState() {
     super.initState();
-    _precargarUbicaciones();
+    _precargar();
   }
 
-  Future<void> _precargarUbicaciones() async {
+  Future<void> _precargar() async {
     try {
+      final c = await cargarContactoInvitado();
       final prefs = await SharedPreferences.getInstance();
       if (!mounted) return;
       setState(() {
+        if (_nombreCtrl.text.isEmpty) _nombreCtrl.text = c.nombre ?? '';
+        if (_telPasajeroCtrl.text.isEmpty) _telPasajeroCtrl.text = c.telefono ?? '';
         final origen = prefs.getString('guest_ultima_origen');
         if (origen != null && _origenCtrl.text.isEmpty) {
           _origenCtrl.text = origen;
@@ -48,47 +51,36 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
           _origenLng = prefs.getDouble('guest_ultima_origen_lng');
         }
         final destino = prefs.getString('guest_ultimo_destino');
-        if (destino != null && _destinoCtrl.text.isEmpty)
-          _destinoCtrl.text = destino;
+        if (destino != null && _destinoCtrl.text.isEmpty) _destinoCtrl.text = destino;
       });
     } catch (_) {}
   }
 
-  Future<void> _capturarUbicacion() async {
-    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      if (mounted)
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('⚠️ Activa el GPS de tu celular.'),
-            backgroundColor: Colors.red,
-          ),
-        );
+  void _alElegirLocal(LocalRegistrado? l) {
+    if (l == null) {
+      if (_origenLat == null) return;
+      setState(() {
+        _origenLat = null;
+        _origenLng = null;
+        _origenEsLocal = false;
+      });
       return;
     }
-    LocationPermission permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied ||
-          permission == LocationPermission.deniedForever)
-        return;
-    }
+    setState(() {
+      _origenLat = l.lat;
+      _origenLng = l.lng;
+      _origenEsLocal = l.lat != null;
+    });
+  }
 
-    try {
-      Position pos = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-      );
-      setState(() {
-        _origenLat = pos.latitude;
-        _origenLng = pos.longitude;
-        _origenCtrl.text = '📍 Mi Ubicación Actual';
-      });
-    } catch (e) {
-      if (mounted)
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Fallo satelital: $e')));
-    }
+  Future<void> _capturarUbicacion() async {
+    final pos = await gpsInvitado(context);
+    if (pos == null || !mounted) return;
+    setState(() {
+      _origenLat = pos.latitude;
+      _origenLng = pos.longitude;
+      _origenEsLocal = false;
+    });
   }
 
   Future<void> _enviarPedido() async {
@@ -96,51 +88,52 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
     setState(() => _procesando = true);
 
     try {
-      String notaFinal =
-          '[ MOTOTAXI ] - PAGO: $_metodoPago | 📱 Pasajero: ${_telPasajeroCtrl.text}';
+      final tel = normalizarWhatsApp(_telPasajeroCtrl.text);
+      final origen = _origenCtrl.text.trim().isNotEmpty
+          ? _origenCtrl.text.trim().toUpperCase()
+          : 'UBICACIÓN GPS DEL CLIENTE';
+      final notaFinal =
+          '⚠️ SOLICITA COTIZACIÓN | [ MOTOTAXI ] - PAGO: $_metodoPago | 📱 Pasajero: $tel';
 
-      // Cascada SE completa: F1 Masters aquí, F2 la resuelve el SERVIDOR
-      // (se_f2_huecos: #1 del paradero más cercano al origen o el móvil más
-      // cercano) y F3/F4 los edge functions desde se_cascade_t0.
-      final String? paraderoObjetivo =
-          await paraderoMasCercano(_origenLat, _origenLng);
+      // Paradero más cercano al punto de recogida (para la F2 cuando se apruebe)
+      final String? paraderoObjetivo = await paraderoMasCercano(_origenLat, _origenLng);
 
-      // ---> INSERCIÓN EN BASE DE DATOS CON CANDADO VIP <---
+      // Igual que los demás formularios: nace como COTIZACIÓN (antes salía
+      // 'pendiente' con tarifa 0). Al aprobarla el invitado (guest_tracking)
+      // arranca la cascada SE completa.
       final response = await Supabase.instance.client
           .from('servicios')
           .insert({
             'creador': 'Invitado: ${_nombreCtrl.text.trim()}',
             'tipo_servicio': 'MOTOTAXI',
-            'origen': _origenCtrl.text.trim().toUpperCase(),
+            'origen': origen,
             'destino': _destinoCtrl.text.trim().toUpperCase(),
             'origen_lat': _origenLat,
             'origen_lng': _origenLng,
-            'tarifa': _requiereCotizacion ? 0.0 : _tarifaSugerida,
-            'tarifa_detalle': {
-              'total': _requiereCotizacion ? 0.0 : _tarifaSugerida,
-              'base': _tarifaSugerida,
-              'fuente': _requiereCotizacion ? 'invitado_cotizacion' : 'invitado_sugerida',
-            },
+            // El pasajero → botón "WA Cliente" en la tarjeta del móvil
+            'telefono_receptor': tel,
+            'tarifa': 0.0,
+            'tarifa_detalle': {'total': 0.0, 'fuente': 'invitado_cotizacion'},
             'observacion': notaFinal,
-            'estado': _requiereCotizacion ? 'cotizacion' : 'pendiente',
+            'estado': 'cotizacion',
             if (paraderoObjetivo != null) 'paradero_origen': paraderoObjetivo,
-            if (!_requiereCotizacion)
-              'se_cascade_t0': DateTime.now().toUtc().toIso8601String(),
-            // F1 (Masters) lo manda el servidor (trg_se_f1_servidor)
-            if (!_requiereCotizacion) 'se_f1_motivo': 'nuevo',
           })
-          .select('id') // solo se usa el id para el seguimiento
+          .select('id')
           .single();
 
-      // Guardamos el ID del pedido + origen/destino para próximos pedidos
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt('ultimo_pedido_invitado', response['id']);
       prefs.setString('guest_ultima_origen', _origenCtrl.text.trim().toUpperCase());
-      if (_origenLat != null) prefs.setDouble('guest_ultima_origen_lat', _origenLat!);
-      if (_origenLng != null) prefs.setDouble('guest_ultima_origen_lng', _origenLng!);
+      if (_origenLat != null) {
+        prefs.setDouble('guest_ultima_origen_lat', _origenLat!);
+        prefs.setDouble('guest_ultima_origen_lng', _origenLng!);
+      } else {
+        prefs.remove('guest_ultima_origen_lat');
+        prefs.remove('guest_ultima_origen_lng');
+      }
       prefs.setString('guest_ultimo_destino', _destinoCtrl.text.trim().toUpperCase());
+      await guardarContactoInvitado(_nombreCtrl.text, _telPasajeroCtrl.text);
 
-      // ---> DISPARO A CENTRAL POR SEGMENTO <---
       try {
         await MotorNotificaciones.dispararACentral(
           titulo: '🛵 MOTOTAXI INVITADO',
@@ -151,10 +144,6 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
         debugPrint('Error OneSignal: $e');
       }
 
-      // F1 (T=0): Masters → lo manda el servidor (se_f1_motivo en el insert).
-      // Si es cotización, la cascada arranca en guest_tracking_screen.dart
-      // cuando el invitado aprueba.
-
       if (mounted) {
         Navigator.pushReplacement(
           context,
@@ -162,10 +151,11 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
         );
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(content: Text(errorInvitado(e)), backgroundColor: Colors.red),
         );
+      }
     } finally {
       if (mounted) setState(() => _procesando = false);
     }
@@ -189,20 +179,13 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Icon(icono, color: Colors.black54, size: 20),
-                const SizedBox(width: 8),
-                Text(
-                  titulo,
+            Row(children: [
+              Icon(icono, color: Colors.black54, size: 20),
+              const SizedBox(width: 8),
+              Text(titulo,
                   style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                    color: Colors.black87,
-                  ),
-                ),
-              ],
-            ),
+                      fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black87)),
+            ]),
             const Divider(height: 24),
             ...hijos,
           ],
@@ -223,15 +206,12 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor:
-          const Color(0xFF0D0D0D), // dark themeINDADO (Sin índices extraños)
+      backgroundColor: const Color(0xFF0D0D0D),
       appBar: AppBar(
-        title: Text(
-          'Pedir Mototaxi',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-        ),
+        title: const Text('Pedir Mototaxi',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         backgroundColor: Colors.black,
-        iconTheme: IconThemeData(color: Colors.white),
+        iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: Form(
         key: _formKey,
@@ -245,25 +225,26 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
               hijos: [
                 TextFormField(
                   controller: _nombreCtrl,
+                  textCapitalization: TextCapitalization.words,
                   decoration: const InputDecoration(
                     labelText: 'Nombre y Apellido',
                     border: OutlineInputBorder(),
                     isDense: true,
                   ),
-                  validator: (v) => v == null || v.isEmpty
-                      ? 'Requerido'
-                      : null, // <-- CERO PANTALLAS ROJAS
+                  validator: validarRequerido,
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _telPasajeroCtrl,
                   keyboardType: TextInputType.phone,
+                  inputFormatters: formatoWhatsApp,
                   decoration: const InputDecoration(
-                    labelText: 'Teléfono de contacto',
+                    labelText: 'Tu WhatsApp / teléfono',
+                    helperText: 'Ej: 3001234567 — el conductor te escribe aquí',
                     border: OutlineInputBorder(),
                     isDense: true,
                   ),
-                  validator: (v) => v == null || v.isEmpty ? 'Requerido' : null,
+                  validator: validarTelefonoInvitado,
                 ),
               ],
             ),
@@ -271,19 +252,23 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
               titulo: 'Ruta del Viaje',
               icono: Icons.map,
               hijos: [
-                TextFormField(
+                CampoOrigenConLocales(
                   controller: _origenCtrl,
-                  decoration: InputDecoration(
-                    labelText: 'Punto de recogida',
-                    border: const OutlineInputBorder(),
-                    isDense: true,
-                    suffixIcon: IconButton(
-                      icon: const Icon(Icons.my_location, color: Colors.blue),
-                      onPressed: _capturarUbicacion,
-                    ),
+                  label: 'Punto de recogida',
+                  onLocal: _alElegirLocal,
+                  // Con GPS guardado la dirección escrita es opcional
+                  validator: (v) => _origenLat != null ? null : validarRequerido(v),
+                  suffixIcon: IconButton(
+                    tooltip: 'Usar mi ubicación actual',
+                    icon: const Icon(Icons.my_location, color: Colors.blue),
+                    onPressed: _capturarUbicacion,
                   ),
-                  validator: (v) => v == null || v.isEmpty ? 'Requerido' : null,
                 ),
+                if (_origenLat != null && !_origenEsLocal)
+                  chipGpsGuardado(onQuitar: () => setState(() {
+                        _origenLat = null;
+                        _origenLng = null;
+                      })),
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _destinoCtrl,
@@ -292,7 +277,7 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
                     border: OutlineInputBorder(),
                     isDense: true,
                   ),
-                  validator: (v) => v == null || v.isEmpty ? 'Requerido' : null,
+                  validator: validarRequerido,
                 ),
               ],
             ),
@@ -310,52 +295,10 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
                   items: ['Efectivo', 'Transferencia']
                       .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                       .toList(),
-                  onChanged: (val) =>
-                      setState(() => _metodoPago = val ?? 'Efectivo'),
+                  onChanged: (val) => setState(() => _metodoPago = val ?? 'Efectivo'),
                 ),
                 const SizedBox(height: 16),
-                const SizedBox(height: 16),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.orange[50], // Fondo suave
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.orange[300]!),
-                  ),
-                  child: const Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.info_outline,
-                            color: Colors.orange,
-                            size: 20,
-                          ),
-                          SizedBox(width: 8),
-                          Text(
-                            'Cotización Obligatoria',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                              color: Colors.orange,
-                            ),
-                          ),
-                        ],
-                      ),
-                      SizedBox(height: 8),
-                      Text(
-                        'Para garantizar un cobro justo, la Central revisará tu solicitud y te enviará la tarifa exacta antes de despachar al conductor.',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.black87,
-                          height: 1.3,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                const AvisoCotizacionInvitado(),
               ],
             ),
             SizedBox(
@@ -363,22 +306,17 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xff3AF500),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
                 onPressed: _procesando ? null : _enviarPedido,
                 child: _procesando
                     ? const CircularProgressIndicator(color: Colors.black)
-                    : const Text(
-                        'PEDIR MOTOTAXI AHORA',
+                    : const Text('PEDIR MOTOTAXI AHORA',
                         style: TextStyle(
-                          color: Colors.black,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 1,
-                        ),
-                      ),
+                            color: Colors.black,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1)),
               ),
             ),
             const SizedBox(height: 30),

@@ -874,13 +874,10 @@ mixin _DialogsMixin on State<LocalScreen> {
                         ),
                         onPressed: () async {
                           // Número o @usuario de WhatsApp
-                          final uri = uriWhatsApp(
+                          await abrirChatWhatsApp(
                             cliente['telefono']?.toString(),
                             texto: '¡Hola! Tenemos promociones especiales para ti hoy en ${widget.usuario['nombre']} 🍔🎁',
                           );
-                          if (uri != null && await canLaunchUrl(uri)) {
-                            await launchUrl(uri, mode: LaunchMode.externalApplication);
-                          }
                         },
                       ),
                     ),

@@ -5,7 +5,39 @@
 //   número  → https://wa.me/573001234567?text=...
 //   usuario → https://wa.me/cryxusz?text=...
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'web_utils.dart';
+
+/// Abre el chat de WhatsApp con ese número o @usuario.
+///  • Navegador de COMPUTADOR: WhatsApp Web en la pestaña "whatsapp" de
+///    ServiExpress (la primera vez la abre; después reutiliza la misma
+///    pestaña en vez de abrir la app de Windows o pestañas nuevas).
+///  • Celular (app o navegador del teléfono): la app de WhatsApp.
+/// Devuelve false si no hay dato o no se pudo abrir.
+Future<bool> abrirChatWhatsApp(String? valor, {String? texto}) async {
+  final uri = uriWhatsApp(valor, texto: texto);
+  if (uri == null) return false;
+  final bool computador = kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.windows ||
+          defaultTargetPlatform == TargetPlatform.macOS ||
+          defaultTargetPlatform == TargetPlatform.linux);
+  if (computador && !esUsuarioWhatsApp(valor)) {
+    var n = (valor ?? '').replaceAll(RegExp(r'[^0-9]'), '');
+    if (n.length == 10) n = '57$n';
+    final q = (texto != null && texto.isNotEmpty)
+        ? '&text=${Uri.encodeComponent(texto)}'
+        : '';
+    openWhatsAppTab('https://web.whatsapp.com/send?phone=$n$q');
+    return true;
+  }
+  try {
+    return await launchUrl(uri, mode: LaunchMode.externalApplication);
+  } catch (_) {
+    return false;
+  }
+}
 
 /// true si lo escrito es un usuario de WhatsApp (tiene letras o empieza con @).
 bool esUsuarioWhatsApp(String? valor) {
