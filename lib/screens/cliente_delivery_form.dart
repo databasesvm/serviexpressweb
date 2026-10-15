@@ -3,7 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:serviexpress_app/utils/paradero_objetivo.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart'; // <-- RUTA CORREGIDA
-import 'package:serviexpress_app/utils/alta_demanda.dart';
+import 'package:serviexpress_app/utils/tema_serviexpress.dart';
 
 class ClienteDeliveryForm extends StatefulWidget {
   final Map<String, dynamic> usuario;
@@ -290,45 +290,15 @@ class _ClienteDeliveryFormState extends State<ClienteDeliveryForm> {
     }
   }
 
+  static const _estilo = EstiloServicio.paqueteria;
+
   Widget _construirBloque({
+    int? paso,
     required String titulo,
     required IconData icono,
     required List<Widget> hijos,
-  }) {
-    return Card(
-      elevation: 0,
-      color: Colors.white,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: Colors.grey.shade200),
-      ),
-      margin: const EdgeInsets.only(bottom: 16),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(icono, color: Colors.black54, size: 20),
-                const SizedBox(width: 8),
-                Text(
-                  titulo,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                    color: Colors.black87,
-                  ),
-                ),
-              ],
-            ),
-            const Divider(height: 24),
-            ...hijos,
-          ],
-        ),
-      ),
-    );
-  }
+  }) =>
+      BloqueSE(paso: paso, titulo: titulo, icono: icono, color: _estilo.color, hijos: hijos);
 
   Widget _construirHistorial() {
     return FutureBuilder<List<Map<String, dynamic>>>(
@@ -352,14 +322,17 @@ class _ClienteDeliveryFormState extends State<ClienteDeliveryForm> {
               'TUS RUTAS FRECUENTES',
               style: TextStyle(
                 fontWeight: FontWeight.bold,
-                color: Colors.black54,
+                color: Colors.white60,
+                fontSize: 12,
+                letterSpacing: 0.5,
               ),
             ),
             const SizedBox(height: 8),
             ...rutas
                 .map(
-                  (ruta) => Card(
-                    elevation: 1,
+                  (ruta) => TarjetaSE(
+                    acento: _estilo.color,
+                    padding: EdgeInsets.zero,
                     margin: const EdgeInsets.only(bottom: 8),
                     child: ListTile(
                       leading: const Icon(Icons.history, color: Colors.black45),
@@ -414,24 +387,16 @@ class _ClienteDeliveryFormState extends State<ClienteDeliveryForm> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
-      appBar: AppBar(
-        title: Text(
-          'Envío de Paquetes',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-        ),
-        backgroundColor: Colors.black,
-        iconTheme: const IconThemeData(color: Colors.white),
-      ),
-      body: Form(
-        key: _formKey,
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            const BannerAltaDemanda(),
+    return Form(
+      key: _formKey,
+      child: ScaffoldServicioSE(
+        estilo: _estilo,
+        procesando: _procesando,
+        onEnviar: _enviarPedido,
+        children: [
             _construirHistorial(),
             _construirBloque(
+              paso: 1,
               titulo: '¿Dónde recogemos?',
               icono: Icons.storefront,
               hijos: [
@@ -439,10 +404,9 @@ class _ClienteDeliveryFormState extends State<ClienteDeliveryForm> {
                   controller: _dirOrigenCtrl,
                   decoration: InputDecoration(
                     labelText: 'Dirección de Recogida',
-                    border: const OutlineInputBorder(),
                     isDense: true,
                     suffixIcon: IconButton(
-                      icon: const Icon(Icons.my_location, color: Colors.blue),
+                      icon: Icon(Icons.my_location, color: _estilo.colorIcono),
                       onPressed: () => _capturarUbicacion(true),
                     ),
                   ),
@@ -454,7 +418,6 @@ class _ClienteDeliveryFormState extends State<ClienteDeliveryForm> {
                   keyboardType: TextInputType.phone,
                   decoration: InputDecoration(
                     labelText: 'Teléfono de quien entrega',
-                    border: const OutlineInputBorder(),
                     isDense: true,
                     suffixIcon: IconButton(
                       icon: const Icon(
@@ -477,6 +440,7 @@ class _ClienteDeliveryFormState extends State<ClienteDeliveryForm> {
               ],
             ),
             _construirBloque(
+              paso: 2,
               titulo: '¿Dónde entregamos?',
               icono: Icons.flag,
               hijos: [
@@ -485,10 +449,9 @@ class _ClienteDeliveryFormState extends State<ClienteDeliveryForm> {
                   onChanged: _onDestinoChanged,
                   decoration: InputDecoration(
                     labelText: 'Dirección de Destino',
-                    border: const OutlineInputBorder(),
                     isDense: true,
                     suffixIcon: IconButton(
-                      icon: const Icon(Icons.my_location, color: Colors.blue),
+                      icon: Icon(Icons.my_location, color: _estilo.colorIcono),
                       onPressed: () => _capturarUbicacion(false),
                     ),
                   ),
@@ -501,7 +464,6 @@ class _ClienteDeliveryFormState extends State<ClienteDeliveryForm> {
                   keyboardType: TextInputType.phone,
                   decoration: InputDecoration(
                     labelText: 'Teléfono de quien recibe',
-                    border: const OutlineInputBorder(),
                     isDense: true,
                     suffixIcon: IconButton(
                       icon: const Icon(
@@ -517,6 +479,7 @@ class _ClienteDeliveryFormState extends State<ClienteDeliveryForm> {
               ],
             ),
             _construirBloque(
+              paso: 3,
               titulo: 'Pago y Cotización',
               icono: Icons.payments,
               hijos: [
@@ -524,7 +487,6 @@ class _ClienteDeliveryFormState extends State<ClienteDeliveryForm> {
                   initialValue: _metodoPago,
                   decoration: const InputDecoration(
                     labelText: 'Método de Pago',
-                    border: OutlineInputBorder(),
                     isDense: true,
                   ),
                   items: ['Efectivo', 'Transferencia']
@@ -532,12 +494,12 @@ class _ClienteDeliveryFormState extends State<ClienteDeliveryForm> {
                       .toList(),
                   onChanged: (val) => setState(() => _metodoPago = val!),
                 ),
+                const SizedBox(height: 16),
                 Container(
-                  padding: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.all(4),
                   decoration: BoxDecoration(
-                    color: Colors.orange[50],
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.orange[200]!),
+                    color: kAvisoSE,
+                    borderRadius: BorderRadius.circular(kRadioCampoSE),
                   ),
                   child: SwitchListTile(
                     title: const Text(
@@ -560,8 +522,7 @@ class _ClienteDeliveryFormState extends State<ClienteDeliveryForm> {
                     keyboardType: TextInputType.number,
                     decoration: const InputDecoration(
                       labelText: 'Tarifa sugerida (\$)',
-                      border: OutlineInputBorder(),
-                      isDense: true,
+                        isDense: true,
                       prefixText: '\$ ',
                     ),
                     onChanged: (v) => setState(() => _tarifaSugerida = double.tryParse(v) ?? 0.0),
@@ -569,33 +530,7 @@ class _ClienteDeliveryFormState extends State<ClienteDeliveryForm> {
                 ],
               ],
             ),
-            const SizedBox(height: 20),
-            SizedBox(
-              height: 55,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xff3AF500),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                onPressed: _procesando ? null : _enviarPedido,
-                child: _procesando
-                    ? const CircularProgressIndicator(color: Colors.black)
-                    : const Text(
-                        'ENVIAR PAQUETE AHORA',
-                        style: TextStyle(
-                          color: Colors.black,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 1,
-                        ),
-                      ),
-              ),
-            ),
-            const SizedBox(height: 30),
-          ],
-        ),
+        ],
       ),
     );
   }

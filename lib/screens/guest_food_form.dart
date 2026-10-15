@@ -14,7 +14,7 @@ class GuestFoodForm extends StatefulWidget {
 }
 
 class _GuestFoodFormState extends State<GuestFoodForm> {
-  static const _estilo = EstiloServicioInvitado.comida;
+  static const _estilo = EstiloServicio.comida;
 
   final _formKey = GlobalKey<FormState>();
   bool _procesando = false;
@@ -171,12 +171,12 @@ class _GuestFoodFormState extends State<GuestFoodForm> {
     final c = _estilo.color;
     return Form(
       key: _formKey,
-      child: ScaffoldInvitado(
+      child: ScaffoldServicioSE(
         estilo: _estilo,
         procesando: _procesando,
         onEnviar: _enviarPedido,
         children: [
-          BloqueInvitado(
+          BloqueSE(
             paso: 1,
             titulo: 'Tus datos',
             icono: Icons.person,
@@ -203,7 +203,7 @@ class _GuestFoodFormState extends State<GuestFoodForm> {
               ),
             ],
           ),
-          BloqueInvitado(
+          BloqueSE(
             paso: 2,
             titulo: '¿Qué pedimos y dónde?',
             icono: Icons.restaurant,
@@ -228,7 +228,7 @@ class _GuestFoodFormState extends State<GuestFoodForm> {
               ),
             ],
           ),
-          BloqueInvitado(
+          BloqueSE(
             paso: 3,
             titulo: '¿Dónde lo entregamos?',
             icono: Icons.home_rounded,
@@ -258,7 +258,7 @@ class _GuestFoodFormState extends State<GuestFoodForm> {
                     })),
             ],
           ),
-          BloqueInvitado(
+          BloqueSE(
             paso: 4,
             titulo: 'Pago',
             icono: Icons.payments_rounded,
@@ -273,7 +273,7 @@ class _GuestFoodFormState extends State<GuestFoodForm> {
                 onChanged: (val) => setState(() => _metodoPago = val ?? 'Efectivo'),
               ),
               const SizedBox(height: 12),
-              const AvisoCotizacionInvitado(),
+              const AvisoCotizacionSE(),
             ],
           ),
         ],

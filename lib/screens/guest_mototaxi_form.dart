@@ -15,7 +15,7 @@ class GuestMototaxiForm extends StatefulWidget {
 }
 
 class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
-  static const _estilo = EstiloServicioInvitado.mototaxi;
+  static const _estilo = EstiloServicio.mototaxi;
 
   final _formKey = GlobalKey<FormState>();
   bool _procesando = false;
@@ -178,12 +178,12 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
     const iconoGps = Color(0xFF1E8E00);
     return Form(
       key: _formKey,
-      child: ScaffoldInvitado(
+      child: ScaffoldServicioSE(
         estilo: _estilo,
         procesando: _procesando,
         onEnviar: _enviarPedido,
         children: [
-          BloqueInvitado(
+          BloqueSE(
             paso: 1,
             titulo: 'Datos del pasajero',
             icono: Icons.person,
@@ -210,7 +210,7 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
               ),
             ],
           ),
-          BloqueInvitado(
+          BloqueSE(
             paso: 2,
             titulo: 'Ruta del viaje',
             icono: Icons.route_rounded,
@@ -241,7 +241,7 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
               ),
             ],
           ),
-          BloqueInvitado(
+          BloqueSE(
             paso: 3,
             titulo: 'Pago',
             icono: Icons.payments_rounded,
@@ -256,7 +256,7 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
                 onChanged: (val) => setState(() => _metodoPago = val ?? 'Efectivo'),
               ),
               const SizedBox(height: 12),
-              const AvisoCotizacionInvitado(),
+              const AvisoCotizacionSE(),
             ],
           ),
         ],

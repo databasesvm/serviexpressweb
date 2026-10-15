@@ -14,7 +14,7 @@ class GuestDeliveryForm extends StatefulWidget {
 }
 
 class _GuestDeliveryFormState extends State<GuestDeliveryForm> {
-  static const _estilo = EstiloServicioInvitado.paqueteria;
+  static const _estilo = EstiloServicio.paqueteria;
 
   final _formKey = GlobalKey<FormState>();
   bool _procesando = false;
@@ -215,12 +215,12 @@ class _GuestDeliveryFormState extends State<GuestDeliveryForm> {
     final c = _estilo.color;
     return Form(
       key: _formKey,
-      child: ScaffoldInvitado(
+      child: ScaffoldServicioSE(
         estilo: _estilo,
         procesando: _procesando,
         onEnviar: _enviarPedido,
         children: [
-          BloqueInvitado(
+          BloqueSE(
             paso: 1,
             titulo: 'Tus datos',
             icono: Icons.person,
@@ -235,7 +235,7 @@ class _GuestDeliveryFormState extends State<GuestDeliveryForm> {
               ),
             ],
           ),
-          BloqueInvitado(
+          BloqueSE(
             paso: 2,
             titulo: '¿Dónde recogemos?',
             icono: Icons.storefront,
@@ -261,7 +261,7 @@ class _GuestDeliveryFormState extends State<GuestDeliveryForm> {
               _campoTelefono(_telOrigenCtrl, 'WhatsApp / teléfono de quien entrega'),
             ],
           ),
-          BloqueInvitado(
+          BloqueSE(
             paso: 3,
             titulo: '¿Dónde entregamos?',
             icono: Icons.flag_rounded,
@@ -289,7 +289,7 @@ class _GuestDeliveryFormState extends State<GuestDeliveryForm> {
               _campoTelefono(_telDestinoCtrl, 'WhatsApp / teléfono de quien recibe'),
             ],
           ),
-          BloqueInvitado(
+          BloqueSE(
             paso: 4,
             titulo: 'Pago',
             icono: Icons.payments_rounded,
@@ -304,7 +304,7 @@ class _GuestDeliveryFormState extends State<GuestDeliveryForm> {
                 onChanged: (val) => setState(() => _metodoPago = val ?? 'Efectivo'),
               ),
               const SizedBox(height: 12),
-              const AvisoCotizacionInvitado(),
+              const AvisoCotizacionSE(),
             ],
           ),
         ],

@@ -14,7 +14,7 @@ class GuestShoppingForm extends StatefulWidget {
 }
 
 class _GuestShoppingFormState extends State<GuestShoppingForm> {
-  static const _estilo = EstiloServicioInvitado.compras;
+  static const _estilo = EstiloServicio.compras;
 
   final _formKey = GlobalKey<FormState>();
   bool _procesando = false;
@@ -163,12 +163,12 @@ class _GuestShoppingFormState extends State<GuestShoppingForm> {
     final c = _estilo.color;
     return Form(
       key: _formKey,
-      child: ScaffoldInvitado(
+      child: ScaffoldServicioSE(
         estilo: _estilo,
         procesando: _procesando,
         onEnviar: _enviarPedido,
         children: [
-          BloqueInvitado(
+          BloqueSE(
             paso: 1,
             titulo: 'Tus datos',
             icono: Icons.person,
@@ -195,7 +195,7 @@ class _GuestShoppingFormState extends State<GuestShoppingForm> {
               ),
             ],
           ),
-          BloqueInvitado(
+          BloqueSE(
             paso: 2,
             titulo: '¿Qué compramos y dónde?',
             icono: Icons.shopping_cart,
@@ -221,7 +221,7 @@ class _GuestShoppingFormState extends State<GuestShoppingForm> {
               ),
             ],
           ),
-          BloqueInvitado(
+          BloqueSE(
             paso: 3,
             titulo: '¿Dónde lo entregamos?',
             icono: Icons.home_rounded,
@@ -250,7 +250,7 @@ class _GuestShoppingFormState extends State<GuestShoppingForm> {
                     })),
             ],
           ),
-          BloqueInvitado(
+          BloqueSE(
             paso: 4,
             titulo: 'Pago',
             icono: Icons.payments_rounded,
@@ -265,7 +265,7 @@ class _GuestShoppingFormState extends State<GuestShoppingForm> {
                 onChanged: (val) => setState(() => _metodoPago = val ?? 'Efectivo'),
               ),
               const SizedBox(height: 12),
-              const AvisoCotizacionInvitado(),
+              const AvisoCotizacionSE(),
             ],
           ),
         ],
