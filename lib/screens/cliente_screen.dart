@@ -21,6 +21,7 @@ import 'package:serviexpress_app/utils/alta_demanda.dart';
 import 'package:serviexpress_app/utils/iconos.dart';
 import 'package:serviexpress_app/utils/errores_servidor.dart';
 import 'package:serviexpress_app/utils/whatsapp_contacto.dart'; // WhatsApp Web en computador
+import 'package:serviexpress_app/utils/tema_serviexpress.dart';
 
 class ClienteScreen extends StatefulWidget {
   final Map<String, dynamic> usuario;
@@ -979,17 +980,21 @@ class _ClienteScreenState extends State<ClienteScreen>
       }
     }
 
-    return Container(
-      width: double.infinity,
+    return TarjetaSE(
+      acento: colorEstado,
       padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: colorEstado.withValues(alpha: 0.3), width: 2),
-      ),
+      margin: EdgeInsets.zero,
       child: Column(
         children: [
-          Icon(icono, size: 60, color: colorEstado),
+          Container(
+            width: 92,
+            height: 92,
+            decoration: BoxDecoration(
+              color: colorEstado.withValues(alpha: 0.12),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icono, size: 52, color: colorEstado),
+          ),
           const SizedBox(height: 16),
           Text(
             titulo,
@@ -1016,62 +1021,8 @@ class _ClienteScreenState extends State<ClienteScreen>
     );
   }
 
-  Widget _construirBotonServicio(
-    BuildContext context, {
-    required String titulo,
-    required String descripcion,
-    required Color colorBase,
-    Color textColor = Colors.white,
-    required VoidCallback onTap,
-  }) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      child: Material(
-        color: colorBase,
-        borderRadius: BorderRadius.circular(12),
-        elevation: 3,
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        titulo,
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: textColor,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        descripcion,
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: textColor.withValues(alpha: 0.85),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Icon(
-                  Icons.arrow_forward_ios_rounded,
-                  color: textColor.withValues(alpha: 0.5),
-                  size: 20,
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  void _irA(Widget pantalla) =>
+      Navigator.push(context, MaterialPageRoute(builder: (_) => pantalla));
 
 
   Future<void> _eliminarMiCuenta(BuildContext context) async {
@@ -1146,13 +1097,15 @@ class _ClienteScreenState extends State<ClienteScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: kFondoSE,
       appBar: AppBar(
         title: Text(
           'ServiExpress | ${widget.usuario['nombre'].toString().split(' ')[0]}',
-          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+          style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.w600, fontSize: 15),
         ),
-        backgroundColor: Colors.black,
+        backgroundColor: kFondoSE,
+        elevation: 0,
+        scrolledUnderElevation: 0,
         iconTheme: const IconThemeData(color: Colors.white),
         actions: [
           // Solo el indicador de soporte permanece en AppBar (tiene alarma en tiempo real)
@@ -1210,8 +1163,8 @@ class _ClienteScreenState extends State<ClienteScreen>
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _tabActual,
         onTap: (i) => setState(() => _tabActual = i),
-        backgroundColor: Colors.black,
-        selectedItemColor: const Color(0xff3AF500),
+        backgroundColor: const Color(0xFF111111),
+        selectedItemColor: kVerdeSE,
         unselectedItemColor: Colors.white54,
         type: BottomNavigationBarType.fixed,
         items: const [
@@ -1237,7 +1190,7 @@ class _ClienteScreenState extends State<ClienteScreen>
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(
-              child: CircularProgressIndicator(color: Colors.black),
+              child: CircularProgressIndicator(color: kVerdeSE),
             );
           }
 
@@ -1279,9 +1232,12 @@ class _ClienteScreenState extends State<ClienteScreen>
             }
           }
 
+          final margen = margenSE(context);
           return SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
-            child: Column(
+            padding: EdgeInsets.fromLTRB(margen, 8, margen, 24),
+            child: ContenidoSE(
+             anchoMax: 640,
+             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (activos.isNotEmpty) ...[
@@ -1312,8 +1268,13 @@ class _ClienteScreenState extends State<ClienteScreen>
                           Container(
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                              color: Colors.black,
-                              borderRadius: BorderRadius.circular(8),
+                              color: const Color(0xFF161616),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: EstiloServicio.deTipo(servicio['tipo_servicio']?.toString())
+                                    .color
+                                    .withValues(alpha: 0.5),
+                              ),
                             ),
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1336,7 +1297,7 @@ class _ClienteScreenState extends State<ClienteScreen>
                             ),
                           ),
                           const SizedBox(height: 12),
-                          const BannerAltaDemanda(),
+                          const BannerAltaDemanda(margin: EdgeInsets.only(bottom: 12)),
                           _construirEstadoVisual(servicio['estado'], servicio),
                         ],
                       ),
@@ -1345,18 +1306,19 @@ class _ClienteScreenState extends State<ClienteScreen>
                 ] else ...[
                   Text(
                     'Hola, ${widget.usuario['nombre'].toString().split(' ')[0]} 👋',
-                    style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black87,
+                    style: TextStyle(
+                      fontSize: angostoSE(context) ? 24 : 28,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                      height: 1.1,
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 6),
                   const Text(
                     '¿Qué quieres pedir hoy?',
-                    style: TextStyle(fontSize: 14, color: Colors.black54),
+                    style: TextStyle(fontSize: 13, color: Colors.white60),
                   ),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 18),
 
                   // ── HÉROE: PEDIR A DOMICILIO ──────────────────────────
                   GestureDetector(
@@ -1369,19 +1331,9 @@ class _ClienteScreenState extends State<ClienteScreen>
                     child: Container(
                       margin: const EdgeInsets.only(bottom: 20),
                       decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF1B1B2F), Color(0xFF2D2D44)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        borderRadius: BorderRadius.circular(18),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.2),
-                            blurRadius: 12,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
+                        color: const Color(0xFF161616),
+                        borderRadius: BorderRadius.circular(kRadioTarjetaSE),
+                        border: Border.all(color: kVerdeSE.withValues(alpha: 0.5)),
                       ),
                       padding: const EdgeInsets.all(20),
                       child: Row(
@@ -1460,69 +1412,35 @@ class _ClienteScreenState extends State<ClienteScreen>
                         fontSize: 11,
                         fontWeight: FontWeight.bold,
                         letterSpacing: 1.3,
-                        color: Colors.black45,
+                        color: Colors.white60,
                       ),
                     ),
                   ),
-                  _construirBotonServicio(
-                    context,
-                    titulo: '🏍️ Mototaxi',
-                    descripcion:
-                        'Transporte rápido y seguro para ti o un conocido.',
-                    colorBase: const Color(0xff3AF500),
-                    textColor: Colors.black,
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) =>
-                            ClienteMototaxiForm(usuario: widget.usuario),
-                      ),
+                  GrillaServiciosSE(mosaicos: [
+                    MosaicoServicioSE(
+                      estilo: EstiloServicio.mototaxi,
+                      subtitulo: 'Transporte rápido y seguro',
+                      onTap: () => _irA(ClienteMototaxiForm(usuario: widget.usuario)),
                     ),
-                  ),
-                  _construirBotonServicio(
-                    context,
-                    titulo: '📦 Envío / Recogida',
-                    descripcion:
-                        'Llevar o traer un paquete, llave o documento.',
-                    colorBase: Colors.blue[700]!,
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) =>
-                            ClienteDeliveryForm(usuario: widget.usuario),
-                      ),
+                    MosaicoServicioSE(
+                      estilo: EstiloServicio.paqueteria,
+                      subtitulo: 'Llevar o traer un paquete o documento',
+                      onTap: () => _irA(ClienteDeliveryForm(usuario: widget.usuario)),
                     ),
-                  ),
-                  _construirBotonServicio(
-                    context,
-                    titulo: '🍔 Comida (sin app)',
-                    descripcion:
-                        'Pedido en cualquier restaurante que no esté en la app.',
-                    colorBase: Colors.red[600]!,
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) =>
-                            ClienteFoodForm(usuario: widget.usuario),
-                      ),
+                    MosaicoServicioSE(
+                      estilo: EstiloServicio.comida,
+                      subtitulo: 'De restaurantes que no están en la app',
+                      onTap: () => _irA(ClienteFoodForm(usuario: widget.usuario)),
                     ),
-                  ),
-                  _construirBotonServicio(
-                    context,
-                    titulo: '🛒 Compras y Encargos',
-                    descripcion:
-                        'Danos tu lista de súper o farmacia, hacemos la fila por ti.',
-                    colorBase: Colors.orange[800]!,
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) =>
-                            ClienteShoppingForm(usuario: widget.usuario),
-                      ),
+                    MosaicoServicioSE(
+                      estilo: EstiloServicio.compras,
+                      subtitulo: 'Súper o farmacia, hacemos la fila',
+                      onTap: () => _irA(ClienteShoppingForm(usuario: widget.usuario)),
                     ),
-                  ),
+                  ]),
                 ],
               ],
+             ),
             ),
           );
         },
@@ -1793,7 +1711,7 @@ class _ClienteScreenState extends State<ClienteScreen>
               // tab realmente muestra (ahorro notable vs. select() sin args).
               future: _futureHistorial ??= Supabase.instance.client
                   .from('servicios')
-                  .select('id, numero_cliente, origen, destino, estado, tarifa, observacion, movil_id, calificacion')
+                  .select('id, numero_cliente, origen, destino, estado, tarifa, observacion, movil_id, calificacion, tipo_servicio')
                   .eq('cliente_id', widget.usuario['id'])
                   .inFilter('estado', ['finalizado', 'cancelado', 'caducado', 'finalizado_por_demora', 'finalizado_con_problema'])
                   .order('id', ascending: false)
@@ -1820,7 +1738,10 @@ class _ClienteScreenState extends State<ClienteScreen>
                     else if (estado == 'finalizado_con_problema' || (servicio['observacion'] ?? '').contains('[MARCA DE FALLA]')) {
                       colorTag = Colors.red[700]!; label = 'NOVEDAD';
                     }
-                    return Card(
+                    return TarjetaSE(
+                      acento: EstiloServicio.deTipo(servicio['tipo_servicio']?.toString()).color,
+                      franja: true,
+                      padding: const EdgeInsets.only(top: 4),
                       margin: const EdgeInsets.only(bottom: 10),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,

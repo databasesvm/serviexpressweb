@@ -8,6 +8,7 @@ import 'package:serviexpress_app/utils/widgets_compartidos.dart';
 import 'package:serviexpress_app/utils/paradero_objetivo.dart';
 import 'package:serviexpress_app/utils/errores_servidor.dart';
 import 'package:serviexpress_app/utils/whatsapp_contacto.dart'; // WhatsApp Web en computador
+import 'package:serviexpress_app/utils/tema_serviexpress.dart';
 
 class GuestTrackingScreen extends StatefulWidget {
   const GuestTrackingScreen({super.key});
@@ -589,17 +590,21 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
 
     return Column(
       children: [
-        Container(
+        TarjetaSE(
+          acento: colorEstado,
           padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            border:
-                Border.all(color: colorEstado.withValues(alpha: 0.3), width: 2),
-          ),
+          margin: EdgeInsets.zero,
           child: Column(
             children: [
-              Icon(icono, size: 60, color: colorEstado),
+              Container(
+                width: 92,
+                height: 92,
+                decoration: BoxDecoration(
+                  color: colorEstado.withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icono, size: 52, color: colorEstado),
+              ),
               const SizedBox(height: 16),
               Text(
                 titulo,
@@ -632,33 +637,34 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
   Widget build(BuildContext context) {
     if (_cargandoId) {
       return const Scaffold(
-        body:
-            Center(child: CircularProgressIndicator(color: Color(0xff3AF500))),
+        backgroundColor: kFondoSE,
+        body: Center(child: CircularProgressIndicator(color: kVerdeSE)),
       );
     }
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: kFondoSE,
       appBar: AppBar(
-        title: Text(
-          'Seguimiento de Servicio',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-        ),
-        backgroundColor: Colors.black,
-        iconTheme: IconThemeData(color: Colors.white),
+        backgroundColor: kFondoSE,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        iconTheme: const IconThemeData(color: Colors.white),
+        title: const Text('Seguimiento de tu pedido',
+            style: TextStyle(color: Colors.white70, fontSize: 15, fontWeight: FontWeight.w600)),
       ),
       body: _idPedido == null
           ? const Center(
               child: Padding(
                 padding: EdgeInsets.all(24.0),
-                child: Text(
-                  'No tienes ningún servicio activo registrado como invitado.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black45,
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.inbox_rounded, color: Colors.white24, size: 64),
+                  SizedBox(height: 12),
+                  Text(
+                    'No tienes ningún servicio activo registrado como invitado.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white60),
                   ),
-                ),
+                ]),
               ),
             )
           : StreamBuilder<List<Map<String, dynamic>>>(
@@ -666,46 +672,69 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting)
                   return const Center(
-                    child: CircularProgressIndicator(color: Colors.black),
+                    child: CircularProgressIndicator(color: kVerdeSE),
                   );
                 if (!snapshot.hasData || snapshot.data!.isEmpty)
                   return const Center(
                     child: Text(
                       'No se encontró el servicio en la base de datos.',
+                      style: TextStyle(color: Colors.white60),
                     ),
                   );
 
                 final servicio = snapshot.data!.first;
                 final estado = servicio['estado'];
+                final estiloSrv =
+                    EstiloServicio.deTipo(servicio['tipo_servicio']?.toString());
+                final margen = margenSE(context);
 
-                return ListView(
-                  padding: const EdgeInsets.all(16),
+                return ContenidoSE(
+                  child: ListView(
+                  padding: EdgeInsets.fromLTRB(margen, 4, margen, 28),
                   children: [
-                    Text(
-                      'Orden #${servicio['id']}',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black38,
+                    EncabezadoSE(
+                      icono: estiloSrv.icono,
+                      color: estiloSrv.color,
+                      titulo: estiloSrv.nombreCorto,
+                      subtitulo: 'Orden #${servicio['id']}',
+                    ),
+                    const SizedBox(height: 16),
+                    TarjetaSE(
+                      acento: estiloSrv.color,
+                      franja: true,
+                      padding: const EdgeInsets.all(14),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(children: [
+                            Icon(Icons.radio_button_checked,
+                                size: 16, color: estiloSrv.colorIcono),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text('${servicio['origen'] ?? ''}',
+                                  style: const TextStyle(fontSize: 14, color: Colors.black87)),
+                            ),
+                          ]),
+                          const SizedBox(height: 8),
+                          Row(children: [
+                            const Icon(Icons.location_on_rounded,
+                                size: 16, color: Colors.black45),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text('${servicio['destino'] ?? ''}',
+                                  style: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.black87)),
+                            ),
+                          ]),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 10),
-                    Text(
-                      '📍 Origen: ${servicio['origen']}',
-                      style: const TextStyle(fontSize: 14),
-                    ),
-                    Text(
-                      '🏁 Destino: ${servicio['destino']}',
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const Divider(height: 30),
 
                     if (!['finalizado', 'finalizado_por_demora', 'finalizado_con_problema',
                           'cancelado', 'caducado'].contains(estado))
-                      const BannerAltaDemanda(),
+                      const BannerAltaDemanda(margin: EdgeInsets.only(bottom: 12)),
                     _construirEstadoVisual(estado, servicio),
 
                     // ── SECCIÓN CALIFICAR (solo invitados, solo finalizado) ──
@@ -791,6 +820,7 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
                     ],
                     // ── FIN SECCIÓN CALIFICAR ─────────────────────────
                   ],
+                  ),
                 );
               },
             ),

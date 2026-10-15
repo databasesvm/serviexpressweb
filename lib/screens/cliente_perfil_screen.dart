@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:serviexpress_app/utils/sesion_segura.dart';
+import 'package:serviexpress_app/utils/tema_serviexpress.dart';
 
 class ClientePerfilScreen extends StatefulWidget {
   final Map<String, dynamic> usuario;
@@ -157,33 +158,38 @@ class _ClientePerfilScreenState extends State<ClientePerfilScreen> {
     _nuevaDirCtrl.clear();
     final result = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        title: const Text('Nueva dirección',
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-        content: TextField(
-          controller: _nuevaDirCtrl,
-          autofocus: true,
-          textCapitalization: TextCapitalization.sentences,
-          decoration: const InputDecoration(
-            hintText: 'Ej: Calle 5 # 12-34, Barrio Los Pinos',
-            border: OutlineInputBorder(),
-            isDense: true,
+      builder: (ctx) => Theme(
+        data: temaFormularioSE(ctx, kVerdeSE),
+        child: AlertDialog(
+          backgroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(kRadioTarjetaSE)),
+          title: const Text('Nueva dirección',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          content: TextField(
+            controller: _nuevaDirCtrl,
+            autofocus: true,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: const InputDecoration(
+              hintText: 'Ej: Calle 5 # 12-34, Barrio Los Pinos',
+            ),
           ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancelar', style: TextStyle(color: Colors.black54))),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: kVerdeSE,
+                  foregroundColor: Colors.black,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+              onPressed: () =>
+                  Navigator.pop(ctx, _nuevaDirCtrl.text.trim()),
+              child: const Text('Agregar', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.black),
-            onPressed: () =>
-                Navigator.pop(ctx, _nuevaDirCtrl.text.trim()),
-            child: const Text('Agregar',
-                style: TextStyle(color: Color(0xff3AF500))),
-          ),
-        ],
       ),
     );
     if (result == null || result.isEmpty) return;
@@ -217,232 +223,226 @@ class _ClientePerfilScreenState extends State<ClientePerfilScreen> {
   @override
   Widget build(BuildContext context) {
     final iniciales = _nombreCtrl.text.isNotEmpty
-        ? _nombreCtrl.text.trim().split(' ').map((p) => p[0]).take(2).join()
+        ? _nombreCtrl.text.trim().split(' ').where((p) => p.isNotEmpty).map((p) => p[0]).take(2).join()
         : '?';
+    final margen = margenSE(context);
+    final teclado = MediaQuery.of(context).viewInsets.bottom > 0;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        title: const Text('Mi Perfil',
-            style: TextStyle(
-                color: Colors.white, fontWeight: FontWeight.bold)),
-        iconTheme: const IconThemeData(color: Colors.white),
-        actions: [
-          if (_cambios)
-            TextButton(
-              onPressed: _guardando ? null : _guardar,
-              child: _guardando
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Color(0xff3AF500)))
-                  : const Text('GUARDAR',
-                      style: TextStyle(
-                          color: Color(0xff3AF500),
-                          fontWeight: FontWeight.bold)),
-            ),
-        ],
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          // ── Avatar ─────────────────────────────────────────────
-          Center(
-            child: CircleAvatar(
-              radius: 42,
-              backgroundColor: Colors.black,
-              child: Text(
-                iniciales.toUpperCase(),
-                style: const TextStyle(
-                    color: Color(0xff3AF500),
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold),
-              ),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Center(
-            child: Text(
-              widget.usuario['usuario']?.toString() ?? '',
-              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-            ),
-          ),
-          const SizedBox(height: 20),
-
-          // ── Datos editables ────────────────────────────────────
-          _seccion('DATOS PERSONALES'),
-          const SizedBox(height: 8),
-          _campo(
-            controller: _nombreCtrl,
-            label: 'Nombre completo',
-            icon: Icons.person_outline,
-            caps: TextCapitalization.characters,
-          ),
-          const SizedBox(height: 10),
-          _campo(
-            controller: _telefonoCtrl,
-            label: 'Teléfono',
-            icon: Icons.phone_outlined,
-            tipo: TextInputType.phone,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-          ),
-          const SizedBox(height: 10),
-          _campo(
-            controller: _cedulaCtrl,
-            label: 'Cédula / Documento',
-            icon: Icons.badge_outlined,
-            tipo: TextInputType.number,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            hint: 'Opcional — para facturación y seguridad',
-          ),
-          const SizedBox(height: 20),
-
-          // ── Datos solo lectura ─────────────────────────────────
-          _seccion('CUENTA'),
-          const SizedBox(height: 8),
-          _campoReadonly(
-              label: 'Correo electrónico',
-              valor: _correo,
-              icon: Icons.email_outlined),
-          const SizedBox(height: 10),
-          _campoReadonly(
-              label: 'Fecha de nacimiento',
-              valor: _fechaNac,
-              icon: Icons.cake_outlined),
-          const SizedBox(height: 20),
-
-          // ── Direcciones guardadas ──────────────────────────────
-          Row(
-            children: [
-              Expanded(child: _seccion('DIRECCIONES GUARDADAS')),
-              TextButton.icon(
-                onPressed:
-                    _direcciones.length >= 5 ? null : _agregarDireccion,
-                icon: const Icon(Icons.add, size: 16),
-                label: const Text('Agregar',
-                    style: TextStyle(fontSize: 12)),
-                style: TextButton.styleFrom(
-                    foregroundColor: Colors.black,
-                    padding: EdgeInsets.zero),
-              ),
-            ],
-          ),
-          if (_direcciones.isEmpty)
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(10),
-                  border:
-                      Border.all(color: Colors.grey.shade200)),
-              child: Text('Sin direcciones guardadas',
-                  style: TextStyle(
-                      color: Colors.grey[500], fontSize: 13)),
-            )
-          else
-            ...List.generate(_direcciones.length, (i) {
-              final dir = _direcciones[i];
-              final esPredeterminada = i == 0;
-              return Container(
-                margin: const EdgeInsets.only(bottom: 8),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                      color: esPredeterminada
-                          ? const Color(0xff3AF500).withValues(alpha: 0.5)
-                          : Colors.grey.shade200),
-                ),
-                child: ListTile(
-                  dense: true,
-                  leading: Icon(
-                    esPredeterminada
-                        ? Icons.home
-                        : Icons.location_on_outlined,
-                    color: esPredeterminada
-                        ? const Color(0xff2aaa00)
-                        : Colors.grey[500],
-                    size: 20,
+    return Theme(
+      data: temaFormularioSE(context, kVerdeSE),
+      child: Scaffold(
+        backgroundColor: kFondoSE,
+        appBar: AppBar(
+          backgroundColor: kFondoSE,
+          elevation: 0,
+          scrolledUnderElevation: 0,
+          iconTheme: const IconThemeData(color: Colors.white),
+          title: const Text('Mi perfil',
+              style: TextStyle(color: Colors.white70, fontSize: 15, fontWeight: FontWeight.w600)),
+        ),
+        body: SafeArea(
+          bottom: false,
+          child: ContenidoSE(
+            child: ListView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              padding: EdgeInsets.fromLTRB(margen, 4, margen, 24),
+              children: [
+                // ── Encabezado con avatar ────────────────────────────
+                Row(children: [
+                  Container(
+                    width: 64,
+                    height: 64,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: kVerdeSE.withValues(alpha: 0.15),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: kVerdeSE.withValues(alpha: 0.6)),
+                    ),
+                    child: Text(
+                      iniciales.toUpperCase(),
+                      style: const TextStyle(
+                          color: kVerdeSE, fontSize: 24, fontWeight: FontWeight.w800),
+                    ),
                   ),
-                  title: Text(dir,
-                      style: const TextStyle(fontSize: 13)),
-                  subtitle: esPredeterminada
-                      ? const Text('Predeterminada',
-                          style: TextStyle(
-                              fontSize: 10,
-                              color: Color(0xff2aaa00),
-                              fontWeight: FontWeight.w600))
-                      : null,
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (!esPredeterminada)
-                        IconButton(
-                          icon: const Icon(Icons.arrow_upward,
-                              size: 18),
-                          tooltip: 'Hacer predeterminada',
-                          onPressed: () => _subirDireccion(i),
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
-                        ),
-                      const SizedBox(width: 4),
-                      IconButton(
-                        icon: Icon(Icons.delete_outline,
-                            size: 18, color: Colors.red[300]),
-                        tooltip: 'Eliminar',
-                        onPressed: () => _eliminarDireccion(i),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(
+                        _nombreCtrl.text.isNotEmpty ? _nombreCtrl.text : 'Mi perfil',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800, height: 1.1),
                       ),
-                    ],
+                      const SizedBox(height: 4),
+                      Text('@${widget.usuario['usuario']?.toString() ?? ''}',
+                          style: const TextStyle(color: Colors.white60, fontSize: 13)),
+                    ]),
+                  ),
+                ]),
+                const SizedBox(height: 18),
+
+                // ── Datos editables ──────────────────────────────────
+                BloqueSE(
+                  titulo: 'Datos personales',
+                  icono: Icons.person_outline,
+                  color: kVerdeSE,
+                  hijos: [
+                    _campo(
+                      controller: _nombreCtrl,
+                      label: 'Nombre completo',
+                      icon: Icons.person_outline,
+                      caps: TextCapitalization.characters,
+                    ),
+                    const SizedBox(height: 10),
+                    _campo(
+                      controller: _telefonoCtrl,
+                      label: 'Teléfono',
+                      icon: Icons.phone_outlined,
+                      tipo: TextInputType.phone,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    ),
+                    const SizedBox(height: 10),
+                    _campo(
+                      controller: _cedulaCtrl,
+                      label: 'Cédula / Documento',
+                      icon: Icons.badge_outlined,
+                      tipo: TextInputType.number,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      hint: 'Opcional — para facturación y seguridad',
+                    ),
+                  ],
+                ),
+
+                // ── Datos solo lectura ───────────────────────────────
+                BloqueSE(
+                  titulo: 'Cuenta',
+                  icono: Icons.lock_outline,
+                  color: kVerdeSE,
+                  hijos: [
+                    _campoReadonly(
+                        label: 'Correo electrónico',
+                        valor: _correo,
+                        icon: Icons.email_outlined),
+                    const SizedBox(height: 10),
+                    _campoReadonly(
+                        label: 'Fecha de nacimiento',
+                        valor: _fechaNac,
+                        icon: Icons.cake_outlined),
+                  ],
+                ),
+
+                // ── Direcciones guardadas ────────────────────────────
+                BloqueSE(
+                  titulo: 'Direcciones guardadas',
+                  icono: Icons.home_outlined,
+                  color: kVerdeSE,
+                  hijos: [
+                    if (_direcciones.isEmpty)
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                            color: kCampoSE,
+                            borderRadius: BorderRadius.circular(kRadioCampoSE)),
+                        child: const Text('Sin direcciones guardadas',
+                            style: TextStyle(color: Colors.black45, fontSize: 13)),
+                      )
+                    else
+                      ...List.generate(_direcciones.length, (i) {
+                        final dir = _direcciones[i];
+                        final esPredeterminada = i == 0;
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          decoration: BoxDecoration(
+                            color: esPredeterminada
+                                ? kVerdeSE.withValues(alpha: 0.10)
+                                : kCampoSE,
+                            borderRadius: BorderRadius.circular(kRadioCampoSE),
+                            border: esPredeterminada
+                                ? Border.all(color: kVerdeSE.withValues(alpha: 0.5))
+                                : null,
+                          ),
+                          child: ListTile(
+                            dense: true,
+                            leading: Icon(
+                              esPredeterminada ? Icons.home : Icons.location_on_outlined,
+                              color: esPredeterminada ? kVerdeOscuroSE : Colors.grey[500],
+                              size: 20,
+                            ),
+                            title: Text(dir, style: const TextStyle(fontSize: 13)),
+                            subtitle: esPredeterminada
+                                ? const Text('Predeterminada',
+                                    style: TextStyle(
+                                        fontSize: 10,
+                                        color: kVerdeOscuroSE,
+                                        fontWeight: FontWeight.w600))
+                                : null,
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (!esPredeterminada)
+                                  IconButton(
+                                    icon: const Icon(Icons.arrow_upward, size: 18),
+                                    tooltip: 'Hacer predeterminada',
+                                    onPressed: () => _subirDireccion(i),
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
+                                  ),
+                                const SizedBox(width: 4),
+                                IconButton(
+                                  icon: Icon(Icons.delete_outline, size: 18, color: Colors.red[300]),
+                                  tooltip: 'Eliminar',
+                                  onPressed: () => _eliminarDireccion(i),
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }),
+                    const SizedBox(height: 4),
+                    Row(children: [
+                      const Expanded(
+                        child: Text(
+                          'La primera se pre-llena al pedir un domicilio.',
+                          style: TextStyle(fontSize: 11, color: Colors.black45),
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: _direcciones.length >= 5 ? null : _agregarDireccion,
+                        icon: const Icon(Icons.add, size: 16),
+                        label: const Text('Agregar', style: TextStyle(fontSize: 12)),
+                        style: TextButton.styleFrom(foregroundColor: kVerdeOscuroSE),
+                      ),
+                    ]),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        // ── Botón guardar fijo abajo (solo si hay cambios) ───────────
+        bottomNavigationBar: (!_cambios || teclado)
+            ? null
+            : SafeArea(
+                child: ContenidoSE(
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(margen, 8, margen, 12),
+                    child: BotonPrincipalSE(
+                      texto: 'GUARDAR CAMBIOS',
+                      icono: Icons.check_rounded,
+                      textoCargando: 'GUARDANDO…',
+                      cargando: _guardando,
+                      onPressed: _guardar,
+                    ),
                   ),
                 ),
-              );
-            }),
-          const SizedBox(height: 8),
-          Text(
-            'La primera dirección se pre-llena automáticamente al pedir un domicilio.',
-            style: TextStyle(fontSize: 11, color: Colors.grey[500]),
-          ),
-          const SizedBox(height: 30),
-
-          // ── Botón guardar principal ────────────────────────────
-          if (_cambios)
-            SizedBox(
-              width: double.infinity,
-              height: 48,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.black,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10))),
-                onPressed: _guardando ? null : _guardar,
-                child: _guardando
-                    ? const CircularProgressIndicator(
-                        color: Color(0xff3AF500), strokeWidth: 2)
-                    : const Text('GUARDAR CAMBIOS',
-                        style: TextStyle(
-                            color: Color(0xff3AF500),
-                            fontWeight: FontWeight.bold,
-                            fontSize: 15)),
               ),
-            ),
-          const SizedBox(height: 20),
-        ],
       ),
     );
   }
-
-  Widget _seccion(String titulo) => Text(
-        titulo,
-        style: const TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.bold,
-            letterSpacing: 1.2,
-            color: Colors.black54),
-      );
 
   Widget _campo({
     required TextEditingController controller,
@@ -462,20 +462,6 @@ class _ClientePerfilScreenState extends State<ClientePerfilScreen> {
         labelText: label,
         hintText: hint,
         prefixIcon: Icon(icon, size: 20),
-        filled: true,
-        fillColor: Colors.white,
-        border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
-            borderSide: BorderSide(color: Colors.grey.shade300)),
-        enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
-            borderSide: BorderSide(color: Colors.grey.shade300)),
-        focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
-            borderSide: const BorderSide(color: Colors.black, width: 1.5)),
-        isDense: true,
-        contentPadding:
-            const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
       ),
     );
   }
@@ -486,11 +472,10 @@ class _ClientePerfilScreenState extends State<ClientePerfilScreen> {
     required IconData icon,
   }) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.grey[100],
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.grey.shade200),
+        color: kCampoSE,
+        borderRadius: BorderRadius.circular(kRadioCampoSE),
       ),
       child: Row(
         children: [
@@ -500,13 +485,9 @@ class _ClientePerfilScreenState extends State<ClientePerfilScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(label,
-                    style: TextStyle(
-                        fontSize: 11, color: Colors.grey[500])),
+                Text(label, style: TextStyle(fontSize: 11, color: Colors.grey[500])),
                 const SizedBox(height: 2),
-                Text(valor,
-                    style: const TextStyle(
-                        fontSize: 14, color: Colors.black54)),
+                Text(valor, style: const TextStyle(fontSize: 14, color: Colors.black54)),
               ],
             ),
           ),

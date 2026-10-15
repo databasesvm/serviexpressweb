@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:serviexpress_app/utils/sonido_manager.dart';
+import 'package:serviexpress_app/utils/tema_serviexpress.dart';
 
 // ============================================================
 // HELPERS GLOBALES — TIPO DE SERVICIO POR CATEGORÍA
@@ -353,24 +354,37 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
     final filtrados = _localesFiltrados;
     final categorias = _categoriasLocales;
 
+    final margen = margenSE(context);
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: kFondoSE,
       appBar: AppBar(
-        backgroundColor: Colors.black,
+        backgroundColor: kFondoSE,
+        elevation: 0,
+        scrolledUnderElevation: 0,
         iconTheme: const IconThemeData(color: Colors.white),
-        title: Text('Pedir Domicilio',
+        title: const Text('Pedir a domicilio',
             style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 16)),
+                color: Colors.white70,
+                fontWeight: FontWeight.w600,
+                fontSize: 15)),
       ),
       body: _cargando
-          ? const Center(child: CircularProgressIndicator(color: Colors.black))
+          ? const Center(child: CircularProgressIndicator(color: kVerdeSE))
           : RefreshIndicator(
               onRefresh: _cargarDatos,
-              child: ListView(
-                padding: const EdgeInsets.all(16),
+              color: kVerdeSE,
+              child: ContenidoSE(
+               anchoMax: 640,
+               child: ListView(
+                padding: EdgeInsets.fromLTRB(margen, 4, margen, 24),
                 children: [
+                  const EncabezadoSE(
+                    icono: Icons.storefront_rounded,
+                    color: kVerdeSE,
+                    titulo: 'Pide a domicilio',
+                    subtitulo: 'Locales registrados en ServiExpress',
+                  ),
+                  const SizedBox(height: 16),
                   // ---- PEDIDOS ACTIVOS ----
                   if (_pedidosActivos.isNotEmpty) ...[
                     const Text('TUS PEDIDOS EN CURSO',
@@ -378,7 +392,7 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
                             fontWeight: FontWeight.bold,
                             fontSize: 12,
                             letterSpacing: 1.2,
-                            color: Colors.black54)),
+                            color: Colors.white60)),
                     const SizedBox(height: 8),
                     ..._pedidosActivos.map((p) => _buildPedidoTracking(p)),
                     const SizedBox(height: 20),
@@ -399,12 +413,12 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
                             )
                           : null,
                       filled: true,
-                      fillColor: Colors.white.withValues(alpha: 0.08),
+                      fillColor: Colors.white,
                       border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(kRadioCampoSE),
                           borderSide: BorderSide.none),
                       contentPadding:
-                          const EdgeInsets.symmetric(vertical: 10),
+                          const EdgeInsets.symmetric(vertical: 12),
                       isDense: true,
                     ),
                   ),
@@ -431,24 +445,22 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 12, vertical: 6),
                               decoration: BoxDecoration(
-                                color: activa ? Colors.black : Colors.white,
+                                color: activa ? kVerdeSE : Colors.white,
                                 borderRadius: BorderRadius.circular(20),
-                                border: Border.all(
-                                    color: activa ? Colors.black : Colors.grey[300]!),
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   Icon(ico,
                                       size: 13,
-                                      color: activa ? const Color(0xff3AF500) : clr),
+                                      color: activa ? Colors.black : clr),
                                   const SizedBox(width: 4),
                                   Text(
                                     cat.split(' / ').first.split(' y ').first,
                                     style: TextStyle(
                                         fontSize: 11,
                                         fontWeight: FontWeight.bold,
-                                        color: activa ? const Color(0xff3AF500) : Colors.black54),
+                                        color: activa ? Colors.black : Colors.black54),
                                   ),
                                 ],
                               ),
@@ -465,7 +477,7 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
                           fontWeight: FontWeight.bold,
                           fontSize: 12,
                           letterSpacing: 1.2,
-                          color: Colors.black54)),
+                          color: Colors.white60)),
                   const SizedBox(height: 8),
                   if (filtrados.isEmpty)
                     Center(
@@ -473,8 +485,8 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
                         padding: const EdgeInsets.all(40),
                         child: Column(
                           children: [
-                            Icon(Icons.store_mall_directory_outlined,
-                                size: 60, color: Colors.grey[300]),
+                            const Icon(Icons.store_mall_directory_outlined,
+                                size: 60, color: Colors.white24),
                             const SizedBox(height: 12),
                             Text(
                               _searchQuery.isNotEmpty ||
@@ -482,7 +494,7 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
                                   ? 'Sin locales que coincidan'
                                   : 'No hay locales registrados aún',
                               textAlign: TextAlign.center,
-                              style: TextStyle(color: Colors.grey[500]),
+                              style: const TextStyle(color: Colors.white60),
                             ),
                           ],
                         ),
@@ -499,12 +511,13 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
                             fontWeight: FontWeight.bold,
                             fontSize: 12,
                             letterSpacing: 1.2,
-                            color: Colors.black54)),
+                            color: Colors.white60)),
                     const SizedBox(height: 8),
                     ..._pedidosEntregados
                         .map((p) => _buildHistorialCard(p)),
                   ],
                 ],
+               ),
               ),
             ),
     );
@@ -1836,8 +1849,13 @@ class _MenuLocalScreenState extends State<MenuLocalScreen> {
     final cierre = local['horario_cierre']?.toString();
 
     return Container(
-      color: Colors.white,
-      padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(kRadioTarjetaSE),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1922,27 +1940,29 @@ class _MenuLocalScreenState extends State<MenuLocalScreen> {
             .toList();
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: kFondoSE,
       appBar: AppBar(
-        backgroundColor: Colors.black,
+        backgroundColor: kFondoSE,
+        elevation: 0,
+        scrolledUnderElevation: 0,
         iconTheme: const IconThemeData(color: Colors.white),
         title: Text(
           widget.local['nombre'],
-          style: TextStyle(
+          style: const TextStyle(
               color: Colors.white,
-              fontWeight: FontWeight.bold,
-              fontSize: 15),
+              fontWeight: FontWeight.w700,
+              fontSize: 16),
         ),
       ),
       floatingActionButton: _totalItems > 0
           ? FloatingActionButton.extended(
-              backgroundColor: Colors.black,
+              backgroundColor: kVerdeSE,
               onPressed: _abrirCarrito,
               icon: Stack(
                 clipBehavior: Clip.none,
                 children: [
                   const Icon(Icons.shopping_cart,
-                      color: Color(0xff3AF500)),
+                      color: Colors.black),
                   Positioned(
                     top: -6,
                     right: -6,
@@ -1966,27 +1986,27 @@ class _MenuLocalScreenState extends State<MenuLocalScreen> {
               label: Text(
                 _fmt(_totalPrecio),
                 style: const TextStyle(
-                    color: Color(0xff3AF500),
-                    fontWeight: FontWeight.bold),
+                    color: Colors.black,
+                    fontWeight: FontWeight.w800),
               ),
             )
           : null,
       body: _cargando
           ? const Center(
               child: CircularProgressIndicator(
-                  color: Colors.black))
+                  color: kVerdeSE))
           : _productos.isEmpty
-              ? Center(
+              ? const Center(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Icon(Icons.restaurant_menu,
-                          size: 60, color: Colors.grey[300]),
-                      const SizedBox(height: 12),
+                          size: 60, color: Colors.white24),
+                      SizedBox(height: 12),
                       Text(
                           'Este local aún no tiene productos publicados',
                           style:
-                              TextStyle(color: Colors.grey[500])),
+                              TextStyle(color: Colors.white60)),
                     ],
                   ),
                 )
@@ -1997,9 +2017,9 @@ class _MenuLocalScreenState extends State<MenuLocalScreen> {
 
                     // ---- BÚSQUEDA ----
                     Container(
-                      color: Colors.white,
+                      color: kFondoSE,
                       padding:
-                          const EdgeInsets.fromLTRB(12, 4, 12, 8),
+                          const EdgeInsets.fromLTRB(12, 8, 12, 8),
                       child: TextField(
                         controller: _busquedaCtrl,
                         onChanged: (v) =>
@@ -2022,14 +2042,14 @@ class _MenuLocalScreenState extends State<MenuLocalScreen> {
                                 )
                               : null,
                           filled: true,
-                          fillColor: Colors.white.withValues(alpha: 0.08),
+                          fillColor: Colors.white,
                           border: OutlineInputBorder(
                               borderRadius:
-                                  BorderRadius.circular(10),
+                                  BorderRadius.circular(kRadioCampoSE),
                               borderSide: BorderSide.none),
                           contentPadding:
                               const EdgeInsets.symmetric(
-                                  vertical: 8),
+                                  vertical: 10),
                           isDense: true,
                         ),
                       ),
@@ -2039,7 +2059,7 @@ class _MenuLocalScreenState extends State<MenuLocalScreen> {
                     if (_busqueda.isEmpty &&
                         _categorias.length > 1)
                       Container(
-                        color: Colors.white,
+                        color: kFondoSE,
                         height: 46,
                         child: ListView.builder(
                           scrollDirection: Axis.horizontal,
@@ -2062,8 +2082,8 @@ class _MenuLocalScreenState extends State<MenuLocalScreen> {
                                         horizontal: 14),
                                 decoration: BoxDecoration(
                                   color: activa
-                                      ? Colors.black
-                                      : Colors.grey[100],
+                                      ? kVerdeSE
+                                      : Colors.white,
                                   borderRadius:
                                       BorderRadius.circular(20),
                                 ),
@@ -2074,8 +2094,7 @@ class _MenuLocalScreenState extends State<MenuLocalScreen> {
                                           fontWeight:
                                               FontWeight.bold,
                                           color: activa
-                                              ? const Color(
-                                                  0xff3AF500)
+                                              ? Colors.black
                                               : Colors.black54)),
                                 ),
                               ),
@@ -2090,8 +2109,8 @@ class _MenuLocalScreenState extends State<MenuLocalScreen> {
                           ? Center(
                               child: Text(
                                   'Sin resultados para "$_busqueda"',
-                                  style: TextStyle(
-                                      color: Colors.grey[500])),
+                                  style: const TextStyle(
+                                      color: Colors.white60)),
                             )
                           : ListView.builder(
                               padding: const EdgeInsets.fromLTRB(
