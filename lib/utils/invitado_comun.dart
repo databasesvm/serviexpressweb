@@ -55,7 +55,7 @@ Future<Position?> gpsInvitado(BuildContext context) async {
     }
   } catch (_) {
     aviso('No pudimos leer tu ubicación. Escribe la dirección y '
-        'el conductor te llamará.');
+        'el Móvil te llamará.');
     return null;
   }
 }
@@ -67,8 +67,8 @@ Widget chipGpsGuardado({required VoidCallback onQuitar}) => Padding(
         const Icon(Icons.check_circle, size: 16, color: Color(0xFF2E7D32)),
         const SizedBox(width: 4),
         const Expanded(
-          child: Text('Ubicación GPS guardada — el conductor llega exacto',
-              style: TextStyle(fontSize: 11, color: Color(0xFF2E7D32), fontWeight: FontWeight.w600)),
+          child: Text('Ubicación guardada — el Móvil llega exacto',
+              style: TextStyle(fontSize: 13, color: Color(0xFF2E7D32), fontWeight: FontWeight.w600)),
         ),
         InkWell(
           onTap: onQuitar,

@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart'; // <-- RUTA CORREGIDA
-import 'package:serviexpress_app/utils/tema_serviexpress.dart';
+import 'package:serviexpress_app/utils/invitado_comun.dart'; // GPS, errores claros + kit de diseño
 
 class ClienteShoppingForm extends StatefulWidget {
   final Map<String, dynamic> usuario;
@@ -151,48 +150,42 @@ class _ClienteShoppingFormState extends State<ClienteShoppingForm> {
     } catch (_) {}
   }
 
+  // GPS: guarda la ubicación SIN borrar lo que el cliente escribió.
   Future<void> _capturarDestinoGps() async {
-    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      if (mounted)
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('⚠️ Activa el GPS de tu celular.'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      return;
-    }
-    LocationPermission permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied ||
-          permission == LocationPermission.deniedForever)
-        return;
-    }
+    final pos = await gpsInvitado(context);
+    if (pos == null || !mounted) return;
+    setState(() {
+      _destinoLat = pos.latitude;
+      _destinoLng = pos.longitude;
+    });
+  }
 
-    try {
-      Position pos = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-      );
+  // Si cambia la dirección escrita, el GPS guardado deja de servir.
+  void _alEditarDestino(String texto) {
+    if (_destinoLat != null) {
       setState(() {
-        _destinoLat = pos.latitude;
-        _destinoLng = pos.longitude;
-        _destinoCtrl.text = '📍 Mi Ubicación Actual';
+        _destinoLat = null;
+        _destinoLng = null;
       });
-    } catch (e) {
-      if (mounted)
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Fallo satelital: $e')));
     }
+    _onDestinoChanged(texto);
   }
 
   Future<void> _enviarPedido() async {
     if (!_formKey.currentState!.validate()) return;
+    if (!_requiereCotizacion && _tarifaSugerida <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Escribe cuánto cuesta, o elige "Que la Central me diga el precio".'),
+        backgroundColor: Colors.red,
+      ));
+      return;
+    }
     setState(() => _procesando = true);
 
     try {
+      if (_destinoCtrl.text.trim().isEmpty && _destinoLat != null) {
+        _destinoCtrl.text = 'UBICACIÓN GPS DEL CLIENTE';
+      }
       String notaFinal =
           '[ COMPRAS ] - 🛒 LISTA:\n${_listaCtrl.text.trim()}\n---\n📞 Tel: ${_telContactoCtrl.text} | PAGO: $_metodoPago';
 
@@ -208,6 +201,8 @@ class _ClienteShoppingFormState extends State<ClienteShoppingForm> {
         'destino': _destinoCtrl.text.trim().toUpperCase(),
         'destino_lat': _destinoLat,
         'destino_lng': _destinoLng,
+        if (_destinoLat != null)
+          'destino_gps_at': DateTime.now().toUtc().toIso8601String(),
         'tarifa': _requiereCotizacion ? 0.0 : _tarifaSugerida,
         'tarifa_detalle': {
           'total': _requiereCotizacion ? 0.0 : _tarifaSugerida,
@@ -251,10 +246,14 @@ class _ClienteShoppingFormState extends State<ClienteShoppingForm> {
       }
 
       if (mounted) {
+        // Directo a su pantalla de pedidos (radar del cliente)
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('¡Lista enviada a Central con éxito!'),
-            backgroundColor: Colors.green,
+          SnackBar(
+            content: Text(_requiereCotizacion
+                ? '✅ Pedido enviado. Aquí te avisamos cuando la Central te diga el precio.'
+                : '✅ Pedido enviado. Ya estamos buscando un Móvil.'),
+            backgroundColor: Colors.green[700],
+            duration: const Duration(seconds: 5),
           ),
         );
         Navigator.pop(context);
@@ -262,7 +261,7 @@ class _ClienteShoppingFormState extends State<ClienteShoppingForm> {
     } catch (e) {
       if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(content: Text(errorInvitado(e)), backgroundColor: Colors.red),
         );
     } finally {
       if (mounted) setState(() => _procesando = false);
@@ -353,6 +352,41 @@ class _ClienteShoppingFormState extends State<ClienteShoppingForm> {
     );
   }
 
+  // Precio: "Que la Central me diga el precio" o "Ya sé cuánto cuesta".
+  Widget _opcionPrecio() => OpcionPrecioSE(
+        centralDicePrecio: _requiereCotizacion,
+        color: _estilo.color,
+        onCambio: (v) => setState(() {
+          _requiereCotizacion = v;
+          if (v) _tarifaSugerida = 0;
+        }),
+        campoValor: TextFormField(
+          initialValue: _tarifaSugerida > 0 ? _tarifaSugerida.toStringAsFixed(0) : '',
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: '¿Cuánto cuesta el domicilio?',
+            prefixText: '\$ ',
+          ),
+          onChanged: (v) => setState(() => _tarifaSugerida = double.tryParse(v) ?? 0.0),
+        ),
+      );
+
+  // Teléfono: se queda lleno (no se borra al tocarlo); la ✕ lo limpia.
+  Widget _campoTelefonoCliente(TextEditingController ctrl, String label) => TextFormField(
+        controller: ctrl,
+        keyboardType: TextInputType.phone,
+        decoration: InputDecoration(
+          labelText: label,
+          hintText: 'Ej: 3001234567',
+          suffixIcon: IconButton(
+            tooltip: 'Borrar',
+            icon: const Icon(Icons.clear, size: 20, color: Colors.grey),
+            onPressed: () => ctrl.clear(),
+          ),
+        ),
+        validator: obligatorioSE('Escribe un teléfono para que el Móvil te contacte'),
+      );
+
   @override
   void dispose() {
     _tiendaCtrl.dispose();
@@ -380,115 +414,69 @@ class _ClienteShoppingFormState extends State<ClienteShoppingForm> {
                 TextFormField(
                   controller: _tiendaCtrl,
                   decoration: const InputDecoration(
-                    labelText: 'Lugar de compra (Ej: Éxito, Farmacia X)',
-                    isDense: true,
+                    labelText: '¿Dónde compramos?',
+                    hintText: 'Ej: Éxito, Farmacia X',
                   ),
-                  validator: (v) => v!.isEmpty ? 'Requerido' : null,
+                  validator: obligatorioSE('Escribe dónde compramos (ej: Éxito)'),
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _listaCtrl,
-                  maxLines: 6,
+                  minLines: 4,
+                  maxLines: 8,
                   decoration: const InputDecoration(
                     labelText: 'Lista de productos',
                     alignLabelWithHint: true,
-                    hintText:
-                        'Ej: 2 leches Colanta deslactosada 1L,\n1 Arroz Roa 5kg...',
+                    hintText: 'Ej: 2 leches deslactosadas 1L,\n1 arroz 5kg...',
                   ),
-                  validator: (v) =>
-                      v!.isEmpty ? 'La lista no puede estar vacía' : null,
+                  validator: obligatorioSE('Escribe qué productos compramos'),
                 ),
               ],
             ),
             _construirBloque(
               paso: 2,
-              titulo: 'Punto de Entrega',
+              titulo: '¿Dónde lo entregamos?',
               icono: Icons.home,
               hijos: [
                 TextFormField(
                   controller: _destinoCtrl,
-                  onChanged: _onDestinoChanged,
-                  decoration: InputDecoration(
+                  onChanged: _alEditarDestino,
+                  decoration: const InputDecoration(
                     labelText: 'Dirección donde recibes',
-                    isDense: true,
-                    suffixIcon: IconButton(
-                      icon: Icon(Icons.my_location, color: _estilo.colorIcono),
-                      onPressed: _capturarDestinoGps,
-                    ),
+                    hintText: 'Ej: Calle 5 # 12-34, barrio Centro',
                   ),
-                  validator: (v) => v!.isEmpty ? 'Requerido' : null,
+                  validator: (v) => _destinoLat != null
+                      ? null
+                      : obligatorioSE('Escribe la dirección o toca "Usar mi ubicación actual"')(v),
                 ),
                 _buildSugerenciasDestino(),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _telContactoCtrl,
-                  keyboardType: TextInputType.phone,
-                  decoration: InputDecoration(
-                    labelText: 'Teléfono de Contacto',
-                    isDense: true,
-                    suffixIcon: IconButton(
-                      icon: const Icon(
-                        Icons.clear,
-                        size: 18,
-                        color: Colors.grey,
-                      ),
-                      onPressed: () => _telContactoCtrl.clear(),
-                    ),
-                  ),
-                  onTap: () {
-                    // Vaciado inteligente
-                    if (_telContactoCtrl.text ==
-                        widget.usuario['telefono']?.toString()) {
-                      _telContactoCtrl.clear();
-                    }
-                  },
-                  validator: (v) => v!.isEmpty ? 'Requerido' : null,
+                BotonUbicacionSE(
+                  guardada: _destinoLat != null,
+                  color: _estilo.color,
+                  onUsar: _capturarDestinoGps,
+                  onQuitar: () => setState(() {
+                    _destinoLat = null;
+                    _destinoLng = null;
+                  }),
                 ),
+                const SizedBox(height: 12),
+                _campoTelefonoCliente(_telContactoCtrl, 'Tu teléfono / WhatsApp'),
               ],
             ),
             _construirBloque(
               paso: 3,
-              titulo: 'Pago y Cotización',
+              titulo: 'Precio y pago',
               icono: Icons.payments,
               hijos: [
+                _opcionPrecio(),
+                const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
                   initialValue: _metodoPago,
-                  decoration: const InputDecoration(
-                    labelText: '¿Cómo pagarás el servicio?',
-                    isDense: true,
-                  ),
+                  decoration: const InputDecoration(labelText: '¿Cómo pagarás?'),
                   items: ['Efectivo', 'Transferencia']
                       .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                       .toList(),
                   onChanged: (val) => setState(() => _metodoPago = val!),
-                ),
-                const SizedBox(height: 16),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: kAvisoSE,
-                    borderRadius: BorderRadius.circular(kRadioCampoSE),
-                  ),
-                  child: SwitchListTile(
-                    title: const Text(
-                      'Solicitar cotización previa',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                      ),
-                    ),
-                    subtitle: const Text(
-                      'Si no conoces la tarifa, la Central te enviará el costo del domicilio antes de despachar.',
-                      style: TextStyle(fontSize: 11),
-                    ),
-                    value: _requiereCotizacion,
-                    activeThumbColor: Colors.orange,
-                    onChanged: (val) => setState(() {
-                      _requiereCotizacion = val;
-                      if (val) _tarifaSugerida = 0;
-                    }),
-                    contentPadding: EdgeInsets.zero,
-                  ),
                 ),
               ],
             ),

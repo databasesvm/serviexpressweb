@@ -110,12 +110,18 @@ ThemeData temaFormularioSE(BuildContext context, Color acento) {
       focusedBorder: borde(acento == kVerdeSE ? kVerdeOscuroSE : acento, 2),
       errorBorder: borde(Colors.red, 1.2),
       focusedErrorBorder: borde(Colors.red, 2),
-      labelStyle: const TextStyle(color: Colors.black54, fontSize: 14),
+      labelStyle: const TextStyle(color: Colors.black54, fontSize: 15),
       floatingLabelStyle: const TextStyle(color: Colors.black87, fontWeight: FontWeight.w600),
-      hintStyle: const TextStyle(color: Colors.black38, fontSize: 13),
-      helperStyle: const TextStyle(color: Colors.black45, fontSize: 11),
+      hintStyle: const TextStyle(color: Colors.black38, fontSize: 14),
+      helperStyle: const TextStyle(color: Colors.black54, fontSize: 13),
+      errorStyle: const TextStyle(color: Colors.red, fontSize: 13, fontWeight: FontWeight.w600),
       helperMaxLines: 2,
       errorMaxLines: 2,
+    ),
+    textTheme: base.textTheme.copyWith(
+      // Texto que se escribe en los campos: grande y legible
+      bodyLarge: (base.textTheme.bodyLarge ?? const TextStyle()).copyWith(fontSize: 16),
+      titleMedium: (base.textTheme.titleMedium ?? const TextStyle()).copyWith(fontSize: 16),
     ),
     textSelectionTheme: TextSelectionThemeData(cursorColor: acento == kVerdeSE ? kVerdeOscuroSE : acento),
   );
@@ -128,7 +134,11 @@ class ContenidoSE extends StatelessWidget {
   const ContenidoSE({super.key, required this.child, this.anchoMax = kAnchoMaxSE});
 
   @override
+  // heightFactor: 1 → toma solo la altura de su contenido. Sin esto, dentro
+  // de la barra inferior (botón fijo) se estiraba a TODA la pantalla y el
+  // formulario quedaba con altura cero (pantalla negra con solo el botón).
   Widget build(BuildContext context) => Center(
+        heightFactor: 1,
         child: ConstrainedBox(
           constraints: BoxConstraints(maxWidth: anchoMax),
           child: child,
@@ -312,7 +322,7 @@ class EtiquetaSE extends StatelessWidget {
       child: Text(texto,
           style: TextStyle(
               color: Color.lerp(fuerte, Colors.black, 0.35),
-              fontSize: 11,
+              fontSize: 12,
               fontWeight: FontWeight.w700,
               letterSpacing: 0.3)),
     );
@@ -400,7 +410,7 @@ class MosaicoServicioSE extends StatelessWidget {
         Text(subtitulo ?? estilo.subtitulo,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 11.5, color: Colors.black54, height: 1.25)),
+            style: const TextStyle(fontSize: 13, color: Colors.black54, height: 1.25)),
       ]),
     );
   }
@@ -441,11 +451,241 @@ class AvisoCotizacionSE extends StatelessWidget {
           Expanded(
             child: Text(
               'La Central te dice el precio antes de enviar el Móvil.',
-              style: TextStyle(fontSize: 12.5, color: Colors.black87, height: 1.3),
+              style: TextStyle(fontSize: 14, color: Colors.black87, height: 1.3),
             ),
           ),
         ]),
       );
+}
+
+// ── Validación con mensaje claro ────────────────────────────────────────────
+/// Campo obligatorio con un mensaje que dice QUÉ falta
+/// (ej. "Escribe la dirección donde recibes"), nunca solo "Requerido".
+String? Function(String?) obligatorioSE(String mensaje) =>
+    (v) => (v == null || v.trim().isEmpty) ? mensaje : null;
+
+// ── Botón visible "Usar mi ubicación actual" ────────────────────────────────
+/// Botón grande con texto (no solo un ícono escondido). Mientras busca el GPS
+/// muestra "Buscando tu ubicación…". Si ya hay ubicación guardada muestra
+/// "✅ Ubicación guardada" con la opción de quitarla. Nunca borra lo escrito.
+class BotonUbicacionSE extends StatefulWidget {
+  final bool guardada;
+  final Future<void> Function() onUsar;
+  final VoidCallback onQuitar;
+  final Color color;
+  final String texto;
+  const BotonUbicacionSE({
+    super.key,
+    required this.guardada,
+    required this.onUsar,
+    required this.onQuitar,
+    this.color = kVerdeSE,
+    this.texto = 'Usar mi ubicación actual',
+  });
+
+  @override
+  State<BotonUbicacionSE> createState() => _BotonUbicacionSEState();
+}
+
+class _BotonUbicacionSEState extends State<BotonUbicacionSE> {
+  bool _buscando = false;
+
+  Future<void> _usar() async {
+    if (_buscando) return;
+    setState(() => _buscando = true);
+    try {
+      await widget.onUsar();
+    } finally {
+      if (mounted) setState(() => _buscando = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final fuerte = widget.color == kVerdeSE ? kVerdeOscuroSE : widget.color;
+    if (widget.guardada) {
+      return Container(
+        margin: const EdgeInsets.only(top: 8),
+        padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
+        decoration: BoxDecoration(
+          color: const Color(0xFFE8F5E9),
+          borderRadius: BorderRadius.circular(kRadioCampoSE),
+        ),
+        child: Row(children: [
+          const Icon(Icons.check_circle, size: 20, color: Color(0xFF2E7D32)),
+          const SizedBox(width: 8),
+          const Expanded(
+            child: Text('Ubicación guardada — el Móvil llega exacto',
+                style: TextStyle(
+                    fontSize: 13, color: Color(0xFF2E7D32), fontWeight: FontWeight.w700)),
+          ),
+          TextButton(
+            onPressed: widget.onQuitar,
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.black54,
+              minimumSize: const Size(48, 40),
+            ),
+            child: const Text('Quitar', style: TextStyle(fontSize: 13)),
+          ),
+        ]),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: SizedBox(
+        width: double.infinity,
+        height: 48,
+        child: OutlinedButton.icon(
+          style: OutlinedButton.styleFrom(
+            foregroundColor: fuerte,
+            side: BorderSide(color: fuerte.withValues(alpha: 0.6), width: 1.5),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadioCampoSE)),
+          ),
+          onPressed: _buscando ? null : _usar,
+          icon: _buscando
+              ? SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: fuerte),
+                )
+              : const Icon(Icons.my_location, size: 20),
+          label: Text(
+            _buscando ? 'Buscando tu ubicación…' : '📍 ${widget.texto}',
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Precio: dos opciones simples (en vez de "cotización previa") ────────────
+/// "💬 Que la Central me diga el precio" (por defecto) o
+/// "💵 Ya sé cuánto cuesta" + campo del valor.
+class OpcionPrecioSE extends StatelessWidget {
+  final bool centralDicePrecio;
+  final ValueChanged<bool> onCambio;
+  final Widget campoValor; // se muestra solo si el cliente ya sabe el precio
+  final Color color;
+  const OpcionPrecioSE({
+    super.key,
+    required this.centralDicePrecio,
+    required this.onCambio,
+    required this.campoValor,
+    required this.color,
+  });
+
+  Widget _opcion(String emoji, String titulo, String sub, bool activa, VoidCallback onTap) {
+    final fuerte = color == kVerdeSE ? kVerdeOscuroSE : color;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(kRadioCampoSE),
+      child: Container(
+        width: double.infinity,
+        constraints: const BoxConstraints(minHeight: 56),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: activa ? color.withValues(alpha: 0.10) : kCampoSE,
+          borderRadius: BorderRadius.circular(kRadioCampoSE),
+          border: Border.all(color: activa ? fuerte : Colors.transparent, width: 2),
+        ),
+        child: Row(children: [
+          Icon(activa ? Icons.radio_button_checked : Icons.radio_button_off,
+              color: activa ? fuerte : Colors.black38),
+          const SizedBox(width: 10),
+          Text(emoji, style: const TextStyle(fontSize: 20)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(titulo,
+                  style: const TextStyle(
+                      fontSize: 15, fontWeight: FontWeight.w700, color: Colors.black87)),
+              Text(sub, style: const TextStyle(fontSize: 13, color: Colors.black54)),
+            ]),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(children: [
+      _opcion('💬', 'Que la Central me diga el precio', 'Te avisamos el valor antes de enviar el Móvil',
+          centralDicePrecio, () => onCambio(true)),
+      const SizedBox(height: 8),
+      _opcion('💵', 'Ya sé cuánto cuesta', 'Escribe el valor y el pedido sale de una vez',
+          !centralDicePrecio, () => onCambio(false)),
+      if (!centralDicePrecio) ...[
+        const SizedBox(height: 10),
+        campoValor,
+      ],
+    ]);
+  }
+}
+
+// ── Pantalla de confirmación "Pedido enviado" ───────────────────────────────
+class PedidoEnviadoSE extends StatelessWidget {
+  final EstiloServicio estilo;
+  final bool esperaPrecio; // true: la Central dirá el precio
+  final String textoBoton;
+  final VoidCallback? onVerPedido; // por defecto: volver atrás
+  const PedidoEnviadoSE({
+    super.key,
+    required this.estilo,
+    required this.esperaPrecio,
+    this.textoBoton = 'VER MI PEDIDO',
+    this.onVerPedido,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final margen = margenSE(context);
+    return Scaffold(
+      backgroundColor: kFondoSE,
+      body: SafeArea(
+        child: ContenidoSE(
+          child: Padding(
+            padding: EdgeInsets.all(margen + 8),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 110,
+                  height: 110,
+                  decoration: BoxDecoration(
+                    color: kVerdeSE.withValues(alpha: 0.15),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: kVerdeSE, width: 2),
+                  ),
+                  child: const Icon(Icons.check_rounded, color: kVerdeSE, size: 64),
+                ),
+                const SizedBox(height: 24),
+                const Text('¡Pedido enviado!',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w800)),
+                const SizedBox(height: 10),
+                Text(
+                  esperaPrecio
+                      ? 'La Central te dirá el precio en un momento. Te avisamos aquí mismo.'
+                      : 'Ya estamos buscando un Móvil para tu ${estilo.nombreCorto.toLowerCase()}.',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white70, fontSize: 16, height: 1.4),
+                ),
+                const SizedBox(height: 32),
+                BotonPrincipalSE(
+                  texto: textoBoton,
+                  color: estilo.color,
+                  icono: Icons.visibility_rounded,
+                  onPressed: onVerPedido ?? () => Navigator.pop(context),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 // ── Pantalla de formulario de servicio ──────────────────────────────────────

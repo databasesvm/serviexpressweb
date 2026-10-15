@@ -179,7 +179,7 @@ class _GuestShoppingFormState extends State<GuestShoppingForm> {
                 textCapitalization: TextCapitalization.words,
                 textInputAction: TextInputAction.next,
                 decoration: const InputDecoration(labelText: 'Tu nombre'),
-                validator: validarRequerido,
+                validator: obligatorioSE('Escribe tu nombre'),
               ),
               const SizedBox(height: 12),
               TextFormField(
@@ -189,7 +189,7 @@ class _GuestShoppingFormState extends State<GuestShoppingForm> {
                 inputFormatters: formatoWhatsApp,
                 decoration: const InputDecoration(
                   labelText: 'Tu WhatsApp / teléfono',
-                  helperText: 'Ej: 3001234567 — el conductor te escribe aquí',
+                  helperText: 'Ej: 3001234567 — el Móvil te escribe aquí',
                 ),
                 validator: validarTelefonoInvitado,
               ),
@@ -205,6 +205,7 @@ class _GuestShoppingFormState extends State<GuestShoppingForm> {
                 controller: _tiendaCtrl,
                 label: 'Lugar de compra (Ej: Éxito, Farmacia X)',
                 onLocal: (l) => _local = l,
+                validator: obligatorioSE('Escribe dónde compramos (ej: Éxito)'),
               ),
               const SizedBox(height: 12),
               TextFormField(
@@ -216,8 +217,7 @@ class _GuestShoppingFormState extends State<GuestShoppingForm> {
                   alignLabelWithHint: true,
                   hintText: 'Ej: 2 leches deslactosadas 1L,\n1 arroz 5kg...',
                 ),
-                validator: (v) =>
-                    v == null || v.trim().isEmpty ? 'La lista no puede estar vacía' : null,
+                validator: obligatorioSE('Escribe qué productos compramos'),
               ),
             ],
           ),
@@ -230,24 +230,23 @@ class _GuestShoppingFormState extends State<GuestShoppingForm> {
               TextFormField(
                 controller: _destinoCtrl,
                 onChanged: _alEditarDestino,
-                decoration: InputDecoration(
+                decoration: const InputDecoration(
                   labelText: 'Dirección donde recibes',
-                  helperText: _destinoLat == null
-                      ? 'Toca 📍 para enviar tu ubicación exacta'
-                      : null,
-                  suffixIcon: IconButton(
-                    tooltip: 'Usar mi ubicación actual',
-                    icon: Icon(Icons.my_location, color: c),
-                    onPressed: _capturarDestinoGps,
-                  ),
+                  hintText: 'Ej: Calle 5 # 12-34, barrio Centro',
                 ),
-                validator: (v) => _destinoLat != null ? null : validarRequerido(v),
+                validator: (v) => _destinoLat != null
+                    ? null
+                    : obligatorioSE('Escribe la dirección o toca "Usar mi ubicación actual"')(v),
               ),
-              if (_destinoLat != null)
-                chipGpsGuardado(onQuitar: () => setState(() {
-                      _destinoLat = null;
-                      _destinoLng = null;
-                    })),
+              BotonUbicacionSE(
+                guardada: _destinoLat != null,
+                color: c,
+                onUsar: _capturarDestinoGps,
+                onQuitar: () => setState(() {
+                  _destinoLat = null;
+                  _destinoLng = null;
+                }),
+              ),
             ],
           ),
           BloqueSE(

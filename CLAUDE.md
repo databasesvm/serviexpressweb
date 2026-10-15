@@ -37,6 +37,13 @@ Kit único en lib/utils/tema_serviexpress.dart. Toda pantalla nueva o rediseñad
 - Botón principal grande (54 px) del color del servicio, fijo abajo en formularios; se esconde con el teclado (BotonPrincipalSE / ScaffoldServicioSE).
 - Responsive: márgenes compactos en celulares < 380 px; contenido centrado con ancho máximo 560 px en PC (ContenidoSE); mosaicos 2 columnas en celular / 4 en ancho (GrillaServiciosSE).
 - Texto de cotización: "La Central te dice el precio antes de enviar el Móvil."
+PRINCIPIO DE USO: todo debe ser MUY INTUITIVO para cualquier persona con poco conocimiento de tecnología.
+- Textos cortos y en lenguaje simple (nada técnico); botones con verbo claro ("Pedir mototaxi", "Aprobar y pedir").
+- Íconos siempre acompañados de texto; nada de acciones escondidas o solo con ícono.
+- Botones y zonas táctiles grandes (mín. 48 px); una acción principal por pantalla, bien visible.
+- Pasos numerados y en orden; pedir solo lo necesario; valores ya llenos cuando se puedan recordar.
+- Mensajes de error que digan qué pasó y qué hacer, sin códigos.
+- Confirmar con mensajes claros cuando algo salió bien; avisar antes de acciones que no se pueden deshacer.
 REGLAS AL APLICARLO:
 - Solo cambia la APARIENCIA, nunca la lógica.
 - Móvil: la tarjeta de servicio debe mostrar/ocultar EXACTAMENTE la misma información que hoy (el móvil no ve la info completa antes de aceptar). Mantener tamaño del botón ACEPTAR, barra de tiempo y colores de alerta (rojo del turno #1, etc.).

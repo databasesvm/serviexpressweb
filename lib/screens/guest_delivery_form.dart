@@ -196,7 +196,7 @@ class _GuestDeliveryFormState extends State<GuestDeliveryForm> {
         keyboardType: TextInputType.phone,
         textInputAction: TextInputAction.next,
         inputFormatters: formatoWhatsApp,
-        decoration: InputDecoration(labelText: label, helperText: 'Ej: 3001234567'),
+        decoration: InputDecoration(labelText: label, hintText: 'Ej: 3001234567'),
         validator: validarTelefonoInvitado,
       );
 
@@ -231,7 +231,7 @@ class _GuestDeliveryFormState extends State<GuestDeliveryForm> {
                 textCapitalization: TextCapitalization.words,
                 textInputAction: TextInputAction.next,
                 decoration: const InputDecoration(labelText: 'Nombre y apellido'),
-                validator: validarRequerido,
+                validator: obligatorioSE('Escribe tu nombre'),
               ),
             ],
           ),
@@ -245,18 +245,21 @@ class _GuestDeliveryFormState extends State<GuestDeliveryForm> {
                 controller: _dirOrigenCtrl,
                 label: 'Dirección o nombre del local',
                 onLocal: _alElegirLocal,
-                validator: (v) => _origenLat != null ? null : validarRequerido(v),
-                suffixIcon: IconButton(
-                  tooltip: 'Usar mi ubicación actual',
-                  icon: Icon(Icons.my_location, color: c),
-                  onPressed: () => _capturarUbicacion(true),
-                ),
+                validator: (v) => _origenLat != null
+                    ? null
+                    : obligatorioSE('Escribe dónde recogemos o toca "Usar mi ubicación actual"')(v),
               ),
-              if (_origenLat != null && !_origenEsLocal)
-                chipGpsGuardado(onQuitar: () => setState(() {
-                      _origenLat = null;
-                      _origenLng = null;
-                    })),
+              if (!_origenEsLocal)
+                BotonUbicacionSE(
+                  guardada: _origenLat != null,
+                  color: c,
+                  texto: 'Recoger en mi ubicación actual',
+                  onUsar: () => _capturarUbicacion(true),
+                  onQuitar: () => setState(() {
+                    _origenLat = null;
+                    _origenLng = null;
+                  }),
+                ),
               const SizedBox(height: 12),
               _campoTelefono(_telOrigenCtrl, 'WhatsApp / teléfono de quien entrega'),
             ],
@@ -270,21 +273,24 @@ class _GuestDeliveryFormState extends State<GuestDeliveryForm> {
               TextFormField(
                 controller: _dirDestinoCtrl,
                 onChanged: _alEditarDestino,
-                decoration: InputDecoration(
+                decoration: const InputDecoration(
                   labelText: 'Dirección de destino',
-                  suffixIcon: IconButton(
-                    tooltip: 'Usar mi ubicación actual',
-                    icon: Icon(Icons.my_location, color: c),
-                    onPressed: () => _capturarUbicacion(false),
-                  ),
+                  hintText: 'Ej: Calle 5 # 12-34, barrio Centro',
                 ),
-                validator: (v) => _destinoLat != null ? null : validarRequerido(v),
+                validator: (v) => _destinoLat != null
+                    ? null
+                    : obligatorioSE('Escribe a dónde lo llevamos o toca "Entregar en mi ubicación actual"')(v),
               ),
-              if (_destinoLat != null)
-                chipGpsGuardado(onQuitar: () => setState(() {
-                      _destinoLat = null;
-                      _destinoLng = null;
-                    })),
+              BotonUbicacionSE(
+                guardada: _destinoLat != null,
+                color: c,
+                texto: 'Entregar en mi ubicación actual',
+                onUsar: () => _capturarUbicacion(false),
+                onQuitar: () => setState(() {
+                  _destinoLat = null;
+                  _destinoLng = null;
+                }),
+              ),
               const SizedBox(height: 12),
               _campoTelefono(_telDestinoCtrl, 'WhatsApp / teléfono de quien recibe'),
             ],

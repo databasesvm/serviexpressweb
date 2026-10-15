@@ -173,9 +173,6 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
   @override
   Widget build(BuildContext context) {
     final c = _estilo.color;
-    // El verde de la marca es muy claro para íconos sobre blanco: se usa un
-    // verde más oscuro solo para el ícono del GPS.
-    const iconoGps = Color(0xFF1E8E00);
     return Form(
       key: _formKey,
       child: ScaffoldServicioSE(
@@ -194,7 +191,7 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
                 textCapitalization: TextCapitalization.words,
                 textInputAction: TextInputAction.next,
                 decoration: const InputDecoration(labelText: 'Nombre y apellido'),
-                validator: validarRequerido,
+                validator: obligatorioSE('Escribe tu nombre'),
               ),
               const SizedBox(height: 12),
               TextFormField(
@@ -204,7 +201,7 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
                 inputFormatters: formatoWhatsApp,
                 decoration: const InputDecoration(
                   labelText: 'Tu WhatsApp / teléfono',
-                  helperText: 'Ej: 3001234567 — el conductor te escribe aquí',
+                  helperText: 'Ej: 3001234567 — el Móvil te escribe aquí',
                 ),
                 validator: validarTelefonoInvitado,
               ),
@@ -221,23 +218,29 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
                 label: 'Punto de recogida',
                 onLocal: _alElegirLocal,
                 // Con GPS guardado la dirección escrita es opcional
-                validator: (v) => _origenLat != null ? null : validarRequerido(v),
-                suffixIcon: IconButton(
-                  tooltip: 'Usar mi ubicación actual',
-                  icon: const Icon(Icons.my_location, color: iconoGps),
-                  onPressed: _capturarUbicacion,
-                ),
+                validator: (v) => _origenLat != null
+                    ? null
+                    : obligatorioSE('Escribe dónde te recogemos o toca "Recogerme aquí"')(v),
               ),
-              if (_origenLat != null && !_origenEsLocal)
-                chipGpsGuardado(onQuitar: () => setState(() {
-                      _origenLat = null;
-                      _origenLng = null;
-                    })),
+              if (!_origenEsLocal)
+                BotonUbicacionSE(
+                  guardada: _origenLat != null,
+                  color: c,
+                  texto: 'Recogerme aquí (mi ubicación actual)',
+                  onUsar: _capturarUbicacion,
+                  onQuitar: () => setState(() {
+                    _origenLat = null;
+                    _origenLng = null;
+                  }),
+                ),
               const SizedBox(height: 12),
               TextFormField(
                 controller: _destinoCtrl,
-                decoration: const InputDecoration(labelText: 'Punto de destino'),
-                validator: validarRequerido,
+                decoration: const InputDecoration(
+                  labelText: '¿A dónde vas?',
+                  hintText: 'Ej: Parque principal',
+                ),
+                validator: obligatorioSE('Escribe a dónde vas'),
               ),
             ],
           ),

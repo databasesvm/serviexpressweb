@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:serviexpress_app/utils/paradero_objetivo.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart';
-import 'package:serviexpress_app/utils/tema_serviexpress.dart';
+import 'package:serviexpress_app/utils/invitado_comun.dart'; // GPS, errores claros + kit de diseño
 
 class ClienteMototaxiForm extends StatefulWidget {
   final Map<String, dynamic> usuario;
@@ -166,50 +165,40 @@ class _ClienteMototaxiFormState extends State<ClienteMototaxiForm> {
     }
   }
 
+  // GPS: guarda la ubicación SIN borrar lo que el cliente escribió.
   Future<void> _capturarUbicacion() async {
-    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      if (mounted)
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('⚠️ Activa el GPS de tu celular.'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      return;
-    }
-    LocationPermission permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied ||
-          permission == LocationPermission.deniedForever)
-        return;
-    }
+    final pos = await gpsInvitado(context);
+    if (pos == null || !mounted) return;
+    setState(() {
+      _origenLat = pos.latitude;
+      _origenLng = pos.longitude;
+    });
+  }
 
-    try {
-      Position pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-        ),
-      );
-      setState(() {
-        _origenLat = pos.latitude;
-        _origenLng = pos.longitude;
-        _origenCtrl.text = '📍 Mi Ubicación Actual';
-      });
-    } catch (e) {
-      if (mounted)
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Fallo satelital: $e')));
-    }
+  // Si cambia el punto de recogida escrito, el GPS guardado deja de servir.
+  void _alEditarOrigen(String _) {
+    if (_origenLat == null) return;
+    setState(() {
+      _origenLat = null;
+      _origenLng = null;
+    });
   }
 
   Future<void> _enviarPedido() async {
     if (!_formKey.currentState!.validate()) return;
+    if (!_requiereCotizacion && _tarifaSugerida <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Escribe cuánto cuesta, o elige "Que la Central me diga el precio".'),
+        backgroundColor: Colors.red,
+      ));
+      return;
+    }
     setState(() => _procesando = true);
 
     try {
+      if (_origenCtrl.text.trim().isEmpty && _origenLat != null) {
+        _origenCtrl.text = 'UBICACIÓN GPS DEL CLIENTE';
+      }
       String notaFinal =
           '[ MOTOTAXI ] - PAGO: $_metodoPago | 📱 Pasajero: ${_telPasajeroCtrl.text}';
 
@@ -271,10 +260,14 @@ class _ClienteMototaxiFormState extends State<ClienteMototaxiForm> {
       }
 
       if (mounted) {
+        // Directo a su pantalla de pedidos (radar del cliente)
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('¡Mototaxi solicitado a Central!'),
-            backgroundColor: Colors.green,
+          SnackBar(
+            content: Text(_requiereCotizacion
+                ? '✅ Pedido enviado. Aquí te avisamos cuando la Central te diga el precio.'
+                : '✅ Pedido enviado. Ya estamos buscando un Móvil.'),
+            backgroundColor: Colors.green[700],
+            duration: const Duration(seconds: 5),
           ),
         );
         Navigator.pop(context);
@@ -282,7 +275,7 @@ class _ClienteMototaxiFormState extends State<ClienteMototaxiForm> {
     } catch (e) {
       if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(content: Text(errorInvitado(e)), backgroundColor: Colors.red),
         );
     } finally {
       if (mounted) setState(() => _procesando = false);
@@ -398,111 +391,85 @@ class _ClienteMototaxiFormState extends State<ClienteMototaxiForm> {
                   controller: _telPasajeroCtrl,
                   keyboardType: TextInputType.phone,
                   decoration: InputDecoration(
-                    labelText: 'Teléfono del Pasajero',
-                    isDense: true,
+                    labelText: 'Teléfono del pasajero',
+                    hintText: 'Ej: 3001234567',
                     suffixIcon: IconButton(
-                      icon: const Icon(
-                        Icons.clear,
-                        size: 18,
-                        color: Colors.grey,
-                      ),
+                      tooltip: 'Borrar',
+                      icon: const Icon(Icons.clear, size: 20, color: Colors.grey),
                       onPressed: () => _telPasajeroCtrl.clear(),
                     ),
                   ),
-                  onTap: () {
-                    // Vaciado inteligente
-                    if (_telPasajeroCtrl.text ==
-                        widget.usuario['telefono']?.toString()) {
-                      _telPasajeroCtrl.clear();
-                    }
-                  },
-                  validator: (v) =>
-                      v == null || v.isEmpty ? 'Requerido' : null,
+                  validator: obligatorioSE('Escribe un teléfono para que el Móvil te contacte'),
                 ),
               ],
             ),
             _construirBloque(
               paso: 2,
-              titulo: 'Ruta del Viaje',
+              titulo: 'Ruta del viaje',
               icono: Icons.map,
               hijos: [
                 TextFormField(
                   controller: _origenCtrl,
-                  decoration: InputDecoration(
-                    labelText: 'Punto de recogida',
-                    isDense: true,
-                    suffixIcon: IconButton(
-                      icon: Icon(Icons.my_location, color: _estilo.colorIcono),
-                      onPressed: _capturarUbicacion,
-                    ),
+                  onChanged: _alEditarOrigen,
+                  decoration: const InputDecoration(
+                    labelText: '¿Dónde te recogemos?',
+                    hintText: 'Ej: Calle 5 # 12-34, barrio Centro',
                   ),
-                  validator: (v) =>
-                      v == null || v.isEmpty ? 'Requerido' : null,
+                  validator: (v) => _origenLat != null
+                      ? null
+                      : obligatorioSE('Escribe dónde te recogemos o toca "Recogerme aquí"')(v),
+                ),
+                BotonUbicacionSE(
+                  guardada: _origenLat != null,
+                  color: _estilo.color,
+                  texto: 'Recogerme aquí (mi ubicación actual)',
+                  onUsar: _capturarUbicacion,
+                  onQuitar: () => setState(() {
+                    _origenLat = null;
+                    _origenLng = null;
+                  }),
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _destinoCtrl,
                   onChanged: _onDestinoChanged,
                   decoration: const InputDecoration(
-                    labelText: 'Punto de destino',
-                    isDense: true,
+                    labelText: '¿A dónde vas?',
+                    hintText: 'Ej: Parque principal',
                   ),
-                  validator: (v) =>
-                      v == null || v.isEmpty ? 'Requerido' : null,
+                  validator: obligatorioSE('Escribe a dónde vas'),
                 ),
                 _buildSugerenciasDestino(),
               ],
             ),
             _construirBloque(
               paso: 3,
-              titulo: 'Detalles Finales',
+              titulo: 'Precio y pago',
               icono: Icons.payments,
               hijos: [
+                OpcionPrecioSE(
+                  centralDicePrecio: _requiereCotizacion,
+                  color: _estilo.color,
+                  onCambio: (v) => setState(() => _requiereCotizacion = v),
+                  campoValor: TextFormField(
+                    initialValue: _tarifaSugerida > 0 ? _tarifaSugerida.toStringAsFixed(0) : '',
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: '¿Cuánto cuesta la carrera?',
+                      prefixText: '\$ ',
+                    ),
+                    onChanged: (v) => setState(() => _tarifaSugerida = double.tryParse(v) ?? 0.0),
+                  ),
+                ),
+                const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
                   initialValue: _metodoPago,
-                  decoration: const InputDecoration(
-                    labelText: 'Método de Pago',
-                    isDense: true,
-                  ),
+                  decoration: const InputDecoration(labelText: '¿Cómo pagarás?'),
                   items: ['Efectivo', 'Transferencia']
                       .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                       .toList(),
                   onChanged: (val) => setState(() => _metodoPago = val ?? 'Efectivo'),
                 ),
-                const SizedBox(height: 16),
-                Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(
-                    color: kAvisoSE,
-                    borderRadius: BorderRadius.circular(kRadioCampoSE),
-                  ),
-                  child: SwitchListTile(
-                    title: const Text(
-                      'Solicitar cotización previa',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                    ),
-                    subtitle: const Text(
-                      'Marca esto si no conoces la tarifa y quieres que la Central te dé el precio antes de enviar la moto.',
-                      style: TextStyle(fontSize: 11),
-                    ),
-                    value: _requiereCotizacion,
-                    activeThumbColor: Colors.orange,
-                    onChanged: (v) => setState(() => _requiereCotizacion = v),
-                  ),
-                ),
-                if (!_requiereCotizacion) ...[
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    initialValue: _tarifaSugerida > 0 ? _tarifaSugerida.toStringAsFixed(0) : '',
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Tarifa sugerida (\$)',
-                        isDense: true,
-                      prefixText: '\$ ',
-                    ),
-                    onChanged: (v) => setState(() => _tarifaSugerida = double.tryParse(v) ?? 0.0),
-                  ),
-                ],
               ],
             ),
         ],

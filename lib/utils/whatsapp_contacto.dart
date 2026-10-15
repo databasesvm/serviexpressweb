@@ -81,7 +81,7 @@ String? validarWhatsApp(String? valor, {bool obligatorio = false}) {
     return null;
   }
   final n = v.replaceAll(RegExp(r'[^0-9]'), '');
-  if (n.length < 7) return 'Número muy corto';
+  if (n.length < 7) return 'Número muy corto. Revisa que esté completo (ej: 3001234567)';
   return null;
 }
 
