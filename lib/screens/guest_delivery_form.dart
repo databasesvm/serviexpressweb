@@ -109,6 +109,7 @@ class _GuestDeliveryFormState extends State<GuestDeliveryForm> {
 
   Future<void> _enviarPedido() async {
     if (!_formKey.currentState!.validate()) return;
+    prepararAvisoRespuesta(); // permiso de notificaciones (avisar el precio)
     setState(() => _procesando = true);
 
     try {
@@ -146,6 +147,7 @@ class _GuestDeliveryFormState extends State<GuestDeliveryForm> {
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt('ultimo_pedido_invitado', response['id']);
+      registrarPedidoInvitadoParaAviso((response['id'] as num).toInt());
       prefs.setString('guest_ultima_origen', _dirOrigenCtrl.text.trim().toUpperCase());
       if (_origenLat != null) {
         prefs.setDouble('guest_ultima_origen_lat', _origenLat!);

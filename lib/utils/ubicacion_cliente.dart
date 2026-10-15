@@ -46,7 +46,7 @@ Future<void> pedirUbicacionCliente(Map<String, dynamic> servicio) async {
   if (token == null || token.isEmpty) return;
 
   final link = '$_urlCaptura?id=$id&t=$token';
-  final texto = 'Hola 👋 Para que el conductor llegue exactamente donde estás, '
+  final texto = 'Hola 👋 Para que el Móvil llegue exactamente donde estás, '
       'activa el GPS de tu teléfono, toca este enlace y luego el botón verde '
       '(solo tarda unos segundos):\n$link';
   final tel = telefonoWhatsAppServicio(servicio);

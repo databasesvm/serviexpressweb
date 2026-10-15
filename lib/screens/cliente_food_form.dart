@@ -169,17 +169,22 @@ class _ClienteFoodFormState extends State<ClienteFoodForm> {
       });
     }
     _onDestinoChanged(texto);
+    // Si cambió la dirección elegida de su red, el precio ya no aplica:
+    // vuelve a cotización de la Central.
+    if (_destinoBase == null && !_requiereCotizacion) {
+      setState(() {
+        _requiereCotizacion = true;
+        _tarifaSugerida = 0;
+      });
+    }
   }
 
   Future<void> _enviarPedido() async {
     if (!_formKey.currentState!.validate()) return;
-    if (!_requiereCotizacion && _tarifaSugerida <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Escribe cuánto cuesta, o elige "Que la Central me diga el precio".'),
-        backgroundColor: Colors.red,
-      ));
-      return;
-    }
+    // Sin precio conocido → siempre cotización de la Central
+    if (!_requiereCotizacion && _tarifaSugerida <= 0) _requiereCotizacion = true;
+    // Permiso de notificaciones del navegador (para avisar el precio)
+    if (_requiereCotizacion) prepararAvisoRespuesta();
     setState(() => _procesando = true);
 
     try {
@@ -353,19 +358,14 @@ class _ClienteFoodFormState extends State<ClienteFoodForm> {
   }
 
   // Precio: "Que la Central me diga el precio" o "Ya sé cuánto cuesta".
-  Widget _opcionPrecio() => OpcionPrecioSE(
-        centralDicePrecio: _requiereCotizacion,
-        color: _estilo.color,
-        onCambio: (v) => setState(() => _requiereCotizacion = v),
-        campoValor: TextFormField(
-          initialValue: _tarifaSugerida > 0 ? _tarifaSugerida.toStringAsFixed(0) : '',
-          keyboardType: TextInputType.number,
-          decoration: const InputDecoration(
-            labelText: '¿Cuánto cuesta el servicio?',
-            prefixText: '\$ ',
-          ),
-          onChanged: (v) => setState(() => _tarifaSugerida = double.tryParse(v) ?? 0.0),
-        ),
+  // Precio: solo se sabe si la dirección de su red tiene precio; si no,
+  // siempre lo dice la Central (cotización). El cliente no lo escribe.
+  Widget _opcionPrecio() => PrecioServicioSE(
+        precioConocido: (!_requiereCotizacion && _tarifaSugerida > 0) ? _tarifaSugerida : null,
+        onPedirCotizacion: () => setState(() {
+          _requiereCotizacion = true;
+          _tarifaSugerida = 0;
+        }),
       );
 
   // Teléfono: se queda lleno (no se borra al tocarlo); la ✕ lo limpia.

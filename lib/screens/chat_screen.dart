@@ -73,7 +73,7 @@ final _kFaqsCliente = <_FaqCategoria>[
           '📱 Nequi\n'
           '📱 Daviplata\n'
           '🏦 Transferencias digitales\n\n'
-          'El conductor te indica las opciones al llegar.',
+          'El Móvil te indica las opciones al llegar.',
       keywords: ['pago', 'pagar', 'efectivo', 'nequi', 'daviplata', 'transferencia', 'billetera'],
     ),
   ]),

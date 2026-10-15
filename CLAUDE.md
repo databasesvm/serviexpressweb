@@ -39,6 +39,7 @@ Kit único en lib/utils/tema_serviexpress.dart. Toda pantalla nueva o rediseñad
 - Texto de cotización: "La Central te dice el precio antes de enviar el Móvil."
 PRINCIPIO DE USO: todo debe ser MUY INTUITIVO para cualquier persona con poco conocimiento de tecnología.
 - Textos cortos y en lenguaje simple (nada técnico); botones con verbo claro ("Pedir mototaxi", "Aprobar y pedir").
+- Siempre decir "Móvil" (se refiere a la moto), NUNCA "conductor" (eso es carro).
 - Íconos siempre acompañados de texto; nada de acciones escondidas o solo con ícono.
 - Botones y zonas táctiles grandes (mín. 48 px); una acción principal por pantalla, bien visible.
 - Pasos numerados y en orden; pedir solo lo necesario; valores ya llenos cuando se puedan recordar.

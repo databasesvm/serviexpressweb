@@ -559,68 +559,65 @@ class _BotonUbicacionSEState extends State<BotonUbicacionSE> {
   }
 }
 
-// ── Precio: dos opciones simples (en vez de "cotización previa") ────────────
-/// "💬 Que la Central me diga el precio" (por defecto) o
-/// "💵 Ya sé cuánto cuesta" + campo del valor.
-class OpcionPrecioSE extends StatelessWidget {
-  final bool centralDicePrecio;
-  final ValueChanged<bool> onCambio;
-  final Widget campoValor; // se muestra solo si el cliente ya sabe el precio
-  final Color color;
-  const OpcionPrecioSE({
+// ── Precio del servicio ─────────────────────────────────────────────────────
+/// El cliente NO escribe el precio. Dos casos:
+///  • Precio conocido (dirección de su red con precio): "✅ Precio: $7.000"
+///    → el pedido sale directo a los Móviles. Puede cambiar a cotización.
+///  • Sin precio conocido: va siempre a cotización de la Central.
+class PrecioServicioSE extends StatelessWidget {
+  final double? precioConocido;
+  final VoidCallback onPedirCotizacion;
+  const PrecioServicioSE({
     super.key,
-    required this.centralDicePrecio,
-    required this.onCambio,
-    required this.campoValor,
-    required this.color,
+    required this.precioConocido,
+    required this.onPedirCotizacion,
   });
 
-  Widget _opcion(String emoji, String titulo, String sub, bool activa, VoidCallback onTap) {
-    final fuerte = color == kVerdeSE ? kVerdeOscuroSE : color;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(kRadioCampoSE),
-      child: Container(
-        width: double.infinity,
-        constraints: const BoxConstraints(minHeight: 56),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: activa ? color.withValues(alpha: 0.10) : kCampoSE,
-          borderRadius: BorderRadius.circular(kRadioCampoSE),
-          border: Border.all(color: activa ? fuerte : Colors.transparent, width: 2),
-        ),
-        child: Row(children: [
-          Icon(activa ? Icons.radio_button_checked : Icons.radio_button_off,
-              color: activa ? fuerte : Colors.black38),
-          const SizedBox(width: 10),
-          Text(emoji, style: const TextStyle(fontSize: 20)),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(titulo,
-                  style: const TextStyle(
-                      fontSize: 15, fontWeight: FontWeight.w700, color: Colors.black87)),
-              Text(sub, style: const TextStyle(fontSize: 13, color: Colors.black54)),
-            ]),
-          ),
-        ]),
-      ),
-    );
+  static String formatoPeso(double v) {
+    final s = v.round().toString();
+    final b = StringBuffer();
+    for (int i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) b.write('.');
+      b.write(s[i]);
+    }
+    return '\$$b';
   }
 
   @override
   Widget build(BuildContext context) {
-    return Column(children: [
-      _opcion('💬', 'Que la Central me diga el precio', 'Te avisamos el valor antes de enviar el Móvil',
-          centralDicePrecio, () => onCambio(true)),
-      const SizedBox(height: 8),
-      _opcion('💵', 'Ya sé cuánto cuesta', 'Escribe el valor y el pedido sale de una vez',
-          !centralDicePrecio, () => onCambio(false)),
-      if (!centralDicePrecio) ...[
-        const SizedBox(height: 10),
-        campoValor,
-      ],
-    ]);
+    final p = precioConocido;
+    if (p == null || p <= 0) return const AvisoCotizacionSE();
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+      decoration: BoxDecoration(
+        color: const Color(0xFFE8F5E9),
+        borderRadius: BorderRadius.circular(kRadioCampoSE),
+        border: Border.all(color: const Color(0xFF2E7D32).withValues(alpha: 0.4)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.check_circle, color: Color(0xFF2E7D32), size: 22),
+          const SizedBox(width: 8),
+          Text('Precio: ${formatoPeso(p)}',
+              style: const TextStyle(
+                  fontSize: 18, fontWeight: FontWeight.w800, color: Color(0xFF1B5E20))),
+        ]),
+        const SizedBox(height: 4),
+        const Text('Es el precio de esta dirección. Tu pedido sale de una vez a los Móviles.',
+            style: TextStyle(fontSize: 13, color: Colors.black87, height: 1.3)),
+        TextButton(
+          onPressed: onPedirCotizacion,
+          style: TextButton.styleFrom(
+            foregroundColor: Colors.black54,
+            padding: EdgeInsets.zero,
+            minimumSize: const Size(48, 40),
+          ),
+          child: const Text('Prefiero que la Central me diga el precio',
+              style: TextStyle(fontSize: 13, decoration: TextDecoration.underline)),
+        ),
+      ]),
+    );
   }
 }
 

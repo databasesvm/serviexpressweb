@@ -681,7 +681,7 @@ extension CentralScreenPerfil on _CentralScreenState {
     if (ctx.mounted) {
       _mostrarPerfilHistorialCompleto(
         ctx,
-        (movil['usuario'] ?? movil['nombre'] ?? 'Conductor').toString().toUpperCase(),
+        (movil['usuario'] ?? movil['nombre'] ?? 'Móvil').toString().toUpperCase(),
         historial,
       );
     }

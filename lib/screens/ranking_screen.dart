@@ -273,7 +273,7 @@ class _RankingScreenState extends State<RankingScreen> {
                       spacing: 6,
                       runSpacing: 4,
                       children: const [
-                        _ChipPremio('👑 1°', 'No paga semana', Color(0xFFFFD54F)),
+                        _ChipPremio('🥇 1°', 'No paga semana', Color(0xFFFFD54F)),
                         _ChipPremio('🥈 2°', '75% desc.', Color(0xFFE0E0E0)),
                         _ChipPremio('🥉 3°', '50% desc.', Color(0xFFFFAB40)),
                       ],
@@ -433,11 +433,11 @@ class _RankingScreenState extends State<RankingScreen> {
                               Text(
                                 clasificado
                                     ? '✅ Clasificado al premio'
-                                        '${puesto != null && puesto > 1 && ptsLider > pts ? ' · a ${ptsLider - pts} pts del 👑' : ''}'
+                                        '${puesto != null && puesto > 1 && ptsLider > pts ? ' · a ${ptsLider - pts} pts del 🥇' : ''}'
                                     : pts == 0
                                         ? 'Sin puntos esta semana'
                                         : 'Faltan ${kPuntosPremioSemana - pts} pts para clasificar'
-                                            '${puesto != 1 && ptsLider > pts ? ' · a ${ptsLider - pts} del 👑' : ''}',
+                                            '${puesto != 1 && ptsLider > pts ? ' · a ${ptsLider - pts} del 🥇' : ''}',
                                 style: TextStyle(
                                   color: clasificado ? Colors.greenAccent : Colors.white54,
                                   fontSize: 10,

@@ -44,9 +44,10 @@ String emojiRango(String? rango) =>
       _ => '🔰',
     };
 
-/// 👑 1° · 🥈 2° · 🥉 3° · '' resto
+/// 🥇 1° · 🥈 2° · 🥉 3° · '' resto
+/// (la corona 👑 queda solo para MASTER/VIP, para no confundir)
 String emojiPodio(int? puesto) => switch (puesto) {
-      1 => '👑',
+      1 => '🥇',
       2 => '🥈',
       3 => '🥉',
       _ => '',

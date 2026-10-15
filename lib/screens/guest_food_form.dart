@@ -79,6 +79,7 @@ class _GuestFoodFormState extends State<GuestFoodForm> {
 
   Future<void> _enviarPedido() async {
     if (!_formKey.currentState!.validate()) return;
+    prepararAvisoRespuesta(); // permiso de notificaciones (avisar el precio)
     setState(() => _procesando = true);
 
     try {
@@ -118,6 +119,7 @@ class _GuestFoodFormState extends State<GuestFoodForm> {
       // Recordar para el próximo pedido
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt('ultimo_pedido_invitado', response['id']);
+      registrarPedidoInvitadoParaAviso((response['id'] as num).toInt());
       prefs.setString('guest_ultima_origen', _restauranteCtrl.text.trim().toUpperCase());
       prefs.setString('guest_ultimo_destino', _destinoCtrl.text.trim().toUpperCase());
       if (_destinoLat != null) {

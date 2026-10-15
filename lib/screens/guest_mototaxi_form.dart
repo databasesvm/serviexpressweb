@@ -59,7 +59,9 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
 
   void _alElegirLocal(LocalRegistrado? l) {
     if (l == null) {
-      if (_origenLat == null) return;
+      // Escribir una referencia NO borra el GPS de "Recógeme aquí";
+      // solo se quita la ubicación si venía de un local elegido.
+      if (_origenLat == null || !_origenEsLocal) return;
       setState(() {
         _origenLat = null;
         _origenLng = null;
@@ -86,6 +88,7 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
 
   Future<void> _enviarPedido() async {
     if (!_formKey.currentState!.validate()) return;
+    prepararAvisoRespuesta(); // permiso de notificaciones (avisar el precio)
     setState(() => _procesando = true);
 
     try {
@@ -123,6 +126,7 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt('ultimo_pedido_invitado', response['id']);
+      registrarPedidoInvitadoParaAviso((response['id'] as num).toInt());
       prefs.setString('guest_ultima_origen', _origenCtrl.text.trim().toUpperCase());
       if (_origenLat != null) {
         prefs.setDouble('guest_ultima_origen_lat', _origenLat!);
@@ -213,26 +217,31 @@ class _GuestMototaxiFormState extends State<GuestMototaxiForm> {
             icono: Icons.route_rounded,
             color: c,
             hijos: [
-              CampoOrigenConLocales(
-                controller: _origenCtrl,
-                label: 'Punto de recogida',
-                onLocal: _alElegirLocal,
-                // Con GPS guardado la dirección escrita es opcional
-                validator: (v) => _origenLat != null
-                    ? null
-                    : obligatorioSE('Escribe dónde te recogemos o toca "Recogerme aquí"')(v),
-              ),
-              if (!_origenEsLocal)
+              // Lo normal en mototaxi: lo recogen donde está → botón primero.
+              if (!_origenEsLocal) ...[
                 BotonUbicacionSE(
                   guardada: _origenLat != null,
                   color: c,
-                  texto: 'Recogerme aquí (mi ubicación actual)',
+                  texto: 'Recógeme aquí (mi ubicación actual)',
                   onUsar: _capturarUbicacion,
                   onQuitar: () => setState(() {
                     _origenLat = null;
                     _origenLng = null;
                   }),
                 ),
+                const SizedBox(height: 12),
+              ],
+              CampoOrigenConLocales(
+                controller: _origenCtrl,
+                // Con GPS guardado, lo escrito es solo una referencia
+                label: (_origenLat != null && !_origenEsLocal)
+                    ? 'Referencia para encontrarte (opcional)'
+                    : 'O escribe dónde te recogemos',
+                onLocal: _alElegirLocal,
+                validator: (v) => _origenLat != null
+                    ? null
+                    : obligatorioSE('Toca "Recógeme aquí" o escribe dónde te recogemos')(v),
+              ),
               const SizedBox(height: 12),
               TextFormField(
                 controller: _destinoCtrl,

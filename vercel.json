@@ -1,0 +1,18 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "sed -i 's/\\r$//' vercel_install.sh vercel_build.sh && bash vercel_install.sh",
+  "buildCommand": "bash vercel_build.sh",
+  "outputDirectory": "deploy_vercel",
+  "cleanUrls": false,
+  "rewrites": [
+    { "source": "/form/:path*", "destination": "/form/index.html" },
+    { "source": "/:path*", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }]
+    }
+  ]
+}

@@ -28,17 +28,45 @@
   <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer=""></script>
   <script>
     window.OneSignalDeferred = window.OneSignalDeferred || [];
-    OneSignalDeferred.push(async function(OneSignal) {
-      await OneSignal.init({
-        appId: "207d1d0a-0218-46e0-9f35-7d8d88f6765a",
-        serviceWorkerPath: "OneSignalSDKWorker.js",
-        promptOptions: {
-          slidedown: { prompts: [] }
-        },
-        notifyButton: { enable: false },
-        allowLocalhostAsSecureOrigin: true,
+    // La web vive en una subcarpeta (/serviexpressweb/ y /serviexpressweb/form/).
+    // El service worker de OneSignal se registra DENTRO de esa carpeta y con
+    // un alcance propio (push/onesignal/) para no chocar con el de Flutter.
+    (function () {
+      var base = new URL('.', document.baseURI).pathname;      // ej: /serviexpressweb/form/
+      var rel = base.replace(/^\//, '');                        // ej: serviexpressweb/form/
+      OneSignalDeferred.push(async function(OneSignal) {
+        await OneSignal.init({
+          appId: "207d1d0a-0218-46e0-9f35-7d8d88f6765a",
+          serviceWorkerPath: rel + "OneSignalSDKWorker.js",
+          serviceWorkerParam: { scope: base + "push/onesignal/" },
+          promptOptions: {
+            slidedown: { prompts: [] }
+          },
+          notifyButton: { enable: false },
+          allowLocalhostAsSecureOrigin: true,
+        });
       });
-    });
+    })();
+
+    // ── Puentes que llama la app (Dart) ─────────────────────────────────
+    // Pedir permiso de notificaciones (debe venir de un toque del usuario).
+    window.sePushPermiso = function () {
+      OneSignalDeferred.push(async function (OS) {
+        try { await OS.Notifications.requestPermission(); } catch (e) {}
+      });
+    };
+    // Identificar al cliente registrado (mismo id que en la app).
+    window.sePushLogin = function (id) {
+      OneSignalDeferred.push(async function (OS) {
+        try { await OS.login(String(id)); } catch (e) {}
+      });
+    };
+    // Marcar el pedido del invitado (no tiene cuenta) para avisarle a él.
+    window.sePushTag = function (k, v) {
+      OneSignalDeferred.push(async function (OS) {
+        try { OS.User.addTag(String(k), String(v)); } catch (e) {}
+      });
+    };
   </script>
 
   

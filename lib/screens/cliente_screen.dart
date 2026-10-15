@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:serviexpress_app/utils/widgets_compartidos.dart';
 import 'package:onesignal_flutter/onesignal_flutter.dart';
@@ -18,10 +17,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:serviexpress_app/utils/paradero_objetivo.dart';
 import 'package:serviexpress_app/utils/textos_push.dart';
 import 'package:serviexpress_app/utils/alta_demanda.dart';
-import 'package:serviexpress_app/utils/iconos.dart';
 import 'package:serviexpress_app/utils/errores_servidor.dart';
-import 'package:serviexpress_app/utils/whatsapp_contacto.dart'; // WhatsApp Web en computador
 import 'package:serviexpress_app/utils/tema_serviexpress.dart';
+import 'package:serviexpress_app/utils/aviso_cotizacion.dart';
+import 'package:serviexpress_app/utils/seguimiento_pedido.dart';
 
 class ClienteScreen extends StatefulWidget {
   final Map<String, dynamic> usuario;
@@ -77,6 +76,8 @@ class _ClienteScreenState extends State<ClienteScreen>
 
     _construirStreams();
     _iniciarVigilanteDeConexion();
+    // En el navegador: identificarlo en OneSignal para el aviso del precio
+    registrarClienteParaAviso(widget.usuario['id'].toString());
 
     // Aviso suave de notificaciones — corre en segundo plano, solo
     // interrumpe si detecta que están desactivadas. Nunca bloquea.
@@ -348,6 +349,8 @@ class _ClienteScreenState extends State<ClienteScreen>
     }
   }
 
+  final VigiaCotizacion _vigiaCotizacion = VigiaCotizacion();
+
   Future<void> _responderCotizacion(
     Map<String, dynamic> servicio,
     bool aprobada,
@@ -401,14 +404,6 @@ class _ClienteScreenState extends State<ClienteScreen>
     } catch (e) {
       debugPrint('Error responderCotizacion: $e');
     }
-  }
-
-  Future<void> _abrirWhatsApp(String telefono, int idPedido) async {
-    // En computador: WhatsApp Web en la pestaña de ServiExpress
-    await abrirChatWhatsApp(
-      telefono,
-      texto: 'Hola, soy el cliente del servicio #$idPedido de ServiExpress. Te escribo para coordinar.',
-    );
   }
 
   Future<void> _enviarCalificacion(
@@ -490,7 +485,7 @@ class _ClienteScreenState extends State<ClienteScreen>
             mainAxisSize: MainAxisSize.min,
             children: [
               const Text(
-                '¡Tu servicio ha finalizado!\n¿Qué tal estuvo tu conductor?',
+                '¡Tu servicio ha finalizado!\n¿Qué tal estuvo tu Móvil?',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: Colors.black87),
               ),
@@ -566,19 +561,19 @@ class _ClienteScreenState extends State<ClienteScreen>
       if (estado == 'en_ruta_origen') {
         colorEstado = Colors.blue[600]!;
         titulo = 'MÓVIL EN CAMINO';
-        descripcion = 'El conductor va hacia el punto de recogida.';
+        descripcion = 'El Móvil va hacia el punto de recogida.';
         icono = Icons.motorcycle;
       } else if (estado == 'en_origen') {
         colorEstado = Colors.orange[600]!;
         titulo = 'MÓVIL EN EL LOCAL';
         descripcion =
-            'El conductor está gestionando tu encargo o esperando al pasajero.';
+            'El Móvil está gestionando tu encargo o esperando al pasajero.';
         icono = Icons.storefront;
       } else {
         colorEstado = const Color(0xff3AF500);
         titulo = 'MÓVIL EN RUTA A DESTINO';
         descripcion =
-            '¡Todo listo! El conductor va en camino a la entrega final.';
+            '¡Todo listo! El Móvil va en camino a la entrega final.';
         icono = Icons.motorcycle;
       }
 
@@ -598,25 +593,11 @@ class _ClienteScreenState extends State<ClienteScreen>
                   .maybeSingle(),
           builder: (context, snapshot) {
             final movil = snapshot.data;
-            String nombreMovil = '...';
-            if (movil != null) {
-              final rol = movil['rol']?.toString() ?? 'movil';
-              if (rol == 'movil') {
-                final usr = movil['usuario']?.toString() ?? '';
-                final numStr = usr.replaceAll(RegExp(r'[^0-9]'), '');
-                nombreMovil = numStr.isNotEmpty
-                    ? 'Móvil $numStr'
-                    : (movil['nombre']?.toString().toUpperCase() ?? 'Móvil');
-              } else {
-                nombreMovil = movil['nombre']?.toString() ?? 'Móvil';
-              }
-            }
-            final telefono = movil != null ? movil['telefono'] : null;
 
             bool tieneMensajeNuevo = servicio['chat_cliente'] == true;
 
             Widget btnChatInterno = SizedBox(
-              height: 40,
+              height: 48,
               child: ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: tieneMensajeNuevo
@@ -654,105 +635,27 @@ class _ClienteScreenState extends State<ClienteScreen>
                   size: 18,
                 ),
                 label: Text(
-                  tieneMensajeNuevo ? 'NUEVO MENSAJE' : 'CHAT INTERNO',
+                  tieneMensajeNuevo ? 'NUEVO MENSAJE DEL MÓVIL' : 'CHAT CON EL MÓVIL (en la app)',
                   style: const TextStyle(
                     fontWeight: FontWeight.bold,
-                    fontSize: 11,
+                    fontSize: 13,
                   ),
                 ),
               ),
             );
 
+            // El nombre, WhatsApp, Llamar, pagos y tiempo de llegada del
+            // Móvil van en la tarjeta del Móvil (TarjetaMovilSE, más abajo).
+            // Aquí quedan las acciones propias del cliente registrado.
             return Container(
-              margin: const EdgeInsets.only(top: 12),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.green[50],
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.green[200]!),
-              ),
+              margin: const EdgeInsets.only(top: 14),
               child: Column(
                 children: [
-                  Row(
-                    children: [
-                      Builder(
-                        builder: (_) {
-                          final String? fotoUrl =
-                              movil?['foto_perfil_url']?.toString();
-                          final bool tieneFoto =
-                              fotoUrl != null && fotoUrl.isNotEmpty;
-                          return CircleAvatar(
-                            radius: 16,
-                            backgroundColor: Colors.green[700],
-                            backgroundImage:
-                                tieneFoto ? NetworkImage(fotoUrl) : null,
-                            child: !tieneFoto
-                                ? Icon(
-                                    Icons.person,
-                                    color: Colors.white,
-                                    size: 18,
-                                  )
-                                : null,
-                          );
-                        },
-                      ),
-                      const SizedBox(width: 10),
-                      Text(
-                        'Móvil: $nombreMovil',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                          color: Colors.black87,
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (movil != null &&
-                      ((movil['pago_nequi']?.toString().isNotEmpty ?? false) ||
-                          (movil['pago_daviplata']?.toString().isNotEmpty ?? false) ||
-                          (movil['pago_bancolombia']?.toString().isNotEmpty ?? false)))
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8, left: 42),
-                      child: Wrap(
-                        spacing: 6,
-                        runSpacing: 4,
-                        children: [
-                          if (movil['pago_nequi']?.toString().isNotEmpty ?? false)
-                            _chipPagoCliente('Nequi', const Color(0xFFE5007D), Colors.white, movil['pago_nequi']),
-                          if (movil['pago_daviplata']?.toString().isNotEmpty ?? false)
-                            _chipPagoCliente('Daviplata', const Color(0xFFEE2A24), Colors.white, movil['pago_daviplata']),
-                          if (movil['pago_bancolombia']?.toString().isNotEmpty ?? false)
-                            _chipPagoCliente('Bancolombia', const Color(0xFFFFCC00), Colors.black, movil['pago_bancolombia']),
-                        ],
-                      ),
-                    ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: tieneMensajeNuevo
-                            ? PulsingWidget(child: btnChatInterno)
-                            : btnChatInterno,
-                      ),
-                      if (telefono != null &&
-                          telefono.toString().trim().isNotEmpty) ...[
-                        const SizedBox(width: 8),
-                        SizedBox(
-                          height: 40,
-                          child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xff25D366),
-                              foregroundColor: Colors.white,
-                              elevation: 0,
-                              padding: const EdgeInsets.all(0),
-                            ),
-                            onPressed: () =>
-                                _abrirWhatsApp(telefono.toString(), servicio['id']),
-                            child: const Icon(iconoWhatsApp, size: 22),
-                          ),
-                        ),
-                      ],
-                    ],
+                  SizedBox(
+                    width: double.infinity,
+                    child: tieneMensajeNuevo
+                        ? PulsingWidget(child: btnChatInterno)
+                        : btnChatInterno,
                   ),
                   // ENRUTAR — el cliente también puede sumarle otro
                   // encargo al mismo moto mientras sigue en camino,
@@ -768,13 +671,14 @@ class _ClienteScreenState extends State<ClienteScreen>
                           style: OutlinedButton.styleFrom(
                             foregroundColor: Colors.blue[700],
                             side: BorderSide(color: Colors.blue[300]!),
-                            padding: const EdgeInsets.symmetric(vertical: 6),
+                            minimumSize: const Size(48, 46),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                           ),
                           onPressed: () => _abrirEnrutarAlMoto(context, servicio, movil),
-                          icon: const Icon(Icons.alt_route, size: 14),
+                          icon: const Icon(Icons.alt_route, size: 18),
                           label: const Text(
-                            'ENRUTAR (sumar otro encargo)',
-                            style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+                            'Sumarle otro encargo a este Móvil',
+                            style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
                           ),
                         ),
                       ),
@@ -791,14 +695,15 @@ class _ClienteScreenState extends State<ClienteScreen>
                           style: OutlinedButton.styleFrom(
                             foregroundColor: Colors.red[700],
                             side: BorderSide(color: Colors.red[300]!),
-                            padding: const EdgeInsets.symmetric(vertical: 6),
+                            minimumSize: const Size(48, 46),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                           ),
                           onPressed: () => _reportarQueja(servicio),
-                          icon: const Icon(Icons.flag_outlined, size: 14),
+                          icon: const Icon(Icons.flag_outlined, size: 18),
                           label: const Text(
-                            'REPORTAR PROBLEMA',
+                            'Reportar un problema',
                             style: TextStyle(
-                                fontSize: 10, fontWeight: FontWeight.bold),
+                                fontSize: 13, fontWeight: FontWeight.bold),
                           ),
                         ),
                       ),
@@ -880,9 +785,9 @@ class _ClienteScreenState extends State<ClienteScreen>
       switch (estado) {
         case 'cotizacion':
           colorEstado = Colors.orange[800]!;
-          titulo = 'ESPERANDO PRECIO';
+          titulo = 'ESPERANDO EL PRECIO';
           descripcion =
-              'La Central está calculando la tarifa. No cierres la app.';
+              'La Central está calculando el precio. Te avisamos con un sonido y una notificación.';
           icono = Icons.calculate_outlined;
           acciones = Padding(
             padding: const EdgeInsets.only(top: 16),
@@ -904,9 +809,9 @@ class _ClienteScreenState extends State<ClienteScreen>
           break;
         case 'cotizada':
           colorEstado = Colors.blue[800]!;
-          titulo = 'COTIZACIÓN RECIBIDA';
+          titulo = '¡YA TIENES PRECIO!';
           descripcion =
-              'La Central asignó tarifa de ${fmtPeso(servicio['tarifa'])}. ¿Confirmas?';
+              'Precio: ${fmtPeso(servicio['tarifa'])}. ¿Lo apruebas para enviar el Móvil?';
           icono = Icons.monetization_on_outlined;
           acciones = Padding(
             padding: const EdgeInsets.only(top: 16),
@@ -934,7 +839,7 @@ class _ClienteScreenState extends State<ClienteScreen>
                     ),
                     onPressed: () => _responderCotizacion(servicio, true),
                     child: const Text(
-                      'PEDIR MÓVIL',
+                      'APROBAR Y PEDIR',
                       style: TextStyle(fontWeight: FontWeight.bold),
                     ),
                   ),
@@ -1209,6 +1114,9 @@ class _ClienteScreenState extends State<ClienteScreen>
               )
               .toList();
 
+          // Aviso "La Central te respondió" (sonido, vibración, ventana)
+          _vigiaCotizacion.revisar(context, activos, onResponder: _responderCotizacion);
+
           final sinCalificar = todos
               .where(
                 (s) =>
@@ -1243,62 +1151,47 @@ class _ClienteScreenState extends State<ClienteScreen>
                 if (activos.isNotEmpty) ...[
                   Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                     margin: const EdgeInsets.only(bottom: 16),
                     decoration: BoxDecoration(
-                      color: Colors.red[50],
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.red[300]!),
+                      color: const Color(0xFF161616),
+                      borderRadius: BorderRadius.circular(kRadioTarjetaSE),
+                      border: Border.all(color: Colors.amber.withValues(alpha: 0.6)),
                     ),
-                    child: const Text(
-                      '⚠️ TIENES SERVICIOS EN CURSO\nEspera a que finalicen para pedir algo nuevo.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: Colors.red,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
-                      ),
+                    child: Text(
+                      activos.length == 1
+                          ? '🛵 Tienes un pedido en curso. Cuando termine puedes pedir otro.'
+                          : '🛵 Tienes ${activos.length} pedidos en curso. Cuando terminen puedes pedir otro.',
+                      style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.3),
                     ),
                   ),
                   ...activos.map((servicio) {
+                    final est = EstiloServicio.deTipo(servicio['tipo_servicio']?.toString());
+                    final conMovil = (servicio['movil_id']?.toString() ?? '').isNotEmpty;
                     return Padding(
-                      padding: const EdgeInsets.only(bottom: 24),
+                      padding: const EdgeInsets.only(bottom: 28),
                       child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF161616),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: EstiloServicio.deTipo(servicio['tipo_servicio']?.toString())
-                                    .color
-                                    .withValues(alpha: 0.5),
-                              ),
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(
-                                  'Orden #${servicio['numero_cliente'] ?? servicio['id']}',
-                                  style: const TextStyle(
-                                    color: Colors.white54,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                Text(
-                                  'Tarifa: ${(servicio['tarifa'] == 0.0 || servicio['tarifa'] == null) ? 'Por Definir' : fmtPeso(servicio['tarifa'])}',
-                                  style: const TextStyle(
-                                    color: Color(0xff3AF500),
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ],
-                            ),
+                          EncabezadoSE(
+                            icono: est.icono,
+                            color: est.color,
+                            titulo: est.nombreCorto,
+                            subtitulo: 'Pedido #${servicio['numero_cliente'] ?? servicio['id']}',
                           ),
-                          const SizedBox(height: 12),
+                          const SizedBox(height: 14),
                           const BannerAltaDemanda(margin: EdgeInsets.only(bottom: 12)),
+                          // 1) Estado con mensaje claro y acciones
                           _construirEstadoVisual(servicio['estado'], servicio),
+                          const SizedBox(height: 14),
+                          // 2) Precio siempre a la vista
+                          PrecioPedidoSE(servicio: servicio),
+                          // 3) El Móvil: WhatsApp, llamar, pagos, tiempo de llegada
+                          if (conMovil) TarjetaMovilSE(servicio: servicio),
+                          // 4) En qué va
+                          LineaPasosSE(servicio: servicio),
+                          // 5) Qué pidió
+                          ResumenPedidoSE(servicio: servicio),
                         ],
                       ),
                     );
@@ -1648,48 +1541,6 @@ class _ClienteScreenState extends State<ClienteScreen>
     );
   }
 
-  Widget _chipPagoCliente(
-    String app,
-    Color colorMarca,
-    Color colorTexto,
-    dynamic numero,
-  ) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(6),
-      onTap: () {
-        Clipboard.setData(ClipboardData(text: numero.toString()));
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('$app copiado: $numero'),
-            backgroundColor: Colors.black,
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: colorMarca,
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              '$app: $numero',
-              style: TextStyle(
-                color: colorTexto,
-                fontWeight: FontWeight.bold,
-                fontSize: 10,
-              ),
-            ),
-            const SizedBox(width: 4),
-            Icon(Icons.copy, size: 10, color: colorTexto.withValues(alpha: 0.8)),
-          ],
-        ),
-      ),
-    );
-  }
 
   // =========================================================================
   // PESTAÑAS DE NAVEGACIÓN

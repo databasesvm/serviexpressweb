@@ -308,7 +308,7 @@ class _ReporteFinancieroScreenState extends State<ReporteFinancieroScreen> {
                         ),
                         child: const Center(
                           child: Text(
-                            'Ningún conductor registra producción en estas fechas.',
+                            'Ningún Móvil registra producción en estas fechas.',
                             style: TextStyle(
                               color: Colors.black54,
                               fontSize: 13,

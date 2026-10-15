@@ -655,7 +655,7 @@ class _LoginScreenState extends State<LoginScreen>
               ),
               const SizedBox(height: 20),
               _opcionRolGoogle(
-                  ctx, 'movil', '🏍️', 'Móvil', 'Conductor o domiciliario'),
+                  ctx, 'movil', '🏍️', 'Móvil', 'Móvil o domiciliario'),
               const SizedBox(height: 10),
               _opcionRolGoogle(ctx, 'local', '🏪', 'Local',
                   'Negocio, sede o punto de venta'),

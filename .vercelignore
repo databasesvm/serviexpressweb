@@ -1,0 +1,18 @@
+# Lo que NO se sube a Vercel (no hace falta para compilar la web)
+build/
+deploy_vercel/
+.dart_tool/
+flutter/
+android/
+ios/
+windows/
+linux/
+macos/
+**/*.apk
+**/*.aab
+main.dart.js
+.git/
+.github/
+.idea/
+.vscode/
+node_modules/

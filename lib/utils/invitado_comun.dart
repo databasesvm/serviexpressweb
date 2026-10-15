@@ -9,6 +9,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'whatsapp_contacto.dart';
 
 export 'tema_serviexpress.dart';
+export 'aviso_cotizacion.dart' show prepararAvisoRespuesta, registrarPedidoInvitadoParaAviso;
 
 // ── GPS ─────────────────────────────────────────────────────────────────────
 

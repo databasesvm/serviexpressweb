@@ -175,24 +175,12 @@ class _ClienteMototaxiFormState extends State<ClienteMototaxiForm> {
     });
   }
 
-  // Si cambia el punto de recogida escrito, el GPS guardado deja de servir.
-  void _alEditarOrigen(String _) {
-    if (_origenLat == null) return;
-    setState(() {
-      _origenLat = null;
-      _origenLng = null;
-    });
-  }
-
   Future<void> _enviarPedido() async {
     if (!_formKey.currentState!.validate()) return;
-    if (!_requiereCotizacion && _tarifaSugerida <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Escribe cuánto cuesta, o elige "Que la Central me diga el precio".'),
-        backgroundColor: Colors.red,
-      ));
-      return;
-    }
+    // Sin precio conocido → siempre cotización de la Central
+    if (!_requiereCotizacion && _tarifaSugerida <= 0) _requiereCotizacion = true;
+    // Permiso de notificaciones del navegador (para avisar el precio)
+    if (_requiereCotizacion) prepararAvisoRespuesta();
     setState(() => _procesando = true);
 
     try {
@@ -408,21 +396,11 @@ class _ClienteMototaxiFormState extends State<ClienteMototaxiForm> {
               titulo: 'Ruta del viaje',
               icono: Icons.map,
               hijos: [
-                TextFormField(
-                  controller: _origenCtrl,
-                  onChanged: _alEditarOrigen,
-                  decoration: const InputDecoration(
-                    labelText: '¿Dónde te recogemos?',
-                    hintText: 'Ej: Calle 5 # 12-34, barrio Centro',
-                  ),
-                  validator: (v) => _origenLat != null
-                      ? null
-                      : obligatorioSE('Escribe dónde te recogemos o toca "Recogerme aquí"')(v),
-                ),
+                // Lo normal en mototaxi: lo recogen donde está → botón primero.
                 BotonUbicacionSE(
                   guardada: _origenLat != null,
                   color: _estilo.color,
-                  texto: 'Recogerme aquí (mi ubicación actual)',
+                  texto: 'Recógeme aquí (mi ubicación actual)',
                   onUsar: _capturarUbicacion,
                   onQuitar: () => setState(() {
                     _origenLat = null;
@@ -431,8 +409,34 @@ class _ClienteMototaxiFormState extends State<ClienteMototaxiForm> {
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
+                  controller: _origenCtrl,
+                  // Con GPS guardado, lo escrito es solo una referencia
+                  // (no borra la ubicación; para cambiarla se toca "Quitar").
+                  decoration: InputDecoration(
+                    labelText: _origenLat != null
+                        ? 'Referencia para encontrarte (opcional)'
+                        : 'O escribe dónde te recogemos',
+                    hintText: _origenLat != null
+                        ? 'Ej: frente a la tienda, casa azul'
+                        : 'Ej: Calle 5 # 12-34, barrio Centro',
+                  ),
+                  validator: (v) => _origenLat != null
+                      ? null
+                      : obligatorioSE('Toca "Recógeme aquí" o escribe dónde te recogemos')(v),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
                   controller: _destinoCtrl,
-                  onChanged: _onDestinoChanged,
+                  onChanged: (t) {
+                    _onDestinoChanged(t);
+                    // Cambió el destino elegido de su red → vuelve a cotización
+                    if (_destinoBase == null && !_requiereCotizacion) {
+                      setState(() {
+                        _requiereCotizacion = true;
+                        _tarifaSugerida = 0;
+                      });
+                    }
+                  },
                   decoration: const InputDecoration(
                     labelText: '¿A dónde vas?',
                     hintText: 'Ej: Parque principal',
@@ -447,19 +451,14 @@ class _ClienteMototaxiFormState extends State<ClienteMototaxiForm> {
               titulo: 'Precio y pago',
               icono: Icons.payments,
               hijos: [
-                OpcionPrecioSE(
-                  centralDicePrecio: _requiereCotizacion,
-                  color: _estilo.color,
-                  onCambio: (v) => setState(() => _requiereCotizacion = v),
-                  campoValor: TextFormField(
-                    initialValue: _tarifaSugerida > 0 ? _tarifaSugerida.toStringAsFixed(0) : '',
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: '¿Cuánto cuesta la carrera?',
-                      prefixText: '\$ ',
-                    ),
-                    onChanged: (v) => setState(() => _tarifaSugerida = double.tryParse(v) ?? 0.0),
-                  ),
+                // Precio: solo se sabe si el destino de su red tiene precio;
+                // si no, siempre lo dice la Central. El cliente no lo escribe.
+                PrecioServicioSE(
+                  precioConocido: (!_requiereCotizacion && _tarifaSugerida > 0) ? _tarifaSugerida : null,
+                  onPedirCotizacion: () => setState(() {
+                    _requiereCotizacion = true;
+                    _tarifaSugerida = 0;
+                  }),
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
