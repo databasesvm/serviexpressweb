@@ -257,11 +257,7 @@ extension CentralScreenMonitor on _CentralScreenState {
     if (servicio['created_at'] != null) {
       try {
         final dt = DateTime.parse(servicio['created_at'].toString()).toLocal();
-        final d = dt.day.toString().padLeft(2, '0');
-        final m = dt.month.toString().padLeft(2, '0');
-        final h = dt.hour.toString().padLeft(2, '0');
-        final min = dt.minute.toString().padLeft(2, '0');
-        fechaCreado = '$d/$m $h:$min';
+        fechaCreado = fechaHora12(dt);
       } catch (_) {
         fechaCreado = servicio['created_at'].toString();
       }
@@ -1100,18 +1096,15 @@ extension CentralScreenMonitor on _CentralScreenState {
   Future<void> _asignarMultiRuta(BuildContext context) async {
     if (_multiSeleccion.isEmpty) return;
 
-    final ahora = DateTime.now().toUtc();
     final motos = _movilesCache
         .where((m) => m['en_linea'] == true) // solo conectados
         .toList()
       ..sort((a, b) {
-        int pingMin(Map<String, dynamic> m) {
-          if (m['ultimo_ping'] == null) return 9999;
-          return ahora
-              .difference(DateTime.parse(m['ultimo_ping'].toString()).toUtc())
-              .inMinutes;
-        }
-        return pingMin(a).compareTo(pingMin(b));
+        // Orden ascendente por número de Móvil (Móvil 1, 2, 3…)
+        int numMovil(Map<String, dynamic> m) =>
+            int.tryParse(RegExp(r'\d+').firstMatch(m['usuario']?.toString() ?? '')?.group(0) ?? '') ?? 99999;
+        final c = numMovil(a).compareTo(numMovil(b));
+        return c != 0 ? c : (a['nombre']?.toString() ?? '').compareTo(b['nombre']?.toString() ?? '');
       });
 
     if (!mounted) return;
@@ -1209,13 +1202,11 @@ extension CentralScreenMonitor on _CentralScreenState {
         .where((m) => m['en_linea'] == true) // solo conectados
         .toList()
       ..sort((a, b) {
-        final pa = a['ultimo_ping'] != null
-            ? DateTime.parse(a['ultimo_ping']).toUtc()
-            : DateTime(2000);
-        final pb = b['ultimo_ping'] != null
-            ? DateTime.parse(b['ultimo_ping']).toUtc()
-            : DateTime(2000);
-        return pb.compareTo(pa); // más reciente primero
+        // Orden ascendente por número de Móvil (Móvil 1, 2, 3…)
+        int numMovil(Map<String, dynamic> m) =>
+            int.tryParse(RegExp(r'\d+').firstMatch(m['usuario']?.toString() ?? '')?.group(0) ?? '') ?? 99999;
+        final c = numMovil(a).compareTo(numMovil(b));
+        return c != 0 ? c : (a['nombre']?.toString() ?? '').compareTo(b['nombre']?.toString() ?? '');
       });
 
     await showModalBottomSheet(
@@ -2346,13 +2337,17 @@ extension CentralScreenMonitor on _CentralScreenState {
                       Row(
                         children: [
                           Text(
-                            estado == 'cotizacion'
-                                ? 'PRECIO PEND.'
-                                : _formatearMonedaCentral(servicio['tarifa']),
+                            servicio['es_punto_a_punto'] == true
+                                ? '🎁 PAP · SIN COBRO'
+                                : estado == 'cotizacion'
+                                    ? 'PRECIO PEND.'
+                                    : _formatearMonedaCentral(servicio['tarifa']),
                             style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.bold,
-                              color: (servicio['tarifa'] == null ||
+                              color: servicio['es_punto_a_punto'] == true
+                                  ? Colors.purple[700]
+                                  : (servicio['tarifa'] == null ||
                                       servicio['tarifa'] == 0 ||
                                       servicio['tarifa'] == 0.0)
                                   ? Colors.orange[700]
@@ -2482,6 +2477,7 @@ extension CentralScreenMonitor on _CentralScreenState {
                       // ── FILA 4: badges opcionales (wrap) ─────────────────────
                       if (alertaRetraso ||
                           servicio['tipo_fn'] == true ||
+                          servicio['es_punto_a_punto'] == true ||
                           (servicio['creador'] != null &&
                               servicio['creador'] != 'Central') ||
                           (estado == 'programado' &&
@@ -2497,6 +2493,23 @@ extension CentralScreenMonitor on _CentralScreenState {
                           spacing: 4,
                           runSpacing: 2,
                           children: [
+                            // Badge PAP — Punto a Punto (sin cobro). Solo lo ve la central.
+                            if (servicio['es_punto_a_punto'] == true)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 5, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.purple[700],
+                                  borderRadius: BorderRadius.circular(3),
+                                ),
+                                child: const Text(
+                                  '🎁 PUNTO A PUNTO',
+                                  style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 8,
+                                      fontWeight: FontWeight.bold),
+                                ),
+                              ),
                             // Badge FN — visible en todas las secciones
                             if (servicio['tipo_fn'] == true)
                               Container(

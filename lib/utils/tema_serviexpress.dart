@@ -127,6 +127,160 @@ ThemeData temaFormularioSE(BuildContext context, Color acento) {
   );
 }
 
+// ── Tema para ventanas (diálogos y hojas) ───────────────────────────────────
+/// Ventanas claras del diseño oficial: fondo blanco, radio 18, campos grises
+/// sin borde y botones de mínimo 48 px. Solo cambia la apariencia: los
+/// colores que un botón ya define a mano se respetan.
+ThemeData temaDialogoSE(BuildContext context, [Color acento = kVerdeSE]) {
+  final base = temaFormularioSE(context, acento);
+  final fuerte = acento == kVerdeSE ? kVerdeOscuroSE : acento;
+  final forma = RoundedRectangleBorder(borderRadius: BorderRadius.circular(12));
+  return base.copyWith(
+    dialogTheme: DialogThemeData(
+      backgroundColor: Colors.white,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadioTarjetaSE)),
+      titleTextStyle: const TextStyle(
+          color: Colors.black87, fontSize: 19, fontWeight: FontWeight.w800, height: 1.2),
+      contentTextStyle: const TextStyle(color: Colors.black87, fontSize: 15, height: 1.35),
+    ),
+    elevatedButtonTheme: ElevatedButtonThemeData(
+      style: ElevatedButton.styleFrom(
+        minimumSize: const Size(48, 48),
+        backgroundColor: acento,
+        foregroundColor: sobreColorSE(acento),
+        elevation: 0,
+        shape: forma,
+        textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+      ),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size(48, 48),
+        foregroundColor: fuerte,
+        side: BorderSide(color: fuerte.withValues(alpha: 0.6)),
+        shape: forma,
+        textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+      ),
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: TextButton.styleFrom(
+        minimumSize: const Size(48, 48),
+        foregroundColor: Colors.black54,
+        textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+      ),
+    ),
+    chipTheme: base.chipTheme.copyWith(
+      labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    ),
+  );
+}
+
+/// Tema para TODA una pantalla oscura (ej. panel del local): sus ventanas y
+/// hojas salen claras (diseño oficial), los campos grises sin borde y los
+/// botones con mínimo 48 px. No cambia colores de botones (en fondo negro un
+/// botón sin color propio debe seguir viéndose).
+ThemeData temaPantallaSE(BuildContext context) {
+  final base = Theme.of(context);
+  final campos = temaFormularioSE(context, kVerdeSE);
+  final forma = RoundedRectangleBorder(borderRadius: BorderRadius.circular(12));
+  return base.copyWith(
+    inputDecorationTheme: campos.inputDecorationTheme,
+    textSelectionTheme: campos.textSelectionTheme,
+    dialogTheme: DialogThemeData(
+      backgroundColor: Colors.white,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadioTarjetaSE)),
+      titleTextStyle: const TextStyle(
+          color: Colors.black87, fontSize: 19, fontWeight: FontWeight.w800, height: 1.2),
+      contentTextStyle: const TextStyle(color: Colors.black87, fontSize: 15, height: 1.35),
+    ),
+    elevatedButtonTheme: ElevatedButtonThemeData(
+      style: ElevatedButton.styleFrom(minimumSize: const Size(48, 48), shape: forma),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(minimumSize: const Size(48, 48), shape: forma),
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+    ),
+  );
+}
+
+/// Título de sección numerado dentro de un formulario: (1) Cliente
+class PasoSE extends StatelessWidget {
+  final int numero;
+  final String titulo;
+  final Color color;
+  const PasoSE(this.numero, this.titulo, {super.key, this.color = kVerdeSE});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 6, bottom: 10),
+      child: Row(children: [
+        Container(
+          width: 26,
+          height: 26,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          child: Text('$numero',
+              style: TextStyle(color: sobreColorSE(color), fontWeight: FontWeight.w800, fontSize: 13)),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(titulo,
+              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: Colors.black87)),
+        ),
+      ]),
+    );
+  }
+}
+
+/// Encabezado de una ventana: ícono de color + título + frase corta.
+class TituloVentanaSE extends StatelessWidget {
+  final IconData icono;
+  final Color color;
+  final String titulo;
+  final String? subtitulo;
+  const TituloVentanaSE({
+    super.key,
+    required this.icono,
+    required this.color,
+    required this.titulo,
+    this.subtitulo,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final fuerte = color == kVerdeSE ? kVerdeOscuroSE : color;
+    return Row(children: [
+      Container(
+        width: 46,
+        height: 46,
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Icon(icono, color: fuerte, size: 24),
+      ),
+      const SizedBox(width: 12),
+      Expanded(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(titulo,
+              style: const TextStyle(
+                  color: Colors.black87, fontSize: 19, fontWeight: FontWeight.w800, height: 1.15)),
+          if (subtitulo != null) ...[
+            const SizedBox(height: 3),
+            Text(subtitulo!, style: const TextStyle(color: Colors.black54, fontSize: 13)),
+          ],
+        ]),
+      ),
+    ]);
+  }
+}
+
 // ── Contenedor responsive: centra y limita el ancho en PC ───────────────────
 class ContenidoSE extends StatelessWidget {
   final Widget child;

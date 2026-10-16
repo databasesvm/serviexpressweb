@@ -4,6 +4,7 @@ import 'package:serviexpress_app/screens/guest_mototaxi_form.dart';
 import 'package:serviexpress_app/screens/guest_shopping_form.dart';
 import 'package:serviexpress_app/screens/guest_food_form.dart';
 import 'package:serviexpress_app/screens/registro_screen.dart';
+import 'package:serviexpress_app/screens/login_screen.dart';
 import 'package:serviexpress_app/screens/guest_tracking_screen.dart';
 import 'package:serviexpress_app/utils/tema_serviexpress.dart';
 import 'package:serviexpress_app/utils/alta_demanda.dart';
@@ -106,11 +107,20 @@ class GuestHomeScreen extends StatelessWidget {
 
               // ── Crear cuenta: beneficios bien visibles ──────────────────
               BeneficiosRegistroSE(
-                onRegistrar: () => _ir(context, const RegistroScreen()),
+                onRegistrar: () => _ir(context, const RegistroScreen(soloCliente: true)),
               ),
               Center(
                 child: TextButton(
-                  onPressed: () => Navigator.pop(context),
+                  // En la web de invitados (/form) esta es la PRIMERA pantalla:
+                  // no hay nada atrás. Antes hacía "pop" → el navegador volvía
+                  // atrás, recargaba la página y se quedaba en el logo.
+                  onPressed: () {
+                    if (Navigator.canPop(context)) {
+                      Navigator.pop(context);
+                    } else {
+                      _ir(context, const LoginScreen());
+                    }
+                  },
                   style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
                   child: const Text('Ya tengo cuenta → Iniciar sesión',
                       style: TextStyle(color: Colors.white70, fontSize: 15)),

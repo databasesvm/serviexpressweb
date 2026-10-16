@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:serviexpress_app/utils/hora12.dart'; // Hora en formato 12 h (am/pm)
 
 /// Pantalla de historial de servicios — accesible desde el menú de Gestión.
 class HistorialServiciosScreen extends StatefulWidget {
@@ -26,7 +27,6 @@ class _HistorialServiciosScreenState extends State<HistorialServiciosScreen> {
   String? _error;
   final TextEditingController _busquedaCtrl = TextEditingController();
   final _fmt = NumberFormat('#,###', 'es_CO');
-  final _fmtHora = DateFormat('dd/MM HH:mm');
 
   @override
   void initState() {
@@ -360,7 +360,7 @@ class _HistorialServiciosScreenState extends State<HistorialServiciosScreen> {
     final estado = s['estado']?.toString() ?? '';
     final color = _colorEstado(estado);
     final fecha = s['created_at'] != null
-        ? _fmtHora.format(DateTime.parse(s['created_at']).toLocal()) : '—';
+        ? fechaHora12(DateTime.parse(s['created_at'])) : '—';
     final tarifa = _fmtPeso(s['tarifa']);
     final movil = _nombreMovil(s['movil_id']);
     final esVip = s['es_vip'] == true;
@@ -517,11 +517,10 @@ class _HistorialServiciosScreenState extends State<HistorialServiciosScreen> {
       );
 
   void _mostrarDetalle(BuildContext context, Map<String, dynamic> s) {
-    final fmtFull = DateFormat('dd/MM/yyyy HH:mm', 'es_CO');
     String fmt(dynamic v) => v == null ? '—' : v.toString();
     String fmtFecha(dynamic v) {
       if (v == null) return '—';
-      try { return fmtFull.format(DateTime.parse(v.toString()).toLocal()); }
+      try { return fechaHora12(DateTime.parse(v.toString()), conAnio: true); }
       catch (_) { return v.toString(); }
     }
     showModalBottomSheet(
@@ -702,7 +701,7 @@ class _HistorialServiciosScreenState extends State<HistorialServiciosScreen> {
     buf.writeln('ID,Estado,Origen,Destino,Tarifa,Móvil,Creador,Fecha');
     for (final s in lista) {
       final fecha = s['created_at'] != null
-          ? DateFormat('dd/MM/yyyy HH:mm').format(DateTime.parse(s['created_at']).toLocal())
+          ? fechaHora12(DateTime.parse(s['created_at']), conAnio: true)
           : '';
       buf.writeln([
         s['id'], s['estado'],

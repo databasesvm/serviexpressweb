@@ -6,6 +6,7 @@ import 'package:onesignal_flutter/onesignal_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'fn_facturacion_screen.dart';
 import 'login_screen.dart';
+import 'package:serviexpress_app/utils/hora12.dart'; // Hora en formato 12 h (am/pm)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Panel supervisor FN — rol: supervisor_fn
@@ -549,10 +550,7 @@ class _TabHistorialState extends State<_TabHistorial> {
     if (raw == null) return '—';
     try {
       final dt = DateTime.parse(raw).toLocal();
-      return '${dt.day.toString().padLeft(2, '0')}/'
-          '${dt.month.toString().padLeft(2, '0')} '
-          '${dt.hour.toString().padLeft(2, '0')}:'
-          '${dt.minute.toString().padLeft(2, '0')}';
+      return fechaHora12(dt);
     } catch (_) {
       return raw;
     }
@@ -1119,10 +1117,7 @@ class _TabAuditoriaState extends State<_TabAuditoria> {
     if (raw == null) return '—';
     try {
       final dt = DateTime.parse(raw).toLocal();
-      return '${dt.day.toString().padLeft(2, '0')}/'
-          '${dt.month.toString().padLeft(2, '0')} '
-          '${dt.hour.toString().padLeft(2, '0')}:'
-          '${dt.minute.toString().padLeft(2, '0')}';
+      return fechaHora12(dt);
     } catch (_) {
       return raw;
     }

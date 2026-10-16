@@ -10,6 +10,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:serviexpress_app/utils/hora_servidor.dart';
+import 'package:serviexpress_app/utils/hora12.dart';
 
 /// Diálogo: elegir Hoy / Mañana y la hora. Devuelve la fecha-hora LOCAL
 /// elegida, o null si se cancela. No deja elegir una hora ya pasada.
@@ -63,17 +64,21 @@ Future<DateTime?> elegirHoraProgramada(BuildContext context,
               const Text('¿A qué hora se envía al radar?',
                   style: TextStyle(fontSize: 12, color: Colors.black54)),
               const SizedBox(height: 6),
+              // Hora ESCRITA en formato 12 h (am / pm)
               OutlinedButton.icon(
-                icon: const Icon(Icons.access_time),
-                label: Text(hora.format(ctx),
+                icon: const Icon(Icons.edit_calendar),
+                label: Text(horaDia12(hora),
                     style: const TextStyle(
                         fontSize: 18, fontWeight: FontWeight.bold)),
                 onPressed: () async {
-                  final t =
-                      await showTimePicker(context: ctx, initialTime: hora);
+                  final t = await elegirHora12(ctx, hora,
+                      titulo: '¿A qué hora se envía al radar?');
                   if (t != null) setD(() => hora = t);
                 },
               ),
+              const SizedBox(height: 4),
+              const Text('Toca la hora para escribirla y elige am o pm.',
+                  style: TextStyle(fontSize: 12, color: Colors.black54)),
               const SizedBox(height: 10),
               Text(
                 pasada

@@ -15,6 +15,7 @@ import 'package:serviexpress_app/screens/login_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'fn_facturacion_screen.dart';
 import 'package:serviexpress_app/utils/cascada_config.dart'; // CONFIG-CASCADA-EXT
+import 'package:serviexpress_app/utils/hora12.dart'; // Hora en formato 12 h (am/pm)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Panel sede FN — rol: sede_fn
@@ -1752,7 +1753,7 @@ class _FormularioTabState extends State<_FormularioTab> {
               Builder(builder: (_) {
                 final convenioHorario = DateTime.now().hour >= 7 && DateTime.now().hour <= 22;
                 return Tooltip(
-                  message: convenioHorario ? '' : 'Fuera de horario de convenio (7:00–23:00)',
+                  message: convenioHorario ? '' : 'Fuera de horario de convenio (7:00 am – 11:00 pm)',
                   child: _switchTile(
                     '🤝 Convenio${convenioHorario ? '' : '  🕐 fuera de horario'}',
                     _esConvenio,
@@ -3952,10 +3953,7 @@ class _HistorialTabState extends State<_HistorialTab> {
     if (raw == null) return '—';
     try {
       final dt = DateTime.parse(raw).toLocal();
-      return '${dt.day.toString().padLeft(2, '0')}/'
-          '${dt.month.toString().padLeft(2, '0')} '
-          '${dt.hour.toString().padLeft(2, '0')}:'
-          '${dt.minute.toString().padLeft(2, '0')}';
+      return fechaHora12(dt);
     } catch (_) {
       return raw;
     }

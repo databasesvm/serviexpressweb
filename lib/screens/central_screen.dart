@@ -33,6 +33,7 @@ import 'package:serviexpress_app/screens/fn_panel_screen.dart'; // Panel FN Farm
 import 'package:serviexpress_app/screens/fn_facturacion_screen.dart'; // Facturación FN
 import 'package:serviexpress_app/screens/fn_red_direcciones_screen.dart'; // Red de direcciones FN
 import 'package:serviexpress_app/screens/historial_servicios_screen.dart'; // Historial de servicios
+import 'package:serviexpress_app/utils/hora12.dart'; // Hora en formato 12 h (am/pm)
 part 'central_panel_precios.dart';
 part 'central_corte_financiero.dart';
 part 'central_gestion_usuarios.dart';

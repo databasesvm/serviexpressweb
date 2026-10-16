@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:dio/dio.dart';
+import 'package:serviexpress_app/utils/hora12.dart'; // Hora en formato 12 h (am/pm)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Panel FN – tres pestañas:
@@ -2117,8 +2118,7 @@ class _CardServicioFN extends StatelessWidget {
 
   String _formatFecha(DateTime dt) {
     final now = DateTime.now();
-    final hm =
-        '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+    final hm = hora12(dt);
     if (dt.year == now.year &&
         dt.month == now.month &&
         dt.day == now.day) { return hm; }

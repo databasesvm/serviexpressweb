@@ -6,7 +6,6 @@ part of 'local_screen.dart';
 // ══════════════════════════════════════════════════════════════════════════════
 mixin _DispatchMixin on State<LocalScreen> {
   // ── Abstract stubs (implementados en otros mixins) ─────────────────────────
-  Future<int> _buscarOCrearSector(String nombre, String municipio);
 
   // ── Cañones OneSignal ──────────────────────────────────────────────────────
   Future<String?> _programarMisilRetardado({
@@ -59,7 +58,7 @@ mixin _DispatchMixin on State<LocalScreen> {
         title: const Row(children: [
           Icon(Icons.two_wheeler, color: Colors.black, size: 22),
           SizedBox(width: 8),
-          Text('PEDIR MÓVIL', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+          Text('Pedir Móvil ya', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
         ]),
         content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
           const Text(
@@ -84,7 +83,7 @@ mixin _DispatchMixin on State<LocalScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(d, false),
-            child: const Text('CANCELAR', style: TextStyle(color: Colors.grey)),
+            child: const Text('Cancelar', style: TextStyle(color: Colors.grey)),
           ),
           ElevatedButton.icon(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.black),
@@ -167,178 +166,109 @@ mixin _DispatchMixin on State<LocalScreen> {
     }
   }
 
-  // --- MÓDULO: COMPLETAR DATOS AL APROBAR COTIZACIÓN (MULTI-PARADERO + TEMPORIZADOR) ---
+  // Aprobar el precio que dio la Central. Sin ventana: los datos (ticket,
+  // WhatsApp y notas) ya se escribieron al crear el pedido. Solo si falta el
+  // WhatsApp del cliente (obligatorio) se pide ese dato. El Móvil se pide
+  // aparte con "Solicitar Móvil" cuando el pedido esté listo.
   void _completarDatosYAprobar(
     BuildContext contextoPrincipal,
     Map<String, dynamic> servicio,
-  ) {
-    final telefonoCtrl = TextEditingController(
-      text: servicio['telefono_receptor']?.toString() ?? '',
-    );
-    final ticketCtrl = TextEditingController(
-      text: servicio['ticket_factura']?.toString() ?? '',
-    );
-    final notasCtrl = TextEditingController();
-    bool procesando = false;
+  ) async {
+    Future<void> aprobar({String? telefono}) async {
+      try {
+        await Supabase.instance.client
+            .from('servicios')
+            .update({
+              'estado': 'cotizacion_aprobada',
+              if (telefono != null) 'telefono_receptor': normalizarWhatsApp(telefono),
+            })
+            .eq('id', servicio['id']);
+        if (contextoPrincipal.mounted) {
+          ScaffoldMessenger.of(contextoPrincipal).showSnackBar(
+            SnackBar(
+              content: Text(
+                '✅ Precio aprobado (${fmtPeso(servicio['tarifa'])}). '
+                'Pulsa "Solicitar Móvil" cuando el pedido esté listo.',
+              ),
+              backgroundColor: Colors.teal[700],
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+      } catch (e) {
+        if (contextoPrincipal.mounted) {
+          ScaffoldMessenger.of(contextoPrincipal).showSnackBar(
+            SnackBar(content: Text(textoError(e)), backgroundColor: Colors.red),
+          );
+        }
+      }
+    }
 
-    showDialog(
+    final telActual = servicio['telefono_receptor']?.toString().trim() ?? '';
+    if (validarWhatsApp(telActual, obligatorio: true) == null) {
+      await aprobar();
+      return;
+    }
+
+    // Falta el WhatsApp del cliente: se pide solo ese dato
+    final telefonoCtrl = TextEditingController(text: telActual);
+    bool procesando = false;
+    if (!contextoPrincipal.mounted) return;
+    await showDialog(
       context: contextoPrincipal,
-      barrierDismissible: false,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          title: const Text(
-            '📝 APROBAR COTIZACIÓN',
-            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue),
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Cotización aprobada por: ${fmtPeso(servicio['tarifa'])}',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+          title: const Text('Falta el WhatsApp del cliente'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Para aprobar el precio (${fmtPeso(servicio['tarifa'])}) escribe el '
+                'WhatsApp del cliente. El Móvil lo usa para avisarle.',
+                style: const TextStyle(fontSize: 14, color: Colors.black54),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: telefonoCtrl,
+                autofocus: true,
+                keyboardType: TextInputType.text,
+                autocorrect: false,
+                enableSuggestions: false,
+                inputFormatters: formatoWhatsApp,
+                decoration: const InputDecoration(
+                  labelText: 'WhatsApp del cliente',
+                  helperText: 'Número o @usuario de WhatsApp',
+                  prefixIcon: Icon(Icons.phone),
                 ),
-                const SizedBox(height: 10),
-                const Text(
-                  'Completa los datos finales para enviarlo al radar:',
-                  style: TextStyle(fontSize: 12, color: Colors.black54),
-                ),
-                const SizedBox(height: 16),
-
-                TextField(
-                  controller: ticketCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Ticket / Factura # (Opcional)',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.receipt_long, size: 18),
-                    isDense: true,
-                  ),
-                ),
-                const SizedBox(height: 12),
-
-                TextField(
-                  controller: telefonoCtrl,
-                  keyboardType: TextInputType.text,
-                  autocorrect: false,
-                  enableSuggestions: false,
-                  inputFormatters: formatoWhatsApp,
-                  decoration: const InputDecoration(
-                    labelText: 'WhatsApp de Contacto (*)',
-                    helperText: 'Número o @usuario de WhatsApp',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.phone, size: 18),
-                    isDense: true,
-                  ),
-                ),
-                const SizedBox(height: 12),
-
-                TextField(
-                  controller: notasCtrl,
-                  maxLines: 3,
-                  decoration: const InputDecoration(
-                    labelText: 'Notas finales de entrega / Pedido',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.notes, size: 18),
-                    isDense: true,
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
           actions: [
             TextButton(
               onPressed: procesando ? null : () => Navigator.pop(context),
-              child: const Text(
-                'CANCELAR',
-                style: TextStyle(color: Colors.red),
-              ),
+              child: const Text('Cancelar'),
             ),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.black),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1565C0),
+                foregroundColor: Colors.white,
+              ),
               onPressed: procesando
                   ? null
                   : () async {
-                      final errWa = validarWhatsApp(telefonoCtrl.text, obligatorio: true);
-                      if (errWa != null) {
+                      final err = validarWhatsApp(telefonoCtrl.text, obligatorio: true);
+                      if (err != null) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(errWa),
-                            backgroundColor: Colors.red,
-                          ),
+                          SnackBar(content: Text(err), backgroundColor: Colors.red),
                         );
                         return;
                       }
-
                       setDialogState(() => procesando = true);
-
-                      String obsAnterior = servicio['observacion'] ?? '';
-                      String ticketStr = ticketCtrl.text.trim().isNotEmpty
-                          ? '[ TICKET: #${ticketCtrl.text.trim()} ] '
-                          : '';
-                      String notasNuevas = notasCtrl.text.trim().isNotEmpty
-                          ? '\n📝 NOTAS EXTRA: ${notasCtrl.text.trim()}'
-                          : '';
-                      String nuevaObs = '$ticketStr$obsAnterior$notasNuevas';
-
-                      try {
-                        // Solo guardamos los datos y marcamos como aprobada.
-                        // El scan de paraderos y las notificaciones se hacen
-                        // cuando el local pulse "SOLICITAR MÓVIL".
-                        await Supabase.instance.client
-                            .from('servicios')
-                            .update({
-                              'estado': 'cotizacion_aprobada',
-                              'observacion': nuevaObs,
-                              'telefono_receptor': normalizarWhatsApp(telefonoCtrl.text),
-                              'ticket_factura': ticketCtrl.text.trim().isEmpty
-                                  ? null
-                                  : ticketCtrl.text.trim(),
-                            })
-                            .eq('id', servicio['id']);
-
-                        if (context.mounted) {
-                          Navigator.pop(context);
-                          ScaffoldMessenger.of(contextoPrincipal).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                '✅ Cotización aprobada. Pulsa "SOLICITAR MÓVIL" cuando el pedido esté listo.',
-                              ),
-                              backgroundColor: Colors.teal,
-                              duration: Duration(seconds: 4),
-                            ),
-                          );
-                        }
-                      } catch (e) {
-                        setDialogState(() => procesando = false);
-                        if (context.mounted)
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(textoError(e)),
-                              backgroundColor: Colors.red,
-                            ),
-                          );
-                      }
+                      Navigator.pop(context);
+                      await aprobar(telefono: telefonoCtrl.text);
                     },
-              child: procesando
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Color(0xff3AF500),
-                      ),
-                    )
-                  : const Text(
-                      'APROBAR',
-                      style: TextStyle(
-                        color: Color(0xff3AF500),
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+              child: const Text('Aprobar precio'),
             ),
           ],
         ),
@@ -382,7 +312,7 @@ mixin _DispatchMixin on State<LocalScreen> {
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         title: const Text(
-          '🏍️ SOLICITAR MÓVIL',
+          'Solicitar Móvil',
           style: TextStyle(fontWeight: FontWeight.bold, color: Colors.teal),
         ),
         content: Column(
@@ -450,7 +380,7 @@ mixin _DispatchMixin on State<LocalScreen> {
               await _enviarAprobadaAlRadar(contextoPrincipal, servicio);
             },
             child: Text(
-              'ENVIAR AL RADAR',
+              'Enviar al radar',
               style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
             ),
           ),
@@ -526,7 +456,6 @@ mixin _DispatchMixin on State<LocalScreen> {
         }
       }
 
-      String destinoNuevo = servicio['destino'] ?? '';
       bool esPuntoAPunto = servicio['es_punto_a_punto'] == true;
       int nuevoServicioId = servicio['id'];
       String nuevoEstado = retardoProgramado > 0 ? 'programado' : 'pendiente';
@@ -578,165 +507,6 @@ mixin _DispatchMixin on State<LocalScreen> {
             backgroundColor: retardoProgramado > 0 ? Colors.blue[800] : Colors.green,
           ),
         );
-      }
-
-      // --- DIÁLOGO RÁPIDO PARA GUARDAR EN LA LISTA DE PRECIOS ---
-      if (contextoPrincipal.mounted) {
-        final resLista = await Supabase.instance.client
-            .from('red_dir_se')
-            .select('nombre, precio')
-            .eq('usuario_id', widget.usuario['id'])
-            .eq('activo', true);
-
-        String destinoMayus = destinoNuevo.toUpperCase();
-        String barrioExtraido = destinoMayus.contains('-')
-            ? destinoMayus.split('-')[0].trim()
-            : destinoMayus;
-        final tarifaCobrada = (servicio['tarifa'] as num).toDouble();
-
-        bool yaEstaGuardado = resLista.any((item) {
-          final nom = (item['nombre'] ?? '').toString().toUpperCase();
-          return barrioExtraido == nom || destinoMayus.startsWith(nom);
-        });
-
-        if (!yaEstaGuardado) {
-          final barrioCtrl = TextEditingController(text: barrioExtraido);
-          String zonaSeleccionada = 'CÚCUTA';
-          bool guardandoLista = false;
-
-          showDialog(
-            context: contextoPrincipal,
-            builder: (ctxSave) => StatefulBuilder(
-              builder: (ctxSave, setSaveState) => AlertDialog(
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                title: const Text(
-                  '💾 GUARDAR EN LISTA',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                ),
-                content: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Se cobró ${fmtPeso(servicio['tarifa'])}',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: Colors.blue,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: barrioCtrl,
-                      textCapitalization: TextCapitalization.characters,
-                      decoration: const InputDecoration(
-                        labelText: 'Barrio / Lugar (Ej: PRADOS)',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    const Text(
-                      '¿A qué municipio pertenece?',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                    ),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 0,
-                      children: ['CÚCUTA', 'LOS PATIOS', 'V. ROSARIO']
-                          .map((z) => ChoiceChip(
-                                label: Text(
-                                  z,
-                                  style: const TextStyle(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                selected: zonaSeleccionada == z,
-                                selectedColor: Colors.blue[100],
-                                onSelected: (bool selected) {
-                                  if (selected)
-                                    setSaveState(() => zonaSeleccionada = z);
-                                },
-                              ))
-                          .toList(),
-                    ),
-                  ],
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(ctxSave),
-                    child: const Text('NO GUARDAR', style: TextStyle(color: Colors.grey)),
-                  ),
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.black),
-                    onPressed: guardandoLista
-                        ? null
-                        : () async {
-                            if (barrioCtrl.text.trim().isEmpty) return;
-                            setSaveState(() => guardandoLista = true);
-                            try {
-                              final sectorId = await _buscarOCrearSector(
-                                barrioCtrl.text.trim().toUpperCase(),
-                                zonaSeleccionada,
-                              );
-                              final munNorm = zonaSeleccionada == 'CÚCUTA'
-                                  ? 'Cúcuta'
-                                  : zonaSeleccionada == 'LOS PATIOS'
-                                      ? 'Los Patios'
-                                      : 'V. Rosario';
-                              await Supabase.instance.client
-                                  .from('red_dir_se')
-                                  .insert({
-                                    'usuario_id': widget.usuario['id'],
-                                    'nombre': barrioCtrl.text.trim().toUpperCase(),
-                                    'municipio': munNorm,
-                                    'sector_id': sectorId,
-                                    'precio': tarifaCobrada.toInt(),
-                                  });
-                              if (ctxSave.mounted) {
-                                Navigator.pop(ctxSave);
-                                ScaffoldMessenger.of(contextoPrincipal).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('✅ Dirección guardada en tu Red de Direcciones.'),
-                                    backgroundColor: Colors.green,
-                                  ),
-                                );
-                              }
-                            } catch (e) {
-                              setSaveState(() => guardandoLista = false);
-                              if (ctxSave.mounted)
-                                ScaffoldMessenger.of(contextoPrincipal).showSnackBar(
-                                  SnackBar(
-                                    content: Text('Error BD: $e'),
-                                    backgroundColor: Colors.red,
-                                  ),
-                                );
-                            }
-                          },
-                    child: guardandoLista
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(
-                              color: Color(0xff3AF500),
-                              strokeWidth: 2,
-                            ),
-                          )
-                        : const Text(
-                            'GUARDAR DIRECCIÓN',
-                            style: TextStyle(
-                              color: Color(0xff3AF500),
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        }
       }
     } catch (e) {
       if (contextoPrincipal.mounted)

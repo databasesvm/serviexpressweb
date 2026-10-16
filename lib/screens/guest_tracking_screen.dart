@@ -239,7 +239,7 @@ class _GuestTrackingScreenState extends State<GuestTrackingScreen> {
   }
 
   void _irRegistro() =>
-      Navigator.push(context, MaterialPageRoute(builder: (_) => const RegistroScreen()));
+      Navigator.push(context, MaterialPageRoute(builder: (_) => const RegistroScreen(soloCliente: true)));
 
   // ── Calificación (invitado: calificador_id = null) ────────────────────
   void _mostrarDialogoCalificacionInvitado(Map<String, dynamic> servicio) {

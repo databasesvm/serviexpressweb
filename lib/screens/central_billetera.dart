@@ -215,7 +215,7 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
         ? DateTime.tryParse(s['created_at'].toString())?.toLocal()
         : null;
     final fechaStr = fecha != null
-        ? '${fecha.day.toString().padLeft(2,'0')}/${fecha.month.toString().padLeft(2,'0')} ${fecha.hour.toString().padLeft(2,'0')}:${fecha.minute.toString().padLeft(2,'0')}'
+        ? fechaHora12(fecha)
         : '';
 
     final borderColor = (esConRecargo || esMulta)
@@ -1244,7 +1244,7 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                             ? DateTime.tryParse(item['created_at'].toString())?.toLocal()
                             : null;
                         final fechaStr = fecha != null
-                            ? '${fecha.day.toString().padLeft(2,'0')}/${fecha.month.toString().padLeft(2,'0')} ${fecha.hour.toString().padLeft(2,'0')}:${fecha.minute.toString().padLeft(2,'0')}'
+                            ? fechaHora12(fecha)
                             : '';
                         final comprUrl = item['comprobante_url']?.toString();
                         return Padding(
@@ -1992,7 +1992,7 @@ class _PanelBilleteraState extends State<_PanelBilletera> {
                         ? DateTime.parse(m['created_at'].toString()).toLocal()
                         : null;
                     final fechaStr = fecha != null
-                        ? '${fecha.day}/${fecha.month} ${fecha.hour.toString().padLeft(2,'0')}:${fecha.minute.toString().padLeft(2,'0')}'
+                        ? fechaHora12(fecha)
                         : '';
                     final comprUrlMv = m['comprobante_url']?.toString();
                     return Container(

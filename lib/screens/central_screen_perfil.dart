@@ -65,7 +65,7 @@ extension CentralScreenPerfil on _CentralScreenState {
       try {
         final h = DateTime.parse(movil['suspendido_hasta'].toString()).toLocal();
         suspendidoHastaTexto =
-            '${h.day.toString().padLeft(2, '0')}/${h.month.toString().padLeft(2, '0')}/${h.year} ${h.hour.toString().padLeft(2, '0')}:${h.minute.toString().padLeft(2, '0')}';
+            fechaHora12(h, conAnio: true);
       } catch (_) {}
     }
 

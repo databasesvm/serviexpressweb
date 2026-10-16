@@ -36,6 +36,7 @@ import 'package:serviexpress_app/utils/iconos.dart'; // Logo de WhatsApp
 import 'package:serviexpress_app/utils/whatsapp_contacto.dart'; // WhatsApp: número o @usuario
 import 'package:serviexpress_app/utils/competencia_semanal.dart'; // Podio semanal 👑 🥈 🥉
 import 'package:serviexpress_app/utils/errores_servidor.dart'; // Mensajes del candado de estados
+import 'package:serviexpress_app/utils/hora12.dart'; // Hora en formato 12 h (am/pm)
 
 part 'movil_widgets.dart';
 
@@ -162,8 +163,50 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
 
   // Punto a Punto: el móvil no sabe que es PAP hasta aceptarlo. Al aceptarlo
   // se le cuentan los beneficios que gana al terminarlo.
-  void _mostrarBeneficiosPAP() {
+  // PAP: la ventana de beneficios se muestra UNA vez por servicio, también
+  // cuando la Central lo asigna directo (no pasa por "aceptar").
+  final Set<String> _papBeneficiosVistos = {};
+  static const String _kPapVistos = 'pap_beneficios_vistos';
+
+  Future<void> _marcarPAPVisto(String id) async {
+    _papBeneficiosVistos.add(id);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final lista = prefs.getStringList(_kPapVistos) ?? <String>[];
+      if (!lista.contains(id)) {
+        lista.add(id);
+        // Solo se guardan los últimos 30
+        while (lista.length > 30) {
+          lista.removeAt(0);
+        }
+        await prefs.setStringList(_kPapVistos, lista);
+      }
+    } catch (_) {}
+  }
+
+  /// Llamado al dibujar un servicio activo: si es PAP y nunca vio los
+  /// beneficios (ej. asignado directo por la Central), se los muestra.
+  void _avisarBeneficiosPAPSiFalta(Map<String, dynamic> servicio) {
+    if (servicio['es_punto_a_punto'] != true) return;
+    final id = servicio['id']?.toString();
+    if (id == null || _papBeneficiosVistos.contains(id)) return;
+    _papBeneficiosVistos.add(id); // evita repetir mientras se revisa
+    // Espera un momento: si el móvil lo acaba de ACEPTAR, el flujo de aceptar
+    // ya muestra la ventana y la marca como vista (así no sale dos veces).
+    Future.delayed(const Duration(seconds: 2), () async {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final lista = prefs.getStringList(_kPapVistos) ?? <String>[];
+        if (lista.contains(id)) return;
+      } catch (_) {}
+      if (!mounted) return;
+      _mostrarBeneficiosPAP(servicioId: id);
+    });
+  }
+
+  void _mostrarBeneficiosPAP({String? servicioId}) {
     if (!mounted) return;
+    if (servicioId != null) _marcarPAPVisto(servicioId);
     _sonidos.reproducirSuave(Sonidos.movilParadero);
     showDialog(
       context: context,
@@ -788,6 +831,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
               break;
             case 'billetera':
             case 'cuenta_activada':
+            case 'premio_pap': // premio del Punto a Punto: NO es un servicio
               // Billetera desbloqueada, recarga aprobada, cuenta activada — suave
               _sonidos.reproducirSuave(Sonidos.movilConfirmar);
               break;
@@ -1645,12 +1689,12 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                           'Para desbloquear tu billetera falta la multa por mora de \$20.000. '
                           'Paga la multa y envía el comprobante.'
                         : recargo
-                        ? 'No se registró el pago de tu semana antes de las 12:20 p. m. del lunes, '
+                        ? 'No se registró el pago de tu semana antes de las 12:20 pm del lunes, '
                           'por eso se sumó una multa por mora.\n\n'
                           'Total a pagar: \$80.000 (\$60.000 semana + \$20.000 multa).\n'
                           'Paga, envía el comprobante y la central desbloqueará tu billetera.'
-                        : 'Cada lunes a las 12:00 m se cobra tu semana (\$60.000) y no se registró tu pago.\n\n'
-                          'Paga y envía el comprobante antes de las 12:20 p. m. para evitar una multa de \$20.000.',
+                        : 'Cada lunes a las 12:00 pm se cobra tu semana (\$60.000) y no se registró tu pago.\n\n'
+                          'Paga y envía el comprobante antes de las 12:20 pm para evitar una multa de \$20.000.',
                     textAlign: TextAlign.center,
                     style: const TextStyle(
                         color: Colors.white60, fontSize: 13, height: 1.6),
@@ -4874,23 +4918,26 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
               .from('usuarios')
               .update({'ticket_prioridad': true}).eq('id', widget.usuario['id']);
         }
-        // Push al propio móvil — queda en bandeja incluso si cierra la app
-        // urgente: false → canal de notificación normal (sin alarma)
-        // sonido: 'notification' → sonido predeterminado del sistema
+        // Push al propio móvil — queda en bandeja incluso si cierra la app.
+        // Va por el canal de CONFIRMACIONES (sonido suave): antes iba por el
+        // canal de alertas de servicio y sonaba como un servicio nuevo.
         try {
           await MotorNotificaciones.dispararMisil(
             idDestino: widget.usuario['id'].toString(),
-            titulo: '🎁 P.A.P completado',
-            mensaje: '+2 pts semana · +0.2 calificación · 🎟️ Prioridad en paradero activada',
+            titulo: '🎁 Premio del Punto a Punto',
+            mensaje: 'Ganaste 2 turnos de prioridad y +2 puntos de la semana. '
+                'No es un servicio nuevo.',
             urgente: false,
-            sonido: 'notification',
+            sonido: Sonidos.movilConfirmar,
+            canalAndroidId: MotorNotificaciones.canalConfirmacionId,
+            data: {'tipo': 'premio_pap'},
           );
         } catch (_) {}
         if (mounted)
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text(
-                '🎟️ ¡P.A.P COMPLETADO! +2 pts semana · +0.2 calificación · Prioridad en paradero activada.',
+                '🎁 ¡Punto a Punto completado! Ganaste 2 turnos de prioridad y +2 puntos de la semana.',
               ),
               backgroundColor: Colors.purple,
               duration: Duration(seconds: 6),
@@ -8946,6 +8993,9 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
       return _construirTarjetaActivaFN(servicio, esMaster: esMaster);
     }
 
+    // PAP asignado directo por la Central: mostrar beneficios la primera vez
+    _avisarBeneficiosPAPSiFalta(servicio);
+
     int efectivos = 0;
     int tiempoMeta = servicio['tiempo_estimado_minutos'] ?? 30;
     bool mostrarReloj = false;
@@ -9332,7 +9382,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                         ),
                         SizedBox(height: 6),
                         Text(
-                          '🎟️ Prioridad en paradero  ·  +2 pts semana  ·  +0.2 calificación',
+                          '🎟️ 2 turnos de prioridad en paradero  ·  +2 pts semana',
                           style:
                               TextStyle(fontSize: 11, color: Colors.white70),
                         ),
@@ -13090,7 +13140,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
 
                   // PAP: recién al aceptarlo se le cuenta y se le dicen los beneficios
                   if (servicio['es_punto_a_punto'] == true) {
-                    _mostrarBeneficiosPAP();
+                    _mostrarBeneficiosPAP(servicioId: servicio['id']?.toString());
                   }
 
                   // Cancelar misiles pendientes según tipo de servicio
@@ -13261,7 +13311,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
 
       // PAP: recién al aceptarlo se le cuenta y se le dicen los beneficios
       if (servicio['es_punto_a_punto'] == true) {
-        _mostrarBeneficiosPAP();
+        _mostrarBeneficiosPAP(servicioId: servicio['id']?.toString());
       }
 
       // Cancelar misiles pendientes según tipo de servicio
@@ -14455,13 +14505,13 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                                   ? 'Ya recibimos tu pago de la semana (\$60.000) ✔\n\n'
                                     'Para desbloquear tu billetera falta la multa por mora de ${pesos(multaCompleta)}.'
                                   : conMora
-                                  ? 'No se registró el pago de tu semana antes de las 12:20 p. m. del lunes. '
+                                  ? 'No se registró el pago de tu semana antes de las 12:20 pm del lunes. '
                                     'Por eso se sumó una multa por mora de ${pesos(multaCompleta)}.\n\n'
                                     'Total a pagar: ${pesos(montoSemana + multaCompleta)} '
                                     '(${pesos(montoSemana)} semana + ${pesos(multaCompleta)} multa).'
-                                  : 'Tu plan es semanal: cada lunes a las 12:00 m se cobra la semana. '
+                                  : 'Tu plan es semanal: cada lunes a las 12:00 pm se cobra la semana. '
                                     'Como no se registró tu pago, tu billetera quedó bloqueada.\n\n'
-                                    'Importante: si no pagas antes de las 12:20 p. m. del lunes, '
+                                    'Importante: si no pagas antes de las 12:20 pm del lunes, '
                                     'se suma una multa por mora de ${pesos(multaCompleta)}.',
                               style: const TextStyle(
                                   color: Colors.white, fontSize: 12, height: 1.45),
@@ -14908,7 +14958,7 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
                             ?.toLocal()
                         : null;
                     final fechaStr = fecha != null
-                        ? '${fecha.day.toString().padLeft(2, '0')}/${fecha.month.toString().padLeft(2, '0')} ${fecha.hour.toString().padLeft(2, '0')}:${fecha.minute.toString().padLeft(2, '0')}'
+                        ? fechaHora12(fecha)
                         : '';
                     final IconData icono = tipo == 'recarga'
                         ? Icons.add_circle_outline

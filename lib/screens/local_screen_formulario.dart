@@ -18,400 +18,6 @@ mixin _FormularioMixin on State<LocalScreen> {
     String? canalAndroidId,
   });
 
-  // ── HELPER: busca o crea un sector por nombre+municipio ───────────────────
-  Future<int> _buscarOCrearSector(String nombre, String municipio) async {
-    final res = await Supabase.instance.client
-        .from('sectores')
-        .select('id')
-        .eq('nombre', nombre)
-        .eq('municipio', municipio)
-        .maybeSingle();
-    if (res != null) return res['id'] as int;
-    final nuevo = await Supabase.instance.client
-        .from('sectores')
-        .insert({'nombre': nombre, 'municipio': municipio})
-        .select('id')
-        .single();
-    return nuevo['id'] as int;
-  }
-
-  // ── HELPER: guarda/actualiza dirección en red_dir_catalogo + se_precios_dir ─
-  Future<int> _guardarEnRedSE({
-    required String nombre,
-    required String municipio,
-    required int sectorId,
-    required int precio,
-    String? telefono, // si viene del CRM, asocia a ese cliente
-  }) async {
-    final db = Supabase.instance.client;
-    final userId = widget.usuario['id'] as int;
-
-    // 1. Buscar o crear en catálogo global
-    final existe = await db
-        .from('red_dir_catalogo')
-        .select('id')
-        .eq('nombre', nombre)
-        .eq('municipio', municipio)
-        .eq('sector_id', sectorId)
-        .maybeSingle();
-    int dirId;
-    if (existe != null) {
-      dirId = existe['id'] as int;
-    } else {
-      final nuevo = await db
-          .from('red_dir_catalogo')
-          .insert({'nombre': nombre, 'municipio': municipio, 'sector_id': sectorId, 'activo': true})
-          .select('id')
-          .single();
-      dirId = nuevo['id'] as int;
-    }
-
-    // 2. Upsert precio para este usuario
-    await db.from('se_precios_dir').upsert(
-      {'usuario_id': userId, 'dir_id': dirId, 'precio': precio},
-      onConflict: 'usuario_id,dir_id',
-    );
-
-    // 3. Asociar al CRM del cliente si hay teléfono
-    final tel = telefono?.trim() ?? '';
-    if (tel.length >= 7) {
-      await db.from('crm_cliente_dirs').upsert(
-        {
-          'local_id': userId,
-          'telefono': tel,
-          'dir_id': dirId,
-          'updated_at': DateTime.now().toIso8601String(),
-        },
-        onConflict: 'local_id,telefono,dir_id',
-      );
-    }
-
-    return dirId;
-  }
-
-  // ── MÓDULO TÁCTICO: GESTOR DE TARIFAS DEL LOCAL ────────────────────────────
-  void _abrirPanelTarifario(BuildContext contextoPrincipal) {
-    String filtroActual = '';
-
-    // OPTIMIZACIÓN: las tarifas se descargan al abrir y solo se vuelven a
-    // descargar al agregar o quitar una. Antes se repetía con cada letra
-    // escrita en el buscador.
-    Future<List<Map<String, dynamic>>> cargarTarifas() => Supabase.instance.client
-        .from('se_precios_dir')
-        .select('precio, red_dir_catalogo!inner(id, nombre, municipio, sector_id, activo, sectores(nombre))')
-        .eq('usuario_id', widget.usuario['id'])
-        .eq('red_dir_catalogo.activo', true);
-    var futureTarifas = cargarTarifas();
-
-    showModalBottomSheet(
-      context: contextoPrincipal,
-      isScrollControlled: true,
-      backgroundColor: const Color(0xFF0D0D0D),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (context) => StatefulBuilder(
-        builder: (context, setModalState) => DraggableScrollableSheet(
-          initialChildSize: 0.8,
-          minChildSize: 0.5,
-          maxChildSize: 0.95,
-          expand: false,
-          builder: (context, scrollController) => Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              children: [
-                Container(
-                  width: 40,
-                  height: 5,
-                  decoration: BoxDecoration(
-                    color: Colors.white24,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  '📚 MI LISTA DE PRECIOS',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
-                ),
-                const Text(
-                  'El sistema autocompletará la tarifa al detectar el Barrio/Sector/Cond./Conj..',
-                  style: TextStyle(fontSize: 12, color: Colors.white54),
-                ),
-                const SizedBox(height: 16),
-
-                // BARRA DE BÚSQUEDA
-                TextField(
-                  style: const TextStyle(color: Colors.white),
-                  decoration: const InputDecoration(
-                    labelText: 'Buscar Barrio / Sector / Cond. / Conj. o Palabra Clave',
-                    labelStyle: TextStyle(color: Colors.white54),
-                    border: OutlineInputBorder(),
-                    enabledBorder: OutlineInputBorder(
-                        borderSide: BorderSide(color: Colors.white24)),
-                    focusedBorder: OutlineInputBorder(
-                        borderSide: BorderSide(color: Color(0xff3AF500))),
-                    prefixIcon: Icon(Icons.search, color: Colors.white54),
-                    isDense: true,
-                  ),
-                  onChanged: (val) =>
-                      setModalState(() => filtroActual = val.toLowerCase()),
-                ),
-                const SizedBox(height: 12),
-
-                // BOTÓN DE AGREGAR NUEVO
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.black,
-                      foregroundColor: const Color(0xff3AF500),
-                    ),
-                    icon: const Icon(Icons.add),
-                    label: const Text(
-                      'NUEVA TARIFA',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    onPressed: () {
-                      final palabraCtrl = TextEditingController();
-                      final tarifaCtrl = TextEditingController();
-                      String zonaSeleccionada =
-                          'CÚCUTA'; // <--- INYECCIÓN: ZONA POR DEFECTO
-
-                      showDialog(
-                        context: context,
-                        builder: (ctxAdd) => StatefulBuilder(
-                          builder: (ctxAdd, setAddState) => AlertDialog(
-                            title: const Text(
-                              'AGREGAR AL TARIFARIO',
-                              style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            content: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                TextField(
-                                  controller: palabraCtrl,
-                                  textCapitalization:
-                                      TextCapitalization.characters,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Barrio / Sector / Cond.',
-                                    isDense: true,
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                // ---> SELECTOR TÁCTICO DE ZONA <---
-                                const Text(
-                                  'Municipio / Zona:',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.black54,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Wrap(
-                                  spacing: 6,
-                                  runSpacing: 0,
-                                  children:
-                                      [
-                                        'CÚCUTA',
-                                        'LOS PATIOS',
-                                        'V. ROSARIO',
-                                      ].map((z) {
-                                        return ChoiceChip(
-                                          label: Text(
-                                            z,
-                                            style: const TextStyle(
-                                              fontSize: 10,
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
-                                          selected: zonaSeleccionada == z,
-                                          selectedColor: Colors.blue[100],
-                                          onSelected: (bool selected) {
-                                            if (selected)
-                                              setAddState(
-                                                () => zonaSeleccionada = z,
-                                              );
-                                          },
-                                        );
-                                      }).toList(),
-                                ),
-                                const SizedBox(height: 12),
-                                TextField(
-                                  controller: tarifaCtrl,
-                                  keyboardType: TextInputType.number,
-                                  inputFormatters: [CurrencyInputFormatter()],
-                                  decoration: InputDecoration(
-                                    labelText: 'Tarifa \$',
-                                    isDense: true,
-                                    suffixIcon: IconButton(
-                                      icon: const Icon(Icons.clear, size: 18),
-                                      tooltip: 'Borrar',
-                                      onPressed: () => tarifaCtrl.clear(),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.pop(ctxAdd),
-                                child: const Text(
-                                  'CANCELAR',
-                                  style: TextStyle(color: Colors.red),
-                                ),
-                              ),
-                              ElevatedButton(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.black,
-                                ),
-                                onPressed: () async {
-                                  if (palabraCtrl.text.isEmpty ||
-                                      tarifaCtrl.text.isEmpty)
-                                    return;
-                                  String tarLimpia = tarifaCtrl.text
-                                      .replaceAll('\$', '')
-                                      .replaceAll('.', '')
-                                      .replaceAll(',', '')
-                                      .trim();
-                                  final precio = int.tryParse(tarLimpia) ?? 0;
-                                  if (precio <= 0) return;
-
-                                  final munNorm = zonaSeleccionada == 'CÚCUTA'
-                                      ? 'Cúcuta'
-                                      : zonaSeleccionada == 'LOS PATIOS'
-                                          ? 'Los Patios'
-                                          : 'V. Rosario';
-                                  final sectorId = await _buscarOCrearSector(
-                                    palabraCtrl.text.trim().toUpperCase(),
-                                    munNorm,
-                                  );
-                                  await _guardarEnRedSE(
-                                    nombre: palabraCtrl.text.trim().toUpperCase(),
-                                    municipio: munNorm,
-                                    sectorId: sectorId,
-                                    precio: precio,
-                                  );
-
-                                  if (ctxAdd.mounted) {
-                                    Navigator.pop(ctxAdd);
-                                    setModalState(() => futureTarifas = cargarTarifas());
-                                  }
-                                },
-                                child: const Text(
-                                  'GUARDAR',
-                                  style: TextStyle(color: Color(0xff3AF500)),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                const Divider(height: 24, color: Colors.white12),
-
-                // LISTADO DE TARIFAS
-                Expanded(
-                  child: FutureBuilder<List<Map<String, dynamic>>>(
-                    future: futureTarifas,
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.waiting)
-                        return const Center(
-                          child: CircularProgressIndicator(color: Colors.white),
-                        );
-
-                      // Normalizar resultado al formato esperado
-                      final raw = snapshot.data ?? [];
-                      final datos = raw.map<Map<String, dynamic>>((row) {
-                        final dir = Map<String, dynamic>.from(row['red_dir_catalogo'] as Map? ?? {});
-                        return {
-                          'id': dir['id'],
-                          'nombre': dir['nombre'],
-                          'municipio': dir['municipio'],
-                          'sector_id': dir['sector_id'],
-                          'precio': row['precio'],
-                          'activo': dir['activo'],
-                          'sectores': dir['sectores'],
-                        };
-                      }).toList()
-                        ..sort((a, b) => (a['nombre'] ?? '').toString()
-                            .compareTo((b['nombre'] ?? '').toString()));
-
-                      final filtrados = datos.where((d) {
-                        final nom = (d['nombre'] ?? '').toString().toLowerCase();
-                        return nom.contains(filtroActual);
-                      }).toList();
-
-                      if (filtrados.isEmpty)
-                        return const Center(
-                          child: Text('No hay direcciones guardadas.',
-                              style: TextStyle(color: Colors.white54)),
-                        );
-
-                      return ListView.builder(
-                        controller: scrollController,
-                        itemCount: filtrados.length,
-                        itemBuilder: (c, i) {
-                          final item = filtrados[i];
-                          final nom = (item['nombre'] ?? '').toString();
-                          final mun = (item['municipio'] ?? '').toString();
-                          final precio = item['precio'] as int?;
-                          return Card(
-                            elevation: 1,
-                            color: const Color(0xFF1E1E1E),
-                            margin: const EdgeInsets.only(bottom: 8),
-                            child: ListTile(
-                              leading: const Icon(
-                                Icons.place,
-                                color: Colors.blue,
-                              ),
-                              title: Text(
-                                nom,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                ),
-                              ),
-                              subtitle: Text(
-                                precio != null ? '$mun · ${fmtPeso(precio)}' : mun,
-                                style: const TextStyle(color: Colors.white54),
-                              ),
-                              trailing: IconButton(
-                                icon: const Icon(
-                                  Icons.delete,
-                                  color: Colors.red,
-                                ),
-                                onPressed: () async {
-                                  // Quitar precio (no borra el catálogo global)
-                                  await Supabase.instance.client
-                                      .from('se_precios_dir')
-                                      .delete()
-                                      .eq('usuario_id', widget.usuario['id'])
-                                      .eq('dir_id', item['id']);
-                                  setModalState(() => futureTarifas = cargarTarifas());
-                                },
-                              ),
-                            ),
-                          );
-                        },
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   // ── FORMULARIO DE PEDIDO ────────────────────────────────────────────────────
   void _abrirFormularioPedido(
     BuildContext context, {
@@ -552,62 +158,63 @@ mixin _FormularioMixin on State<LocalScreen> {
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) {
           _setDS = setDialogState;
-          return AlertDialog(
+          // Diseño oficial: color del tipo de servicio (PAP morado)
+          final EstiloServicio estiloForm =
+              EstiloServicio.deTipo(_esMototaxi ? 'mototaxi' : _tipoDefecto);
+          final Color colorForm =
+              esPuntoAPunto ? const Color(0xFF9B51E0) : estiloForm.color;
+          int pasoNum = 0;
+          Widget paso(String t) => PasoSE(++pasoNum, t, color: colorForm);
+          return Theme(
+            data: temaDialogoSE(context, colorForm),
+            child: AlertDialog(
           insetPadding: const EdgeInsets.symmetric(
             horizontal: 12,
             vertical: 24,
           ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
+          titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+          contentPadding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+          actionsPadding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+          title: TituloVentanaSE(
+            icono: esPuntoAPunto
+                ? Icons.card_giftcard
+                : (_esMototaxi ? Icons.two_wheeler : estiloForm.icono),
+            color: colorForm,
+            titulo: _esCot
+                ? 'Pedir precio a la Central'
+                : (esPuntoAPunto ? 'Punto a Punto' : 'Pedir Móvil'),
+            subtitulo: _esCot
+                ? 'Sin precio: la Central te lo dice primero'
+                : (esPuntoAPunto
+                    ? 'Servicio sin cobro'
+                    : 'Con precio: sale de una vez a los Móviles'),
           ),
-          title: Text(
-              _esCot
-                  ? 'COTIZAR SERVICIO'
-                  : (esPuntoAPunto ? 'PUNTO A PUNTO' : 'SOLICITAR MÓVIL'),
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: _esCot
-                    ? Colors.orange[800]
-                    : (esPuntoAPunto ? Colors.purple : Colors.black),
-              ),
-            ),
           content: SizedBox(
-            width: double.maxFinite,
+            width: kAnchoMaxSE,
             child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (!esPuntoAPunto) const BannerAltaDemanda(),
-                Container(
+                if (_esCot)
+                  const AvisoCotizacionSE()
+                else
+                  Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.all(10),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                     decoration: BoxDecoration(
-                      color: _esCot
-                          ? Colors.orange[50]
-                          : (esPuntoAPunto
-                                ? Colors.purple[50]
-                                : Colors.grey[200]),
-                      borderRadius: BorderRadius.circular(6),
-                      border: _esCot
-                          ? Border.all(color: Colors.orange[300]!)
-                          : (esPuntoAPunto
-                                ? Border.all(color: Colors.purple[200]!)
-                                : null),
+                      color: esPuntoAPunto ? const Color(0xFFF3E5F5) : kCampoSE,
+                      borderRadius: BorderRadius.circular(kRadioCampoSE),
                     ),
                     child: Text(
-                      _esCot
-                          ? 'Central fijará la tarifa para esta ruta.'
-                          : (esPuntoAPunto
-                                ? '🏁 Destino final: ${widget.usuario['nombre']}'
-                                : '📍 Local: ${widget.usuario['nombre']}'),
+                      esPuntoAPunto
+                          ? '🏁 Llega a: ${widget.usuario['nombre']}'
+                          : '📍 Sale de: ${widget.usuario['nombre']}',
                       style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: _esCot
-                            ? Colors.orange[900]
-                            : (esPuntoAPunto
-                                  ? Colors.purple[800]
-                                  : Colors.black54),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: esPuntoAPunto ? const Color(0xFF7B1FA2) : Colors.black87,
                       ),
                     ),
                   ),
@@ -619,8 +226,8 @@ mixin _FormularioMixin on State<LocalScreen> {
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
-                      color: Colors.blue[700],
-                      borderRadius: BorderRadius.circular(6),
+                      color: const Color(0xFF1565C0),
+                      borderRadius: BorderRadius.circular(kRadioCampoSE),
                     ),
                     child: Row(
                       children: [
@@ -644,6 +251,7 @@ mixin _FormularioMixin on State<LocalScreen> {
 
                 // 1. TICKET (no aplica al PAP: es un servicio directo)
                 if (!esPuntoAPunto) ...[
+                  paso('Cliente'),
                   TextField(
                     controller: ticketController,
                     keyboardType: TextInputType.text,
@@ -769,6 +377,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                 ],
 
                 // 3. DESTINO
+                paso(esPuntoAPunto ? '¿Dónde recogen?' : '¿A dónde va?'),
                 TextField(
                   controller: destinoController,
                   decoration: InputDecoration(
@@ -786,7 +395,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                               Icons.list_alt,
                               color: Colors.blue,
                             ),
-                            tooltip: 'Ver mi lista de precios',
+                            tooltip: 'Ver precios de ServiExpress',
                             onPressed: () {
                               showDialog(
                                 context: context,
@@ -795,7 +404,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                                     borderRadius: BorderRadius.circular(12),
                                   ),
                                   title: const Text(
-                                    '📖 MI LISTA DE PRECIOS',
+                                    '📖 PRECIOS DE SERVIEXPRESS',
                                     style: TextStyle(
                                       fontWeight: FontWeight.bold,
                                       fontSize: 15,
@@ -971,7 +580,7 @@ mixin _FormularioMixin on State<LocalScreen> {
                         // --- SUGERENCIAS PROPIAS (con precio, verde) ---
                         if (sugerenciasListaPrecios.isNotEmpty) ...[
                           const Text(
-                            '💡 Mi lista de precios:',
+                            '💡 Precio de ServiExpress:',
                             style: TextStyle(
                               fontSize: 12,
                               color: Colors.black54,
@@ -1061,6 +670,7 @@ mixin _FormularioMixin on State<LocalScreen> {
 
                 // 4. TARIFA Y RELOJ
                 if (!esPuntoAPunto) ...[
+                  paso('Precio y hora'),
                   Row(
                     children: [
                       Expanded(
@@ -1070,8 +680,8 @@ mixin _FormularioMixin on State<LocalScreen> {
                           inputFormatters: [CurrencyInputFormatter()],
                           decoration: InputDecoration(
                             labelText: _esCot
-                                ? 'Tarifa (Central la fijará)'
-                                : 'Tarifa (\$)',
+                                ? 'Precio (vacío = la Central te lo dice)'
+                                : 'Precio (\$)',
                             enabled: true,
                             border: const OutlineInputBorder(),
                             prefixIcon: const Icon(Icons.attach_money),
@@ -1091,8 +701,8 @@ mixin _FormularioMixin on State<LocalScreen> {
                       vertical: 4,
                     ),
                     decoration: BoxDecoration(
-                      border: Border.all(color: Colors.grey),
-                      borderRadius: BorderRadius.circular(4),
+                      color: kCampoSE,
+                      borderRadius: BorderRadius.circular(kRadioCampoSE),
                     ),
                     child: DropdownButtonHideUnderline(
                       child: DropdownButton<String>(
@@ -1203,13 +813,14 @@ mixin _FormularioMixin on State<LocalScreen> {
                 ],
 
                 // 5. NOTAS
+                paso('Detalles'),
                 TextField(
                   controller: notasController,
                   maxLines: 2,
                   decoration: InputDecoration(
                     labelText: esPuntoAPunto
                         ? '¿Qué van a traer? (Detalles)'
-                        : 'Notas de la orden',
+                        : 'Notas para el Móvil (opcional)',
                     border: const OutlineInputBorder(),
                     prefixIcon: const Icon(Icons.notes),
                   ),
@@ -1222,19 +833,17 @@ mixin _FormularioMixin on State<LocalScreen> {
             TextButton(
               onPressed: procesando ? null : () => Navigator.pop(context),
               child: const Text(
-                'CANCELAR',
-                style: TextStyle(color: Colors.red),
+                'Cancelar',
+                style: TextStyle(color: Color(0xFFC62828)),
               ),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: _esCot
-                    ? Colors.orange[800]
-                    : (esPuntoAPunto ? Colors.purple[800] : const Color(0xff3AF500)),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 12,
-                ),
+                backgroundColor: colorForm,
+                foregroundColor: sobreColorSE(colorForm),
+                minimumSize: const Size(160, 54),
+                padding: const EdgeInsets.symmetric(horizontal: 22),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
               ),
               onPressed: procesando
                   ? null
@@ -1251,35 +860,8 @@ mixin _FormularioMixin on State<LocalScreen> {
                         return;
                       }
 
-                      // ---> COTIZACIÓN PREVIA OBLIGATORIA <---
-                      // Si hay lista de precios y el local intenta enviar en modo
-                      // solicitar directo, el destino DEBE tener precio guardado.
-                      if (!_esCot && !esPuntoAPunto && !_esMototaxi &&
-                          listaPrecios.isNotEmpty) {
-                        final String destinoEscrito =
-                            destinoController.text.trim().toUpperCase();
-                        final bool tienePrecios = listaPrecios.any((item) {
-                          final s = (item['sectores'] as Map?)
-                              ?.cast<String, dynamic>();
-                          if (s == null) return false;
-                          final barrio =
-                              '${s['nombre']} (${s['municipio']})'.toUpperCase();
-                          return destinoEscrito.startsWith(barrio) ||
-                              barrio == destinoEscrito;
-                        });
-                        if (!tienePrecios) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                '⚠️ Este destino no tiene tarifa guardada. Cotiza primero con Central (deja la tarifa vacía).',
-                              ),
-                              backgroundColor: Colors.orange,
-                              duration: Duration(seconds: 4),
-                            ),
-                          );
-                          return;
-                        }
-                      }
+                      // (Sin bloqueo por lista de precios: el local puede poner
+                      // el precio que acordó con el cliente, ej. por WhatsApp.)
 
                       // ---> REGLA DE DISCIPLINA: FILTRO ANTICIEGOS (NOMENCLATURA) <---
                       String destinoFinal = destinoController.text
@@ -1833,205 +1415,9 @@ mixin _FormularioMixin on State<LocalScreen> {
                           }
                         }
 
-                        // ---> CIERRE Y APERTURA DE POPUP PARA GUARDAR NUEVOS PRECIOS <---
+                        // Cierra el formulario (los locales no manejan lista de precios)
                         if (context.mounted) {
                           Navigator.pop(context);
-
-                          String destinoMayus = destinoNuevo.toUpperCase();
-                          String barrioExtraido = destinoMayus.contains('-')
-                              ? destinoMayus.split('-')[0].trim()
-                              : destinoMayus;
-
-                          bool yaEstaGuardado = listaPrecios.any((item) {
-                            final s = (item['sectores'] as Map?)?.cast<String, dynamic>();
-                            if (s == null) return false;
-                            final clave = '${s['nombre']} (${s['municipio']})'.toUpperCase();
-                            return barrioExtraido == clave ||
-                                (destinoMayus.startsWith(clave) &&
-                                    (item['tarifa'] as num).toDouble() ==
-                                        tarifaNueva);
-                          });
-
-                          if (!esPuntoAPunto &&
-                              !_esCot &&
-                              !yaEstaGuardado) {
-                            final barrioCtrl = TextEditingController(
-                              text: barrioExtraido,
-                            );
-                            String zonaSeleccionada = 'CÚCUTA';
-                            bool guardandoLista = false;
-
-                            showDialog(
-                              context: context,
-                              builder: (ctxSave) => StatefulBuilder(
-                                builder: (ctxSave, setSaveState) => AlertDialog(
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  title: const Text(
-                                    '💾 ¿GUARDAR EN TU LISTA?',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 16,
-                                    ),
-                                  ),
-                                  content: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        'Tarifa cobrada: ${tarifaController.text}',
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.blue,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 12),
-                                      TextField(
-                                        controller: barrioCtrl,
-                                        textCapitalization:
-                                            TextCapitalization.characters,
-                                        decoration: const InputDecoration(
-                                          labelText:
-                                              'Barrio / Lugar (Ej: COCONUCO)',
-                                          border: OutlineInputBorder(),
-                                          isDense: true,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 12),
-                                      const Text(
-                                        '¿A qué municipio pertenece?',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                      Wrap(
-                                        spacing: 6,
-                                        runSpacing: 0,
-                                        children:
-                                            [
-                                              'CÚCUTA',
-                                              'LOS PATIOS',
-                                              'V. ROSARIO',
-                                            ].map((z) {
-                                              return ChoiceChip(
-                                                label: Text(
-                                                  z,
-                                                  style: const TextStyle(
-                                                    fontSize: 10,
-                                                    fontWeight: FontWeight.bold,
-                                                  ),
-                                                ),
-                                                selected: zonaSeleccionada == z,
-                                                selectedColor: Colors.blue[100],
-                                                onSelected: (bool selected) {
-                                                  if (selected)
-                                                    setSaveState(
-                                                      () =>
-                                                          zonaSeleccionada = z,
-                                                    );
-                                                },
-                                              );
-                                            }).toList(),
-                                      ),
-                                    ],
-                                  ),
-                                  actions: [
-                                    TextButton(
-                                      onPressed: () => Navigator.pop(ctxSave),
-                                      child: const Text(
-                                        'NO GUARDAR',
-                                        style: TextStyle(color: Colors.grey),
-                                      ),
-                                    ),
-                                    ElevatedButton(
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.black,
-                                      ),
-                                      onPressed: guardandoLista
-                                          ? null
-                                          : () async {
-                                              if (barrioCtrl.text
-                                                  .trim()
-                                                  .isEmpty)
-                                                return;
-                                              setSaveState(
-                                                () => guardandoLista = true,
-                                              );
-                                              try {
-                                                final munNorm = zonaSeleccionada == 'CÚCUTA'
-                                                    ? 'Cúcuta'
-                                                    : zonaSeleccionada == 'LOS PATIOS'
-                                                        ? 'Los Patios'
-                                                        : 'V. Rosario';
-                                                final sectorId = await _buscarOCrearSector(
-                                                  barrioCtrl.text.trim().toUpperCase(),
-                                                  munNorm,
-                                                );
-                                                await _guardarEnRedSE(
-                                                  nombre: barrioCtrl.text.trim().toUpperCase(),
-                                                  municipio: munNorm,
-                                                  sectorId: sectorId,
-                                                  precio: tarifaNueva.toInt(),
-                                                  telefono: telefonoController.text,
-                                                );
-
-                                                if (ctxSave.mounted) {
-                                                  Navigator.pop(ctxSave);
-                                                  ScaffoldMessenger.of(
-                                                    context,
-                                                  ).showSnackBar(
-                                                    const SnackBar(
-                                                      content: Text(
-                                                        '✅ Dirección guardada en tu Red de Direcciones.',
-                                                      ),
-                                                      backgroundColor:
-                                                          Colors.green,
-                                                    ),
-                                                  );
-                                                }
-                                              } catch (e) {
-                                                setSaveState(
-                                                  () => guardandoLista = false,
-                                                );
-                                                if (ctxSave.mounted)
-                                                  ScaffoldMessenger.of(
-                                                    context,
-                                                  ).showSnackBar(
-                                                    SnackBar(
-                                                      content: Text(
-                                                        'Error BD: $e',
-                                                      ),
-                                                      backgroundColor:
-                                                          Colors.red,
-                                                    ),
-                                                  );
-                                              }
-                                            },
-                                      child: guardandoLista
-                                          ? const SizedBox(
-                                              width: 16,
-                                              height: 16,
-                                              child: CircularProgressIndicator(
-                                                color: Color(0xff3AF500),
-                                                strokeWidth: 2,
-                                              ),
-                                            )
-                                          : const Text(
-                                              'GUARDAR DIRECCIÓN',
-                                              style: TextStyle(
-                                                color: Color(0xff3AF500),
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            );
-                          }
                         }
                       } catch (e) {
                         setDialogState(() => procesando = false);
@@ -2046,20 +1432,23 @@ mixin _FormularioMixin on State<LocalScreen> {
                       width: 20,
                       height: 20,
                       child: CircularProgressIndicator(
-                        color: Colors.white,
+                        color: sobreColorSE(colorForm),
                         strokeWidth: 2,
                       ),
                     )
                   : Text(
-                      _esCot ? 'ENVIAR A CENTRAL' : 'ENVIAR PEDIDO',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
+                      _esCot
+                          ? 'Pedir precio'
+                          : (esPuntoAPunto ? 'Enviar Punto a Punto' : 'Pedir Móvil'),
+                      style: TextStyle(
+                        color: sobreColorSE(colorForm),
+                        fontWeight: FontWeight.w800,
+                        fontSize: 16,
                       ),
                     ),
             ),
           ],
-        );
+        ));
       },
       ),
     );

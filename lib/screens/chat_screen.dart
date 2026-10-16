@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:serviexpress_app/utils/onesignal_api.dart';
 import 'package:serviexpress_app/utils/sonido_manager.dart';
+import 'package:serviexpress_app/utils/hora12.dart'; // Hora en formato 12 h (am/pm)
 
 // ============================================================
 // CHATBOT FAQ — Nivel 1 (botones) + Nivel 2 (palabras clave)
@@ -955,7 +956,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (isoStr == null) return '';
     try {
       final dt = DateTime.parse(isoStr).toLocal();
-      return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+      return hora12(dt);
     } catch (_) {
       return '';
     }

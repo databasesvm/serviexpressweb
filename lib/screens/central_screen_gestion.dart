@@ -1752,7 +1752,7 @@ extension CentralScreenGestion on _CentralScreenState {
                         String fechaTexto = '';
                         try {
                           final f = DateTime.parse(s['created_at']).toLocal();
-                          fechaTexto = DateFormat('dd/MM/yyyy · hh:mm a').format(f);
+                          fechaTexto = fechaHora12(f, conAnio: true);
                         } catch (_) {}
                         return Card(
                           margin: const EdgeInsets.only(bottom: 8),
@@ -2563,7 +2563,7 @@ class _PanelGestorParaderosState extends State<_PanelGestorParaderos>
       children: [
         _bannerInfo(
           '⚡ Punto a Punto — activa 1 servicio gratuito/día por local seleccionado. '
-          'El móvil que lo complete recibe: 🎟️ Prioridad en paradero · +2 pts semana · +0.2 calificación.',
+          'El móvil que lo complete recibe: 🎟️ 2 turnos de prioridad en paradero · +2 pts semana.',
         ),
         const SizedBox(height: 12),
         if (locales.isEmpty)

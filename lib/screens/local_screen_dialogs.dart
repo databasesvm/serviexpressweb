@@ -79,7 +79,7 @@ mixin _DialogsMixin on State<LocalScreen> {
                 ),
               ),
               const Text(
-                'HISTORIAL COMPLETO',
+                'Historial de todos mis pedidos',
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
               ),
               const SizedBox(height: 10),
@@ -123,7 +123,7 @@ mixin _DialogsMixin on State<LocalScreen> {
                               context: context,
                               builder: (ctx) => AlertDialog(
                                 title: const Text(
-                                  '⚠️ ELIMINAR REGISTRO',
+                                  '¿Borrar este pedido del historial?',
                                   style: TextStyle(
                                     color: Colors.red,
                                     fontWeight: FontWeight.bold,
@@ -146,7 +146,7 @@ mixin _DialogsMixin on State<LocalScreen> {
                                     ),
                                     onPressed: () => Navigator.pop(ctx, true),
                                     child: Text(
-                                      'SÍ, BORRAR',
+                                      'Sí, borrar',
                                       style: TextStyle(
                                         color: Colors.white,
                                         fontWeight: FontWeight.bold,
@@ -294,11 +294,11 @@ mixin _DialogsMixin on State<LocalScreen> {
                 ),
               ),
               const Text(
-                '👥 DIRECTORIO DE CLIENTES (CRM)',
+                'Mis clientes',
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
               ),
               const Text(
-                'Fidelización y volumen de envíos por WhatsApp',
+                'Quién te compra y cuántos pedidos ha hecho',
                 style: TextStyle(fontSize: 12, color: Colors.white54),
               ),
 
@@ -784,7 +784,7 @@ mixin _DialogsMixin on State<LocalScreen> {
               const SizedBox(height: 12),
 
               const Text(
-                'HISTORIAL DE DIRECCIONES:',
+                'Direcciones de este cliente',
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.bold,
@@ -846,7 +846,7 @@ mixin _DialogsMixin on State<LocalScreen> {
                         ),
                         icon: const Icon(Icons.motorcycle, size: 16),
                         label: const Text(
-                          'NUEVO PEDIDO',
+                          'Nuevo pedido para este cliente',
                           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
                         ),
                         onPressed: () {
@@ -1012,7 +1012,7 @@ mixin _DialogsMixin on State<LocalScreen> {
         contentPadding: EdgeInsets.zero,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         title: const Text(
-          'UBICA TU LOCAL',
+          'Ubica tu local',
           textAlign: TextAlign.center,
           style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
         ),
@@ -1081,7 +1081,7 @@ mixin _DialogsMixin on State<LocalScreen> {
                   },
                   icon: const Icon(Icons.save, color: Color(0xff3AF500)),
                   label: const Text(
-                    'GUARDAR AQUÍ',
+                    'Guardar aquí',
                     style: TextStyle(
                       color: Color(0xff3AF500),
                       fontWeight: FontWeight.bold,
@@ -1209,7 +1209,7 @@ mixin _DialogsMixin on State<LocalScreen> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx2, setDlg) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Text('Config. Domicilios',
+          title: const Text('Configurar domicilios',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           content: SingleChildScrollView(
             child: Column(
@@ -1280,14 +1280,14 @@ mixin _DialogsMixin on State<LocalScreen> {
                       icon: const Icon(Icons.access_time, size: 14),
                       label: Text(
                         apertura != null
-                            ? '${apertura!.hour.toString().padLeft(2, "0")}:${apertura!.minute.toString().padLeft(2, "0")}'
+                            ? horaDia12(apertura!)
                             : 'Apertura',
                         style: const TextStyle(fontSize: 12),
                       ),
                       onPressed: () async {
-                        final t = await showTimePicker(
-                            context: ctx2,
-                            initialTime: apertura ?? const TimeOfDay(hour: 8, minute: 0));
+                        final t = await elegirHora12(
+                            ctx2, apertura ?? const TimeOfDay(hour: 8, minute: 0),
+                            titulo: '¿A qué hora abres?');
                         if (t != null) setDlg(() => apertura = t);
                       },
                     ),
@@ -1298,14 +1298,14 @@ mixin _DialogsMixin on State<LocalScreen> {
                       icon: const Icon(Icons.access_time, size: 14),
                       label: Text(
                         cierre != null
-                            ? '${cierre!.hour.toString().padLeft(2, "0")}:${cierre!.minute.toString().padLeft(2, "0")}'
+                            ? horaDia12(cierre!)
                             : 'Cierre',
                         style: const TextStyle(fontSize: 12),
                       ),
                       onPressed: () async {
-                        final t = await showTimePicker(
-                            context: ctx2,
-                            initialTime: cierre ?? const TimeOfDay(hour: 22, minute: 0));
+                        final t = await elegirHora12(
+                            ctx2, cierre ?? const TimeOfDay(hour: 22, minute: 0),
+                            titulo: '¿A qué hora cierras?');
                         if (t != null) setDlg(() => cierre = t);
                       },
                     ),
@@ -1405,7 +1405,7 @@ mixin _DialogsMixin on State<LocalScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text(
-          '📍 UBICACIÓN DEL LOCAL',
+          'Ubicación del local',
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
         content: const Text(
@@ -1519,7 +1519,7 @@ mixin _DialogsMixin on State<LocalScreen> {
               const SizedBox(width: 8),
               const Expanded(
                 child: Text(
-                  'RECARGO ACTIVO',
+                  'Hay un recargo activo',
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                 ),
               ),
@@ -1575,7 +1575,7 @@ mixin _DialogsMixin on State<LocalScreen> {
             TextButton(
               onPressed: () => Navigator.pop(ctxRecargo, false),
               child: Text(
-                'CANCELAR DESPACHO',
+                'No enviar',
                 style: TextStyle(
                   color: Colors.grey[700],
                   fontWeight: FontWeight.bold,
@@ -1629,7 +1629,7 @@ mixin _DialogsMixin on State<LocalScreen> {
           side: const BorderSide(color: Colors.red, width: 2),
         ),
         title: const Text(
-          '⚠️ ELIMINAR CUENTA',
+          '¿Eliminar tu cuenta?',
           style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
         ),
         content: const Text(
@@ -1644,7 +1644,7 @@ mixin _DialogsMixin on State<LocalScreen> {
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red[900]),
             onPressed: () => Navigator.pop(ctx, true),
             child: Text(
-              'SÍ, ELIMINAR',
+              'Sí, eliminar',
               style: TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,

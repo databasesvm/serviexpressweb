@@ -11,6 +11,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import '../utils/web_downloader.dart';
+import 'package:serviexpress_app/utils/hora12.dart'; // Hora en formato 12 h (am/pm)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FnFacturacionScreen
@@ -249,10 +250,7 @@ class _FnFacturacionScreenState extends State<FnFacturacionScreen> {
         return '${dt.day.toString().padLeft(2, '0')}/'
             '${dt.month.toString().padLeft(2, '0')}/${dt.year}';
       }
-      return '${dt.day.toString().padLeft(2, '0')}/'
-          '${dt.month.toString().padLeft(2, '0')}/${dt.year} '
-          '${dt.hour.toString().padLeft(2, '0')}:'
-          '${dt.minute.toString().padLeft(2, '0')}';
+      return fechaHora12(dt, conAnio: true);
     } catch (_) {
       return raw;
     }

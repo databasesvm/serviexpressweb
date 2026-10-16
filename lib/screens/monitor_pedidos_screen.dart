@@ -6,6 +6,7 @@ import 'package:serviexpress_app/utils/onesignal_api.dart';
 import 'package:serviexpress_app/utils/sonido_manager.dart';
 import 'package:serviexpress_app/utils/deeplink_service.dart';
 import 'package:serviexpress_app/screens/pedidos_cliente_screen.dart';
+import 'package:serviexpress_app/utils/hora12.dart'; // Hora en formato 12 h (am/pm)
 
 // ============================================================
 // MONITOR DE PEDIDOS — PANTALLA CENTRAL
@@ -463,7 +464,7 @@ class _MonitorPedidosScreenState extends State<MonitorPedidosScreen>
     final total = (p['total'] as num?)?.toInt() ?? 0;
     final fecha = DateTime.tryParse(p['created_at']?.toString() ?? '')?.toLocal();
     final horaStr = fecha != null
-        ? '${fecha.hour.toString().padLeft(2, '0')}:${fecha.minute.toString().padLeft(2, '0')}'
+        ? hora12(fecha)
         : '—';
     // Minutos desde creación
     final mins = fecha != null ? DateTime.now().difference(fecha).inMinutes : 0;
@@ -1021,7 +1022,7 @@ class _MonitorPedidosScreenState extends State<MonitorPedidosScreen>
                             ),
                             subtitle: Text(
                               fecha != null
-                                  ? '${fecha.day}/${fecha.month}/${fecha.year} ${fecha.hour}:${fecha.minute.toString().padLeft(2, '0')}'
+                                  ? fechaHora12(fecha, conAnio: true)
                                   : '',
                               style: const TextStyle(fontSize: 11),
                             ),

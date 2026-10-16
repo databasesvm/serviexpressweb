@@ -146,7 +146,7 @@ extension CentralScreenReportesParadero on _CentralScreenState {
     final sigueEnFila = reportado['paradero_actual']?.toString() == paradero;
     final t = DateTime.tryParse(r['created_at']?.toString() ?? '')?.toLocal();
     final hora = t != null
-        ? '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}'
+        ? hora12(t)
         : '';
 
     final String detalle = retirado

@@ -107,11 +107,7 @@ class _PanelReportesBottomSheetState
     if (raw == null) return '—';
     try {
       final dt = DateTime.parse(raw).toLocal();
-      final h = dt.hour.toString().padLeft(2, '0');
-      final m = dt.minute.toString().padLeft(2, '0');
-      final d = dt.day.toString().padLeft(2, '0');
-      final mo = dt.month.toString().padLeft(2, '0');
-      return '$d/$mo $h:$m';
+      return fechaHora12(dt);
     } catch (_) {
       return '—';
     }
@@ -549,11 +545,7 @@ class _PanelReportesScreenState extends State<_PanelReportesScreen>
     if (raw == null) return '—';
     try {
       final dt = DateTime.parse(raw).toLocal();
-      final h = dt.hour.toString().padLeft(2, '0');
-      final m = dt.minute.toString().padLeft(2, '0');
-      final d = dt.day.toString().padLeft(2, '0');
-      final mo = dt.month.toString().padLeft(2, '0');
-      return '$d/$mo $h:$m';
+      return fechaHora12(dt);
     } catch (_) { return '—'; }
   }
 

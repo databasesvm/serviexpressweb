@@ -20,6 +20,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:serviexpress_app/screens/login_screen.dart';
+import 'package:serviexpress_app/screens/cliente_screen.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/gestures.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -41,7 +43,10 @@ const String _kUrlPrivacidad =
     'https://databasesvm.github.io/serviexpressweb/privacidad.html';
 
 class RegistroScreen extends StatefulWidget {
-  const RegistroScreen({super.key});
+  /// true: viene de la web/pantalla de invitado → registro directo como
+  /// CLIENTE (sin el paso de elegir rol) y al terminar entra a su cuenta.
+  final bool soloCliente;
+  const RegistroScreen({super.key, this.soloCliente = false});
 
   @override
   State<RegistroScreen> createState() => _RegistroScreenState();
@@ -94,7 +99,9 @@ class _RegistroScreenState extends State<RegistroScreen> {
   // Suscripción:    0=Rol, 1=Plan, 2=Datos, 3=Selfie, 4=Cuenta, 5=Confirmar (6 pasos)
   // Prediario/Post: 0=Rol, 1=Plan, 2=Datos, 3=Docs,   4=Cuenta, 5=Confirmar (6 pasos)
   // Otros:          0=Rol,         1=Datos, 2=Cuenta,            3=Confirmar (4 pasos)
-  int _pasoActual = 0;
+  late int _pasoActual = widget.soloCliente ? 1 : 0;
+  // Paso donde empieza (cliente directo se salta "Tu rol")
+  int get _pasoInicial => widget.soloCliente ? 1 : 0;
   bool get _esPrePost =>
       _rolSeleccionado == 'movil' && _tipoMovil != null && _tipoMovil != 'suscripcion';
   int get _totalPasos {
@@ -282,7 +289,7 @@ class _RegistroScreenState extends State<RegistroScreen> {
   }
 
   void _retrocederPaso() {
-    if (_pasoActual == 0) {
+    if (_pasoActual == _pasoInicial) {
       Navigator.pop(context);
     } else {
       if (_rolSeleccionado == 'movil' && _pasoActual == 1) {
@@ -589,7 +596,17 @@ class _RegistroScreenState extends State<RegistroScreen> {
               backgroundColor: Colors.green,
             ),
           );
-          Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+          // Entra DIRECTO a su cuenta (sin pasar por el login). Antes iba a
+          // '/', que en la web de invitados es la pantalla de invitado.
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(
+              builder: (_) => _rolSeleccionado == 'cliente'
+                  ? ClienteScreen(usuario: filaInsertada)
+                  : const LoginScreen(),
+            ),
+            (route) => false,
+          );
         } else {
           // Notificar a Central que hay un usuario pendiente de activación
           try {
@@ -822,14 +839,15 @@ class _RegistroScreenState extends State<RegistroScreen> {
                 ),
               ),
               Text(
-                'Paso ${_pasoActual + 1} de $_totalPasos',
+                'Paso ${_pasoActual + 1 - _pasoInicial} de ${_totalPasos - _pasoInicial}',
                 style: const TextStyle(color: Colors.white54, fontSize: 12),
               ),
             ],
           ),
           const SizedBox(height: 10),
           Row(
-            children: List.generate(_totalPasos, (i) {
+            children: List.generate(_totalPasos - _pasoInicial, (j) {
+              final i = j + _pasoInicial;
               final activo = i <= _pasoActual;
               return Expanded(
                 child: Container(
@@ -872,7 +890,7 @@ class _RegistroScreenState extends State<RegistroScreen> {
                 side: const BorderSide(color: Colors.black26),
               ),
               child: Text(
-                _pasoActual == 0 ? 'CANCELAR' : 'ATRÁS',
+                _pasoActual == _pasoInicial ? 'CANCELAR' : 'ATRÁS',
                 style: const TextStyle(
                     color: Colors.black54, fontWeight: FontWeight.bold),
               ),

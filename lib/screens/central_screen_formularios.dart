@@ -4,18 +4,20 @@ part of 'central_screen.dart';
 extension CentralScreenFormularios on _CentralScreenState {
 
   // ── PUNTO A PUNTO creado por la central ──────────────────────────────────
-  // A un LOCAL: sale del paradero del local y va al local (cuenta como el PAP
-  // del día de ese local). A una DIRECCIÓN LIBRE: sale del paradero que elija
-  // la central. El servidor (fn_pap_preparar) arma origen/destino, tarifa 0 y
+  // A un LOCAL: va al local (cuenta como el PAP del día de ese local); sale
+  // del paradero más cercano al local (la central lo puede cambiar). A una
+  // DIRECCIÓN LIBRE: sale del paradero que elija la central. Se puede asignar
+  // directo a un móvil o programar a una hora. El servidor (fn_pap_preparar) arma origen/destino, tarifa 0 y
   // arranca la cascada normal; el móvil solo sabe que es PAP al aceptarlo.
   // Al finalizarlo gana 2 turnos de prioridad + 2 puntos de la semana.
   Future<void> _abrirFormularioPAP(BuildContext context) async {
     List<Map<String, dynamic>> locales = [];
-    List<String> paraderos = [];
+    List<Map<String, dynamic>> paraderos = [];
+    List<Map<String, dynamic>> movilesConectados = [];
     try {
       final r1 = await Supabase.instance.client
           .from('usuarios')
-          .select('id, nombre, paradero_exclusivo, ultimo_punto_a_punto')
+          .select('id, nombre, paradero_exclusivo, ultimo_punto_a_punto, lat_fija, lng_fija')
           .eq('rol', 'local')
           .eq('activo', true)
           .not('eliminado', 'is', true)
@@ -23,12 +25,23 @@ extension CentralScreenFormularios on _CentralScreenState {
       locales = List<Map<String, dynamic>>.from(r1);
       final r2 = await Supabase.instance.client
           .from('paraderos')
-          .select('nombre')
+          .select('nombre, latitud, longitud, emoji, color_hex')
           .eq('activo', true)
           .order('orden', ascending: true);
-      paraderos = List<Map<String, dynamic>>.from(r2)
-          .map((p) => p['nombre'].toString().toUpperCase())
-          .toList();
+      paraderos = List<Map<String, dynamic>>.from(r2);
+      final r3 = await Supabase.instance.client
+          .from('usuarios')
+          .select('id, nombre, usuario, rango_movil')
+          .eq('rol', 'movil')
+          .eq('en_linea', true)
+          .eq('tiene_se', true)
+          .order('usuario', ascending: true);
+      movilesConectados = List<Map<String, dynamic>>.from(r3)
+        ..sort((a, b) {
+          final na = int.tryParse(RegExp(r'\d+').firstMatch(a['usuario']?.toString() ?? '')?.group(0) ?? '') ?? 9999;
+          final nb = int.tryParse(RegExp(r'\d+').firstMatch(b['usuario']?.toString() ?? '')?.group(0) ?? '') ?? 9999;
+          return na.compareTo(nb);
+        });
     } catch (_) {}
     if (!context.mounted) return;
 
@@ -37,13 +50,54 @@ extension CentralScreenFormularios on _CentralScreenState {
         '${hoy.year}-${hoy.month.toString().padLeft(2, '0')}-${hoy.day.toString().padLeft(2, '0')}';
     bool usadoHoy(Map<String, dynamic> l) =>
         (l['ultimo_punto_a_punto']?.toString() ?? '').startsWith(hoyStr);
+    String nombrePar(Map<String, dynamic> p) => p['nombre'].toString().toUpperCase();
+
+    // Paradero predeterminado para un local: el MÁS CERCANO a sus coordenadas;
+    // sin coordenadas, el primero que tenga configurado; si no, ninguno.
+    String? paraderoDeLocal(Map<String, dynamic> l) {
+      final lat = (l['lat_fija'] as num?)?.toDouble();
+      final lng = (l['lng_fija'] as num?)?.toDouble();
+      if (lat != null && lng != null) {
+        String? mejor;
+        double mejorD = double.infinity;
+        for (final p in paraderos) {
+          final pl = (p['latitud'] as num?)?.toDouble();
+          final pg = (p['longitud'] as num?)?.toDouble();
+          if (pl == null || pg == null) continue;
+          final d = (pl - lat) * (pl - lat) + (pg - lng) * (pg - lng);
+          if (d < mejorD) {
+            mejorD = d;
+            mejor = nombrePar(p);
+          }
+        }
+        if (mejor != null) return mejor;
+      }
+      final propios = (l['paradero_exclusivo']?.toString() ?? '')
+          .split(',')
+          .map((s) => s.trim().toUpperCase())
+          .where((s) => s.isNotEmpty);
+      for (final n in propios) {
+        if (paraderos.any((p) => nombrePar(p) == n)) return n;
+      }
+      return null;
+    }
 
     bool aLocal = true;
     int? localId;
-    String? paradero = paraderos.isNotEmpty ? paraderos.first : null;
+    String? paradero = paraderos.isNotEmpty ? nombrePar(paraderos.first) : null;
+    bool paraderoAuto = true; // se elige solo hasta que la central lo cambie
+    String? movilDirectoId;
+    String? movilDirectoNombre;
+    DateTime? horaProgramada;
     final destinoCtrl = TextEditingController();
     final notaCtrl = TextEditingController();
     bool procesando = false;
+
+    Widget titulo(String t) => Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Text(t,
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.black54)),
+        );
 
     showDialog(
       context: context,
@@ -54,7 +108,7 @@ extension CentralScreenFormularios on _CentralScreenState {
           title: const Text('🎁 PUNTO A PUNTO',
               style: TextStyle(fontWeight: FontWeight.bold, color: Colors.purple)),
           content: SizedBox(
-            width: 420,
+            width: 440,
             child: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -101,12 +155,20 @@ extension CentralScreenFormularios on _CentralScreenState {
                           ),
                         );
                       }).toList(),
-                      onChanged: (v) => setD(() => localId = v),
+                      onChanged: (v) => setD(() {
+                        localId = v;
+                        // Paradero más cercano al local (si la central no lo cambió)
+                        if (paraderoAuto && v != null) {
+                          final l = locales.firstWhere((x) => (x['id'] as num).toInt() == v,
+                              orElse: () => <String, dynamic>{});
+                          final p = l.isEmpty ? null : paraderoDeLocal(l);
+                          if (p != null) paradero = p;
+                        }
+                      }),
                     ),
                     const SizedBox(height: 6),
                     const Text(
-                      'Sale del paradero del local y va al local. Cuenta como el '
-                      'PAP del día de ese local.',
+                      'Va al local. Cuenta como el PAP del día de ese local.',
                       style: TextStyle(fontSize: 11, color: Colors.black54),
                     ),
                   ] else ...[
@@ -120,22 +182,115 @@ extension CentralScreenFormularios on _CentralScreenState {
                         prefixIcon: Icon(Icons.flag, size: 18),
                       ),
                     ),
-                    const SizedBox(height: 10),
-                    DropdownButtonFormField<String>(
-                      isExpanded: true,
-                      value: paradero,
-                      decoration: const InputDecoration(
-                        labelText: 'Sale del paradero',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                      items: paraderos
-                          .map((p) => DropdownMenuItem(value: p, child: Text(p)))
-                          .toList(),
-                      onChanged: (v) => setD(() => paradero = v),
-                    ),
                   ],
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 14),
+                  // PARADERO DE ORIGEN (para los dos casos)
+                  titulo(aLocal
+                      ? 'SALE DEL PARADERO (el más cercano al local, puedes cambiarlo)'
+                      : 'SALE DEL PARADERO'),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: paraderos.map((pd) {
+                      final nombre = nombrePar(pd);
+                      final emoji = pd['emoji'] as String? ?? '📍';
+                      final color = _hexColor(pd['color_hex'] as String? ?? '#1565C0');
+                      final bool sel = paradero == nombre;
+                      return ChoiceChip(
+                        label: Text('$emoji $nombre',
+                            style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: sel ? Colors.white : color)),
+                        selected: sel,
+                        selectedColor: color,
+                        backgroundColor: color.withValues(alpha: 0.08),
+                        side: BorderSide(color: color.withValues(alpha: 0.4), width: 1),
+                        onSelected: (_) => setD(() {
+                          paradero = nombre;
+                          paraderoAuto = false;
+                        }),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 14),
+                  // ASIGNAR DIRECTAMENTE (opcional)
+                  titulo('ASIGNAR DIRECTAMENTE A (opcional)'),
+                  DropdownButtonFormField<String?>(
+                    value: movilDirectoId,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                      prefixIcon: Icon(Icons.person_pin, size: 18),
+                    ),
+                    items: [
+                      const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('Nadie — sale a la cascada', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                      ),
+                      ...movilesConectados.map((m) => DropdownMenuItem<String?>(
+                            value: m['id'].toString(),
+                            child: Text(
+                              '${_formatearNombreCentral(m)} · ${m['rango_movil'] ?? ''}',
+                              style: const TextStyle(fontSize: 12),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          )),
+                    ],
+                    onChanged: (v) => setD(() {
+                      movilDirectoId = v;
+                      movilDirectoNombre = v == null
+                          ? null
+                          : _formatearNombreCentral(movilesConectados.firstWhere(
+                              (m) => m['id'].toString() == v,
+                              orElse: () => <String, dynamic>{}));
+                      if (v != null) horaProgramada = null; // directo sale de una vez
+                    }),
+                  ),
+                  if (movilDirectoId != null)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 4),
+                      child: Text('Le llega solo a ese móvil y queda asignado de una vez.',
+                          style: TextStyle(fontSize: 11, color: Colors.black54)),
+                    ),
+                  const SizedBox(height: 14),
+                  // ¿CUÁNDO? (no aplica a la asignación directa)
+                  if (movilDirectoId == null) ...[
+                    Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      runSpacing: 4,
+                      children: [
+                        const Icon(Icons.schedule, size: 18, color: Colors.black54),
+                        const SizedBox(width: 6),
+                        const Text('¿Cuándo?', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                        const SizedBox(width: 10),
+                        ChoiceChip(
+                          label: const Text('Ahora'),
+                          selected: horaProgramada == null,
+                          onSelected: (_) => setD(() => horaProgramada = null),
+                        ),
+                        const SizedBox(width: 6),
+                        ChoiceChip(
+                          label: Text(horaProgramada == null
+                              ? '📅 Programar'
+                              : '📅 ${textoProgramado(horaProgramada!)}'),
+                          selected: horaProgramada != null,
+                          onSelected: (_) async {
+                            final h = await elegirHoraProgramada(ctx, inicial: horaProgramada);
+                            if (h != null) setD(() => horaProgramada = h);
+                          },
+                        ),
+                      ],
+                    ),
+                    if (horaProgramada != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4, left: 24),
+                        child: Text('Se envía al radar ${textoProgramado(horaProgramada!)}.',
+                            style: TextStyle(fontSize: 11, color: Colors.blue[800])),
+                      ),
+                    const SizedBox(height: 12),
+                  ],
                   TextField(
                     controller: notaCtrl,
                     maxLines: 2,
@@ -170,25 +325,51 @@ extension CentralScreenFormularios on _CentralScreenState {
                             backgroundColor: Colors.red));
                         return;
                       }
+                      final bool esDirecto = movilDirectoId != null;
+                      final bool esProgramado = !esDirecto &&
+                          horaProgramada != null &&
+                          horaProgramada!.isAfter(DateTime.now());
                       setD(() => procesando = true);
                       try {
                         final nota = notaCtrl.text.trim();
-                        await Supabase.instance.client.from('servicios').insert({
+                        final ins = await Supabase.instance.client.from('servicios').insert({
                           'es_punto_a_punto': true,
-                          'estado': 'pendiente',
+                          // Directo: nace asignado (decisión de la central).
+                          // Programado: el servidor lo suelta a su hora.
+                          'estado': esDirecto
+                              ? 'en_ruta_origen'
+                              : (esProgramado ? 'programado' : 'pendiente'),
+                          if (esDirecto) 'movil_id': int.tryParse(movilDirectoId!),
+                          if (esDirecto) 'accepted_at': DateTime.now().toUtc().toIso8601String(),
+                          if (esProgramado)
+                            'liberacion_at': horaProgramada!.toUtc().toIso8601String(),
                           'creador': 'Central',
                           'tipo_servicio': 'PAQUETERÍA',
                           'metodo_pago': 'Efectivo',
                           'archivado': false,
                           if (aLocal) 'local_id': localId,
                           if (!aLocal) 'destino': destinoCtrl.text.trim().toUpperCase(),
-                          if (!aLocal && paradero != null) 'paradero_origen': paradero,
+                          if (paradero != null) 'paradero_origen': paradero,
                           if (nota.isNotEmpty) 'observacion': nota,
-                        });
+                        }).select('origen, destino').single();
+                        if (esDirecto) {
+                          await MotorNotificaciones.dispararServicioDirecto(
+                            idDestino: movilDirectoId!,
+                            titulo: TextosPush.asignadoTitulo,
+                            mensaje: TextosPush.asignadoMensaje(
+                              'La Central',
+                              TextosPush.ruta(ins['origen']?.toString(), ins['destino']?.toString() ?? ''),
+                            ),
+                          );
+                        }
                         if (ctx.mounted) Navigator.pop(ctx);
                         if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                            content: Text('🎁 Punto a Punto creado — ya está en la cascada.'),
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                            content: Text(esDirecto
+                                ? '🎁 Punto a Punto asignado a ${movilDirectoNombre ?? 'el móvil'}.'
+                                : esProgramado
+                                    ? '🎁 Punto a Punto programado: se envía al radar ${textoProgramado(horaProgramada!)}.'
+                                    : '🎁 Punto a Punto creado — ya está en la cascada.'),
                             backgroundColor: Colors.purple,
                           ));
                         }

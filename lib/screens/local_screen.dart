@@ -31,6 +31,7 @@ import 'package:serviexpress_app/utils/programacion.dart'; // Servicios programa
 import 'package:serviexpress_app/utils/ubicacion_desde_enlace.dart'; // Pegar ubicación de WhatsApp/Maps
 import 'package:serviexpress_app/utils/errores_servidor.dart'; // Mensajes del candado de estados
 import 'package:serviexpress_app/utils/tema_serviexpress.dart'; // Diseño oficial (tarjetas)
+import 'package:serviexpress_app/utils/hora12.dart'; // Hora en formato 12 h (am/pm)
 
 part 'local_screen_dispatch.dart';
 part 'local_screen_cards.dart';
@@ -570,7 +571,10 @@ class _LocalScreenState extends State<LocalScreen>
             _perfilCargado = true;
           }
 
-          return Scaffold(
+          // Diseño oficial: ventanas y hojas claras, campos grises, botones 48 px
+          return Theme(
+            data: temaPantallaSE(context),
+            child: Scaffold(
             backgroundColor: const Color(0xFF0D0D0D),
             appBar: AppBar(
               title: Text(
@@ -703,12 +707,20 @@ class _LocalScreenState extends State<LocalScreen>
                 final histCancelados = historial.where((s) => s['estado'] == 'cancelado').length;
 
                 // Helper chip para KPI bar
-                Widget kpiBar(String val, String label, Color color) => Padding(
-                  padding: const EdgeInsets.only(right: 10),
-                  child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    Text(val, style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: color)),
-                    Text(label, style: const TextStyle(fontSize: 9, color: Colors.black45)),
-                  ]),
+                // Diseño oficial: tarjetica blanca con número grande y texto claro
+                Widget kpiBar(String val, String label, Color color) => Expanded(
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 4),
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(kRadioCampoSE),
+                    ),
+                    child: Column(mainAxisSize: MainAxisSize.min, children: [
+                      Text(val, style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: color)),
+                      Text(label, style: const TextStyle(fontSize: 12, color: Colors.black54, fontWeight: FontWeight.w600)),
+                    ]),
+                  ),
                 );
 
                 return TabBarView(
@@ -719,8 +731,8 @@ class _LocalScreenState extends State<LocalScreen>
                         // ── PANEL DE ACCIONES 2×2 ─────────────────────────
                         Container(
                           width: double.infinity,
-                          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-                          color: const Color(0xFF141414),
+                          padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+                          color: const Color(0xFF0D0D0D),
                           child: Column(
                             children: [
                               // Fila 1: NUEVO PEDIDO + PEDIR MÓVIL (rápido, sin formulario)
@@ -729,16 +741,17 @@ class _LocalScreenState extends State<LocalScreen>
                                   flex: 3,
                                   child: ElevatedButton.icon(
                                     style: ElevatedButton.styleFrom(
-                                      backgroundColor: const Color(0xff3AF500),
+                                      backgroundColor: kVerdeSE,
                                       foregroundColor: Colors.black,
-                                      padding: const EdgeInsets.symmetric(vertical: 11),
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                      minimumSize: const Size(0, 54),
+                                      elevation: 0,
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                                     ),
                                     onPressed: () => _abrirFormularioPedido(context,
                                         perfilEnVivo: perfilEnVivo),
-                                    icon: const Icon(Icons.motorcycle, size: 18),
-                                    label: const Text('NUEVO PEDIDO',
-                                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                                    icon: const Icon(Icons.add_circle, size: 22),
+                                    label: const Text('Nuevo pedido',
+                                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
                                   ),
                                 ),
                                 const SizedBox(width: 8),
@@ -746,17 +759,18 @@ class _LocalScreenState extends State<LocalScreen>
                                   flex: 2,
                                   child: ElevatedButton.icon(
                                     style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.orange[800],
-                                      foregroundColor: Colors.white,
-                                      padding: const EdgeInsets.symmetric(vertical: 11),
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                      backgroundColor: Colors.white,
+                                      foregroundColor: Colors.black87,
+                                      minimumSize: const Size(0, 54),
+                                      elevation: 0,
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                                     ),
                                     onPressed: () => _solicitarMovilDirecto(context),
-                                    icon: const Icon(Icons.two_wheeler, size: 18),
+                                    icon: const Icon(Icons.two_wheeler, size: 22, color: kVerdeOscuroSE),
                                     label: const FittedBox(
                                       fit: BoxFit.scaleDown,
-                                      child: Text('PEDIR MÓVIL',
-                                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                                      child: Text('Pedir Móvil ya',
+                                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
                                     ),
                                   ),
                                 ),
@@ -770,11 +784,11 @@ class _LocalScreenState extends State<LocalScreen>
                                     Expanded(
                                       child: ElevatedButton.icon(
                                         style: ElevatedButton.styleFrom(
-                                          backgroundColor: puedeVip ? Colors.purple[800] : Colors.grey[300],
-                                          foregroundColor: puedeVip ? Colors.white : Colors.grey[600],
-                                          padding: const EdgeInsets.symmetric(vertical: 10),
-                                          elevation: puedeVip ? 2 : 0,
-                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                          backgroundColor: puedeVip ? const Color(0xFF7B1FA2) : Colors.grey[300],
+                                          foregroundColor: puedeVip ? Colors.white : Colors.grey[700],
+                                          minimumSize: const Size(0, 50),
+                                          elevation: 0,
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                                         ),
                                         onPressed: puedeVip
                                             ? () => _abrirFormularioPedido(context,
@@ -782,8 +796,8 @@ class _LocalScreenState extends State<LocalScreen>
                                             : null,
                                         icon: const Icon(Icons.flash_on, size: 17),
                                         label: Text(
-                                          puedeVip ? 'PUNTO A PUNTO' : 'P.A.P AGOTADO',
-                                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                                          puedeVip ? 'Punto a Punto' : 'Punto a Punto ya usado hoy',
+                                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
                                         ),
                                       ),
                                     ),
@@ -849,13 +863,13 @@ class _LocalScreenState extends State<LocalScreen>
                             children: [
                               // ── KPI BAR ─────────────────────────────
                               Container(
-                                color: const Color(0xFF141414),
-                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                                color: const Color(0xFF0D0D0D),
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
                                 child: Row(
                                   children: [
-                                    kpiBar('${historial.length}', 'Total hoy', Colors.white70),
-                                    kpiBar('$histFinalizados', 'Entregados', Colors.green[400]!),
-                                    kpiBar('$histCancelados', 'Cancelados', Colors.red[400]!),
+                                    kpiBar('${historial.length}', 'Total hoy', Colors.black87),
+                                    kpiBar('$histFinalizados', 'Entregados', const Color(0xFF2E7D32)),
+                                    kpiBar('$histCancelados', 'Cancelados', const Color(0xFFC62828)),
                                   ],
                                 ),
                               ),
@@ -896,8 +910,8 @@ class _LocalScreenState extends State<LocalScreen>
                             width: double.infinity,
                             padding: const EdgeInsets.all(16),
                             decoration: BoxDecoration(
-                              color: Colors.black,
-                              borderRadius: BorderRadius.circular(14),
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(kRadioTarjetaSE),
                             ),
                             child: Row(
                               children: [
@@ -977,10 +991,10 @@ class _LocalScreenState extends State<LocalScreen>
                                     children: [
                                       Text(
                                         perfilEnVivo['nombre']?.toString() ?? 'Mi Local',
-                                        style: TextStyle(
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 15,
+                                        style: const TextStyle(
+                                          color: Colors.black87,
+                                          fontWeight: FontWeight.w800,
+                                          fontSize: 17,
                                         ),
                                       ),
                                       Row(
@@ -988,8 +1002,9 @@ class _LocalScreenState extends State<LocalScreen>
                                           Text(
                                             '$countFinalizadosHoy servicios hoy',
                                             style: const TextStyle(
-                                              color: Color(0xff3AF500),
-                                              fontSize: 12,
+                                              color: kVerdeOscuroSE,
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w700,
                                             ),
                                           ),
                                           const SizedBox(width: 8),
@@ -1041,16 +1056,16 @@ class _LocalScreenState extends State<LocalScreen>
                             padding: EdgeInsets.only(left: 2, bottom: 8),
                             child: Text('MENÚ Y CARTA',
                                 style: TextStyle(
-                                    fontSize: 11,
+                                    fontSize: 13,
                                     fontWeight: FontWeight.bold,
-                                    letterSpacing: 1.3,
-                                    color: Colors.white38)),
+                                    letterSpacing: 1.0,
+                                    color: Colors.white70)),
                           ),
                           _hubCard(
                             icon: Icons.restaurant_menu,
                             iconColor: Colors.white,
                             iconBg: Colors.green,
-                            title: 'Mi Carta',
+                            title: 'Mi carta',
                             subtitle: 'Productos, categorías y precios',
                             onTap: () => Navigator.push(
                               context,
@@ -1081,16 +1096,16 @@ class _LocalScreenState extends State<LocalScreen>
                             padding: EdgeInsets.only(left: 2, bottom: 8),
                             child: Text('DOMICILIOS SERVIEXPRESS',
                                 style: TextStyle(
-                                    fontSize: 11,
+                                    fontSize: 13,
                                     fontWeight: FontWeight.bold,
-                                    letterSpacing: 1.3,
-                                    color: Colors.white38)),
+                                    letterSpacing: 1.0,
+                                    color: Colors.white70)),
                           ),
                           _hubCard(
                             icon: Icons.delivery_dining,
                             iconColor: Colors.black,
                             iconBg: const Color(0xff3AF500),
-                            title: 'Pedidos Entrantes',
+                            title: 'Pedidos entrantes',
                             subtitle: 'Ver y gestionar pedidos en tiempo real',
                             onTap: () => Navigator.push(
                               context,
@@ -1125,15 +1140,15 @@ class _LocalScreenState extends State<LocalScreen>
                             padding: EdgeInsets.only(left: 2, bottom: 8),
                             child: Text('PERFIL Y CONFIGURACIÓN',
                                 style: TextStyle(
-                                    fontSize: 11,
+                                    fontSize: 13,
                                     fontWeight: FontWeight.bold,
-                                    letterSpacing: 1.3,
-                                    color: Colors.white38)),
+                                    letterSpacing: 1.0,
+                                    color: Colors.white70)),
                           ),
                           Container(
                             decoration: BoxDecoration(
-                              color: const Color(0xFF1C1C1C),
-                              borderRadius: BorderRadius.circular(14),
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(kRadioTarjetaSE),
                               boxShadow: [
                                 BoxShadow(
                                   color: Colors.black.withValues(alpha: 0.3),
@@ -1146,33 +1161,33 @@ class _LocalScreenState extends State<LocalScreen>
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text('Tipo de Servicio por Defecto',
+                                const Text('Tipo de servicio por defecto',
                                     style: TextStyle(
-                                        fontSize: 12,
+                                        fontSize: 13,
                                         fontWeight: FontWeight.bold,
-                                        color: Colors.white54)),
+                                        color: Colors.black54)),
                                 const SizedBox(height: 6),
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 12),
                                   decoration: BoxDecoration(
-                                    border: Border.all(color: Colors.white24),
-                                    borderRadius: BorderRadius.circular(8),
+                                    color: kCampoSE,
+                                    borderRadius: BorderRadius.circular(kRadioCampoSE),
                                   ),
                                   child: DropdownButtonHideUnderline(
                                     child: DropdownButton<String>(
                                       value: _tipoServicioDefecto,
                                       isExpanded: true,
-                                      dropdownColor: const Color(0xFF2A2A2A),
-                                      iconEnabledColor: Colors.white54,
-                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
+                                      dropdownColor: Colors.white,
+                                      iconEnabledColor: Colors.black54,
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black87),
                                       items: ['PAQUETERÍA', 'COMIDA', 'FARMACIA', 'BEBIDAS']
                                           .map((v) => DropdownMenuItem(
                                                 value: v,
                                                 child: Text(v,
                                                     style: const TextStyle(
                                                         fontWeight: FontWeight.bold,
-                                                        fontSize: 13,
-                                                        color: Colors.white)),
+                                                        fontSize: 15,
+                                                        color: Colors.black87)),
                                               ))
                                           .toList(),
                                       onChanged: (v) {
@@ -1185,51 +1200,33 @@ class _LocalScreenState extends State<LocalScreen>
                                 TextField(
                                   controller: _telLocalController,
                                   keyboardType: TextInputType.phone,
-                                  style: const TextStyle(color: Colors.white),
-                                  decoration: InputDecoration(
-                                    labelText: 'WhatsApp del Local',
-                                    labelStyle: const TextStyle(color: Colors.white54),
-                                    border: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(8)),
-                                    enabledBorder: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(8),
-                                        borderSide: const BorderSide(color: Colors.white24)),
-                                    focusedBorder: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(8),
-                                        borderSide: const BorderSide(color: Color(0xff3AF500))),
-                                    prefixIcon: const Icon(Icons.phone, color: Colors.white54),
+                                  style: const TextStyle(color: Colors.black87, fontSize: 16),
+                                  decoration: const InputDecoration(
+                                    labelText: 'WhatsApp del local',
+                                    prefixIcon: Icon(Icons.phone, color: Colors.black54),
                                   ),
                                 ),
                                 const SizedBox(height: 12),
                                 TextField(
                                   controller: _instruccionesController,
                                   maxLines: 2,
-                                  style: const TextStyle(color: Colors.white),
-                                  decoration: InputDecoration(
-                                    labelText: 'Instrucciones de Recogida',
-                                    labelStyle: const TextStyle(color: Colors.white54),
-                                    hintText: 'Ej: Quitarse el casco, etc...',
-                                    hintStyle: const TextStyle(color: Colors.white24),
-                                    border: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(8)),
-                                    enabledBorder: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(8),
-                                        borderSide: const BorderSide(color: Colors.white24)),
-                                    focusedBorder: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(8),
-                                        borderSide: const BorderSide(color: Color(0xff3AF500))),
-                                    prefixIcon: const Icon(Icons.assignment, color: Colors.white54),
+                                  style: const TextStyle(color: Colors.black87, fontSize: 16),
+                                  decoration: const InputDecoration(
+                                    labelText: 'Instrucciones para el Móvil al recoger',
+                                    hintText: 'Ej: Quitarse el casco, entrar por el lado',
+                                    prefixIcon: Icon(Icons.assignment, color: Colors.black54),
                                   ),
                                 ),
                                 const SizedBox(height: 14),
                                 SizedBox(
                                   width: double.infinity,
-                                  height: 46,
+                                  height: 54,
                                   child: ElevatedButton(
                                     style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.black,
+                                      backgroundColor: kVerdeSE,
+                                      elevation: 0,
                                       shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(10)),
+                                          borderRadius: BorderRadius.circular(14)),
                                     ),
                                     onPressed: _guardandoPerfil
                                         ? null
@@ -1267,11 +1264,12 @@ class _LocalScreenState extends State<LocalScreen>
                                             width: 20,
                                             height: 20,
                                             child: CircularProgressIndicator(
-                                                color: Color(0xff3AF500), strokeWidth: 2))
-                                        : const Text('GUARDAR CAMBIOS',
+                                                color: Colors.black, strokeWidth: 2))
+                                        : const Text('Guardar cambios',
                                             style: TextStyle(
-                                                color: Color(0xff3AF500),
-                                                fontWeight: FontWeight.bold)),
+                                                color: Colors.black,
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.w800)),
                                   ),
                                 ),
                               ],
@@ -1284,15 +1282,15 @@ class _LocalScreenState extends State<LocalScreen>
                             padding: EdgeInsets.only(left: 2, bottom: 8),
                             child: Text('MÁS OPCIONES',
                                 style: TextStyle(
-                                    fontSize: 11,
+                                    fontSize: 13,
                                     fontWeight: FontWeight.bold,
-                                    letterSpacing: 1.3,
-                                    color: Colors.white38)),
+                                    letterSpacing: 1.0,
+                                    color: Colors.white70)),
                           ),
                           Container(
                             decoration: BoxDecoration(
-                              color: const Color(0xFF1C1C1C),
-                              borderRadius: BorderRadius.circular(14),
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(kRadioTarjetaSE),
                               boxShadow: [
                                 BoxShadow(
                                   color: Colors.black.withValues(alpha: 0.3),
@@ -1302,51 +1300,46 @@ class _LocalScreenState extends State<LocalScreen>
                             ),
                             child: Column(
                               children: [
-                                _hubListTile(
-                                  icon: Icons.menu_book_rounded,
-                                  iconColor: Colors.green,
-                                  title: 'Lista de Precios',
-                                  subtitle: 'Buscar o agregar tarifas por barrio/sector',
-                                  onTap: () => _abrirPanelTarifario(context),
-                                ),
-                                const Divider(height: 1, color: Colors.white12),
+                                // (Lista de precios eliminada: los precios los
+                                // maneja la Central en la red SE; el local tiene
+                                // el CRM con los precios recientes del cliente.)
                                 Builder(builder: (ctx) {
                                   final apertura = perfilEnVivo['horario_apertura']?.toString();
                                   final cierre = perfilEnVivo['horario_cierre']?.toString();
                                   final horaStr = (apertura != null && cierre != null)
-                                      ? '${apertura.substring(0, 5)} – ${cierre.substring(0, 5)}'
+                                      ? '${horaTexto12(apertura)} – ${horaTexto12(cierre)}'
                                       : 'Sin horario configurado';
                                   return _hubListTile(
                                     icon: Icons.schedule,
                                     iconColor: Colors.teal,
-                                    title: 'Horario de Atención',
+                                    title: 'Horario de atención',
                                     subtitle: horaStr,
                                     onTap: () => _abrirConfigDomicilios(perfilEnVivo),
                                   );
                                 }),
-                                const Divider(height: 1, color: Colors.white12),
+                                const Divider(height: 1, color: Colors.black12),
                                 _hubListTile(
                                   icon: Icons.folder_shared,
-                                  iconColor: Colors.grey,
-                                  title: 'Bóveda Historial General',
+                                  iconColor: Colors.blueGrey,
+                                  title: 'Historial de todos mis pedidos',
                                   onTap: () => _mostrarHistorialGlobal(context),
                                 ),
-                                const Divider(height: 1, color: Colors.white12),
+                                const Divider(height: 1, color: Colors.black12),
                                 _hubListTile(
                                   icon: Icons.people_alt,
                                   iconColor: Colors.purple,
-                                  title: 'Directorio de Clientes (CRM)',
-                                  subtitle: 'Compras, estadísticas y retargeting',
+                                  title: 'Mis clientes',
+                                  subtitle: 'Quién te compra, cuánto y sus direcciones',
                                   onTap: () => _abrirCRMLocal(context, perfilEnVivo),
                                 ),
-                                const Divider(height: 1, color: Colors.white12),
+                                const Divider(height: 1, color: Colors.black12),
                                 _hubListTile(
                                   icon: Icons.add_location_alt,
-                                  iconColor: Colors.orangeAccent,
-                                  title: 'Configurar Ubicación del Local',
+                                  iconColor: Colors.orange[800]!,
+                                  title: 'Ubicación del local',
                                   onTap: () => _abrirMenuUbicacion(),
                                 ),
-                                const Divider(height: 1, color: Colors.white12),
+                                const Divider(height: 1, color: Colors.black12),
                                 Builder(
                                   builder: (ctx) {
                                     final tieneAlarma = perfilEnVivo['chat_central'] == true;
@@ -1388,8 +1381,8 @@ class _LocalScreenState extends State<LocalScreen>
                           // ── CUENTA ──────────────────────────────────
                           Container(
                             decoration: BoxDecoration(
-                              color: const Color(0xFF1C1C1C),
-                              borderRadius: BorderRadius.circular(14),
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(kRadioTarjetaSE),
                               boxShadow: [
                                 BoxShadow(
                                   color: Colors.black.withValues(alpha: 0.3),
@@ -1402,14 +1395,14 @@ class _LocalScreenState extends State<LocalScreen>
                                 _hubListTile(
                                   icon: Icons.person_remove,
                                   iconColor: Colors.red,
-                                  title: 'Eliminar Mi Cuenta',
+                                  title: 'Eliminar mi cuenta',
                                   onTap: () => _eliminarMiCuenta(context),
                                 ),
-                                const Divider(height: 1, color: Colors.white12),
+                                const Divider(height: 1, color: Colors.black12),
                                 _hubListTile(
                                   icon: Icons.power_settings_new,
                                   iconColor: Colors.redAccent,
-                                  title: 'Cerrar Sesión',
+                                  title: 'Cerrar sesión',
                                   onTap: _cerrarSesionSegura,
                                 ),
                               ],
@@ -1441,7 +1434,7 @@ class _LocalScreenState extends State<LocalScreen>
                 );
               },
             ),
-          );   // Scaffold
+          ));  // Scaffold + Theme
         },     // outer StreamBuilder builder
       ),       // outer StreamBuilder (child: de DefaultTabController)
     );         // DefaultTabController

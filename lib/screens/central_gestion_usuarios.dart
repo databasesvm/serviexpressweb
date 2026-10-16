@@ -1268,7 +1268,7 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
                 ])),
                 if (fecha != null) Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
                   Text('${fecha.day}/${fecha.month}/${fecha.year}', style: const TextStyle(color: Colors.white38, fontSize: 10)),
-                  Text('${fecha.hour}:${fecha.minute.toString().padLeft(2,'0')}', style: const TextStyle(color: Colors.white24, fontSize: 9)),
+                  Text(hora12(fecha), style: const TextStyle(color: Colors.white24, fontSize: 9)),
                 ]),
               ]),
             ),
@@ -2143,7 +2143,7 @@ class _PanelGestionUsuariosState extends State<_PanelGestionUsuarios>
 
     String _fmt(DateTime? dt) {
       if (dt == null) return '—';
-      return '${dt.day.toString().padLeft(2,'0')}/${dt.month.toString().padLeft(2,'0')}/${dt.year} ${dt.hour.toString().padLeft(2,'0')}:${dt.minute.toString().padLeft(2,'0')}';
+      return fechaHora12(dt, conAnio: true);
     }
 
     return Container(

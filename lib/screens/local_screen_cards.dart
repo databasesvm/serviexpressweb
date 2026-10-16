@@ -79,14 +79,12 @@ mixin _CardsMixin on State<LocalScreen> {
     super.dispose();
   }
 
-  // ── Helper: formatea ISO timestamp a "HH:mm" local ───────────────────────
+  // ── Helper: formatea ISO timestamp a "3:05 pm" local ─────────────────────
   String _fmtHora(dynamic iso) {
     if (iso == null) return '';
     try {
       final dt = DateTime.parse(iso.toString()).toLocal();
-      final h = dt.hour.toString().padLeft(2, '0');
-      final m = dt.minute.toString().padLeft(2, '0');
-      return ' · $h:$m';
+      return ' · ${hora12(dt)}';
     } catch (_) {
       return '';
     }
@@ -192,7 +190,7 @@ mixin _CardsMixin on State<LocalScreen> {
             borderRadius: BorderRadius.circular(12),
           ),
           title: const Text(
-            'CALIFICAR MÓVIL',
+            'Calificar al Móvil',
             style: TextStyle(fontWeight: FontWeight.bold),
           ),
           content: Column(
@@ -232,7 +230,7 @@ mixin _CardsMixin on State<LocalScreen> {
             TextButton(
               onPressed: procesando ? null : () => Navigator.pop(context),
               child: const Text(
-                'CANCELAR',
+                'Cancelar',
                 style: TextStyle(color: Colors.grey),
               ),
             ),
@@ -313,7 +311,7 @@ mixin _CardsMixin on State<LocalScreen> {
                       ),
                     )
                   : const Text(
-                      'ENVIAR NOTA',
+                      'Enviar calificación',
                       style: TextStyle(
                         color: Colors.amber,
                         fontWeight: FontWeight.bold,
@@ -2225,20 +2223,20 @@ mixin _CardsMixin on State<LocalScreen> {
     Widget? secondaryAction,
   }) {
     return Material(
-      color: const Color(0xFF1C1C1C),
-      borderRadius: BorderRadius.circular(14),
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(kRadioTarjetaSE),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(kRadioTarjetaSE),
         child: Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(kRadioTarjetaSE),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.3),
-                blurRadius: 6,
-                offset: const Offset(0, 2),
+                color: iconBg.withValues(alpha: 0.18),
+                blurRadius: 18,
+                offset: const Offset(0, 6),
               ),
             ],
           ),
@@ -2260,12 +2258,12 @@ mixin _CardsMixin on State<LocalScreen> {
                   children: [
                     Text(title,
                         style: const TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 15,
-                            color: Colors.white)),
+                            fontWeight: FontWeight.w800, fontSize: 16,
+                            color: Colors.black87)),
                     const SizedBox(height: 2),
                     Text(subtitle,
                         style: const TextStyle(
-                            fontSize: 12, color: Colors.white54)),
+                            fontSize: 13, color: Colors.black54)),
                     if (secondaryAction != null) ...[
                       const SizedBox(height: 10),
                       secondaryAction,
@@ -2274,7 +2272,7 @@ mixin _CardsMixin on State<LocalScreen> {
                 ),
               ),
               const SizedBox(width: 8),
-              const Icon(Icons.chevron_right, color: Colors.white24, size: 22),
+              const Icon(Icons.chevron_right, color: Colors.black38, size: 24),
             ],
           ),
         ),
@@ -2294,7 +2292,7 @@ mixin _CardsMixin on State<LocalScreen> {
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           child: Row(
             children: [
               Container(
@@ -2313,19 +2311,19 @@ mixin _CardsMixin on State<LocalScreen> {
                   children: [
                     Text(title,
                         style: const TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 14,
-                            color: Colors.white)),
+                            fontWeight: FontWeight.w800, fontSize: 15,
+                            color: Colors.black87)),
                     if (subtitle != null) ...[
                       const SizedBox(height: 2),
                       Text(subtitle,
                           style: const TextStyle(
-                              fontSize: 12, color: Colors.white54)),
+                              fontSize: 13, color: Colors.black54)),
                     ],
                   ],
                 ),
               ),
               const SizedBox(width: 8),
-              const Icon(Icons.chevron_right, size: 22, color: Colors.white24),
+              const Icon(Icons.chevron_right, size: 24, color: Colors.black38),
             ],
           ),
         ),

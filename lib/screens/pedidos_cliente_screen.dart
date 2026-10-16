@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:serviexpress_app/utils/sonido_manager.dart';
 import 'package:serviexpress_app/utils/tema_serviexpress.dart';
+import 'package:serviexpress_app/utils/hora12.dart'; // Hora en formato 12 h (am/pm)
 
 // ============================================================
 // HELPERS GLOBALES — TIPO DE SERVICIO POR CATEGORÍA
@@ -621,7 +622,7 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
     } else if (!abierto) {
       final ap = local['horario_apertura']?.toString();
       badgeLabel = ap != null && ap.length >= 5
-          ? 'CERRADO · Abre ${ap.substring(0, 5)}'
+          ? 'CERRADO · Abre ${horaTexto12(ap)}'
           : 'CERRADO';
       badgeColor = Colors.red[700]!;
     }
@@ -833,7 +834,7 @@ class _PedidosClienteScreenState extends State<PedidosClienteScreen> {
     final fecha =
         DateTime.tryParse(p['created_at']?.toString() ?? '');
     final fechaStr = fecha != null
-        ? '${fecha.day}/${fecha.month} ${fecha.hour.toString().padLeft(2, '0')}:${fecha.minute.toString().padLeft(2, '0')}'
+        ? fechaHora12(fecha)
         : '';
 
     return Container(
@@ -1894,7 +1895,7 @@ class _MenuLocalScreenState extends State<MenuLocalScreen> {
                 _infoChip(Icons.category_outlined, categoria.split(' / ').first),
               if (apertura != null && cierre != null)
                 _infoChip(Icons.schedule,
-                    '${apertura.substring(0, 5)} – ${cierre.substring(0, 5)}'),
+                    '${horaTexto12(apertura)} – ${horaTexto12(cierre)}'),
               Builder(builder: (ctx) {
                 final rawDias = local['dias_semana']?.toString();
                 if (rawDias == null || rawDias.length != 7 || rawDias == '1111111') return const SizedBox.shrink();
