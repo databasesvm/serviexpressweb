@@ -1977,6 +1977,17 @@ extension CentralScreenMonitor on _CentralScreenState {
         ],
       );
 
+  // "MÓVIL 12" a partir del id (para las etiquetas de transferencia)
+  String _movilTransfer(dynamic id) {
+    if (id == null) return '?';
+    final m = _movilesCache.firstWhere(
+      (x) => x['id'].toString() == id.toString(),
+      orElse: () => <String, dynamic>{},
+    );
+    if (m.isEmpty) return 'MÓVIL #$id';
+    return _formatearNombreCentral(m).toUpperCase();
+  }
+
   String _tiempoRelativo(DateTime utc) {
     final diff = DateTime.now().toUtc().difference(utc);
     if (diff.inMinutes < 1) return 'ahora';
@@ -2678,9 +2689,9 @@ extension CentralScreenMonitor on _CentralScreenState {
                                   borderRadius: BorderRadius.circular(3),
                                   border: Border.all(color: Colors.teal[300]!, width: 0.6),
                                 ),
-                                child: const Text(
-                                  '⏳ TRANSFIRIENDO...',
-                                  style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
+                                child: Text(
+                                  '⏳ TRANSFIRIENDO A ${_movilTransfer(servicio['transferencia_a_movil_id'])}…',
+                                  style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
                                 ),
                               ),
                             // Servicio ya transferido — queda como soporte/auditoría
@@ -2691,9 +2702,11 @@ extension CentralScreenMonitor on _CentralScreenState {
                                   color: Colors.deepPurple[600],
                                   borderRadius: BorderRadius.circular(3),
                                 ),
-                                child: const Text(
-                                  '🔄 TRANSFERIDO',
-                                  style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
+                                child: Text(
+                                  servicio['transferido_de_movil_id'] != null
+                                      ? '🔄 TRANSFERIDO DE ${_movilTransfer(servicio['transferido_de_movil_id'])}'
+                                      : '🔄 TRANSFERIDO',
+                                  style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
                                 ),
                               ),
                             // Transferencia rechazada — auditoría
@@ -2704,9 +2717,11 @@ extension CentralScreenMonitor on _CentralScreenState {
                                   color: Colors.red[800],
                                   borderRadius: BorderRadius.circular(3),
                                 ),
-                                child: const Text(
-                                  '❌ TRANSF. RECHAZADA',
-                                  style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
+                                child: Text(
+                                  servicio['transferencia_rechazada_por'] != null
+                                      ? '❌ TRANSF. RECHAZADA POR ${_movilTransfer(servicio['transferencia_rechazada_por'])}'
+                                      : '❌ TRANSF. RECHAZADA',
+                                  style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
                                 ),
                               ),
                           ],

@@ -2,13 +2,16 @@
     "name": "ServiExpress",
     "short_name": "ServiExpress",
     "description": "Plataforma de domicilios y mototaxi en Cúcuta",
-    "start_url": "/",
+    "start_url": "./",
     "display": "standalone",
     "background_color": "#0D0D0D",
     "theme_color": "#0D0D0D",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
-    "categories": ["transportation", "utilities"],
+    "categories": [
+        "transportation",
+        "utilities"
+    ],
     "icons": [
         {
             "src": "icons/Icon-192.png",
@@ -32,5 +35,7 @@
             "type": "image/png",
             "purpose": "maskable"
         }
-    ]
+    ],
+    "scope": "./",
+    "id": "./"
 }

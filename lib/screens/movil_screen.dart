@@ -12982,10 +12982,14 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     final String tipoSvcAcep =
         servicio['tipo_servicio']?.toString().toUpperCase().trim() ?? '';
     final bool esRecogidaLocalAcep = tipoSvcAcep == 'RECOGIDA LOCAL';
+    // FN: el destino lo da la sede al llegar (se revela en la sede), así que
+    // NUNCA se le pide al móvil que escriba la dirección.
+    final bool esFnAcep = servicio['tipo_fn'] == true;
 
     // Los servicios de RECOGIDA LOCAL no necesitan destino — el punto de entrega
     // es el propio local, así que saltamos el diálogo de destino en blanco.
     if (!esRecogidaLocalAcep &&
+        !esFnAcep &&
         (destinoActual.isEmpty ||
             destinoActual.toLowerCase() == 'n/a' ||
             destinoActual.length < 3)) {
