@@ -1,4 +1,9 @@
-name: Deploy Flutter Web → GitHub Pages (dual)
+name: GitHub Pages → redirige a www.serviexpress.app
+
+# La web oficial ahora vive en Vercel (www.serviexpress.app).
+# Este flujo ya NO compila Flutter: publica solo páginas que redirigen
+# databasesvm.github.io/serviexpressweb/<ruta> → www.serviexpress.app/<ruta>
+# y un service worker que limpia la app vieja guardada en los teléfonos.
 
 on:
   push:
@@ -9,48 +14,15 @@ permissions:
   contents: write
 
 jobs:
-  build-and-deploy:
+  redirigir:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: 'stable'
-          flutter-version: '3.44.6'
-          cache: true
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      # ── Versión 1: operadores (login) → ROOT del sitio ───────────
-      - name: Build web — operadores (Login)
-        run: flutter build web --release --base-href "/serviexpressweb/"
-
-      - name: Guardar build operadores en root
-        run: |
-          mkdir -p deploy
-          cp -r build/web/. deploy/
-
-      # ── Versión 2: invitados (GuestHome) → /form/ ────────────────
-      # La app detecta '/form' en Uri.base.path en tiempo de ejecución
-      - name: Build web — invitados (GuestHome)
-        run: flutter build web --release --base-href "/serviexpressweb/form/"
-
-      - name: Guardar build invitados en /form/
-        run: |
-          mkdir -p deploy/form
-          cp -r build/web/. deploy/form/
-
-      # ── Deploy ambas a la rama gh-pages ───────────────────────────
-      - name: Crear .nojekyll
-        run: touch deploy/.nojekyll
-
-      - name: Deploy a GitHub Pages
+      - name: Publicar redirección en gh-pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./deploy
+          publish_dir: ./redireccion_github
           force_orphan: true
