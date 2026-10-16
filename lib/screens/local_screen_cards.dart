@@ -333,9 +333,8 @@ mixin _CardsMixin on State<LocalScreen> {
   //     datos con íconos, precio con desglose y acciones abajo.
   //   • El local NO ve la fase de la cascada: solo "Buscando móvil".
   // ═══════════════════════════════════════════════════════════════════════════
-  static const Color _tFondo = Color(0xFF1C1C1E);
-  static const Color _tFondo2 = Color(0xFF26262A);
-  static const Color _tTexto2 = Color(0xFF9A9AA0);
+  //   • Diseño oficial (tema_serviexpress): tarjeta blanca, franja del color
+  //     del servicio, botones de 48 px con texto.
 
   Widget _construirTarjetaServicio(
     Map<String, dynamic> servicio, {
@@ -368,90 +367,84 @@ mixin _CardsMixin on State<LocalScreen> {
     final bool asignadoDirecto = estado == 'pendiente' &&
         (servicio['exclusivo_id']?.toString().trim() ?? '').isNotEmpty;
     switch (estado) {
+      // Colores fuertes: se leen bien sobre la tarjeta blanca (diseño oficial)
       case 'programado':
-        color = Colors.lightBlueAccent;
+        color = const Color(0xFF1565C0);
         icono = Icons.schedule;
+        // La hora y la cuenta regresiva en vivo van debajo (CuentaRegresivaRadar)
         textoEstado = 'PROGRAMADO';
-        if (servicio['liberacion_at'] != null) {
-          final diff = DateTime.parse(servicio['liberacion_at']).toLocal().difference(DateTime.now()).inMinutes;
-          textoEstado = diff > 60
-              ? 'PROGRAMADO · ${textoProgramado(DateTime.parse(servicio['liberacion_at'])).toUpperCase()}'
-              : diff > 0
-                  ? 'PROGRAMADO · SALE EN $diff MIN'
-                  : 'LIBERANDO…';
-        }
         break;
       case 'pendiente':
         if (asignadoDirecto) {
           final et = _etiquetaMovilAsignado(servicio['exclusivo_id'].toString().split(',').first.trim());
-          color = Colors.lightBlueAccent;
+          color = const Color(0xFF1565C0);
           icono = Icons.assignment_ind_rounded;
           textoEstado = et != null ? 'ASIGNADO A ${et.toUpperCase()} · ESPERANDO QUE ACEPTE' : 'MÓVIL ASIGNADO · ESPERANDO QUE ACEPTE';
         } else {
-          color = Colors.amber;
+          color = const Color(0xFFB26A00);
           icono = Icons.radar;
           textoEstado = 'BUSCANDO MÓVIL';
         }
         break;
       case 'en_curso':
       case 'en_ruta_origen':
-        color = const Color(0xff3AF500);
+        color = kVerdeOscuroSE;
         icono = Icons.two_wheeler;
         textoEstado = 'MÓVIL EN CAMINO AL LOCAL';
         break;
       case 'en_origen':
-        color = Colors.orangeAccent;
+        color = const Color(0xFFE65100);
         icono = Icons.storefront;
         textoEstado = 'MÓVIL EN EL LOCAL';
         break;
       case 'en_ruta_destino':
-        color = const Color(0xff3AF500);
+        color = kVerdeOscuroSE;
         icono = Icons.delivery_dining;
         textoEstado = 'EN RUTA DE ENTREGA';
         break;
       case 'problema':
-        color = Colors.redAccent;
+        color = const Color(0xFFC62828);
         icono = Icons.warning_amber_rounded;
         textoEstado = 'NOVEDAD REPORTADA';
         break;
       case 'cotizacion':
-        color = Colors.orangeAccent;
+        color = const Color(0xFFE65100);
         icono = Icons.hourglass_top_rounded;
         textoEstado = 'ESPERANDO PRECIO';
         break;
       case 'cotizada':
-        color = Colors.lightBlueAccent;
+        color = const Color(0xFF1565C0);
         icono = Icons.monetization_on;
         textoEstado = 'COTIZACIÓN RECIBIDA';
         break;
       case 'cotizacion_aprobada':
-        color = Colors.tealAccent;
+        color = const Color(0xFF00796B);
         icono = Icons.check_circle_outline;
         textoEstado = 'APROBADA · EN ESPERA';
         break;
       case 'finalizado':
-        color = Colors.greenAccent;
+        color = const Color(0xFF2E7D32);
         icono = Icons.check_circle;
         textoEstado = 'ENTREGADO';
         break;
       case 'cancelado':
-        color = Colors.grey;
+        color = const Color(0xFF616161);
         icono = Icons.block;
         textoEstado = 'CANCELADO';
         break;
       case 'caducado':
-        color = Colors.purpleAccent;
+        color = const Color(0xFF7B1FA2);
         icono = Icons.hourglass_disabled;
         textoEstado = 'NADIE TOMÓ EL SERVICIO';
         break;
       case 'finalizado_por_demora':
       case 'finalizado_con_problema':
-        color = Colors.orangeAccent;
+        color = const Color(0xFFE65100);
         icono = Icons.report_problem;
         textoEstado = 'CERRADO CON NOVEDAD';
         break;
       default:
-        color = Colors.grey;
+        color = const Color(0xFF616161);
         icono = Icons.help_outline;
         textoEstado = estado.toUpperCase();
     }
@@ -470,14 +463,16 @@ mixin _CardsMixin on State<LocalScreen> {
     final num? tarifa = servicio['tarifa'] as num?;
     final num tarifaNum = tarifa ?? 0;
     final bool hayTarifa = !esPAP && tarifaNum > 0;
-    final String tipo = (servicio['tipo_servicio'] ?? '').toString().toUpperCase();
-    final IconData iconoTipo = tipo.contains('MOTOTAXI')
-        ? Icons.two_wheeler
-        : (tipo.contains('COMIDA') || tipo.contains('DOMICILIO'))
-            ? Icons.restaurant
-            : tipo.contains('COMPRA')
-                ? Icons.shopping_bag_outlined
-                : Icons.inventory_2_outlined;
+    // Color del tipo de servicio (franja de la tarjeta, diseño oficial)
+    final EstiloServicio estiloTipo = EstiloServicio.deTipo(servicio['tipo_servicio']?.toString());
+    // El tipo solo se muestra si es distinto al que el local tiene en su perfil
+    // (ej. un local de comida que pide un mototaxi).
+    final String tipoPerfil = (widget.usuario['tipo_servicio_defecto'] ?? 'COMIDA').toString(); // mismo valor por defecto del formulario
+    final bool tipoDistinto = !esPAP &&
+        (servicio['tipo_servicio'] ?? '').toString().trim().isNotEmpty &&
+        EstiloServicio.deTipo(servicio['tipo_servicio']?.toString()) != EstiloServicio.deTipo(tipoPerfil);
+    final bool esRecogidaLocal = (servicio['tipo_servicio'] ?? '').toString().toUpperCase() == 'RECOGIDA LOCAL';
+    final String destinoTexto = servicio['destino']?.toString().trim() ?? '';
 
     final bool destacada = !esHistorial && _cotizadasRecientes.contains(svcId);
 
@@ -485,55 +480,110 @@ mixin _CardsMixin on State<LocalScreen> {
     Widget cabecera() => InkWell(
           onTap: toggleExpansion,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+            padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Row(children: [
                 Flexible(
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                     decoration: BoxDecoration(
-                      color: color.withValues(alpha: 0.14),
+                      color: color.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(icono, size: 14, color: color),
-                      const SizedBox(width: 5),
+                      Icon(icono, size: 15, color: color),
+                      const SizedBox(width: 6),
                       Flexible(
                         child: Text(textoEstado,
-                            maxLines: 1,
+                            maxLines: 2,
                             overflow: TextOverflow.ellipsis,
-                            style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.3)),
+                            style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w800, letterSpacing: 0.3)),
                       ),
                     ]),
                   ),
                 ),
                 if (tiempo.isNotEmpty) ...[
                   const SizedBox(width: 8),
-                  Text(tiempo, style: const TextStyle(color: _tTexto2, fontSize: 11)),
+                  Text(tiempo, style: const TextStyle(color: Colors.black54, fontSize: 12)),
                 ],
                 const Spacer(),
                 Text('#${servicio['numero_local'] ?? servicio['id']}',
-                    style: const TextStyle(color: _tTexto2, fontWeight: FontWeight.bold, fontSize: 12)),
-                Icon(estaExpandida ? Icons.expand_less : Icons.expand_more, color: _tTexto2, size: 20),
+                    style: const TextStyle(color: Colors.black54, fontWeight: FontWeight.bold, fontSize: 13)),
+                Icon(estaExpandida ? Icons.expand_less : Icons.expand_more, color: Colors.black54, size: 24),
               ]),
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
+              // Dirección de entrega: con título y sin cortarse
               Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Icon(esPAP ? Icons.flash_on : iconoTipo, size: 18, color: Colors.white70),
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Icon(esPAP ? Icons.flash_on : Icons.location_on_rounded,
+                      size: 22, color: estiloTipo.colorIcono),
+                ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text(
-                    esPAP ? 'Punto a punto · ${servicio['origen'] ?? ''}' : (servicio['destino']?.toString() ?? '—'),
-                    maxLines: estaExpandida ? 3 : 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700, height: 1.25),
-                  ),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(
+                      esPAP ? 'Punto a punto' : (esRecogidaLocal ? 'Pedido' : 'Entregar en'),
+                      style: const TextStyle(color: Colors.black54, fontSize: 12, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      esPAP ? (servicio['origen']?.toString() ?? '') : (destinoTexto.isEmpty ? '—' : destinoTexto),
+                      maxLines: estaExpandida ? null : 2,
+                      overflow: estaExpandida ? TextOverflow.visible : TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.black87, fontSize: 16, fontWeight: FontWeight.w800, height: 1.25),
+                    ),
+                  ]),
                 ),
                 if (hayTarifa) ...[
                   const SizedBox(width: 8),
                   Text(fmtPeso(tarifa),
-                      style: const TextStyle(color: Color(0xff3AF500), fontSize: 16, fontWeight: FontWeight.bold)),
+                      style: const TextStyle(color: kVerdeOscuroSE, fontSize: 18, fontWeight: FontWeight.w800)),
                 ],
               ]),
+              if (tipoDistinto) ...[
+                const SizedBox(height: 8),
+                EtiquetaSE(estiloTipo.nombreCorto, estiloTipo.color),
+              ],
+              // Programado: cuenta regresiva en vivo hasta salir al radar
+              if (!esHistorial &&
+                  servicio['liberacion_at'] != null &&
+                  (estado == 'programado' ||
+                      (estado == 'cotizacion_aprobada' &&
+                          (DateTime.tryParse(servicio['liberacion_at'].toString())
+                                  ?.isAfter(DateTime.now()) ??
+                              false)))) ...[
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    CuentaRegresivaRadar(
+                      liberacionAt: servicio['liberacion_at'],
+                      color: const Color(0xFF1565C0),
+                      tamano: 15,
+                    ),
+                    if (estado == 'programado')
+                      SizedBox(
+                        height: 48,
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.send_rounded, size: 18),
+                          label: const Text('Enviar ya',
+                              style: TextStyle(fontWeight: FontWeight.bold)),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFF1565C0),
+                            side: const BorderSide(color: Color(0xFF1565C0)),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadioCampoSE)),
+                          ),
+                          onPressed: () => enviarProgramadoYa(
+                              context, servicio['id'],
+                              localId: widget.usuario['id']),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
             ]),
           ),
         );
@@ -566,30 +616,30 @@ mixin _CardsMixin on State<LocalScreen> {
                   Expanded(
                       child: Container(
                           height: 2,
-                          color: i == 0 ? Colors.transparent : (i <= actual ? color : Colors.white12))),
+                          color: i == 0 ? Colors.transparent : (i <= actual ? color : Colors.black12))),
                   Container(
-                    width: 14,
-                    height: 14,
+                    width: 16,
+                    height: 16,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: i < actual ? color : (i == actual ? color.withValues(alpha: 0.25) : _tFondo2),
-                      border: Border.all(color: i <= actual ? color : Colors.white24, width: 2),
+                      color: i < actual ? color : (i == actual ? color.withValues(alpha: 0.2) : kCampoSE),
+                      border: Border.all(color: i <= actual ? color : Colors.black26, width: 2),
                     ),
-                    child: i < actual ? const Icon(Icons.check, size: 9, color: Colors.black) : null,
+                    child: i < actual ? const Icon(Icons.check, size: 10, color: Colors.white) : null,
                   ),
                   Expanded(
                       child: Container(
                           height: 2,
-                          color: i == pasos.length - 1 ? Colors.transparent : (i < actual ? color : Colors.white12))),
+                          color: i == pasos.length - 1 ? Colors.transparent : (i < actual ? color : Colors.black12))),
                 ]),
                 const SizedBox(height: 4),
                 Text(pasos[i].$1,
                     style: TextStyle(
-                        fontSize: 10,
-                        color: i <= actual ? Colors.white : _tTexto2,
-                        fontWeight: i == actual ? FontWeight.bold : FontWeight.normal)),
+                        fontSize: 11,
+                        color: i <= actual ? Colors.black87 : Colors.black45,
+                        fontWeight: i == actual ? FontWeight.w800 : FontWeight.normal)),
                 Text(pasos[i].$2 != null && i <= actual ? hora(pasos[i].$2) : ' ',
-                    style: const TextStyle(fontSize: 9, color: _tTexto2)),
+                    style: const TextStyle(fontSize: 10, color: Colors.black54)),
               ]),
             ),
           ],
@@ -622,32 +672,36 @@ mixin _CardsMixin on State<LocalScreen> {
                 ('Bancolombia', const Color(0xFFFFCC00), data['pago_bancolombia'].toString()),
             ];
 
+            // Botón con ícono + texto (mín. 48 px, nada escondido solo en ícono)
             Widget botonIcono(IconData ic, Color c, String tip, VoidCallback onTap, {bool alerta = false}) =>
-                Tooltip(
-                  message: tip,
-                  child: InkWell(
-                    onTap: onTap,
-                    borderRadius: BorderRadius.circular(10),
-                    child: Container(
-                      width: 38,
-                      height: 38,
-                      decoration: BoxDecoration(
-                        color: (alerta ? Colors.red : c).withValues(alpha: alerta ? 0.9 : 0.16),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Icon(ic, size: 19, color: alerta ? Colors.white : c),
+                InkWell(
+                  onTap: onTap,
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    constraints: const BoxConstraints(minWidth: 64, minHeight: 52),
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: (alerta ? Colors.red : c).withValues(alpha: alerta ? 0.9 : 0.12),
+                      borderRadius: BorderRadius.circular(12),
                     ),
+                    child: Column(mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center, children: [
+                      Icon(ic, size: 20, color: alerta ? Colors.white : c),
+                      const SizedBox(height: 2),
+                      Text(tip,
+                          style: TextStyle(
+                              fontSize: 11, fontWeight: FontWeight.w700, color: alerta ? Colors.white : c)),
+                    ]),
                   ),
                 );
 
             return Container(
-              margin: const EdgeInsets.only(bottom: 10),
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(color: _tFondo2, borderRadius: BorderRadius.circular(10)),
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: kCampoSE, borderRadius: BorderRadius.circular(kRadioCampoSE)),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Row(children: [
                   CircleAvatar(
-                    radius: 20,
+                    radius: 22,
                     backgroundColor: Colors.black,
                     backgroundImage: tieneFoto ? NetworkImage(fotoUrl) : null,
                     child: tieneFoto
@@ -659,24 +713,25 @@ mixin _CardsMixin on State<LocalScreen> {
                   Expanded(
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Text(nombreFinal,
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                          style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.w800, fontSize: 15)),
                       if (esMovil && data['nombre'] != null)
                         Text(data['nombre'].toString().toUpperCase(),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(color: _tTexto2, fontSize: 10)),
+                            style: const TextStyle(color: Colors.black54, fontSize: 12)),
                     ]),
                   ),
-                  if (telefonoReal.isNotEmpty) ...[
-                    botonIcono(iconoWhatsApp, verdeWhatsApp, 'WhatsApp', () async {
+                ]),
+                const SizedBox(height: 10),
+                Wrap(spacing: 8, runSpacing: 8, children: [
+                  if (telefonoReal.isNotEmpty)
+                    botonIcono(iconoWhatsApp, const Color(0xFF128C7E), 'WhatsApp', () async {
                       // En computador: WhatsApp Web en la pestaña de ServiExpress
                       await abrirChatWhatsApp(telefonoReal);
                     }),
-                    const SizedBox(width: 6),
-                  ],
                   botonIcono(
                     chatNuevo ? Icons.mark_email_unread : (esHistorial ? Icons.history : Icons.chat_bubble_outline),
-                    Colors.lightBlueAccent,
+                    const Color(0xFF1565C0),
                     chatNuevo ? 'Mensaje nuevo' : 'Chat',
                     () {
                       if (!esHistorial) {
@@ -701,38 +756,40 @@ mixin _CardsMixin on State<LocalScreen> {
                     },
                     alerta: chatNuevo,
                   ),
-                  const SizedBox(width: 6),
-                  botonIcono(Icons.badge_outlined, Colors.white70, 'Ver perfil', () => _verPerfilMovilLocal(context, data)),
+                  botonIcono(Icons.badge_outlined, Colors.black87, 'Ver perfil', () => _verPerfilMovilLocal(context, data)),
                 ]),
                 const SizedBox(height: 10),
                 // Pagos: siempre visibles, con botón de copiar
                 if (pagos.isEmpty)
                   const Text('Sin métodos de pago registrados',
-                      style: TextStyle(color: _tTexto2, fontSize: 11, fontStyle: FontStyle.italic))
+                      style: TextStyle(color: Colors.black54, fontSize: 12, fontStyle: FontStyle.italic))
                 else
                   ...pagos.map((p) => Container(
-                        margin: const EdgeInsets.only(top: 4),
-                        padding: const EdgeInsets.fromLTRB(10, 4, 4, 4),
+                        margin: const EdgeInsets.only(top: 6),
+                        padding: const EdgeInsets.fromLTRB(10, 2, 2, 2),
                         decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.25),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border(left: BorderSide(color: p.$2, width: 3)),
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border(left: BorderSide(color: p.$2, width: 4)),
                         ),
                         child: Row(children: [
                           SizedBox(
-                            width: 84,
+                            width: 90,
                             child: Text(p.$1,
-                                style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.bold)),
+                                style: const TextStyle(color: Colors.black54, fontSize: 13, fontWeight: FontWeight.bold)),
                           ),
                           Expanded(
                             child: Text(p.$3,
                                 style: const TextStyle(
-                                    color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600, letterSpacing: 0.5)),
+                                    color: Colors.black87, fontSize: 14, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
                           ),
-                          IconButton(
-                            tooltip: 'Copiar',
-                            visualDensity: VisualDensity.compact,
-                            icon: const Icon(Icons.copy_rounded, size: 18, color: Colors.white70),
+                          TextButton.icon(
+                            style: TextButton.styleFrom(
+                              foregroundColor: const Color(0xFF1565C0),
+                              minimumSize: const Size(48, 48),
+                            ),
+                            icon: const Icon(Icons.copy_rounded, size: 18),
+                            label: const Text('Copiar', style: TextStyle(fontWeight: FontWeight.w700)),
                             onPressed: () {
                               Clipboard.setData(ClipboardData(text: p.$3));
                               ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -745,14 +802,15 @@ mixin _CardsMixin on State<LocalScreen> {
                         ]),
                       )),
                 if (['en_ruta_origen', 'en_origen', 'en_ruta_destino'].contains(estado) && !esHistorial) ...[
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 10),
                   SizedBox(
                     width: double.infinity,
+                    height: 48,
                     child: OutlinedButton.icon(
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.lightBlueAccent,
-                        side: BorderSide(color: Colors.lightBlueAccent.withValues(alpha: 0.5)),
-                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        foregroundColor: const Color(0xFF1565C0),
+                        side: const BorderSide(color: Color(0xFF1565C0)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadioCampoSE)),
                       ),
                       onPressed: () => _abrirFormularioPedido(
                         context,
@@ -760,9 +818,9 @@ mixin _CardsMixin on State<LocalScreen> {
                         movilPreselId: data['id'].toString(),
                         movilPreselLabel: movilLabel(data),
                       ),
-                      icon: const Icon(Icons.add_circle_outline, size: 16),
-                      label: Text('NUEVO PEDIDO CON ${movilLabel(data).toUpperCase()}',
-                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                      icon: const Icon(Icons.add_circle_outline, size: 18),
+                      label: Text('Nuevo pedido con ${movilLabel(data)}',
+                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
                     ),
                   ),
                 ],
@@ -773,128 +831,149 @@ mixin _CardsMixin on State<LocalScreen> {
 
     // ── Fila de dato con ícono ───────────────────────────────────────────
     Widget dato(IconData ic, Widget contenido, {Widget? accion}) => Padding(
-          padding: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.only(bottom: 12),
           child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Padding(padding: const EdgeInsets.only(top: 1), child: Icon(ic, size: 16, color: _tTexto2)),
+            Padding(padding: const EdgeInsets.only(top: 1), child: Icon(ic, size: 20, color: Colors.black54)),
             const SizedBox(width: 10),
             Expanded(child: contenido),
             if (accion != null) accion,
           ]),
         );
+    // Título pequeño + valor (ej. "Ticket" / "#40")
+    Widget tituloValor(String titulo, String valor, {Color? colorValor}) =>
+        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(titulo, style: const TextStyle(color: Colors.black54, fontSize: 12, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 2),
+          Text(valor,
+              style: TextStyle(
+                  color: colorValor ?? Colors.black87, fontSize: 15, fontWeight: FontWeight.w700, height: 1.3)),
+        ]);
+    // Botón chico con ícono + texto (48 px de alto)
+    Widget botonDato(String texto, IconData ic, Color c, VoidCallback onTap) => SizedBox(
+          height: 48,
+          child: OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+              foregroundColor: c,
+              side: BorderSide(color: c.withValues(alpha: 0.5)),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadioCampoSE)),
+            ),
+            onPressed: onTap,
+            icon: Icon(ic, size: 18),
+            label: Text(texto, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+          ),
+        );
 
     final String telCliente = servicio['telefono_receptor']?.toString().trim() ?? '';
     final String ticket = servicio['ticket_factura']?.toString().trim() ?? '';
-    final String nota = servicio['observacion']?.toString().trim() ?? '';
+    // Nota: solo lo que escribió el local. Sin etiquetas internas
+    // ([ COMIDA ], [ TICKET: #… ], [⏰ PROGRAMADO: …]) ni las instrucciones
+    // de recogida del perfil del local.
+    final String nota = (servicio['observacion']?.toString() ?? '')
+        .replaceAll(RegExp(r'\n?\s*•\s*Recogida:[^\n]*'), '')
+        .replaceAll(RegExp(r'\[\s*TICKET:[^\]]*\]'), '')
+        .replaceAll(RegExp(r'\[\s*⏰[^\]]*\]'), '')
+        .replaceAll(RegExp(r'\[\s*[A-ZÁÉÍÓÚÑ ]+\s*\]'), '')
+        .replaceAll(RegExp(r'^[\s·—-]+'), '')
+        .replaceAll(RegExp(r'[ \t]{2,}'), ' ')
+        .trim();
     final String fotoComanda = servicio['foto_comanda_url']?.toString() ?? '';
     final int recargo = (servicio['recargo_total'] as num?)?.toInt() ?? 0;
 
-    Future<void> contactarCliente(BuildContext ctx) async {
-      // Número o @usuario de WhatsApp. Con @usuario no se puede llamar.
-      final Uri? uriTel = uriLlamada(telCliente);
-      final Uri? uriWa = uriWhatsApp(telCliente);
-      final bool esUsuario = esUsuarioWhatsApp(telCliente);
-      await showModalBottomSheet(
-        context: ctx,
-        backgroundColor: _tFondo,
-        builder: (bs) => SafeArea(
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            ListTile(
-              title: Text('Cliente · $telCliente', style: const TextStyle(color: Colors.white)),
-            ),
-            if (uriTel != null)
-              ListTile(
-                leading: const Icon(Icons.call, color: Colors.lightBlueAccent),
-                title: const Text('Llamar', style: TextStyle(color: Colors.white)),
-                onTap: () async {
-                  Navigator.pop(bs);
-                  await launchUrl(uriTel);
-                },
-              ),
-            if (uriWa != null)
-              ListTile(
-                leading: const Icon(iconoWhatsApp, color: verdeWhatsApp),
-                title: const Text('WhatsApp', style: TextStyle(color: Colors.white)),
-                onTap: () async {
-                  Navigator.pop(bs);
-                  await abrirChatWhatsApp(telCliente);
-                },
-              ),
-            ListTile(
-              leading: const Icon(Icons.copy_rounded, color: Colors.white70),
-              title: Text(esUsuario ? 'Copiar usuario' : 'Copiar número',
-                  style: const TextStyle(color: Colors.white)),
-              onTap: () {
-                Clipboard.setData(ClipboardData(text: telCliente));
-                Navigator.pop(bs);
-              },
-            ),
-          ]),
-        ),
-      );
+    // Contacto del cliente: botones visibles (número o @usuario de WhatsApp;
+    // con @usuario no se puede llamar).
+    final Uri? uriTelCliente = uriLlamada(telCliente);
+    final Uri? uriWaCliente = uriWhatsApp(telCliente);
+    final bool esUsuarioWa = esUsuarioWhatsApp(telCliente);
+    void copiar(String texto, String aviso) {
+      Clipboard.setData(ClipboardData(text: texto));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(aviso),
+        duration: const Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+      ));
     }
 
-    Widget botonPrincipal(String texto, IconData? ic, Color c, VoidCallback onTap) => ElevatedButton.icon(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: c,
-            foregroundColor: Colors.black,
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    final double? destLat = (servicio['destino_lat'] as num?)?.toDouble();
+    final double? destLng = (servicio['destino_lng'] as num?)?.toDouble();
+
+    Widget botonPrincipal(String texto, IconData? ic, Color c, VoidCallback onTap) => SizedBox(
+          height: 54,
+          child: ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: c,
+              foregroundColor: sobreColorSE(c),
+              elevation: 0,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            ),
+            onPressed: onTap,
+            icon: Icon(ic ?? Icons.check, size: 20),
+            label: Text(texto, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
           ),
-          onPressed: onTap,
-          icon: Icon(ic ?? Icons.check, size: 18),
-          label: Text(texto, style: const TextStyle(fontWeight: FontWeight.bold)),
         );
-    Widget botonSecundario(String texto, Color c, VoidCallback? onTap, {IconData? ic}) => OutlinedButton.icon(
-          style: OutlinedButton.styleFrom(
-            foregroundColor: c,
-            side: BorderSide(color: c.withValues(alpha: 0.5)),
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    Widget botonSecundario(String texto, Color c, VoidCallback? onTap, {IconData? ic}) => SizedBox(
+          height: 48,
+          child: OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+              foregroundColor: c,
+              side: BorderSide(color: c.withValues(alpha: 0.6)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadioCampoSE)),
+            ),
+            onPressed: onTap,
+            icon: Icon(ic ?? Icons.close, size: 18),
+            label: Text(texto, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
           ),
-          onPressed: onTap,
-          icon: Icon(ic ?? Icons.close, size: 16),
-          label: Text(texto, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
         );
 
     // ── Cuerpo ────────────────────────────────────────────────────────────
     Widget cuerpo() => Padding(
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Divider(color: Colors.white10, height: 1),
-            const SizedBox(height: 12),
+            const Divider(color: Colors.black12, height: 1),
+            const SizedBox(height: 14),
             if (!esPAP && ['pendiente', 'en_curso', 'en_ruta_origen', 'en_origen', 'en_ruta_destino',
                     'problema', 'finalizado'].contains(estado))
               lineaAvance(),
             if (servicio['movil_id'] != null) bloqueMovil(),
 
-            // Datos del pedido
+            // ── Datos del pedido ──────────────────────────────────────────
+            // Dirección de entrega: copiar / ver en mapa
+            if (!esPAP && !esRecogidaLocal && destinoTexto.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Wrap(spacing: 8, runSpacing: 8, children: [
+                  botonDato('Copiar dirección', Icons.copy_rounded, Colors.black87,
+                      () => copiar(destinoTexto, 'Dirección copiada')),
+                  if (destLat != null && destLng != null)
+                    botonDato('Ver en mapa', Icons.map_outlined, const Color(0xFF1565C0), () {
+                      launchUrl(
+                        Uri.parse('https://www.google.com/maps/search/?api=1&query=$destLat,$destLng'),
+                        mode: LaunchMode.externalApplication,
+                      );
+                    }),
+                ]),
+              ),
             if (ticket.isNotEmpty)
-              dato(Icons.receipt_long, Text('Ticket / factura #$ticket',
-                  style: const TextStyle(color: Colors.lightBlueAccent, fontWeight: FontWeight.bold, fontSize: 13))),
+              dato(Icons.receipt_long, tituloValor('Ticket / factura', '#$ticket')),
             if (telCliente.isNotEmpty)
               dato(
-                Icons.phone,
-                InkWell(
-                  onTap: () => contactarCliente(context),
-                  child: Text('Cliente: $telCliente',
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          decoration: TextDecoration.underline,
-                          decorationColor: Colors.white38)),
-                ),
-                accion: InkWell(
-                  onTap: () => contactarCliente(context),
-                  child: const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 6),
-                    child: Icon(Icons.more_horiz, color: _tTexto2, size: 18),
-                  ),
-                ),
+                Icons.person_outline,
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  tituloValor('Cliente', telCliente),
+                  const SizedBox(height: 8),
+                  Wrap(spacing: 8, runSpacing: 8, children: [
+                    if (uriWaCliente != null)
+                      botonDato('WhatsApp', iconoWhatsApp, const Color(0xFF128C7E),
+                          () => abrirChatWhatsApp(telCliente)),
+                    if (uriTelCliente != null)
+                      botonDato('Llamar', Icons.call, const Color(0xFF1565C0), () => launchUrl(uriTelCliente)),
+                    botonDato(esUsuarioWa ? 'Copiar usuario' : 'Copiar número', Icons.copy_rounded,
+                        Colors.black87, () => copiar(telCliente, esUsuarioWa ? 'Usuario copiado' : 'Número copiado')),
+                  ]),
+                ]),
               ),
             if (nota.isNotEmpty)
-              dato(Icons.sticky_note_2_outlined,
-                  Text(nota, style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.3))),
+              dato(Icons.sticky_note_2_outlined, tituloValor('Nota', nota)),
             if (fotoComanda.isNotEmpty)
               dato(
                 Icons.photo_camera_outlined,
@@ -928,7 +1007,7 @@ mixin _CardsMixin on State<LocalScreen> {
                     ),
                     const SizedBox(width: 10),
                     const Text('Foto de comanda · toca para ver',
-                        style: TextStyle(color: _tTexto2, fontSize: 12)),
+                        style: TextStyle(color: Colors.black54, fontSize: 13)),
                   ]),
                 ),
               ),
@@ -937,45 +1016,50 @@ mixin _CardsMixin on State<LocalScreen> {
             if (esPAP)
               Container(
                 width: double.infinity,
-                margin: const EdgeInsets.only(top: 2, bottom: 4),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                margin: const EdgeInsets.only(top: 2, bottom: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                 decoration: BoxDecoration(
-                  color: Colors.purple.withValues(alpha: 0.18),
-                  borderRadius: BorderRadius.circular(10),
+                  color: const Color(0xFFF3E5F5),
+                  borderRadius: BorderRadius.circular(kRadioCampoSE),
                 ),
                 child: const Text('⚡ PUNTO A PUNTO — Servicio gratuito',
-                    style: TextStyle(color: Colors.purpleAccent, fontWeight: FontWeight.bold, fontSize: 13)),
+                    style: TextStyle(color: Color(0xFF7B1FA2), fontWeight: FontWeight.w800, fontSize: 14)),
               )
             else
               Container(
                 width: double.infinity,
-                margin: const EdgeInsets.only(top: 2, bottom: 4),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                decoration: BoxDecoration(color: _tFondo2, borderRadius: BorderRadius.circular(10)),
+                margin: const EdgeInsets.only(top: 2, bottom: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                decoration: BoxDecoration(
+                  color: estado == 'cotizacion' ? kAvisoSE : kCampoSE,
+                  borderRadius: BorderRadius.circular(kRadioCampoSE),
+                ),
                 child: estado == 'cotizacion'
                     ? const Row(children: [
-                        Icon(Icons.hourglass_top_rounded, size: 16, color: Colors.orangeAccent),
+                        Icon(Icons.hourglass_top_rounded, size: 18, color: Color(0xFFE65100)),
                         SizedBox(width: 8),
-                        Text('Esperando el precio de la central…',
-                            style: TextStyle(color: Colors.orangeAccent, fontWeight: FontWeight.bold, fontSize: 13)),
+                        Expanded(
+                          child: Text('Esperando el precio de la Central…',
+                              style: TextStyle(color: Color(0xFFE65100), fontWeight: FontWeight.w800, fontSize: 14)),
+                        ),
                       ])
                     : Row(children: [
-                        const Text('Tarifa', style: TextStyle(color: _tTexto2, fontSize: 12)),
+                        const Text('Tarifa', style: TextStyle(color: Colors.black54, fontSize: 13, fontWeight: FontWeight.w600)),
                         const SizedBox(width: 10),
                         Expanded(
                           child: recargo > 0 && hayTarifa
                               ? Text('base ${fmtPeso(tarifaNum - recargo)} + recargo ${fmtPeso(recargo)}',
-                                  style: const TextStyle(color: _tTexto2, fontSize: 11))
+                                  style: const TextStyle(color: Colors.black54, fontSize: 12))
                               : const SizedBox.shrink(),
                         ),
                         Text(hayTarifa ? fmtPeso(tarifa) : '—',
-                            style: const TextStyle(color: Color(0xff3AF500), fontWeight: FontWeight.bold, fontSize: 18)),
+                            style: const TextStyle(color: kVerdeOscuroSE, fontWeight: FontWeight.w800, fontSize: 20)),
                       ]),
               ),
 
             // Ubicación del cliente
             if (!esHistorial && !terminado) ...[
-              IndicadorUbicacionCliente(servicio, oscuro: true),
+              IndicadorUbicacionCliente(servicio),
             ],
 
             // ── Acciones ──────────────────────────────────────────────────
@@ -983,50 +1067,44 @@ mixin _CardsMixin on State<LocalScreen> {
             if (!esHistorial) ...[
               if (estado == 'cotizada')
                 Row(children: [
-                  Expanded(child: botonSecundario('RECHAZAR', Colors.redAccent, () => _cancelarPedido(servicio['id']))),
+                  Expanded(
+                      child: botonSecundario('Rechazar', const Color(0xFFC62828), () => _cancelarPedido(servicio['id']))),
                   const SizedBox(width: 8),
                   Expanded(
                       flex: 2,
-                      child: botonPrincipal('APROBAR', Icons.check, Colors.lightBlueAccent,
+                      child: botonPrincipal('Aprobar precio', Icons.check, const Color(0xFF1565C0),
                           () => _completarDatosYAprobar(context, servicio))),
                 ])
               else if (estado == 'cotizacion_aprobada') ...[
-                Text('Precio aprobado: ${fmtPeso(tarifa)}. Cuando el pedido esté listo, solicita el móvil.',
-                    style: const TextStyle(color: Colors.tealAccent, fontSize: 12, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
+                Text('Precio aprobado: ${fmtPeso(tarifa)}. Cuando el pedido esté listo, solicita el Móvil.',
+                    style: const TextStyle(color: Color(0xFF00796B), fontSize: 14, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 10),
                 Row(children: [
-                  Expanded(child: botonSecundario('CANCELAR', Colors.redAccent, () => _cancelarPedido(servicio['id']))),
+                  Expanded(
+                      child: botonSecundario('Cancelar', const Color(0xFFC62828), () => _cancelarPedido(servicio['id']))),
                   const SizedBox(width: 8),
                   Expanded(
                       flex: 2,
-                      child: botonPrincipal('SOLICITAR MÓVIL', Icons.two_wheeler, Colors.tealAccent,
+                      child: botonPrincipal('Solicitar Móvil', Icons.two_wheeler, const Color(0xFF00796B),
                           () => _solicitarMovilAprobado(context, servicio))),
                 ]),
               ],
-              if (!terminado)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Row(children: [
-                    Expanded(
-                      child: botonSecundario('PEDIR UBICACIÓN', Colors.lightBlueAccent,
-                          () => pedirUbicacionCliente(servicio), ic: Icons.my_location),
-                    ),
-                    const SizedBox(width: 8),
-                    // El cliente ya mandó su ubicación por WhatsApp: pegar el enlace
-                    Expanded(
-                      child: botonSecundario('PEGAR UBICACIÓN', Colors.tealAccent,
-                          () => pegarUbicacionEnServicio(context, servicio),
-                          ic: Icons.add_location_alt),
-                    ),
-                    if (estado == 'pendiente' || estado == 'cotizacion') ...[
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: botonSecundario(estado == 'cotizacion' ? 'DESCARTAR' : 'CANCELAR', Colors.redAccent,
-                            () => _cancelarPedido(servicio['id'])),
-                      ),
-                    ],
-                  ]),
+              if (!terminado) ...[
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: botonSecundario('Pedir ubicación al cliente', const Color(0xFF1565C0),
+                      () => pedirUbicacionCliente(servicio), ic: Icons.my_location),
                 ),
+                if (estado == 'pendiente' || estado == 'cotizacion') ...[
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: botonSecundario(estado == 'cotizacion' ? 'Descartar pedido' : 'Cancelar pedido',
+                        const Color(0xFFC62828), () => _cancelarPedido(servicio['id'])),
+                  ),
+                ],
+              ],
             ],
 
             // Historial: calificar / ocultar / eliminar
@@ -1034,65 +1112,66 @@ mixin _CardsMixin on State<LocalScreen> {
               if (servicio['calificacion_local'] == null)
                 SizedBox(
                   width: double.infinity,
-                  child: botonPrincipal('CALIFICAR MÓVIL', Icons.star_rate_rounded, Colors.amber,
+                  child: botonPrincipal('Calificar Móvil', Icons.star_rate_rounded, Colors.amber,
                       () => _mostrarDialogoCalificacion(servicio)),
                 )
               else
                 Row(children: [
-                  const Text('Tu calificación', style: TextStyle(color: _tTexto2, fontSize: 12)),
+                  const Text('Tu calificación', style: TextStyle(color: Colors.black54, fontSize: 13)),
                   const Spacer(),
                   ...List.generate(
                       5,
                       (i) => Icon(i < (servicio['calificacion_local'] as int) ? Icons.star : Icons.star_border,
-                          color: Colors.amber, size: 18)),
+                          color: Colors.amber[700], size: 20)),
                 ]),
               const SizedBox(height: 8),
             ],
             if (esHistorial && !esGlobal)
               SizedBox(
                 width: double.infinity,
-                child: botonSecundario('OCULTAR DEL TABLERO DE HOY', Colors.white54, onOcultar, ic: Icons.archive),
+                child: botonSecundario('Ocultar del tablero de hoy', Colors.black54, onOcultar, ic: Icons.archive),
               ),
             if (esGlobal)
               SizedBox(
                 width: double.infinity,
-                child: botonSecundario('ELIMINAR PERMANENTEMENTE', Colors.redAccent, onEliminar, ic: Icons.delete),
+                child: botonSecundario('Eliminar para siempre', const Color(0xFFC62828), onEliminar, ic: Icons.delete),
               ),
           ]),
         );
 
+    // Tarjeta clara del diseño oficial: blanca, radio 18, franja del color del
+    // servicio y sombra suave. Una cotización recién respondida se resalta.
+    final Color acento = estiloTipo.color;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 600),
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(bottom: 14),
       decoration: BoxDecoration(
-        color: _tFondo,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-            color: destacada ? Colors.lightBlueAccent : Colors.white.withValues(alpha: 0.06),
-            width: destacada ? 2 : 1),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(kRadioTarjetaSE),
+        border: destacada ? Border.all(color: const Color(0xFF1565C0), width: 2.5) : null,
         boxShadow: [
           if (destacada)
-            BoxShadow(color: Colors.lightBlueAccent.withValues(alpha: 0.45), blurRadius: 20, spreadRadius: 2)
+            BoxShadow(color: const Color(0xFF2F80ED).withValues(alpha: 0.55), blurRadius: 22, spreadRadius: 2)
           else
-            BoxShadow(color: Colors.black.withValues(alpha: 0.35), blurRadius: 6, offset: const Offset(0, 2)),
+            BoxShadow(color: acento.withValues(alpha: 0.18), blurRadius: 18, offset: const Offset(0, 6)),
         ],
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(kRadioTarjetaSE),
         child: Stack(children: [
           Padding(
-            padding: const EdgeInsets.only(left: 4),
+            padding: const EdgeInsets.only(left: 5),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               cabecera(),
               if (estaExpandida) cuerpo(),
             ]),
           ),
-          // Franja de color del estado
+          // Franja del color del servicio
           Positioned(
             left: 0,
             top: 0,
             bottom: 0,
-            child: Container(width: 4, color: esHistorial ? color.withValues(alpha: 0.5) : color),
+            child: Container(width: 5, color: esHistorial ? acento.withValues(alpha: 0.5) : acento),
           ),
         ]),
       ),

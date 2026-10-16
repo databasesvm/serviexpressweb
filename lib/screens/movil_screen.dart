@@ -8984,6 +8984,16 @@ class _MovilScreenState extends State<MovilScreen> with WidgetsBindingObserver {
     bool mostrarBotonNavegar = estado == 'en_ruta_destino' ||
         (estado == 'en_ruta_origen' && !esComidaOCompra);
 
+    // Servicio creado por la Central sin ubicación (solo texto) en el punto
+    // al que va el móvil: no se muestra "Navegar en Google Maps".
+    if (mostrarBotonNavegar &&
+        (servicio['creador']?.toString() ?? '') == 'Central') {
+      final bool haciaOrigen = estado == 'en_ruta_origen';
+      final latNav = servicio[haciaOrigen ? 'origen_lat' : 'destino_lat'];
+      final lngNav = servicio[haciaOrigen ? 'origen_lng' : 'destino_lng'];
+      if (latNav == null || lngNav == null) mostrarBotonNavegar = false;
+    }
+
     Widget botonAccion;
     if (tieneProblema) {
       botonAccion = ElevatedButton(

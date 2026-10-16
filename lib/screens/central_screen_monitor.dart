@@ -2127,9 +2127,33 @@ extension CentralScreenMonitor on _CentralScreenState {
           final estado = servicio['estado'];
 
           // --- MOTOR CENTINELA DE RETRASO ---
-          final fechaCreacion = servicio['created_at'] != null
+          // Cuenta desde que el servicio SALIÓ AL RADAR, no desde que se creó:
+          // una cotización o un programado puede crearse mucho antes.
+          // liberacion_at = momento en que entró al radar (o se liberó de nuevo).
+          final DateTime creado = servicio['created_at'] != null
               ? DateTime.parse(servicio['created_at']).toUtc()
               : DateTime.now().toUtc();
+          final DateTime? alRadar =
+              DateTime.tryParse(servicio['liberacion_at']?.toString() ?? '')?.toUtc();
+          final bool yaEnRadar = !['cotizacion', 'cotizada', 'cotizacion_aprobada', 'programado']
+              .contains(estado);
+          final fechaCreacion = (yaEnRadar && alRadar != null && alRadar.isAfter(creado))
+              ? alRadar
+              : creado;
+          // Reloj de la tarjeta ("hace X"): antes del radar se reinicia en cada
+          // fase (cotización → precio enviado → aprobada → programado), usando
+          // fase_desde (la pone el servidor al cambiar de estado). En el radar
+          // es una sola cuenta general desde que salió (no se reinicia cuando el
+          // Móvil acepta, llega o inicia ruta).
+          final DateTime? inicioFase =
+              DateTime.tryParse(servicio['fase_desde']?.toString() ?? '')?.toUtc();
+          final DateTime fechaReloj = yaEnRadar
+              ? fechaCreacion
+              : (estado == 'cotizacion'
+                  ? (inicioFase ?? creado)
+                  : (inicioFase ??
+                      DateTime.tryParse(servicio['updated_at']?.toString() ?? '')?.toUtc() ??
+                      creado));
           final minutosTranscurridos = DateTime.now()
               .toUtc()
               .difference(fechaCreacion)
@@ -2387,7 +2411,7 @@ extension CentralScreenMonitor on _CentralScreenState {
                           ],
                           const Spacer(),
                           Text(
-                            _tiempoRelativo(fechaCreacion),
+                            _tiempoRelativo(fechaReloj),
                             style: TextStyle(
                                 fontSize: 9,
                                 color: alertaRetraso
@@ -2540,8 +2564,6 @@ extension CentralScreenMonitor on _CentralScreenState {
                                 final lib = DateTime.parse(
                                         servicio['liberacion_at'])
                                     .toLocal();
-                                final diff =
-                                    lib.difference(DateTime.now()).inMinutes;
                                 return Container(
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 5, vertical: 2),
@@ -2550,19 +2572,52 @@ extension CentralScreenMonitor on _CentralScreenState {
                                     borderRadius: BorderRadius.circular(3),
                                     border: Border.all(color: Colors.teal[300]!),
                                   ),
-                                  child: Text(
-                                    diff > 60
-                                        ? '📅 Programado: ${textoProgramado(lib)}'
-                                        : diff > 0
-                                            ? '⏰ Sale en ${diff}min (${textoProgramado(lib)})'
-                                            : '⏰ Liberando...',
-                                    style: TextStyle(
-                                        color: Colors.teal[900],
-                                        fontSize: 8,
-                                        fontWeight: FontWeight.bold),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        '📅 ${textoProgramado(lib)} · ',
+                                        style: TextStyle(
+                                            color: Colors.teal[900],
+                                            fontSize: 8,
+                                            fontWeight: FontWeight.bold),
+                                      ),
+                                      // Cuenta regresiva en vivo al radar
+                                      CuentaRegresivaRadar(
+                                        liberacionAt: servicio['liberacion_at'],
+                                        color: Colors.teal[900]!,
+                                        tamano: 8,
+                                        compacto: true,
+                                      ),
+                                    ],
                                   ),
                                 );
                               }),
+                            if (estado == 'programado')
+                              InkWell(
+                                onTap: () =>
+                                    enviarProgramadoYa(context, servicio['id']),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.teal[700],
+                                    borderRadius: BorderRadius.circular(3),
+                                  ),
+                                  child: const Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.send_rounded,
+                                            color: Colors.white, size: 10),
+                                        SizedBox(width: 3),
+                                        Text('ENVIAR YA',
+                                            style: TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 8,
+                                                fontWeight: FontWeight.bold)),
+                                      ]),
+                                ),
+                              ),
                             if (servicio['observacion'] != null)
                               ConstrainedBox(
                                 constraints:

@@ -1,5 +1,5 @@
 // Histórico de la competencia semanal: una tarjeta por semana con el podio
-// (👑 🥈 🥉), quién ganó premio (≥80 pts) y el top 10. Lo ven la central y
+// (🥇 🥈 🥉), quién ganó premio (≥80 pts) y el top 10. Lo ven la central y
 // los móviles. Los datos los guarda el servidor cada lunes al cerrar la
 // semana (fn_calcular_premios_semanales → tabla premios_semanales).
 
@@ -22,6 +22,15 @@ class _HistoricoPremiosScreenState extends State<HistoricoPremiosScreen> {
   // semana_inicio → filas ordenadas por posición
   List<MapEntry<String, List<Map<String, dynamic>>>> _semanas = [];
   final Set<String> _expandidas = {};
+  // Empates del premio que la Central debe decidir
+  List<Map<String, dynamic>> _empates = [];
+  // empate_id → (movil_id → puesto elegido: 0 = sin premio)
+  final Map<int, Map<int, int>> _eleccion = {};
+  bool _guardandoEmpate = false;
+
+  /// La abre la Central (sin miMovilId) → puede decidir. El servidor igual
+  /// verifica que sea la Central (fn_es_central).
+  bool get _esCentral => widget.miMovilId == null;
 
   static const _meses = [
     'ene', 'feb', 'mar', 'abr', 'may', 'jun',
@@ -47,9 +56,18 @@ class _HistoricoPremiosScreenState extends State<HistoricoPremiosScreen> {
       for (final r in List<Map<String, dynamic>>.from(rows)) {
         porSemana.putIfAbsent(r['semana_inicio'].toString(), () => []).add(r);
       }
+      List<Map<String, dynamic>> empates = [];
+      try {
+        empates = List<Map<String, dynamic>>.from(await Supabase.instance.client
+            .from('premios_empates')
+            .select('id, semana_inicio, semana_fin, puestos, candidatos, estado')
+            .eq('estado', 'pendiente')
+            .order('id', ascending: false));
+      } catch (_) {}
       if (!mounted) return;
       setState(() {
         _semanas = porSemana.entries.toList();
+        _empates = empates;
         _cargando = false;
       });
     } catch (e) {
@@ -98,7 +116,7 @@ class _HistoricoPremiosScreenState extends State<HistoricoPremiosScreen> {
                         style: const TextStyle(color: Colors.white54)),
                   ),
                 )
-              : _semanas.isEmpty
+              : (_semanas.isEmpty && _empates.isEmpty)
                   ? const Center(
                       child: Padding(
                         padding: EdgeInsets.all(24),
@@ -112,13 +130,186 @@ class _HistoricoPremiosScreenState extends State<HistoricoPremiosScreen> {
                     )
                   : RefreshIndicator(
                       onRefresh: _cargar,
-                      child: ListView.builder(
+                      child: ListView(
                         padding: const EdgeInsets.all(12),
-                        itemCount: _semanas.length,
-                        itemBuilder: (_, i) => _tarjetaSemana(_semanas[i].key, _semanas[i].value),
+                        children: [
+                          ..._empates.map(_tarjetaEmpate),
+                          ..._semanas.map((s) => _tarjetaSemana(s.key, s.value)),
+                        ],
                       ),
                     ),
     );
+  }
+
+  // ── EMPATE: la Central decide quién gana (o si varios ganan el mismo) ──
+  Widget _tarjetaEmpate(Map<String, dynamic> e) {
+    final id = (e['id'] as num).toInt();
+    final puestos = List<int>.from((e['puestos'] as List? ?? []).map((x) => (x as num).toInt()));
+    final cands = List<Map<String, dynamic>>.from(
+        (e['candidatos'] as List? ?? []).map((c) => Map<String, dynamic>.from(c as Map)));
+    final eleccion = _eleccion.putIfAbsent(id, () => {});
+    final puestosTxt = puestos.map((p) => '$p°').join(' y ');
+
+    Widget chip(int movilId, int puesto, String texto) {
+      final sel = (eleccion[movilId] ?? 0) == puesto;
+      return Padding(
+        padding: const EdgeInsets.only(right: 6, bottom: 6),
+        child: ChoiceChip(
+          label: Text(texto, style: TextStyle(
+              fontSize: 13, fontWeight: FontWeight.bold,
+              color: sel ? Colors.black : Colors.white70)),
+          selected: sel,
+          selectedColor: const Color(0xFFFFD54F),
+          backgroundColor: const Color(0xFF2A2A2A),
+          side: BorderSide(color: sel ? const Color(0xFFFFD54F) : Colors.white24),
+          onSelected: _esCentral && !_guardandoEmpate
+              ? (_) => setState(() => eleccion[movilId] = puesto)
+              : null,
+        ),
+      );
+    }
+
+    return Card(
+      color: const Color(0xFF241C00),
+      margin: const EdgeInsets.only(bottom: 14),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: const BorderSide(color: Color(0xFFFFD54F), width: 2),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('⚖️ Empate en el premio — ${_rango(e)}',
+              style: const TextStyle(color: Color(0xFFFFD54F), fontWeight: FontWeight.w900, fontSize: 16)),
+          const SizedBox(height: 4),
+          Text(
+            _esCentral
+                ? 'Falta decidir el $puestosTxt puesto. Elige el puesto de cada Móvil '
+                    '(puedes dar el mismo puesto a varios).'
+                : 'La Central está decidiendo el $puestosTxt puesto.',
+            style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.3),
+          ),
+          const SizedBox(height: 12),
+          for (final c in cands) ...[
+            Builder(builder: (_) {
+              final mid = (c['movil_id'] as num).toInt();
+              final num_ = (c['numero_movil'] as num?)?.toInt();
+              final punt = (c['puntuacion'] as num?)?.toDouble();
+              return Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1A1A1A),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(
+                    '${num_ != null ? 'Móvil $num_' : (c['nombre'] ?? 'Móvil')}  ·  ${c['puntos']} pts'
+                    '${punt != null ? '  ·  ⭐ ${punt.toStringAsFixed(2)}' : ''}'
+                    '  ·  ${c['servicios'] ?? 0} servicios',
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(children: [
+                    for (final p in puestos) chip(mid, p, '${emojiPodio(p)} $p°'),
+                    chip(mid, 0, 'Sin premio'),
+                  ]),
+                ]),
+              );
+            }),
+          ],
+          if (_esCentral)
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFFFD54F),
+                  foregroundColor: Colors.black,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+                onPressed: _guardandoEmpate ? null : () => _guardarEmpate(id, cands),
+                icon: _guardandoEmpate
+                    ? const SizedBox(width: 18, height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
+                    : const Icon(Icons.gavel_rounded),
+                label: const Text('GUARDAR DECISIÓN',
+                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
+              ),
+            ),
+        ]),
+      ),
+    );
+  }
+
+  Future<void> _guardarEmpate(int empateId, List<Map<String, dynamic>> cands) async {
+    final eleccion = _eleccion[empateId] ?? {};
+    final asignaciones = [
+      for (final c in cands)
+        if ((eleccion[(c['movil_id'] as num).toInt()] ?? 0) > 0)
+          {'movil_id': (c['movil_id'] as num).toInt(), 'puesto': eleccion[(c['movil_id'] as num).toInt()]},
+    ];
+    final resumen = cands.map((c) {
+      final p = eleccion[(c['movil_id'] as num).toInt()] ?? 0;
+      final n = (c['numero_movil'] as num?)?.toInt();
+      return '• Móvil ${n ?? '?'}: ${p == 0 ? 'sin premio' : '${emojiPodio(p)} $p° puesto'}';
+    }).join('\n');
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        title: const Text('¿Confirmas la decisión?', style: TextStyle(color: Colors.white)),
+        content: Text('$resumen\n\nA los ganadores les llega el aviso y su descuento. '
+            'No se puede cambiar después.',
+            style: const TextStyle(color: Colors.white70, height: 1.4)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('REVISAR', style: TextStyle(color: Colors.white54))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFFD54F), foregroundColor: Colors.black),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('SÍ, GUARDAR', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    setState(() => _guardandoEmpate = true);
+    try {
+      final r = await Supabase.instance.client.rpc('fn_resolver_empate_premio',
+          params: {'p_empate_id': empateId, 'p_asignaciones': asignaciones});
+      final res = r is Map ? Map<String, dynamic>.from(r) : <String, dynamic>{};
+      if (!mounted) return;
+      if (res['ok'] == true) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('✅ Decisión guardada. Se avisó a los ganadores.'),
+          backgroundColor: Colors.green,
+        ));
+        await _cargar();
+      } else {
+        final err = res['error']?.toString() ?? '';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(err == 'no_autorizado'
+              ? 'Solo la Central puede decidir el empate.'
+              : err == 'ya_resuelto'
+                  ? 'Este empate ya fue decidido.'
+                  : 'No se pudo guardar. Intenta de nuevo.'),
+          backgroundColor: Colors.red,
+        ));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('No se pudo guardar. Revisa tu conexión e intenta de nuevo.'),
+          backgroundColor: Colors.red,
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _guardandoEmpate = false);
+    }
   }
 
   Widget _tarjetaSemana(String clave, List<Map<String, dynamic>> filas) {

@@ -300,6 +300,9 @@ class _RankingScreenState extends State<RankingScreen> {
                       final int ptsLider = _ranking.isNotEmpty
                           ? (_ranking.first['puntos_semana'] as int? ?? 0)
                           : 0;
+                      // Empate en el podio: otro móvil con los mismos puntos
+                      final bool empatado = puesto != null && pts > 0 &&
+                          _ranking.where((r) => (r['puntos_semana'] as int? ?? 0) == pts).length > 1;
                       final Color colorPodio = puesto == 1
                           ? const Color(0xFFFFD54F)
                           : puesto == 2
@@ -444,6 +447,17 @@ class _RankingScreenState extends State<RankingScreen> {
                                   fontWeight: clasificado ? FontWeight.bold : FontWeight.normal,
                                 ),
                               ),
+                              if (empatado)
+                                const Padding(
+                                  padding: EdgeInsets.only(top: 2),
+                                  child: Text(
+                                    '⚖️ Empate — si sigue así, decide la Central. ¡Suma un servicio más!',
+                                    style: TextStyle(
+                                        color: Color(0xFFFFD54F),
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold),
+                                  ),
+                                ),
                             ],
                           ),
                           trailing: Column(

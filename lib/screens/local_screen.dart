@@ -30,6 +30,7 @@ import 'package:serviexpress_app/utils/whatsapp_contacto.dart'; // WhatsApp: nú
 import 'package:serviexpress_app/utils/programacion.dart'; // Servicios programados a una hora
 import 'package:serviexpress_app/utils/ubicacion_desde_enlace.dart'; // Pegar ubicación de WhatsApp/Maps
 import 'package:serviexpress_app/utils/errores_servidor.dart'; // Mensajes del candado de estados
+import 'package:serviexpress_app/utils/tema_serviexpress.dart'; // Diseño oficial (tarjetas)
 
 part 'local_screen_dispatch.dart';
 part 'local_screen_cards.dart';

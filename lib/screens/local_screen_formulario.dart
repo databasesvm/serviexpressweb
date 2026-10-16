@@ -494,8 +494,9 @@ mixin _FormularioMixin on State<LocalScreen> {
         widget.usuario['tipo_servicio_defecto']?.toString() ?? 'PAQUETERÍA';
     bool _esMototaxi = false;
 
-    // Modo dinámico: cotización si tarifa vacía, solicitar si tiene precio
-    bool _esCot = true;
+    // Modo dinámico: cotización si tarifa vacía, solicitar si tiene precio.
+    // PAP = servicio DIRECTO: nunca es cotización (no lleva tarifa).
+    bool _esCot = !esPuntoAPunto;
     void Function(VoidCallback)? _setDS;
 
     // PRECIO AUTOMÁTICO (cotización automática): solo aparece si la central
@@ -541,7 +542,7 @@ mixin _FormularioMixin on State<LocalScreen> {
     }
     tarifaController.addListener(() {
       _setDS?.call(() {
-        _esCot = tarifaController.text.trim().isEmpty;
+        _esCot = !esPuntoAPunto && tarifaController.text.trim().isEmpty;
       });
     });
 
@@ -641,17 +642,19 @@ mixin _FormularioMixin on State<LocalScreen> {
                 ],
                 const SizedBox(height: 16),
 
-                // 1. TICKET
-                TextField(
-                  controller: ticketController,
-                  keyboardType: TextInputType.text,
-                  decoration: const InputDecoration(
-                    labelText: 'Ticket / Factura # (Opcional)',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.receipt_long),
+                // 1. TICKET (no aplica al PAP: es un servicio directo)
+                if (!esPuntoAPunto) ...[
+                  TextField(
+                    controller: ticketController,
+                    keyboardType: TextInputType.text,
+                    decoration: const InputDecoration(
+                      labelText: 'Ticket / Factura # (Opcional)',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.receipt_long),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 12),
+                  const SizedBox(height: 12),
+                ],
 
                 // 2. WHATSAPP (MINI-CRM CLIENTES)
                 if (!esPuntoAPunto) ...[
@@ -1077,7 +1080,11 @@ mixin _FormularioMixin on State<LocalScreen> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 10),
+                  const Text('¿Cuándo lo necesitas?',
+                      style: TextStyle(
+                          fontSize: 14, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 6),
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 10,
@@ -1103,9 +1110,13 @@ mixin _FormularioMixin on State<LocalScreen> {
                               (String v) => DropdownMenuItem(
                                 value: v,
                                 child: Text(
-                                  v == 'A una hora…' && horaProgramada != null
-                                      ? '📅 Enviar móvil: ${textoProgramado(horaProgramada!)}'
-                                      : 'Enviar móvil: $v',
+                                  v == 'Inmediato'
+                                      ? '⚡ Ya, lo antes posible'
+                                      : v == 'A una hora…'
+                                          ? (horaProgramada != null
+                                              ? '📅 A una hora exacta: ${textoProgramado(horaProgramada!)}'
+                                              : '📅 A una hora exacta…')
+                                          : '⏱ $v',
                                   style: const TextStyle(
                                     fontWeight: FontWeight.bold,
                                   ),
@@ -1131,6 +1142,21 @@ mixin _FormularioMixin on State<LocalScreen> {
                       ),
                     ),
                   ),
+                  if (tiempoPreparacion != 'Inmediato')
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6, left: 2),
+                      child: Text(
+                        tiempoPreparacion == 'A una hora…' &&
+                                horaProgramada != null
+                            ? 'Se envía al radar ${textoProgramado(horaProgramada!)}.'
+                            : _esCot
+                                ? 'Se envía al radar ${tiempoPreparacion.replaceFirst('En ', '')} después de que apruebes el precio.'
+                                : 'Se envía al radar ${tiempoPreparacion.toLowerCase()} '
+                                    '(${textoProgramado(DateTime.now().add(Duration(minutes: int.tryParse(tiempoPreparacion.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0)))}).',
+                        style: const TextStyle(
+                            fontSize: 13, color: Colors.black54),
+                      ),
+                    ),
                   const SizedBox(height: 10),
                   // Chips de servicio: Mototaxi y Lluvia en la misma fila
                   Wrap(
@@ -1215,8 +1241,10 @@ mixin _FormularioMixin on State<LocalScreen> {
                   : () async {
                       if (destinoController.text.isEmpty) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Falta la dirección.'),
+                          SnackBar(
+                            content: Text(esPuntoAPunto
+                                ? 'Escribe dónde compran o recogen.'
+                                : 'Escribe la dirección de entrega.'),
                             backgroundColor: Colors.red,
                           ),
                         );
@@ -1396,8 +1424,12 @@ mixin _FormularioMixin on State<LocalScreen> {
 
                         // PAP: sin etiqueta — el móvil no debe saberlo antes de aceptar
                         if (!esPuntoAPunto && tiempoPreparacion != 'Inmediato') {
+                          final etiquetaProg = tiempoPreparacion == 'A una hora…' &&
+                                  horaProgramada != null
+                              ? textoProgramado(horaProgramada!)
+                              : tiempoPreparacion;
                           notaManual =
-                              '[⏰ PROGRAMADO: $tiempoPreparacion] $notaManual';
+                              '[⏰ PROGRAMADO: $etiquetaProg] $notaManual';
                         }
 
                         String bloqueInstrucciones =
@@ -1699,6 +1731,12 @@ mixin _FormularioMixin on State<LocalScreen> {
                                   ? null
                                   : ticketNum,
                               'liberacion_at': liberacionCalculada,
+                              // Cotización "En X min": los minutos cuentan desde
+                              // que el local aprueba el precio (lo hace el servidor).
+                              if (_esCot &&
+                                  tiempoPreparacion != 'A una hora…' &&
+                                  retardoProgramado > 0)
+                                'programado_min': retardoProgramado,
                             })
                             .select()
                             .single();

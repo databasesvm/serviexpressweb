@@ -757,7 +757,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                     Padding(
                       padding: const EdgeInsets.only(top: 4, left: 24),
                       child: Text(
-                        'Sale a los móviles exactamente ${textoProgramado(horaProgramada!)}.',
+                        'Se envía al radar ${textoProgramado(horaProgramada!)}.',
                         style: TextStyle(fontSize: 11, color: Colors.blue[800]),
                       ),
                     ),
@@ -987,7 +987,7 @@ extension CentralScreenFormularios on _CentralScreenState {
                           // pendiente a la hora exacta y ahí empieza F1→F4.
                           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                             content: Text(
-                                '📅 Servicio programado: sale a los móviles ${textoProgramado(horaProgramada!)}'),
+                                '📅 Servicio programado: se envía al radar ${textoProgramado(horaProgramada!)}'),
                             backgroundColor: Colors.blue[800],
                           ));
                         } else {

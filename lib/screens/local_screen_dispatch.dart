@@ -571,9 +571,11 @@ mixin _DispatchMixin on State<LocalScreen> {
 
       if (contextoPrincipal.mounted) {
         ScaffoldMessenger.of(contextoPrincipal).showSnackBar(
-          const SnackBar(
-            content: Text('✅ Móvil solicitado con éxito. Orden en el radar.'),
-            backgroundColor: Colors.green,
+          SnackBar(
+            content: Text(retardoProgramado > 0
+                ? '📅 Listo. Se envía al radar ${textoProgramado(DateTime.parse(servicio['liberacion_at']))}.'
+                : '✅ Móvil solicitado con éxito. Orden en el radar.'),
+            backgroundColor: retardoProgramado > 0 ? Colors.blue[800] : Colors.green,
           ),
         );
       }
