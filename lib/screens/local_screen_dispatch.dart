@@ -14,7 +14,8 @@ mixin _DispatchMixin on State<LocalScreen> {
     required String mensaje,
     int minutosRetardo = 0,
     int segundosRetardo = 0,
-  }) => MotorNotificaciones.programarMisilRetardado(
+  }) =>
+      MotorNotificaciones.programarMisilRetardado(
         externalIds: externalIds,
         titulo: titulo,
         mensaje: mensaje,
@@ -28,7 +29,8 @@ mixin _DispatchMixin on State<LocalScreen> {
     required String mensaje,
     String? sonido,
     String? canalAndroidId,
-  }) => MotorNotificaciones.dispararRafa(
+  }) =>
+      MotorNotificaciones.dispararRafa(
         idsDestinos: externalIds,
         titulo: titulo,
         mensaje: mensaje,
@@ -58,27 +60,31 @@ mixin _DispatchMixin on State<LocalScreen> {
         title: const Row(children: [
           Icon(Icons.two_wheeler, color: Colors.black, size: 22),
           SizedBox(width: 8),
-          Text('Pedir Móvil ya', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+          Text('Pedir Móvil Rapido',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
         ]),
-        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text(
-            'El móvil viene al local y aquí le entregan los datos del servicio.',
-            style: TextStyle(fontSize: 13, color: Colors.black87),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: notaCtrl,
-            autofocus: true,
-            maxLines: 2,
-            minLines: 1,
-            textCapitalization: TextCapitalization.sentences,
-            decoration: const InputDecoration(
-              labelText: 'Dirección o nota (opcional)',
-              hintText: 'Ej: Barrio Trapiches casa 5 · 2 pedidos',
-              border: OutlineInputBorder(),
-            ),
-          ),
-        ]),
+        content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'El móvil viene al local y aquí le entregan los datos del servicio.',
+                style: TextStyle(fontSize: 13, color: Colors.black87),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: notaCtrl,
+                autofocus: true,
+                maxLines: 2,
+                minLines: 1,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(
+                  labelText: 'Dirección o nota (opcional)',
+                  hintText: 'Ej: Barrio Trapiches casa 5 · 2 pedidos',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ]),
         actionsAlignment: MainAxisAlignment.spaceBetween,
         actions: [
           TextButton(
@@ -90,7 +96,8 @@ mixin _DispatchMixin on State<LocalScreen> {
             onPressed: () => Navigator.pop(d, true),
             icon: const Icon(Icons.radar, color: Color(0xff3AF500), size: 18),
             label: const Text('PEDIR MÓVIL AHORA',
-                style: TextStyle(color: Color(0xff3AF500), fontWeight: FontWeight.bold)),
+                style: TextStyle(
+                    color: Color(0xff3AF500), fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -102,7 +109,8 @@ mixin _DispatchMixin on State<LocalScreen> {
     try {
       final double? oLat = (widget.usuario['lat_fija'] as num?)?.toDouble();
       final double? oLng = (widget.usuario['lng_fija'] as num?)?.toDouble();
-      final String localNombre = widget.usuario['nombre']?.toString() ?? 'Local';
+      final String localNombre =
+          widget.usuario['nombre']?.toString() ?? 'Local';
 
       // 1. Insertar servicio RECOGIDA LOCAL (sin tarifa, sin destino)
       final insertedSvc = await Supabase.instance.client
@@ -115,8 +123,9 @@ mixin _DispatchMixin on State<LocalScreen> {
             'estado': 'pendiente',
             'tarifa': 0,
             'creador': localNombre,
-            'observacion': '[ RECOGIDA LOCAL ] Pedido rápido — los datos se entregan en el local'
-                '${nota.isNotEmpty ? ' · $nota' : ''}',
+            'observacion':
+                '[ RECOGIDA LOCAL ] Pedido rápido — los datos se entregan en el local'
+                    '${nota.isNotEmpty ? ' · $nota' : ''}',
             if (oLat != null) 'origen_lat': oLat,
             if (oLng != null) 'origen_lng': oLng,
           })
@@ -134,8 +143,7 @@ mixin _DispatchMixin on State<LocalScreen> {
       if (paraderoObjetivo != null) {
         await Supabase.instance.client
             .from('servicios')
-            .update({'paradero_origen': paraderoObjetivo})
-            .eq('id', svcId);
+            .update({'paradero_origen': paraderoObjetivo}).eq('id', svcId);
       }
 
       // Fase 1 (T=0): Masters → la manda el servidor (se_f1_motivo).
@@ -176,13 +184,11 @@ mixin _DispatchMixin on State<LocalScreen> {
   ) async {
     Future<void> aprobar({String? telefono}) async {
       try {
-        await Supabase.instance.client
-            .from('servicios')
-            .update({
-              'estado': 'cotizacion_aprobada',
-              if (telefono != null) 'telefono_receptor': normalizarWhatsApp(telefono),
-            })
-            .eq('id', servicio['id']);
+        await Supabase.instance.client.from('servicios').update({
+          'estado': 'cotizacion_aprobada',
+          if (telefono != null)
+            'telefono_receptor': normalizarWhatsApp(telefono),
+        }).eq('id', servicio['id']);
         if (contextoPrincipal.mounted) {
           ScaffoldMessenger.of(contextoPrincipal).showSnackBar(
             SnackBar(
@@ -257,10 +263,12 @@ mixin _DispatchMixin on State<LocalScreen> {
               onPressed: procesando
                   ? null
                   : () async {
-                      final err = validarWhatsApp(telefonoCtrl.text, obligatorio: true);
+                      final err =
+                          validarWhatsApp(telefonoCtrl.text, obligatorio: true);
                       if (err != null) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(err), backgroundColor: Colors.red),
+                          SnackBar(
+                              content: Text(err), backgroundColor: Colors.red),
                         );
                         return;
                       }
@@ -289,12 +297,14 @@ mixin _DispatchMixin on State<LocalScreen> {
           .from('servicios')
           .select('movil_id')
           .eq('local_id', widget.usuario['id'])
-          .inFilter('estado', ['en_ruta_origen', 'en_origen', 'en_ruta_destino'])
-          .not('movil_id', 'is', null);
+          .inFilter('estado', [
+        'en_ruta_origen',
+        'en_origen',
+        'en_ruta_destino'
+      ]).not('movil_id', 'is', null);
 
-      final Set<String> movilIds = serviciosActivos
-          .map((s) => s['movil_id'].toString())
-          .toSet();
+      final Set<String> movilIds =
+          serviciosActivos.map((s) => s['movil_id'].toString()).toSet();
 
       if (movilIds.isNotEmpty) {
         final perfiles = await Supabase.instance.client
@@ -335,31 +345,33 @@ mixin _DispatchMixin on State<LocalScreen> {
                 ),
               ),
               ...movilesActivos.map((moto) => Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.blue[700],
-                      side: BorderSide(color: Colors.blue[300]!),
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.blue[700],
+                          side: BorderSide(color: Colors.blue[300]!),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
+                        ),
+                        onPressed: () async {
+                          Navigator.pop(ctx);
+                          // Envía el servicio DIRECTAMENTE al móvil seleccionado
+                          // (no al radar general) — como exclusivo_id para que
+                          // solo él lo vea, con notificación inmediata solo a él.
+                          await _enviarAprobadaAlMovilExclusivo(
+                              contextoPrincipal, servicio, moto);
+                        },
+                        icon: const Icon(Icons.alt_route, size: 16),
+                        label: Text(
+                          'ENRUTAR a ${(moto['usuario'] ?? moto['nombre'] ?? '').toString().toUpperCase()}',
+                          style: const TextStyle(
+                              fontSize: 12, fontWeight: FontWeight.bold),
+                        ),
+                      ),
                     ),
-                    onPressed: () async {
-                      Navigator.pop(ctx);
-                      // Envía el servicio DIRECTAMENTE al móvil seleccionado
-                      // (no al radar general) — como exclusivo_id para que
-                      // solo él lo vea, con notificación inmediata solo a él.
-                      await _enviarAprobadaAlMovilExclusivo(
-                        contextoPrincipal, servicio, moto);
-                    },
-                    icon: const Icon(Icons.alt_route, size: 16),
-                    label: Text(
-                      'ENRUTAR a ${(moto['usuario'] ?? moto['nombre'] ?? '').toString().toUpperCase()}',
-                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ),
-              )),
+                  )),
               const Divider(),
             ],
             const Text(
@@ -381,7 +393,8 @@ mixin _DispatchMixin on State<LocalScreen> {
             },
             child: Text(
               'Enviar al radar',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              style:
+                  TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
             ),
           ),
         ],
@@ -402,13 +415,10 @@ mixin _DispatchMixin on State<LocalScreen> {
     final String movilId = moto['id'].toString();
 
     try {
-      await Supabase.instance.client
-          .from('servicios')
-          .update({
-            'estado': 'pendiente',
-            'exclusivo_id': movilId,
-          })
-          .eq('id', servicio['id']);
+      await Supabase.instance.client.from('servicios').update({
+        'estado': 'pendiente',
+        'exclusivo_id': movilId,
+      }).eq('id', servicio['id']);
 
       // Notificación inmediata solo al móvil elegido
       await _dispararMisilInmediato(
@@ -416,15 +426,16 @@ mixin _DispatchMixin on State<LocalScreen> {
         titulo: TextosPush.asignadoTitulo,
         mensaje: TextosPush.asignadoMensaje(
           widget.usuario['nombre']?.toString() ?? 'El local',
-          TextosPush.ruta(servicio['origen']?.toString(),
-              servicio['destino']?.toString()),
+          TextosPush.ruta(
+              servicio['origen']?.toString(), servicio['destino']?.toString()),
         ),
       );
 
       if (contextoPrincipal.mounted) {
         ScaffoldMessenger.of(contextoPrincipal).showSnackBar(
           SnackBar(
-            content: Text('✅ Orden #${servicio['id']} enviada directamente a $movilUsuario.'),
+            content: Text(
+                '✅ Orden #${servicio['id']} enviada directamente a $movilUsuario.'),
             backgroundColor: Colors.blue[700],
             duration: const Duration(seconds: 3),
           ),
@@ -474,20 +485,17 @@ mixin _DispatchMixin on State<LocalScreen> {
         );
       }
 
-      await Supabase.instance.client
-          .from('servicios')
-          .update({
-            'estado': nuevoEstado,
-            if (paraderoObjetivo != null) 'paradero_origen': paraderoObjetivo,
-            // La cotización pudo crearse hace rato: el reloj de fases (tarjetas
-            // y servidor) arranca AHORA. Los programados conservan su hora.
-            if (retardoProgramado == 0)
-              'liberacion_at': DateTime.now().toUtc().toIso8601String(),
-            // F1 (T=0) a Masters lo manda el SERVIDOR, solo si el servicio ya
-            // está en el radar. Un programado lo avisa el servidor al liberarlo.
-            if (retardoProgramado == 0) 'se_f1_motivo': 'nuevo',
-          })
-          .eq('id', nuevoServicioId);
+      await Supabase.instance.client.from('servicios').update({
+        'estado': nuevoEstado,
+        if (paraderoObjetivo != null) 'paradero_origen': paraderoObjetivo,
+        // La cotización pudo crearse hace rato: el reloj de fases (tarjetas
+        // y servidor) arranca AHORA. Los programados conservan su hora.
+        if (retardoProgramado == 0)
+          'liberacion_at': DateTime.now().toUtc().toIso8601String(),
+        // F1 (T=0) a Masters lo manda el SERVIDOR, solo si el servicio ya
+        // está en el radar. Un programado lo avisa el servidor al liberarlo.
+        if (retardoProgramado == 0) 'se_f1_motivo': 'nuevo',
+      }).eq('id', nuevoServicioId);
 
       // F3/F4 — pg_cron (edge functions). Programados: los arranca el servidor al liberar.
       if (!esPuntoAPunto && retardoProgramado == 0) {
@@ -504,7 +512,8 @@ mixin _DispatchMixin on State<LocalScreen> {
             content: Text(retardoProgramado > 0
                 ? '📅 Listo. Se envía al radar ${textoProgramado(DateTime.parse(servicio['liberacion_at']))}.'
                 : '✅ Móvil solicitado con éxito. Orden en el radar.'),
-            backgroundColor: retardoProgramado > 0 ? Colors.blue[800] : Colors.green,
+            backgroundColor:
+                retardoProgramado > 0 ? Colors.blue[800] : Colors.green,
           ),
         );
       }
@@ -531,11 +540,8 @@ Future<String?> _paraderoObjetivoDeLocal(
   double? lng,
 ) async {
   final String raw = usuarioLocal['paradero_exclusivo']?.toString() ?? '';
-  final List<String> exclusivos = raw
-      .split(',')
-      .map((e) => e.trim())
-      .where((e) => e.isNotEmpty)
-      .toList();
+  final List<String> exclusivos =
+      raw.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
   if (exclusivos.isNotEmpty) return exclusivos.first.toUpperCase();
   if (lat == null || lng == null) return null;
   try {

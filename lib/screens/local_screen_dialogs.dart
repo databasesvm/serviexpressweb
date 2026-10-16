@@ -80,7 +80,10 @@ mixin _DialogsMixin on State<LocalScreen> {
               ),
               const Text(
                 'Historial de todos mis pedidos',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
+                style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                    color: Colors.white),
               ),
               const SizedBox(height: 10),
               Expanded(
@@ -161,8 +164,8 @@ mixin _DialogsMixin on State<LocalScreen> {
                               // Disparamos el borrado fantasma a la base de datos
                               await Supabase.instance.client
                                   .from('servicios')
-                                  .update({'oculto_local': true})
-                                  .eq('id', historialGlobal[index]['id']);
+                                  .update({'oculto_local': true}).eq(
+                                      'id', historialGlobal[index]['id']);
 
                               // Quitarlo de la lista ya descargada (la consulta
                               // no se repite) y redibujar el panel.
@@ -213,7 +216,8 @@ mixin _DialogsMixin on State<LocalScreen> {
 
         if (precios.isNotEmpty) {
           return precios.map<Map<String, dynamic>>((row) {
-            final dir = Map<String, dynamic>.from(row['red_dir_catalogo'] as Map? ?? {});
+            final dir = Map<String, dynamic>.from(
+                row['red_dir_catalogo'] as Map? ?? {});
             return {'destino': dir['nombre'] ?? '', 'tarifa': row['precio']};
           }).toList();
         }
@@ -295,13 +299,15 @@ mixin _DialogsMixin on State<LocalScreen> {
               ),
               const Text(
                 'Mis clientes',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
+                style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                    color: Colors.white),
               ),
               const Text(
                 'Quién te compra y cuántos pedidos ha hecho',
                 style: TextStyle(fontSize: 12, color: Colors.white54),
               ),
-
               Padding(
                 padding: const EdgeInsets.all(16.0),
                 child: TextField(
@@ -316,7 +322,6 @@ mixin _DialogsMixin on State<LocalScreen> {
                       setModalState(() => filtroActual = val.trim()),
                 ),
               ),
-
               Expanded(
                 child: FutureBuilder<List<dynamic>>(
                   future: futureCrm,
@@ -327,8 +332,12 @@ mixin _DialogsMixin on State<LocalScreen> {
                       );
                     }
 
-                    final servicios = ((snapshot.data?[0] as List?)?.cast<Map<String, dynamic>>()) ?? [];
-                    final infoRows = ((snapshot.data?[1] as List?)?.cast<Map<String, dynamic>>()) ?? [];
+                    final servicios = ((snapshot.data?[0] as List?)
+                            ?.cast<Map<String, dynamic>>()) ??
+                        [];
+                    final infoRows = ((snapshot.data?[1] as List?)
+                            ?.cast<Map<String, dynamic>>()) ??
+                        [];
                     final Map<String, Map<String, dynamic>> infoMap = {
                       for (final r in infoRows) r['telefono'].toString(): r,
                     };
@@ -348,7 +357,8 @@ mixin _DialogsMixin on State<LocalScreen> {
                     Map<String, Map<String, dynamic>> directorio = {};
 
                     for (var servicio in servicios) {
-                      String tel = servicio['telefono_receptor'].toString().trim();
+                      String tel =
+                          servicio['telefono_receptor'].toString().trim();
                       if (tel.isEmpty || tel == 'null') continue;
 
                       if (!directorio.containsKey(tel)) {
@@ -388,8 +398,8 @@ mixin _DialogsMixin on State<LocalScreen> {
                       }
                     }
 
-                    List<Map<String, dynamic>> listaClientes = directorio.values
-                        .toList();
+                    List<Map<String, dynamic>> listaClientes =
+                        directorio.values.toList();
                     if (filtroActual.isNotEmpty) {
                       listaClientes = listaClientes
                           .where(
@@ -420,9 +430,12 @@ mixin _DialogsMixin on State<LocalScreen> {
                       itemCount: listaClientes.length,
                       itemBuilder: (ctx, i) {
                         final cliente = listaClientes[i];
-                        final infoCliente = infoMap[cliente['telefono'].toString()];
-                        final nombreGuardado = infoCliente?['nombre']?.toString();
-                        final notasGuardadas = infoCliente?['notas']?.toString();
+                        final infoCliente =
+                            infoMap[cliente['telefono'].toString()];
+                        final nombreGuardado =
+                            infoCliente?['nombre']?.toString();
+                        final notasGuardadas =
+                            infoCliente?['notas']?.toString();
 
                         Map<String, int> dirs = cliente['direcciones'];
                         String dirFavorita = 'Sin registrar';
@@ -474,13 +487,20 @@ mixin _DialogsMixin on State<LocalScreen> {
                                 children: [
                                   CircleAvatar(
                                     radius: 22,
-                                    backgroundColor: badgeColor.withValues(alpha: 0.1),
+                                    backgroundColor:
+                                        badgeColor.withValues(alpha: 0.1),
                                     child: nombreGuardado != null
                                         ? Text(
-                                            nombreGuardado.substring(0, 1).toUpperCase(),
-                                            style: TextStyle(color: badgeColor, fontWeight: FontWeight.bold, fontSize: 16),
+                                            nombreGuardado
+                                                .substring(0, 1)
+                                                .toUpperCase(),
+                                            style: TextStyle(
+                                                color: badgeColor,
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 16),
                                           )
-                                        : Icon(Icons.person, color: badgeColor, size: 24),
+                                        : Icon(Icons.person,
+                                            color: badgeColor, size: 24),
                                   ),
                                   const SizedBox(width: 12),
                                   Expanded(
@@ -491,7 +511,8 @@ mixin _DialogsMixin on State<LocalScreen> {
                                         Row(
                                           children: [
                                             Text(
-                                              nombreGuardado ?? cliente['telefono'],
+                                              nombreGuardado ??
+                                                  cliente['telefono'],
                                               style: const TextStyle(
                                                 fontWeight: FontWeight.bold,
                                                 fontSize: 16,
@@ -501,9 +522,9 @@ mixin _DialogsMixin on State<LocalScreen> {
                                             Container(
                                               padding:
                                                   const EdgeInsets.symmetric(
-                                                    horizontal: 6,
-                                                    vertical: 2,
-                                                  ),
+                                                horizontal: 6,
+                                                vertical: 2,
+                                              ),
                                               decoration: BoxDecoration(
                                                 color: badgeColor,
                                                 borderRadius:
@@ -524,7 +545,9 @@ mixin _DialogsMixin on State<LocalScreen> {
                                           const SizedBox(height: 2),
                                           Text(
                                             cliente['telefono'],
-                                            style: const TextStyle(fontSize: 11, color: Colors.black45),
+                                            style: const TextStyle(
+                                                fontSize: 11,
+                                                color: Colors.black45),
                                           ),
                                         ],
                                         const SizedBox(height: 4),
@@ -644,256 +667,277 @@ mixin _DialogsMixin on State<LocalScreen> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        title: Row(
-          children: [
-            const Icon(Icons.contact_phone, color: Colors.blue),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    nombreActual ?? cliente['telefono'],
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                  ),
-                  if (nombreActual != null)
-                    Text(cliente['telefono'],
-                        style: const TextStyle(fontSize: 12, color: Colors.black45, fontWeight: FontWeight.normal)),
-                ],
-              ),
-            ),
-            IconButton(
-              tooltip: 'Editar datos del cliente',
-              icon: const Icon(Icons.edit_rounded, color: Colors.blue, size: 20),
-              onPressed: () => _editarDatosCliente(
-                ctx,
-                cliente['telefono'].toString(),
-                nombreActual,
-                notasActuales,
-                (nuevoNombre, nuevasNotas) => setDialogState(() {
-                  nombreActual = nuevoNombre;
-                  notasActuales = nuevasNotas;
-                }),
-              ),
-            ),
-          ],
-        ),
-        content: SizedBox(
-          width: 400,
-          height: 450,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          title: Row(
             children: [
-              // PANEL DE MÉTRICAS (Simplificado)
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.blue[50],
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.blue[200]!),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              const Icon(Icons.contact_phone, color: Colors.blue),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Column(
-                      children: [
-                        const Text(
-                          'Exitosos',
-                          style: TextStyle(fontSize: 10, color: Colors.black54),
-                        ),
-                        Text(
-                          '${cliente['completados']}',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 18,
-                            color: Colors.blue[800],
-                          ),
-                        ),
-                      ],
+                    Text(
+                      nombreActual ?? cliente['telefono'],
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 16),
                     ),
-                    Container(width: 1, height: 32, color: Colors.grey[300]),
-                    Column(
-                      children: [
-                        const Text(
-                          'Cancelados',
-                          style: TextStyle(fontSize: 10, color: Colors.black54),
-                        ),
-                        Text(
-                          '${cliente['cancelados']}',
+                    if (nombreActual != null)
+                      Text(cliente['telefono'],
                           style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 18,
-                            color: Colors.red,
-                          ),
-                        ),
-                      ],
-                    ),
-                    Container(width: 1, height: 32, color: Colors.grey[300]),
-                    Column(
-                      children: [
-                        const Text(
-                          'Último',
-                          style: TextStyle(fontSize: 10, color: Colors.black54),
-                        ),
-                        Text(
-                          fechaStr,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
-                            color: Colors.black,
-                          ),
-                        ),
-                      ],
-                    ),
+                              fontSize: 12,
+                              color: Colors.black45,
+                              fontWeight: FontWeight.normal)),
                   ],
                 ),
               ),
-              const SizedBox(height: 12),
-              Text(
-                '📍 Destino principal: $dirFavorita',
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              if (notasActuales != null && notasActuales!.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: Colors.amber[50],
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.amber[200]!),
-                  ),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Icon(Icons.sticky_note_2_rounded, size: 14, color: Colors.amber),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(notasActuales!,
-                            style: const TextStyle(fontSize: 12, color: Colors.black87)),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-              const SizedBox(height: 12),
-
-              const Text(
-                'Direcciones de este cliente',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black54,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Expanded(
-                child: ListView.builder(
-                  itemCount: historial.length,
-                  itemBuilder: (c, i) {
-                    final servicio = historial[i];
-                    final bool finalizado = servicio['estado'] == 'finalizado';
-                    final dt = DateTime.parse(servicio['created_at']).toLocal();
-                    return ListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      leading: Icon(
-                        finalizado ? Icons.check_circle : Icons.cancel,
-                        color: finalizado ? Colors.green : Colors.red,
-                        size: 20,
-                      ),
-                      title: Text(
-                        '${servicio['destino']}',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      subtitle: Text(
-                        '${dt.day}/${dt.month}/${dt.year} - ${servicio['estado'].toString().toUpperCase()}',
-                        style: const TextStyle(fontSize: 10),
-                      ),
-                    );
-                  },
+              IconButton(
+                tooltip: 'Editar datos del cliente',
+                icon: const Icon(Icons.edit_rounded,
+                    color: Colors.blue, size: 20),
+                onPressed: () => _editarDatosCliente(
+                  ctx,
+                  cliente['telefono'].toString(),
+                  nombreActual,
+                  notasActuales,
+                  (nuevoNombre, nuevasNotas) => setDialogState(() {
+                    nombreActual = nuevoNombre;
+                    notasActuales = nuevasNotas;
+                  }),
                 ),
               ),
             ],
           ),
-        ),
-        actions: [
-          // Fila 1: botones de acción
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+          content: SizedBox(
+            width: 400,
+            height: 450,
             child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xff3AF500),
-                          foregroundColor: Colors.black,
-                          padding: const EdgeInsets.symmetric(vertical: 10),
-                        ),
-                        icon: const Icon(Icons.motorcycle, size: 16),
-                        label: const Text(
-                          'Nuevo pedido para este cliente',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
-                        ),
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                          Navigator.pop(context);
-                          _abrirFormularioPedido(
-                            context,
-                            perfilEnVivo: perfilEnVivo,
-                            telefonoPrellenado: cliente['telefono'].toString(),
-                          );
-                        },
+                // PANEL DE MÉTRICAS (Simplificado)
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.blue[50],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.blue[200]!),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      Column(
+                        children: [
+                          const Text(
+                            'Exitosos',
+                            style:
+                                TextStyle(fontSize: 10, color: Colors.black54),
+                          ),
+                          Text(
+                            '${cliente['completados']}',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 18,
+                              color: Colors.blue[800],
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xff25D366),
-                          padding: const EdgeInsets.symmetric(vertical: 10),
-                        ),
-                        icon: const Icon(iconoWhatsApp, color: Colors.white, size: 16),
-                        label: const Text(
-                          'PROMO',
-                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
-                        ),
-                        onPressed: () async {
-                          // Número o @usuario de WhatsApp
-                          await abrirChatWhatsApp(
-                            cliente['telefono']?.toString(),
-                            texto: '¡Hola! Tenemos promociones especiales para ti hoy en ${widget.usuario['nombre']} 🍔🎁',
-                          );
-                        },
+                      Container(width: 1, height: 32, color: Colors.grey[300]),
+                      Column(
+                        children: [
+                          const Text(
+                            'Cancelados',
+                            style:
+                                TextStyle(fontSize: 10, color: Colors.black54),
+                          ),
+                          Text(
+                            '${cliente['cancelados']}',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 18,
+                              color: Colors.red,
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                  ],
+                      Container(width: 1, height: 32, color: Colors.grey[300]),
+                      Column(
+                        children: [
+                          const Text(
+                            'Último',
+                            style:
+                                TextStyle(fontSize: 10, color: Colors.black54),
+                          ),
+                          Text(
+                            fechaStr,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                              color: Colors.black,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 4),
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('CERRAR', style: TextStyle(color: Colors.black54)),
+                const SizedBox(height: 12),
+                Text(
+                  '📍 Destino principal: $dirFavorita',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                if (notasActuales != null && notasActuales!.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.amber[50],
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.amber[200]!),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.sticky_note_2_rounded,
+                            size: 14, color: Colors.amber),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(notasActuales!,
+                              style: const TextStyle(
+                                  fontSize: 12, color: Colors.black87)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 12),
+
+                const Text(
+                  'Direcciones de este cliente',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black54,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: historial.length,
+                    itemBuilder: (c, i) {
+                      final servicio = historial[i];
+                      final bool finalizado =
+                          servicio['estado'] == 'finalizado';
+                      final dt =
+                          DateTime.parse(servicio['created_at']).toLocal();
+                      return ListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        leading: Icon(
+                          finalizado ? Icons.check_circle : Icons.cancel,
+                          color: finalizado ? Colors.green : Colors.red,
+                          size: 20,
+                        ),
+                        title: Text(
+                          '${servicio['destino']}',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        subtitle: Text(
+                          '${dt.day}/${dt.month}/${dt.year} - ${servicio['estado'].toString().toUpperCase()}',
+                          style: const TextStyle(fontSize: 10),
+                        ),
+                      );
+                    },
+                  ),
                 ),
               ],
             ),
           ),
-        ],
-      ),
-      ),  // StatefulBuilder
+          actions: [
+            // Fila 1: botones de acción
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xff3AF500),
+                            foregroundColor: Colors.black,
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                          ),
+                          icon: const Icon(Icons.motorcycle, size: 16),
+                          label: const Text(
+                            'Nuevo pedido para este cliente',
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 11),
+                          ),
+                          onPressed: () {
+                            Navigator.pop(ctx);
+                            Navigator.pop(context);
+                            _abrirFormularioPedido(
+                              context,
+                              perfilEnVivo: perfilEnVivo,
+                              telefonoPrellenado:
+                                  cliente['telefono'].toString(),
+                            );
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xff25D366),
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                          ),
+                          icon: const Icon(iconoWhatsApp,
+                              color: Colors.white, size: 16),
+                          label: const Text(
+                            'PROMO',
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 11),
+                          ),
+                          onPressed: () async {
+                            // Número o @usuario de WhatsApp
+                            await abrirChatWhatsApp(
+                              cliente['telefono']?.toString(),
+                              texto:
+                                  '¡Hola! Tenemos promociones especiales para ti hoy en ${widget.usuario['nombre']} 🍔🎁',
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('CERRAR',
+                        style: TextStyle(color: Colors.black54)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ), // StatefulBuilder
     );
   }
 
@@ -915,15 +959,25 @@ mixin _DialogsMixin on State<LocalScreen> {
       context: ctx,
       builder: (dCtx) => StatefulBuilder(
         builder: (dCtx, setDs) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           title: Row(children: [
             const Icon(Icons.edit_rounded, color: Colors.blue, size: 20),
             const SizedBox(width: 8),
             Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-                const Text('EDITAR CLIENTE', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                Text(telefono, style: const TextStyle(fontSize: 12, color: Colors.black45, fontWeight: FontWeight.normal)),
-              ]),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('EDITAR CLIENTE',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 15)),
+                    Text(telefono,
+                        style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.black45,
+                            fontWeight: FontWeight.normal)),
+                  ]),
             ),
           ]),
           content: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -954,7 +1008,8 @@ mixin _DialogsMixin on State<LocalScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(dCtx),
-              child: const Text('CANCELAR', style: TextStyle(color: Colors.black45)),
+              child: const Text('CANCELAR',
+                  style: TextStyle(color: Colors.black45)),
             ),
             ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
@@ -962,32 +1017,47 @@ mixin _DialogsMixin on State<LocalScreen> {
                 foregroundColor: Colors.white,
               ),
               icon: guardando
-                  ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                          color: Colors.white, strokeWidth: 2))
                   : const Icon(Icons.save_rounded, size: 16),
-              label: const Text('GUARDAR', style: TextStyle(fontWeight: FontWeight.bold)),
-              onPressed: guardando ? null : () async {
-                setDs(() => guardando = true);
-                final nuevoNombre = nombreCtrl.text.trim().isEmpty ? null : nombreCtrl.text.trim();
-                final nuevasNotas = notasCtrl.text.trim().isEmpty ? null : notasCtrl.text.trim();
-                try {
-                  await Supabase.instance.client.from('crm_clientes_info').upsert({
-                    'local_id': widget.usuario['id'],
-                    'telefono': telefono,
-                    'nombre': nuevoNombre,
-                    'notas': nuevasNotas,
-                    'updated_at': DateTime.now().toIso8601String(),
-                  }, onConflict: 'local_id,telefono');
-                  if (dCtx.mounted) Navigator.pop(dCtx);
-                  onGuardado(nuevoNombre, nuevasNotas);
-                } catch (e) {
-                  setDs(() => guardando = false);
-                  if (dCtx.mounted) {
-                    ScaffoldMessenger.of(dCtx).showSnackBar(
-                      SnackBar(content: Text(textoError(e)), backgroundColor: Colors.red),
-                    );
-                  }
-                }
-              },
+              label: const Text('GUARDAR',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+              onPressed: guardando
+                  ? null
+                  : () async {
+                      setDs(() => guardando = true);
+                      final nuevoNombre = nombreCtrl.text.trim().isEmpty
+                          ? null
+                          : nombreCtrl.text.trim();
+                      final nuevasNotas = notasCtrl.text.trim().isEmpty
+                          ? null
+                          : notasCtrl.text.trim();
+                      try {
+                        await Supabase.instance.client
+                            .from('crm_clientes_info')
+                            .upsert({
+                          'local_id': widget.usuario['id'],
+                          'telefono': telefono,
+                          'nombre': nuevoNombre,
+                          'notas': nuevasNotas,
+                          'updated_at': DateTime.now().toIso8601String(),
+                        }, onConflict: 'local_id,telefono');
+                        if (dCtx.mounted) Navigator.pop(dCtx);
+                        onGuardado(nuevoNombre, nuevasNotas);
+                      } catch (e) {
+                        setDs(() => guardando = false);
+                        if (dCtx.mounted) {
+                          ScaffoldMessenger.of(dCtx).showSnackBar(
+                            SnackBar(
+                                content: Text(textoError(e)),
+                                backgroundColor: Colors.red),
+                          );
+                        }
+                      }
+                    },
             ),
           ],
         ),
@@ -1053,13 +1123,10 @@ mixin _DialogsMixin on State<LocalScreen> {
                     padding: const EdgeInsets.symmetric(vertical: 14),
                   ),
                   onPressed: () async {
-                    await Supabase.instance.client
-                        .from('usuarios')
-                        .update({
-                          'lat_fija': centerPos.latitude,
-                          'lng_fija': centerPos.longitude,
-                        })
-                        .eq('id', widget.usuario['id']);
+                    await Supabase.instance.client.from('usuarios').update({
+                      'lat_fija': centerPos.latitude,
+                      'lng_fija': centerPos.longitude,
+                    }).eq('id', widget.usuario['id']);
 
                     setState(() {
                       widget.usuario['lat_fija'] = centerPos.latitude;
@@ -1188,16 +1255,26 @@ mixin _DialogsMixin on State<LocalScreen> {
   Future<void> _abrirConfigDomicilios(Map<String, dynamic> perfil) async {
     final db = Supabase.instance.client;
     final categorias = [
-      'Restaurante / Comida', 'Bebidas y Licores', 'Panadería / Pastelería',
-      'Mercado / Supermercado', 'Farmacia / Droguería',
-      'Ferretería', 'Papelería', 'Tecnología / Electrónica',
-      'Ropa / Accesorios', 'Miscelánea', 'Mascotas', 'Otro',
+      'Restaurante / Comida',
+      'Bebidas y Licores',
+      'Panadería / Pastelería',
+      'Mercado / Supermercado',
+      'Farmacia / Droguería',
+      'Ferretería',
+      'Papelería',
+      'Tecnología / Electrónica',
+      'Ropa / Accesorios',
+      'Miscelánea',
+      'Mascotas',
+      'Otro',
     ];
     String categoria = perfil['categoria_local']?.toString() ?? 'Comida';
-    final tiempoCtrl = TextEditingController(text: (perfil['tiempo_entrega'] ?? 35).toString());
-    final minimoCtrl = TextEditingController(text: (perfil['pedido_minimo'] ?? 0).toString());
+    final tiempoCtrl = TextEditingController(
+        text: (perfil['tiempo_entrega'] ?? 35).toString());
+    final minimoCtrl =
+        TextEditingController(text: (perfil['pedido_minimo'] ?? 0).toString());
     TimeOfDay? apertura = _parseTime(perfil['horario_apertura']?.toString());
-    TimeOfDay? cierre   = _parseTime(perfil['horario_cierre']?.toString());
+    TimeOfDay? cierre = _parseTime(perfil['horario_cierre']?.toString());
     // dias_semana: string "1111111" Mon=0..Sun=6
     final rawDias = perfil['dias_semana']?.toString();
     List<bool> diasAbierto = rawDias != null && rawDias.length == 7
@@ -1208,7 +1285,8 @@ mixin _DialogsMixin on State<LocalScreen> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx2, setDlg) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: const Text('Configurar domicilios',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           content: SingleChildScrollView(
@@ -1216,77 +1294,93 @@ mixin _DialogsMixin on State<LocalScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Categoría', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                const Text('Categoría',
+                    style: TextStyle(fontSize: 12, color: Colors.black54)),
                 const SizedBox(height: 4),
                 DropdownButtonFormField<String>(
-                  initialValue: categorias.contains(categoria) ? categoria : 'Comida',
-                  items: categorias.map((cat) => DropdownMenuItem(
-                      value: cat, child: Text(cat, style: const TextStyle(fontSize: 13)))).toList(),
+                  initialValue:
+                      categorias.contains(categoria) ? categoria : 'Comida',
+                  items: categorias
+                      .map((cat) => DropdownMenuItem(
+                          value: cat,
+                          child:
+                              Text(cat, style: const TextStyle(fontSize: 13))))
+                      .toList(),
                   onChanged: (v) {
-                  if (v == null) return;
-                  setDlg(() {
-                    categoria = v;
-                    // Reflect auto-tipo in parent state (will be overridden if user changed it manually)
-                    final s = v.toLowerCase();
-                    if (s.contains('comida') || s.contains('restaurante') ||
-                        s.contains('panader') || s.contains('pastel')) {
-                      setState(() => _tipoServicioDefecto = 'COMIDA');
-                    } else if (s.contains('bebidas') || s.contains('licores')) {
-                      setState(() => _tipoServicioDefecto = 'BEBIDAS');
-                    } else if (s.contains('paquete')) {
-                      setState(() => _tipoServicioDefecto = 'PAQUETERÍA');
-                    } else {
-                      setState(() => _tipoServicioDefecto = 'COMPRAS');
-                    }
-                  });
-                },
+                    if (v == null) return;
+                    setDlg(() {
+                      categoria = v;
+                      // Reflect auto-tipo in parent state (will be overridden if user changed it manually)
+                      final s = v.toLowerCase();
+                      if (s.contains('comida') ||
+                          s.contains('restaurante') ||
+                          s.contains('panader') ||
+                          s.contains('pastel')) {
+                        setState(() => _tipoServicioDefecto = 'COMIDA');
+                      } else if (s.contains('bebidas') ||
+                          s.contains('licores')) {
+                        setState(() => _tipoServicioDefecto = 'BEBIDAS');
+                      } else if (s.contains('paquete')) {
+                        setState(() => _tipoServicioDefecto = 'PAQUETERÍA');
+                      } else {
+                        setState(() => _tipoServicioDefecto = 'COMPRAS');
+                      }
+                    });
+                  },
                   decoration: InputDecoration(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
                   ),
                 ),
                 const SizedBox(height: 12),
-                const Text('Tiempo estimado de entrega', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                const Text('Tiempo estimado de entrega',
+                    style: TextStyle(fontSize: 12, color: Colors.black54)),
                 const SizedBox(height: 4),
                 TextField(
                   controller: tiempoCtrl,
                   keyboardType: TextInputType.number,
                   decoration: InputDecoration(
                     suffixText: 'min',
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
                   ),
                   style: const TextStyle(fontSize: 13),
                 ),
                 const SizedBox(height: 12),
-                const Text('Pedido mínimo (COP)', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                const Text('Pedido mínimo (COP)',
+                    style: TextStyle(fontSize: 12, color: Colors.black54)),
                 const SizedBox(height: 4),
                 TextField(
                   controller: minimoCtrl,
                   keyboardType: TextInputType.number,
                   decoration: InputDecoration(
                     prefixText: '\$ ',
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
                   ),
                   style: const TextStyle(fontSize: 13),
                 ),
                 const SizedBox(height: 12),
-                const Text('Horario de atención', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                const Text('Horario de atención',
+                    style: TextStyle(fontSize: 12, color: Colors.black54)),
                 const SizedBox(height: 4),
                 Row(children: [
                   Expanded(
                     child: OutlinedButton.icon(
                       icon: const Icon(Icons.access_time, size: 14),
                       label: Text(
-                        apertura != null
-                            ? horaDia12(apertura!)
-                            : 'Apertura',
+                        apertura != null ? horaDia12(apertura!) : 'Apertura',
                         style: const TextStyle(fontSize: 12),
                       ),
                       onPressed: () async {
-                        final t = await elegirHora12(
-                            ctx2, apertura ?? const TimeOfDay(hour: 8, minute: 0),
+                        final t = await elegirHora12(ctx2,
+                            apertura ?? const TimeOfDay(hour: 8, minute: 0),
                             titulo: '¿A qué hora abres?');
                         if (t != null) setDlg(() => apertura = t);
                       },
@@ -1297,14 +1391,12 @@ mixin _DialogsMixin on State<LocalScreen> {
                     child: OutlinedButton.icon(
                       icon: const Icon(Icons.access_time, size: 14),
                       label: Text(
-                        cierre != null
-                            ? horaDia12(cierre!)
-                            : 'Cierre',
+                        cierre != null ? horaDia12(cierre!) : 'Cierre',
                         style: const TextStyle(fontSize: 12),
                       ),
                       onPressed: () async {
-                        final t = await elegirHora12(
-                            ctx2, cierre ?? const TimeOfDay(hour: 22, minute: 0),
+                        final t = await elegirHora12(ctx2,
+                            cierre ?? const TimeOfDay(hour: 22, minute: 0),
                             titulo: '¿A qué hora cierras?');
                         if (t != null) setDlg(() => cierre = t);
                       },
@@ -1312,13 +1404,22 @@ mixin _DialogsMixin on State<LocalScreen> {
                   ),
                 ]),
                 const SizedBox(height: 12),
-                const Text('Días de atención', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                const Text('Días de atención',
+                    style: TextStyle(fontSize: 12, color: Colors.black54)),
                 const SizedBox(height: 6),
                 Wrap(
                   spacing: 6,
                   children: List.generate(7, (i) {
                     const labels = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
-                    const fullNames = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+                    const fullNames = [
+                      'Lun',
+                      'Mar',
+                      'Mié',
+                      'Jue',
+                      'Vie',
+                      'Sáb',
+                      'Dom'
+                    ];
                     final activo = diasAbierto[i];
                     return FilterChip(
                       label: Text(labels[i],
@@ -1333,9 +1434,11 @@ mixin _DialogsMixin on State<LocalScreen> {
                       backgroundColor: const Color(0xFF0D0D0D),
                       checkmarkColor: const Color(0xff3AF500),
                       showCheckmark: false,
-                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 4, vertical: 0),
                       visualDensity: VisualDensity.compact,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(6)),
                     );
                   }),
                 ),
@@ -1345,13 +1448,15 @@ mixin _DialogsMixin on State<LocalScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancelar', style: TextStyle(color: Colors.grey)),
+              child:
+                  const Text('Cancelar', style: TextStyle(color: Colors.grey)),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.black,
                 foregroundColor: const Color(0xff3AF500),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8)),
               ),
               onPressed: () async {
                 final tiempo = int.tryParse(tiempoCtrl.text.trim()) ?? 35;
@@ -1373,16 +1478,19 @@ mixin _DialogsMixin on State<LocalScreen> {
                   if (ctx.mounted) {
                     Navigator.pop(ctx);
                     ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
-                        content: Text('Configuración guardada'), backgroundColor: Colors.green));
+                        content: Text('Configuración guardada'),
+                        backgroundColor: Colors.green));
                   }
                 } catch (e) {
                   if (ctx.mounted) {
-                    ScaffoldMessenger.of(ctx).showSnackBar(
-                        SnackBar(content: Text(textoError(e)), backgroundColor: Colors.red));
+                    ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+                        content: Text(textoError(e)),
+                        backgroundColor: Colors.red));
                   }
                 }
               },
-              child: const Text('Guardar', style: TextStyle(fontWeight: FontWeight.bold)),
+              child: const Text('Guardar',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
             ),
           ],
         ),
@@ -1397,7 +1505,8 @@ mixin _DialogsMixin on State<LocalScreen> {
     if (s == null || s.isEmpty) return null;
     final parts = s.split(':');
     if (parts.length < 2) return null;
-    return TimeOfDay(hour: int.tryParse(parts[0]) ?? 0, minute: int.tryParse(parts[1]) ?? 0);
+    return TimeOfDay(
+        hour: int.tryParse(parts[0]) ?? 0, minute: int.tryParse(parts[1]) ?? 0);
   }
 
   void _abrirMenuUbicacion() {
@@ -1450,18 +1559,21 @@ mixin _DialogsMixin on State<LocalScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        title: const Text('Cerrar sesión', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text('Cerrar sesión',
+            style: TextStyle(fontWeight: FontWeight.bold)),
         content: const Text('¿Seguro que quieres cerrar sesión?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar', style: TextStyle(color: Colors.black54)),
+            child:
+                const Text('Cancelar', style: TextStyle(color: Colors.black54)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.black),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('CERRAR SESIÓN',
-                style: TextStyle(color: Color(0xff3AF500), fontWeight: FontWeight.bold)),
+                style: TextStyle(
+                    color: Color(0xff3AF500), fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -1507,7 +1619,8 @@ mixin _DialogsMixin on State<LocalScreen> {
       context: context,
       barrierDismissible: false, // No se puede ignorar tocando fuera
       builder: (ctxRecargo) => PopScope(
-        canPop: false, // El botón atrás tampoco lo evade — debe elegir una opción
+        canPop:
+            false, // El botón atrás tampoco lo evade — debe elegir una opción
         child: AlertDialog(
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
@@ -1657,19 +1770,17 @@ mixin _DialogsMixin on State<LocalScreen> {
 
     if (confirmar == true) {
       try {
-        await Supabase.instance.client
-            .from('usuarios')
-            .update({
-              'suspendido': true,
-              'en_linea': false,
-              'observacion': 'CUENTA ELIMINADA POR EL USUARIO',
-            })
-            .eq('id', widget.usuario['id']);
+        await Supabase.instance.client.from('usuarios').update({
+          'suspendido': true,
+          'en_linea': false,
+          'observacion': 'CUENTA ELIMINADA POR EL USUARIO',
+        }).eq('id', widget.usuario['id']);
 
         final prefs = await SharedPreferences.getInstance();
         await prefs.remove('saved_phone');
         await prefs.remove('saved_password');
-        await prefs.remove('sesion_usuario_json'); // evita auto-login con cuenta eliminada
+        await prefs.remove(
+            'sesion_usuario_json'); // evita auto-login con cuenta eliminada
         await prefs.setBool('auto_login', false);
 
         if (!kIsWeb) OneSignal.logout();

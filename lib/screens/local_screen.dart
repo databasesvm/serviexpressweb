@@ -47,7 +47,12 @@ class LocalScreen extends StatefulWidget {
 }
 
 class _LocalScreenState extends State<LocalScreen>
-    with WidgetsBindingObserver, _CardsMixin, _DialogsMixin, _FormularioMixin, _DispatchMixin {
+    with
+        WidgetsBindingObserver,
+        _CardsMixin,
+        _DialogsMixin,
+        _FormularioMixin,
+        _DispatchMixin {
   // Memoria táctica para ocultar servicios del panel de hoy
   final Set<int> _serviciosOcultosLocal = {};
 
@@ -60,6 +65,7 @@ class _LocalScreenState extends State<LocalScreen>
   bool _guardandoPerfil = false;
   @override
   final SonidoManager _sonidos = SonidoManager();
+
   /// Contador de servicios activos para el badge en la pestaña ACTIVOS
   final ValueNotifier<int> _activosCount = ValueNotifier(0);
 
@@ -129,8 +135,8 @@ class _LocalScreenState extends State<LocalScreen>
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (_) =>
-                const PermisosCriticosScreen(permisosRequeridos: kPermisosLocal),
+            builder: (_) => const PermisosCriticosScreen(
+                permisosRequeridos: kPermisosLocal),
             fullscreenDialog: true,
           ),
         );
@@ -230,8 +236,7 @@ class _LocalScreenState extends State<LocalScreen>
 
     final crudoPerfil = Supabase.instance.client
         .from('usuarios')
-        .stream(primaryKey: ['id'])
-        .eq('id', widget.usuario['id']);
+        .stream(primaryKey: ['id']).eq('id', widget.usuario['id']);
 
     final crudoServicios = Supabase.instance.client
         .from('servicios')
@@ -261,13 +266,24 @@ class _LocalScreenState extends State<LocalScreen>
         // Sonidos (estado / móvil asignado / cotización / chat) comparando
         // contra lo último conocido. Reemplaza los dos canales extra.
         _sonidosPorCambios(data);
-        _chatLocalCount.value = data.where((s) => s['chat_cliente'] == true).length;
-        _activosCount.value = data.where((s) =>
-          s['oculto_local'] != true &&
-          ['programado','pendiente','en_curso','en_ruta_origen','en_origen',
-           'en_ruta_destino','problema','cotizacion','cotizada','cotizacion_aprobada']
-              .contains(s['estado']?.toString())
-        ).length;
+        _chatLocalCount.value =
+            data.where((s) => s['chat_cliente'] == true).length;
+        _activosCount.value = data
+            .where((s) =>
+                s['oculto_local'] != true &&
+                [
+                  'programado',
+                  'pendiente',
+                  'en_curso',
+                  'en_ruta_origen',
+                  'en_origen',
+                  'en_ruta_destino',
+                  'problema',
+                  'cotizacion',
+                  'cotizada',
+                  'cotizacion_aprobada'
+                ].contains(s['estado']?.toString()))
+            .length;
         if (!_ctrlServiciosLocal.isClosed) _ctrlServiciosLocal.add(data);
       },
       onError: (e) {
@@ -325,22 +341,28 @@ class _LocalScreenState extends State<LocalScreen>
 
   // Abre el chat del servicio donde el móvil escribió al local
   void _abrirChatPendienteLocal() {
-    final svc = _cacheServiciosLocal?.where((s) => s['chat_cliente'] == true).firstOrNull;
+    final svc = _cacheServiciosLocal
+        ?.where((s) => s['chat_cliente'] == true)
+        .firstOrNull;
     if (svc == null) return;
-    Supabase.instance.client.from('servicios').update({'chat_cliente': false}).eq('id', svc['id']);
-    Navigator.push(context, MaterialPageRoute(
-      builder: (_) => ChatScreen(
-        salaId: 'servicio_${svc['id']}',
-        miId: widget.usuario['id'],
-        miNombre: widget.usuario['nombre']?.toString() ?? 'Local',
-        titulo: 'Chat del Servicio',
-        servicioId: svc['id'],
-        alarmaLocal: 'chat_cliente',
-        alarmaDestino: 'chat_movil',
-        destinatarioId: (svc['movil_id'] as num?)?.toInt(),
-        tipoFaq: TipoFaqChat.local,
-      ),
-    ));
+    Supabase.instance.client
+        .from('servicios')
+        .update({'chat_cliente': false}).eq('id', svc['id']);
+    Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ChatScreen(
+            salaId: 'servicio_${svc['id']}',
+            miId: widget.usuario['id'],
+            miNombre: widget.usuario['nombre']?.toString() ?? 'Local',
+            titulo: 'Chat del Servicio',
+            servicioId: svc['id'],
+            alarmaLocal: 'chat_cliente',
+            alarmaDestino: 'chat_movil',
+            destinatarioId: (svc['movil_id'] as num?)?.toInt(),
+            tipoFaq: TipoFaqChat.local,
+          ),
+        ));
   }
 
   // Vigilante: cada 60 s hace la revisión liviana (_verificarFrescura) y solo
@@ -385,10 +407,13 @@ class _LocalScreenState extends State<LocalScreen>
   /// Deriva tipo_servicio desde categoria_local (fallback cuando no está guardado)
   String _tipoDesdeCategoria(String cat) {
     final s = cat.toLowerCase();
-    if (s.contains('comida') || s.contains('restaurante') ||
-        s.contains('panader') || s.contains('pastel')) return 'COMIDA';
+    if (s.contains('comida') ||
+        s.contains('restaurante') ||
+        s.contains('panader') ||
+        s.contains('pastel')) return 'COMIDA';
     if (s.contains('bebidas') || s.contains('licores')) return 'BEBIDAS';
-    if (s.contains('farmacia') || s.contains('drogueria') ||
+    if (s.contains('farmacia') ||
+        s.contains('drogueria') ||
         s.contains('medicamento')) return 'FARMACIA';
     if (s.contains('paquete')) return 'PAQUETERÍA';
     return 'PAQUETERÍA';
@@ -409,8 +434,10 @@ class _LocalScreenState extends State<LocalScreen>
     if (apertura == null || cierre == null) return true;
     int toMin(String s) {
       final p = s.split(':');
-      return (int.tryParse(p[0]) ?? 0) * 60 + (int.tryParse(p.length > 1 ? p[1] : '0') ?? 0);
+      return (int.tryParse(p[0]) ?? 0) * 60 +
+          (int.tryParse(p.length > 1 ? p[1] : '0') ?? 0);
     }
+
     final now = TimeOfDay.now();
     final nowMin = now.hour * 60 + now.minute;
     final aMin = toMin(apertura);
@@ -424,19 +451,20 @@ class _LocalScreenState extends State<LocalScreen>
     try {
       await Supabase.instance.client
           .from('usuarios')
-          .update({'activo': nuevoActivo})
-          .eq('id', perfil['id']);
+          .update({'activo': nuevoActivo}).eq('id', perfil['id']);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(nuevoActivo ? '✅ Local abierto manualmente' : '🔒 Local cerrado manualmente'),
+          content: Text(nuevoActivo
+              ? '✅ Local abierto manualmente'
+              : '🔒 Local cerrado manualmente'),
           backgroundColor: nuevoActivo ? Colors.green : Colors.red,
           duration: const Duration(seconds: 2),
         ));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(textoError(e)), backgroundColor: Colors.red));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(textoError(e)), backgroundColor: Colors.red));
       }
     }
   }
@@ -488,10 +516,8 @@ class _LocalScreenState extends State<LocalScreen>
       lng = pos.longitude;
 
       // 1. Sellar en Supabase
-      await Supabase.instance.client
-          .from('usuarios')
-          .update({'lat_fija': lat, 'lng_fija': lng})
-          .eq('id', widget.usuario['id']);
+      await Supabase.instance.client.from('usuarios').update(
+          {'lat_fija': lat, 'lng_fija': lng}).eq('id', widget.usuario['id']);
 
       // 2. Guardar en memoria activa para que no vuelva a pedirlo hoy
       setState(() {
@@ -556,8 +582,8 @@ class _LocalScreenState extends State<LocalScreen>
           // Leemos el perfil en vivo de la BD para tener la config actualizada
           final perfilEnVivo =
               (snapshotUsuario.hasData && snapshotUsuario.data!.isNotEmpty)
-              ? snapshotUsuario.data!.first
-              : widget.usuario;
+                  ? snapshotUsuario.data!.first
+                  : widget.usuario;
 
           // Inicializamos los campos del perfil la primera vez
           if (!_perfilCargado && snapshotUsuario.hasData) {
@@ -567,876 +593,1069 @@ class _LocalScreenState extends State<LocalScreen>
                 perfilEnVivo['instrucciones_recogida']?.toString() ?? '';
             _tipoServicioDefecto =
                 perfilEnVivo['tipo_servicio_defecto']?.toString() ??
-                _tipoDesdeCategoria(perfilEnVivo['categoria_local']?.toString() ?? '');
+                    _tipoDesdeCategoria(
+                        perfilEnVivo['categoria_local']?.toString() ?? '');
             _perfilCargado = true;
           }
 
           // Diseño oficial: ventanas y hojas claras, campos grises, botones 48 px
           return Theme(
-            data: temaPantallaSE(context),
-            child: Scaffold(
-            backgroundColor: const Color(0xFF0D0D0D),
-            appBar: AppBar(
-              title: Text(
-                'Panel | ${perfilEnVivo['nombre']}',
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              backgroundColor: Colors.black,
-              iconTheme: IconThemeData(color: Colors.white),
-              bottom: TabBar(
-                labelColor: Color(0xff3AF500),
-                unselectedLabelColor: Colors.white70,
-                indicatorColor: Color(0xff3AF500),
-                tabs: [
-                  ValueListenableBuilder<int>(
-                    valueListenable: _activosCount,
-                    builder: (_, count, __) => Tab(
-                      icon: Badge(
-                        isLabelVisible: count > 0,
-                        label: Text(
-                          '$count',
-                          style: const TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        backgroundColor: Color(0xff3AF500),
-                        textColor: Colors.black,
-                        child: const Icon(Icons.motorcycle),
-                      ),
-                      text: 'ACTIVOS',
-                    ),
-                  ),
-                  const Tab(icon: Icon(Icons.history), text: 'HISTORIAL'),
-                  const Tab(
-                    icon: Icon(Icons.storefront),
-                    text: 'MI LOCAL',
-                  ),
-                ],
-              ),
-              // Borramos las "actions" de aquí porque ahora viven en "MI LOCAL"
-            ),
-            body: StreamBuilder<List<Map<String, dynamic>>>(
-              stream: _streamServiciosLocal,
-              initialData: _cacheServiciosLocal, // evita spinner al reconectar
-              builder: (context, snapshot) {
-                if (!snapshot.hasData) {
-                  return const Center(
-                    child: CircularProgressIndicator(color: Colors.black),
-                  );
-                }
-
-                // FIX #5 (client-side): stream() no soporta 2 .eq() simultáneos.
-                // Aceptable: el stream ya está acotado por local_id.
-                final todos = (snapshot.data ?? [])
-                    .where((s) => s['oculto_local'] != true)
-                    .toList();
-
-                todos.sort((a, b) {
-                  final fA =
-                      a['created_at'] !=
-                          null // FIX: era null3 (typo)
-                      ? DateTime.parse(a['created_at'])
-                      : DateTime.fromMillisecondsSinceEpoch(0);
-                  final fB = b['created_at'] != null
-                      ? DateTime.parse(b['created_at'])
-                      : DateTime.fromMillisecondsSinceEpoch(0);
-                  return fB.compareTo(fA);
-                });
-
-                final activos = todos
-                    .where(
-                      (s) => [
-                        'programado', // <--- INYECCIÓN: PARA QUE NO SEA INVISIBLE
-                        'pendiente',
-                        'en_curso',
-                        'en_ruta_origen',
-                        'en_origen',
-                        'en_ruta_destino',
-                        'problema',
-                        'cotizacion',
-                        'cotizada',
-                        'cotizacion_aprobada',
-                      ].contains(s['estado']),
-                    )
-                    .toList();
-
-                final hoy = DateTime.now();
-                final historial = todos.where((s) {
-                  if (![
-                    'finalizado',
-                    'cancelado',
-                    'caducado',
-                    'finalizado_por_demora',
-                    'finalizado_con_problema',
-                  ].contains(s['estado'])) {
-                    return false;
-                  }
-                  if (_serviciosOcultosLocal.contains(s['id'])) return false;
-
-                  if (s['created_at'] != null) {
-                    final fechaSvc = DateTime.parse(s['created_at']).toLocal();
-                    return fechaSvc.year == hoy.year &&
-                        fechaSvc.month == hoy.month &&
-                        fechaSvc.day == hoy.day;
-                  }
-                  return false;
-                }).toList();
-
-                // Calculamos el volumen de entregas limpias de hoy
-                final countFinalizadosHoy = todos.where((s) {
-                  if (s['estado'] != 'finalizado') return false;
-                  if (s['created_at'] != null) {
-                    final fechaSvc = DateTime.parse(s['created_at']).toLocal();
-                    return fechaSvc.year == hoy.year &&
-                        fechaSvc.month == hoy.month &&
-                        fechaSvc.day == hoy.day;
-                  }
-                  return false;
-                }).length;
-
-                // Stats rápidos para el KPI bar del historial
-                // tiene_punto_a_punto: la central lo activa por local específico
-                final tienePAP = perfilEnVivo['tiene_punto_a_punto'] == true;
-                final puedeVip = tienePAP && _puedeUsarPuntoAPunto(perfilEnVivo);
-                final histFinalizados = historial.where((s) => s['estado'] == 'finalizado').length;
-                final histCancelados = historial.where((s) => s['estado'] == 'cancelado').length;
-
-                // Helper chip para KPI bar
-                // Diseño oficial: tarjetica blanca con número grande y texto claro
-                Widget kpiBar(String val, String label, Color color) => Expanded(
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 4),
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    decoration: BoxDecoration(
+              data: temaPantallaSE(context),
+              child: Scaffold(
+                backgroundColor: const Color(0xFF0D0D0D),
+                appBar: AppBar(
+                  title: Text(
+                    'Panel | ${perfilEnVivo['nombre']}',
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
                       color: Colors.white,
-                      borderRadius: BorderRadius.circular(kRadioCampoSE),
+                      fontWeight: FontWeight.bold,
                     ),
-                    child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      Text(val, style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: color)),
-                      Text(label, style: const TextStyle(fontSize: 12, color: Colors.black54, fontWeight: FontWeight.w600)),
-                    ]),
                   ),
-                );
-
-                return TabBarView(
-                  children: [
-                    // --- PESTAÑA 1: ACTIVOS ---
-                    Column(
-                      children: [
-                        // ── PANEL DE ACCIONES 2×2 ─────────────────────────
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-                          color: const Color(0xFF0D0D0D),
-                          child: Column(
-                            children: [
-                              // Fila 1: NUEVO PEDIDO + PEDIR MÓVIL (rápido, sin formulario)
-                              Row(children: [
-                                Expanded(
-                                  flex: 3,
-                                  child: ElevatedButton.icon(
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: kVerdeSE,
-                                      foregroundColor: Colors.black,
-                                      minimumSize: const Size(0, 54),
-                                      elevation: 0,
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                                    ),
-                                    onPressed: () => _abrirFormularioPedido(context,
-                                        perfilEnVivo: perfilEnVivo),
-                                    icon: const Icon(Icons.add_circle, size: 22),
-                                    label: const Text('Nuevo pedido',
-                                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  flex: 2,
-                                  child: ElevatedButton.icon(
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.white,
-                                      foregroundColor: Colors.black87,
-                                      minimumSize: const Size(0, 54),
-                                      elevation: 0,
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                                    ),
-                                    onPressed: () => _solicitarMovilDirecto(context),
-                                    icon: const Icon(Icons.two_wheeler, size: 22, color: kVerdeOscuroSE),
-                                    label: const FittedBox(
-                                      fit: BoxFit.scaleDown,
-                                      child: Text('Pedir Móvil ya',
-                                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
-                                    ),
-                                  ),
-                                ),
-                              ]),
-                              // Fila 2: PUNTO A PUNTO + SOLICITAR MÓVIL (dos columnas)
-                              // El bloque PAP solo aparece si la central lo habilitó para este local
-                              if (tienePAP) ...[
-                                const SizedBox(height: 8),
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: ElevatedButton.icon(
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: puedeVip ? const Color(0xFF7B1FA2) : Colors.grey[300],
-                                          foregroundColor: puedeVip ? Colors.white : Colors.grey[700],
-                                          minimumSize: const Size(0, 50),
-                                          elevation: 0,
-                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                                        ),
-                                        onPressed: puedeVip
-                                            ? () => _abrirFormularioPedido(context,
-                                                esPuntoAPunto: true, perfilEnVivo: perfilEnVivo)
-                                            : null,
-                                        icon: const Icon(Icons.flash_on, size: 17),
-                                        label: Text(
-                                          puedeVip ? 'Punto a Punto' : 'Punto a Punto ya usado hoy',
-                                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                        const Divider(height: 1, color: Colors.white12),
-                        const BannerAltaDemanda(margin: EdgeInsets.fromLTRB(12, 10, 12, 0)),
-                        Expanded(
-                          child: activos.isEmpty
-                              ? Center(
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(Icons.inbox_outlined, size: 52, color: Colors.white12),
-                                      const SizedBox(height: 12),
-                                      const Text(
-                                        'Sin servicios activos',
-                                        style: TextStyle(
-                                          color: Colors.white54,
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 15,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 4),
-                                      const Text(
-                                        'Toca NUEVO PEDIDO para empezar',
-                                        style: TextStyle(color: Colors.white38, fontSize: 12),
-                                      ),
-                                    ],
-                                  ),
-                                )
-                              : ValueListenableBuilder<int>(
-                                  valueListenable: _expansionTick,
-                                  builder: (_, __, ___) => ListView.builder(
-                                    padding: const EdgeInsets.all(12),
-                                    itemCount: activos.length,
-                                    itemBuilder: (c, i) => RepaintBoundary(
-                                      key: ValueKey('activo_local_${activos[i]['id']}'),
-                                      child: _construirTarjetaServicio(activos[i]),
-                                    ),
-                                  ),
-                                ),
-                        ),
-                      ],
-                    ),
-
-                    // --- PESTAÑA 2: HISTORIAL ---
-                    historial.isEmpty
-                        ? const Center(
-                            child: Text(
-                              'Tu historial está limpio.',
-                              style: TextStyle(
-                                color: Colors.white54,
+                  backgroundColor: Colors.black,
+                  iconTheme: IconThemeData(color: Colors.white),
+                  bottom: TabBar(
+                    labelColor: Color(0xff3AF500),
+                    unselectedLabelColor: Colors.white70,
+                    indicatorColor: Color(0xff3AF500),
+                    tabs: [
+                      ValueListenableBuilder<int>(
+                        valueListenable: _activosCount,
+                        builder: (_, count, __) => Tab(
+                          icon: Badge(
+                            isLabelVisible: count > 0,
+                            label: Text(
+                              '$count',
+                              style: const TextStyle(
+                                fontSize: 10,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
-                          )
-                        : Column(
-                            children: [
-                              // ── KPI BAR ─────────────────────────────
-                              Container(
-                                color: const Color(0xFF0D0D0D),
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-                                child: Row(
-                                  children: [
-                                    kpiBar('${historial.length}', 'Total hoy', Colors.black87),
-                                    kpiBar('$histFinalizados', 'Entregados', const Color(0xFF2E7D32)),
-                                    kpiBar('$histCancelados', 'Cancelados', const Color(0xFFC62828)),
+                            backgroundColor: Color(0xff3AF500),
+                            textColor: Colors.black,
+                            child: const Icon(Icons.motorcycle),
+                          ),
+                          text: 'ACTIVOS',
+                        ),
+                      ),
+                      const Tab(icon: Icon(Icons.history), text: 'HISTORIAL'),
+                      const Tab(
+                        icon: Icon(Icons.storefront),
+                        text: 'MI LOCAL',
+                      ),
+                    ],
+                  ),
+                  // Borramos las "actions" de aquí porque ahora viven en "MI LOCAL"
+                ),
+                body: StreamBuilder<List<Map<String, dynamic>>>(
+                  stream: _streamServiciosLocal,
+                  initialData:
+                      _cacheServiciosLocal, // evita spinner al reconectar
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) {
+                      return const Center(
+                        child: CircularProgressIndicator(color: Colors.black),
+                      );
+                    }
+
+                    // FIX #5 (client-side): stream() no soporta 2 .eq() simultáneos.
+                    // Aceptable: el stream ya está acotado por local_id.
+                    final todos = (snapshot.data ?? [])
+                        .where((s) => s['oculto_local'] != true)
+                        .toList();
+
+                    todos.sort((a, b) {
+                      final fA =
+                          a['created_at'] != null // FIX: era null3 (typo)
+                              ? DateTime.parse(a['created_at'])
+                              : DateTime.fromMillisecondsSinceEpoch(0);
+                      final fB = b['created_at'] != null
+                          ? DateTime.parse(b['created_at'])
+                          : DateTime.fromMillisecondsSinceEpoch(0);
+                      return fB.compareTo(fA);
+                    });
+
+                    final activos = todos
+                        .where(
+                          (s) => [
+                            'programado', // <--- INYECCIÓN: PARA QUE NO SEA INVISIBLE
+                            'pendiente',
+                            'en_curso',
+                            'en_ruta_origen',
+                            'en_origen',
+                            'en_ruta_destino',
+                            'problema',
+                            'cotizacion',
+                            'cotizada',
+                            'cotizacion_aprobada',
+                          ].contains(s['estado']),
+                        )
+                        .toList();
+
+                    final hoy = DateTime.now();
+                    final historial = todos.where((s) {
+                      if (![
+                        'finalizado',
+                        'cancelado',
+                        'caducado',
+                        'finalizado_por_demora',
+                        'finalizado_con_problema',
+                      ].contains(s['estado'])) {
+                        return false;
+                      }
+                      if (_serviciosOcultosLocal.contains(s['id']))
+                        return false;
+
+                      if (s['created_at'] != null) {
+                        final fechaSvc =
+                            DateTime.parse(s['created_at']).toLocal();
+                        return fechaSvc.year == hoy.year &&
+                            fechaSvc.month == hoy.month &&
+                            fechaSvc.day == hoy.day;
+                      }
+                      return false;
+                    }).toList();
+
+                    // Calculamos el volumen de entregas limpias de hoy
+                    final countFinalizadosHoy = todos.where((s) {
+                      if (s['estado'] != 'finalizado') return false;
+                      if (s['created_at'] != null) {
+                        final fechaSvc =
+                            DateTime.parse(s['created_at']).toLocal();
+                        return fechaSvc.year == hoy.year &&
+                            fechaSvc.month == hoy.month &&
+                            fechaSvc.day == hoy.day;
+                      }
+                      return false;
+                    }).length;
+
+                    // Stats rápidos para el KPI bar del historial
+                    // tiene_punto_a_punto: la central lo activa por local específico
+                    final tienePAP =
+                        perfilEnVivo['tiene_punto_a_punto'] == true;
+                    final puedeVip =
+                        tienePAP && _puedeUsarPuntoAPunto(perfilEnVivo);
+                    final histFinalizados = historial
+                        .where((s) => s['estado'] == 'finalizado')
+                        .length;
+                    final histCancelados = historial
+                        .where((s) => s['estado'] == 'cancelado')
+                        .length;
+
+                    // Helper chip para KPI bar
+                    // Diseño oficial: tarjetica blanca con número grande y texto claro
+                    Widget kpiBar(String val, String label, Color color) =>
+                        Expanded(
+                          child: Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 4),
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius:
+                                  BorderRadius.circular(kRadioCampoSE),
+                            ),
+                            child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(val,
+                                      style: TextStyle(
+                                          fontSize: 20,
+                                          fontWeight: FontWeight.w800,
+                                          color: color)),
+                                  Text(label,
+                                      style: const TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.black54,
+                                          fontWeight: FontWeight.w600)),
+                                ]),
+                          ),
+                        );
+
+                    return TabBarView(
+                      children: [
+                        // --- PESTAÑA 1: ACTIVOS ---
+                        Column(
+                          children: [
+                            // ── PANEL DE ACCIONES 2×2 ─────────────────────────
+                            Container(
+                              width: double.infinity,
+                              padding:
+                                  const EdgeInsets.fromLTRB(12, 12, 12, 12),
+                              color: const Color(0xFF0D0D0D),
+                              child: Column(
+                                children: [
+                                  // Fila 1: NUEVO PEDIDO + PEDIR MÓVIL (rápido, sin formulario)
+                                  Row(children: [
+                                    Expanded(
+                                      flex: 3,
+                                      child: ElevatedButton.icon(
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: kVerdeSE,
+                                          foregroundColor: Colors.black,
+                                          minimumSize: const Size(0, 54),
+                                          elevation: 0,
+                                          shape: RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(14)),
+                                        ),
+                                        onPressed: () => _abrirFormularioPedido(
+                                            context,
+                                            perfilEnVivo: perfilEnVivo),
+                                        icon: const Icon(Icons.add_circle,
+                                            size: 22),
+                                        label: const Text('Nuevo pedido',
+                                            style: TextStyle(
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.w800)),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      flex: 2,
+                                      child: ElevatedButton.icon(
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: Colors.white,
+                                          foregroundColor: Colors.black87,
+                                          minimumSize: const Size(0, 54),
+                                          elevation: 0,
+                                          shape: RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(14)),
+                                        ),
+                                        onPressed: () =>
+                                            _solicitarMovilDirecto(context),
+                                        icon: const Icon(Icons.two_wheeler,
+                                            size: 22, color: kVerdeOscuroSE),
+                                        label: const FittedBox(
+                                          fit: BoxFit.scaleDown,
+                                          child: Text('Pedir Móvil Rapido',
+                                              style: TextStyle(
+                                                  fontSize: 15,
+                                                  fontWeight: FontWeight.w800)),
+                                        ),
+                                      ),
+                                    ),
+                                  ]),
+                                  // Fila 2: PUNTO A PUNTO + SOLICITAR MÓVIL (dos columnas)
+                                  // El bloque PAP solo aparece si la central lo habilitó para este local
+                                  if (tienePAP) ...[
+                                    const SizedBox(height: 8),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: ElevatedButton.icon(
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: puedeVip
+                                                  ? const Color(0xFF7B1FA2)
+                                                  : Colors.grey[300],
+                                              foregroundColor: puedeVip
+                                                  ? Colors.white
+                                                  : Colors.grey[700],
+                                              minimumSize: const Size(0, 50),
+                                              elevation: 0,
+                                              shape: RoundedRectangleBorder(
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                          14)),
+                                            ),
+                                            onPressed: puedeVip
+                                                ? () => _abrirFormularioPedido(
+                                                    context,
+                                                    esPuntoAPunto: true,
+                                                    perfilEnVivo: perfilEnVivo)
+                                                : null,
+                                            icon: const Icon(Icons.flash_on,
+                                                size: 17),
+                                            label: Text(
+                                              puedeVip
+                                                  ? 'Punto a Punto'
+                                                  : 'Punto a Punto ya usado hoy',
+                                              style: const TextStyle(
+                                                  fontSize: 14,
+                                                  fontWeight: FontWeight.w800),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ],
-                                ),
+                                ],
                               ),
-                              const Divider(height: 1, color: Colors.white12),
-                              // ── LISTA ────────────────────────────────
-                              Expanded(
-                                child: ValueListenableBuilder<int>(
-                                  valueListenable: _expansionTick,
-                                  builder: (_, __, ___) => ListView.builder(
-                                    padding: const EdgeInsets.all(12),
-                                    itemCount: historial.length,
-                                    itemBuilder: (c, i) => RepaintBoundary(
-                                      key: ValueKey('hist_local_${historial[i]['id']}'),
-                                      child: _construirTarjetaServicio(
-                                        historial[i],
-                                        esHistorial: true,
-                                        onOcultar: () => setState(
-                                          () => _serviciosOcultosLocal.add(
-                                            historial[i]['id'],
+                            ),
+                            const Divider(height: 1, color: Colors.white12),
+                            const BannerAltaDemanda(
+                                margin: EdgeInsets.fromLTRB(12, 10, 12, 0)),
+                            Expanded(
+                              child: activos.isEmpty
+                                  ? Center(
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.inbox_outlined,
+                                              size: 52, color: Colors.white12),
+                                          const SizedBox(height: 12),
+                                          const Text(
+                                            'Sin servicios activos',
+                                            style: TextStyle(
+                                              color: Colors.white54,
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 15,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          const Text(
+                                            'Toca NUEVO PEDIDO para empezar',
+                                            style: TextStyle(
+                                                color: Colors.white38,
+                                                fontSize: 12),
+                                          ),
+                                        ],
+                                      ),
+                                    )
+                                  : ValueListenableBuilder<int>(
+                                      valueListenable: _expansionTick,
+                                      builder: (_, __, ___) => ListView.builder(
+                                        padding: const EdgeInsets.all(12),
+                                        itemCount: activos.length,
+                                        itemBuilder: (c, i) => RepaintBoundary(
+                                          key: ValueKey(
+                                              'activo_local_${activos[i]['id']}'),
+                                          child: _construirTarjetaServicio(
+                                              activos[i]),
+                                        ),
+                                      ),
+                                    ),
+                            ),
+                          ],
+                        ),
+
+                        // --- PESTAÑA 2: HISTORIAL ---
+                        historial.isEmpty
+                            ? const Center(
+                                child: Text(
+                                  'Tu historial está limpio.',
+                                  style: TextStyle(
+                                    color: Colors.white54,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              )
+                            : Column(
+                                children: [
+                                  // ── KPI BAR ─────────────────────────────
+                                  Container(
+                                    color: const Color(0xFF0D0D0D),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 10),
+                                    child: Row(
+                                      children: [
+                                        kpiBar('${historial.length}',
+                                            'Total hoy', Colors.black87),
+                                        kpiBar('$histFinalizados', 'Entregados',
+                                            const Color(0xFF2E7D32)),
+                                        kpiBar('$histCancelados', 'Cancelados',
+                                            const Color(0xFFC62828)),
+                                      ],
+                                    ),
+                                  ),
+                                  const Divider(
+                                      height: 1, color: Colors.white12),
+                                  // ── LISTA ────────────────────────────────
+                                  Expanded(
+                                    child: ValueListenableBuilder<int>(
+                                      valueListenable: _expansionTick,
+                                      builder: (_, __, ___) => ListView.builder(
+                                        padding: const EdgeInsets.all(12),
+                                        itemCount: historial.length,
+                                        itemBuilder: (c, i) => RepaintBoundary(
+                                          key: ValueKey(
+                                              'hist_local_${historial[i]['id']}'),
+                                          child: _construirTarjetaServicio(
+                                            historial[i],
+                                            esHistorial: true,
+                                            onOcultar: () => setState(
+                                              () => _serviciosOcultosLocal.add(
+                                                historial[i]['id'],
+                                              ),
+                                            ),
                                           ),
                                         ),
                                       ),
                                     ),
                                   ),
+                                ],
+                              ),
+
+                        // --- PESTAÑA 3: MI LOCAL (HUB) ---
+                        SingleChildScrollView(
+                          padding: const EdgeInsets.fromLTRB(14, 14, 14, 80),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // ── HEADER ─────────────────────────────────
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius:
+                                      BorderRadius.circular(kRadioTarjetaSE),
+                                ),
+                                child: Row(
+                                  children: [
+                                    GestureDetector(
+                                      onTap: () async {
+                                        final picker = ImagePicker();
+                                        final img = await picker.pickImage(
+                                            source: ImageSource.gallery,
+                                            imageQuality: 75);
+                                        if (img == null) return;
+                                        try {
+                                          final bytes = await img.readAsBytes();
+                                          final path =
+                                              'perfil_local_${perfilEnVivo['id']}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+                                          await Supabase.instance.client.storage
+                                              .from('avatars')
+                                              .uploadBinary(path, bytes,
+                                                  fileOptions:
+                                                      const FileOptions(
+                                                          contentType:
+                                                              'image/jpeg',
+                                                          upsert: true));
+                                          final url = Supabase
+                                              .instance.client.storage
+                                              .from('avatars')
+                                              .getPublicUrl(path);
+                                          await Supabase.instance.client
+                                              .from('usuarios')
+                                              .update({
+                                            'foto_perfil_url': url
+                                          }).eq('id', perfilEnVivo['id']);
+                                          if (mounted) {
+                                            ScaffoldMessenger.of(context)
+                                                .showSnackBar(const SnackBar(
+                                                    content: Text(
+                                                        '✅ Foto actualizada'),
+                                                    backgroundColor:
+                                                        Colors.green));
+                                          }
+                                        } catch (e) {
+                                          if (mounted) {
+                                            ScaffoldMessenger.of(context)
+                                                .showSnackBar(SnackBar(
+                                                    content:
+                                                        Text(textoError(e)),
+                                                    backgroundColor:
+                                                        Colors.red));
+                                          }
+                                        }
+                                      },
+                                      child: () {
+                                        final fotoUrl =
+                                            perfilEnVivo['foto_perfil_url']
+                                                ?.toString();
+                                        final tieneFoto = fotoUrl != null &&
+                                            fotoUrl.isNotEmpty;
+                                        return Stack(
+                                          children: [
+                                            CircleAvatar(
+                                              radius: 26,
+                                              backgroundColor:
+                                                  const Color(0xff3AF500),
+                                              backgroundImage: tieneFoto
+                                                  ? NetworkImage(fotoUrl)
+                                                  : null,
+                                              onBackgroundImageError:
+                                                  tieneFoto ? (_, __) {} : null,
+                                              child: !tieneFoto
+                                                  ? const Icon(Icons.storefront,
+                                                      color: Colors.black,
+                                                      size: 24)
+                                                  : null,
+                                            ),
+                                            Positioned(
+                                              bottom: 0,
+                                              right: 0,
+                                              child: Container(
+                                                width: 16,
+                                                height: 16,
+                                                decoration: const BoxDecoration(
+                                                  color: Colors.white,
+                                                  shape: BoxShape.circle,
+                                                ),
+                                                child: const Icon(
+                                                    Icons.camera_alt,
+                                                    size: 10,
+                                                    color: Colors.black),
+                                              ),
+                                            ),
+                                          ],
+                                        );
+                                      }(),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            perfilEnVivo['nombre']
+                                                    ?.toString() ??
+                                                'Mi Local',
+                                            style: const TextStyle(
+                                              color: Colors.black87,
+                                              fontWeight: FontWeight.w800,
+                                              fontSize: 17,
+                                            ),
+                                          ),
+                                          Row(
+                                            children: [
+                                              Text(
+                                                '$countFinalizadosHoy servicios hoy',
+                                                style: const TextStyle(
+                                                  color: kVerdeOscuroSE,
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.w700,
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Builder(builder: (ctx) {
+                                                final abierto =
+                                                    _localEstaAbierto(
+                                                        perfilEnVivo);
+                                                return GestureDetector(
+                                                  onTap: () =>
+                                                      _toggleAbiertoCerrado(
+                                                          perfilEnVivo),
+                                                  child: Container(
+                                                    padding: const EdgeInsets
+                                                        .symmetric(
+                                                        horizontal: 8,
+                                                        vertical: 3),
+                                                    decoration: BoxDecoration(
+                                                      color: abierto
+                                                          ? const Color(
+                                                              0xff3AF500)
+                                                          : Colors.red,
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              20),
+                                                    ),
+                                                    child: Row(
+                                                      mainAxisSize:
+                                                          MainAxisSize.min,
+                                                      children: [
+                                                        Text(
+                                                          abierto
+                                                              ? 'ABIERTO'
+                                                              : 'CERRADO',
+                                                          style: TextStyle(
+                                                            color: abierto
+                                                                ? Colors.black
+                                                                : Colors.white,
+                                                            fontSize: 10,
+                                                            fontWeight:
+                                                                FontWeight.bold,
+                                                            letterSpacing: 0.5,
+                                                          ),
+                                                        ),
+                                                        const SizedBox(
+                                                            width: 4),
+                                                        Icon(
+                                                          Icons.touch_app,
+                                                          size: 10,
+                                                          color: abierto
+                                                              ? Colors.black54
+                                                              : Colors.white70,
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                );
+                                              }),
+                                            ],
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 18),
+
+                              // ── SECCIÓN 1: CARTA ────────────────────────
+                              const Padding(
+                                padding: EdgeInsets.only(left: 2, bottom: 8),
+                                child: Text('MENÚ Y CARTA',
+                                    style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.bold,
+                                        letterSpacing: 1.0,
+                                        color: Colors.white70)),
+                              ),
+                              _hubCard(
+                                icon: Icons.restaurant_menu,
+                                iconColor: Colors.white,
+                                iconBg: Colors.green,
+                                title: 'Mi carta',
+                                subtitle: 'Productos, categorías y precios',
+                                onTap: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => CartaLocalScreen(
+                                      localId: perfilEnVivo['id'] as int,
+                                      localNombre:
+                                          perfilEnVivo['nombre']?.toString() ??
+                                              'Mi Local',
+                                      initialTab: 0,
+                                    ),
+                                  ),
+                                ),
+                                secondaryAction: OutlinedButton.icon(
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: Colors.teal,
+                                    side: const BorderSide(color: Colors.teal),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 14, vertical: 8),
+                                    shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(8)),
+                                  ),
+                                  icon: const Icon(Icons.qr_code_2, size: 16),
+                                  label: const Text('Compartir QR',
+                                      style: TextStyle(fontSize: 13)),
+                                  onPressed: () =>
+                                      _mostrarQrCarta(perfilEnVivo),
+                                ),
+                              ),
+                              const SizedBox(height: 18),
+
+                              // ── SECCIÓN 2: DOMICILIOS ───────────────────
+                              const Padding(
+                                padding: EdgeInsets.only(left: 2, bottom: 8),
+                                child: Text('DOMICILIOS SERVIEXPRESS',
+                                    style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.bold,
+                                        letterSpacing: 1.0,
+                                        color: Colors.white70)),
+                              ),
+                              _hubCard(
+                                icon: Icons.delivery_dining,
+                                iconColor: Colors.black,
+                                iconBg: const Color(0xff3AF500),
+                                title: 'Pedidos entrantes',
+                                subtitle:
+                                    'Ver y gestionar pedidos en tiempo real',
+                                onTap: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => CartaLocalScreen(
+                                      localId: perfilEnVivo['id'] as int,
+                                      localNombre:
+                                          perfilEnVivo['nombre']?.toString() ??
+                                              'Mi Local',
+                                      initialTab: 1,
+                                    ),
+                                  ),
+                                ),
+                                secondaryAction: Row(
+                                  children: [
+                                    OutlinedButton.icon(
+                                      style: OutlinedButton.styleFrom(
+                                        foregroundColor: Colors.deepPurple,
+                                        side: const BorderSide(
+                                            color: Colors.deepPurple),
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 14, vertical: 8),
+                                        shape: RoundedRectangleBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(8)),
+                                      ),
+                                      icon: const Icon(Icons.tune, size: 16),
+                                      label: const Text('Config. domicilios',
+                                          style: TextStyle(fontSize: 13)),
+                                      onPressed: () =>
+                                          _abrirConfigDomicilios(perfilEnVivo),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 18),
+
+                              // ── SECCIÓN 3: PERFIL & CONFIG ──────────────
+                              const Padding(
+                                padding: EdgeInsets.only(left: 2, bottom: 8),
+                                child: Text('PERFIL Y CONFIGURACIÓN',
+                                    style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.bold,
+                                        letterSpacing: 1.0,
+                                        color: Colors.white70)),
+                              ),
+                              Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius:
+                                      BorderRadius.circular(kRadioTarjetaSE),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color:
+                                          Colors.black.withValues(alpha: 0.3),
+                                      blurRadius: 6,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
+                                padding: const EdgeInsets.all(16),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text('Tipo de servicio por defecto',
+                                        style: TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.black54)),
+                                    const SizedBox(height: 6),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 12),
+                                      decoration: BoxDecoration(
+                                        color: kCampoSE,
+                                        borderRadius: BorderRadius.circular(
+                                            kRadioCampoSE),
+                                      ),
+                                      child: DropdownButtonHideUnderline(
+                                        child: DropdownButton<String>(
+                                          value: _tipoServicioDefecto,
+                                          isExpanded: true,
+                                          dropdownColor: Colors.white,
+                                          iconEnabledColor: Colors.black54,
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 15,
+                                              color: Colors.black87),
+                                          items: [
+                                            'PAQUETERÍA',
+                                            'COMIDA',
+                                            'FARMACIA',
+                                            'BEBIDAS'
+                                          ]
+                                              .map((v) => DropdownMenuItem(
+                                                    value: v,
+                                                    child: Text(v,
+                                                        style: const TextStyle(
+                                                            fontWeight:
+                                                                FontWeight.bold,
+                                                            fontSize: 15,
+                                                            color: Colors
+                                                                .black87)),
+                                                  ))
+                                              .toList(),
+                                          onChanged: (v) {
+                                            if (v != null)
+                                              setState(() =>
+                                                  _tipoServicioDefecto = v);
+                                          },
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 14),
+                                    TextField(
+                                      controller: _telLocalController,
+                                      keyboardType: TextInputType.phone,
+                                      style: const TextStyle(
+                                          color: Colors.black87, fontSize: 16),
+                                      decoration: const InputDecoration(
+                                        labelText: 'WhatsApp del local',
+                                        prefixIcon: Icon(Icons.phone,
+                                            color: Colors.black54),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    TextField(
+                                      controller: _instruccionesController,
+                                      maxLines: 2,
+                                      style: const TextStyle(
+                                          color: Colors.black87, fontSize: 16),
+                                      decoration: const InputDecoration(
+                                        labelText:
+                                            'Instrucciones para el Móvil al recoger',
+                                        hintText:
+                                            'Ej: Quitarse el casco, entrar por el lado',
+                                        prefixIcon: Icon(Icons.assignment,
+                                            color: Colors.black54),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 14),
+                                    SizedBox(
+                                      width: double.infinity,
+                                      height: 54,
+                                      child: ElevatedButton(
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: kVerdeSE,
+                                          elevation: 0,
+                                          shape: RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(14)),
+                                        ),
+                                        onPressed: _guardandoPerfil
+                                            ? null
+                                            : () async {
+                                                setState(() =>
+                                                    _guardandoPerfil = true);
+                                                try {
+                                                  await Supabase.instance.client
+                                                      .from('usuarios')
+                                                      .update({
+                                                    'tipo_servicio_defecto':
+                                                        _tipoServicioDefecto,
+                                                    'telefono_local':
+                                                        _telLocalController.text
+                                                            .trim(),
+                                                    'instrucciones_recogida':
+                                                        _instruccionesController
+                                                            .text
+                                                            .trim(),
+                                                  }).eq('id',
+                                                          perfilEnVivo['id']);
+                                                  if (context.mounted) {
+                                                    ScaffoldMessenger.of(
+                                                            context)
+                                                        .showSnackBar(
+                                                      const SnackBar(
+                                                          content: Text(
+                                                              '✅ Perfil actualizado.'),
+                                                          backgroundColor:
+                                                              Colors.green),
+                                                    );
+                                                  }
+                                                } catch (e) {
+                                                  if (context.mounted) {
+                                                    ScaffoldMessenger.of(
+                                                            context)
+                                                        .showSnackBar(
+                                                      SnackBar(
+                                                          content: Text(
+                                                              textoError(e)),
+                                                          backgroundColor:
+                                                              Colors.red),
+                                                    );
+                                                  }
+                                                } finally {
+                                                  setState(() =>
+                                                      _guardandoPerfil = false);
+                                                }
+                                              },
+                                        child: _guardandoPerfil
+                                            ? const SizedBox(
+                                                width: 20,
+                                                height: 20,
+                                                child:
+                                                    CircularProgressIndicator(
+                                                        color: Colors.black,
+                                                        strokeWidth: 2))
+                                            : const Text('Guardar cambios',
+                                                style: TextStyle(
+                                                    color: Colors.black,
+                                                    fontSize: 16,
+                                                    fontWeight:
+                                                        FontWeight.w800)),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 18),
+
+                              // ── OPCIONES ADICIONALES ────────────────────
+                              const Padding(
+                                padding: EdgeInsets.only(left: 2, bottom: 8),
+                                child: Text('MÁS OPCIONES',
+                                    style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.bold,
+                                        letterSpacing: 1.0,
+                                        color: Colors.white70)),
+                              ),
+                              Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius:
+                                      BorderRadius.circular(kRadioTarjetaSE),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color:
+                                          Colors.black.withValues(alpha: 0.3),
+                                      blurRadius: 4,
+                                    ),
+                                  ],
+                                ),
+                                child: Column(
+                                  children: [
+                                    // (Lista de precios eliminada: los precios los
+                                    // maneja la Central en la red SE; el local tiene
+                                    // el CRM con los precios recientes del cliente.)
+                                    Builder(builder: (ctx) {
+                                      final apertura =
+                                          perfilEnVivo['horario_apertura']
+                                              ?.toString();
+                                      final cierre =
+                                          perfilEnVivo['horario_cierre']
+                                              ?.toString();
+                                      final horaStr = (apertura != null &&
+                                              cierre != null)
+                                          ? '${horaTexto12(apertura)} – ${horaTexto12(cierre)}'
+                                          : 'Sin horario configurado';
+                                      return _hubListTile(
+                                        icon: Icons.schedule,
+                                        iconColor: Colors.teal,
+                                        title: 'Horario de atención',
+                                        subtitle: horaStr,
+                                        onTap: () => _abrirConfigDomicilios(
+                                            perfilEnVivo),
+                                      );
+                                    }),
+                                    const Divider(
+                                        height: 1, color: Colors.black12),
+                                    _hubListTile(
+                                      icon: Icons.folder_shared,
+                                      iconColor: Colors.blueGrey,
+                                      title: 'Historial de todos mis pedidos',
+                                      onTap: () =>
+                                          _mostrarHistorialGlobal(context),
+                                    ),
+                                    const Divider(
+                                        height: 1, color: Colors.black12),
+                                    _hubListTile(
+                                      icon: Icons.people_alt,
+                                      iconColor: Colors.purple,
+                                      title: 'Mis clientes',
+                                      subtitle:
+                                          'Quién te compra, cuánto y sus direcciones',
+                                      onTap: () =>
+                                          _abrirCRMLocal(context, perfilEnVivo),
+                                    ),
+                                    const Divider(
+                                        height: 1, color: Colors.black12),
+                                    _hubListTile(
+                                      icon: Icons.add_location_alt,
+                                      iconColor: Colors.orange[800]!,
+                                      title: 'Ubicación del local',
+                                      onTap: () => _abrirMenuUbicacion(),
+                                    ),
+                                    const Divider(
+                                        height: 1, color: Colors.black12),
+                                    Builder(
+                                      builder: (ctx) {
+                                        final tieneAlarma =
+                                            perfilEnVivo['chat_central'] ==
+                                                true;
+                                        return _hubListTile(
+                                          icon: tieneAlarma
+                                              ? Icons.mark_email_unread
+                                              : Icons.support_agent,
+                                          iconColor: tieneAlarma
+                                              ? Colors.red
+                                              : Colors.blue[800]!,
+                                          title: 'Soporte Central',
+                                          onTap: () {
+                                            Supabase.instance.client
+                                                .from('usuarios')
+                                                .update({
+                                              'chat_central': false
+                                            }).eq('id', perfilEnVivo['id']);
+                                            Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (_) => ChatScreen(
+                                                  salaId:
+                                                      'soporte_${perfilEnVivo['id']}',
+                                                  miId: perfilEnVivo['id'],
+                                                  miNombre:
+                                                      perfilEnVivo['nombre'],
+                                                  titulo: 'Soporte Central',
+                                                  usuarioId: perfilEnVivo['id'],
+                                                  alarmaLocal: 'chat_central',
+                                                  alarmaDestino:
+                                                      'alarma_soporte',
+                                                  tipoFaq: TipoFaqChat.local,
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                        );
+                                      },
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+
+                              // ── CUENTA ──────────────────────────────────
+                              Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius:
+                                      BorderRadius.circular(kRadioTarjetaSE),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color:
+                                          Colors.black.withValues(alpha: 0.3),
+                                      blurRadius: 4,
+                                    ),
+                                  ],
+                                ),
+                                child: Column(
+                                  children: [
+                                    _hubListTile(
+                                      icon: Icons.person_remove,
+                                      iconColor: Colors.red,
+                                      title: 'Eliminar mi cuenta',
+                                      onTap: () => _eliminarMiCuenta(context),
+                                    ),
+                                    const Divider(
+                                        height: 1, color: Colors.black12),
+                                    _hubListTile(
+                                      icon: Icons.power_settings_new,
+                                      iconColor: Colors.redAccent,
+                                      title: 'Cerrar sesión',
+                                      onTap: _cerrarSesionSegura,
+                                    ),
+                                  ],
                                 ),
                               ),
                             ],
                           ),
-
-                    // --- PESTAÑA 3: MI LOCAL (HUB) ---
-                    SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(14, 14, 14, 80),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // ── HEADER ─────────────────────────────────
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(kRadioTarjetaSE),
-                            ),
-                            child: Row(
-                              children: [
-                                GestureDetector(
-                                  onTap: () async {
-                                    final picker = ImagePicker();
-                                    final img = await picker.pickImage(
-                                        source: ImageSource.gallery, imageQuality: 75);
-                                    if (img == null) return;
-                                    try {
-                                      final bytes = await img.readAsBytes();
-                                      final path =
-                                          'perfil_local_${perfilEnVivo['id']}_${DateTime.now().millisecondsSinceEpoch}.jpg';
-                                      await Supabase.instance.client.storage
-                                          .from('avatars')
-                                          .uploadBinary(path, bytes,
-                                              fileOptions: const FileOptions(
-                                                  contentType: 'image/jpeg',
-                                                  upsert: true));
-                                      final url = Supabase.instance.client.storage
-                                          .from('avatars')
-                                          .getPublicUrl(path);
-                                      await Supabase.instance.client
-                                          .from('usuarios')
-                                          .update({'foto_perfil_url': url})
-                                          .eq('id', perfilEnVivo['id']);
-                                      if (mounted) {
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                            const SnackBar(
-                                                content: Text('✅ Foto actualizada'),
-                                                backgroundColor: Colors.green));
-                                      }
-                                    } catch (e) {
-                                      if (mounted) {
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                            SnackBar(
-                                                content: Text(textoError(e)),
-                                                backgroundColor: Colors.red));
-                                      }
-                                    }
-                                  },
-                                  child: () {
-                                    final fotoUrl = perfilEnVivo['foto_perfil_url']?.toString();
-                                    final tieneFoto = fotoUrl != null && fotoUrl.isNotEmpty;
-                                    return Stack(
-                                      children: [
-                                        CircleAvatar(
-                                          radius: 26,
-                                          backgroundColor: const Color(0xff3AF500),
-                                          backgroundImage: tieneFoto ? NetworkImage(fotoUrl) : null,
-                                          onBackgroundImageError: tieneFoto ? (_, __) {} : null,
-                                          child: !tieneFoto
-                                              ? const Icon(Icons.storefront, color: Colors.black, size: 24)
-                                              : null,
-                                        ),
-                                        Positioned(
-                                          bottom: 0,
-                                          right: 0,
-                                          child: Container(
-                                            width: 16,
-                                            height: 16,
-                                            decoration: const BoxDecoration(
-                                              color: Colors.white,
-                                              shape: BoxShape.circle,
-                                            ),
-                                            child: const Icon(Icons.camera_alt, size: 10, color: Colors.black),
-                                          ),
-                                        ),
-                                      ],
-                                    );
-                                  }(),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        perfilEnVivo['nombre']?.toString() ?? 'Mi Local',
-                                        style: const TextStyle(
-                                          color: Colors.black87,
-                                          fontWeight: FontWeight.w800,
-                                          fontSize: 17,
-                                        ),
-                                      ),
-                                      Row(
-                                        children: [
-                                          Text(
-                                            '$countFinalizadosHoy servicios hoy',
-                                            style: const TextStyle(
-                                              color: kVerdeOscuroSE,
-                                              fontSize: 13,
-                                              fontWeight: FontWeight.w700,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 8),
-                                          Builder(builder: (ctx) {
-                                            final abierto = _localEstaAbierto(perfilEnVivo);
-                                            return GestureDetector(
-                                              onTap: () => _toggleAbiertoCerrado(perfilEnVivo),
-                                              child: Container(
-                                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                                decoration: BoxDecoration(
-                                                  color: abierto ? const Color(0xff3AF500) : Colors.red,
-                                                  borderRadius: BorderRadius.circular(20),
-                                                ),
-                                                child: Row(
-                                                  mainAxisSize: MainAxisSize.min,
-                                                  children: [
-                                                    Text(
-                                                      abierto ? 'ABIERTO' : 'CERRADO',
-                                                      style: TextStyle(
-                                                        color: abierto ? Colors.black : Colors.white,
-                                                        fontSize: 10,
-                                                        fontWeight: FontWeight.bold,
-                                                        letterSpacing: 0.5,
-                                                      ),
-                                                    ),
-                                                    const SizedBox(width: 4),
-                                                    Icon(
-                                                      Icons.touch_app,
-                                                      size: 10,
-                                                      color: abierto ? Colors.black54 : Colors.white70,
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                            );
-                                          }),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 18),
-
-                          // ── SECCIÓN 1: CARTA ────────────────────────
-                          const Padding(
-                            padding: EdgeInsets.only(left: 2, bottom: 8),
-                            child: Text('MENÚ Y CARTA',
-                                style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.bold,
-                                    letterSpacing: 1.0,
-                                    color: Colors.white70)),
-                          ),
-                          _hubCard(
-                            icon: Icons.restaurant_menu,
-                            iconColor: Colors.white,
-                            iconBg: Colors.green,
-                            title: 'Mi carta',
-                            subtitle: 'Productos, categorías y precios',
-                            onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => CartaLocalScreen(
-                                  localId: perfilEnVivo['id'] as int,
-                                  localNombre: perfilEnVivo['nombre']?.toString() ?? 'Mi Local',
-                                  initialTab: 0,
-                                ),
-                              ),
-                            ),
-                            secondaryAction: OutlinedButton.icon(
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: Colors.teal,
-                                side: const BorderSide(color: Colors.teal),
-                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                              ),
-                              icon: const Icon(Icons.qr_code_2, size: 16),
-                              label: const Text('Compartir QR', style: TextStyle(fontSize: 13)),
-                              onPressed: () => _mostrarQrCarta(perfilEnVivo),
-                            ),
-                          ),
-                          const SizedBox(height: 18),
-
-                          // ── SECCIÓN 2: DOMICILIOS ───────────────────
-                          const Padding(
-                            padding: EdgeInsets.only(left: 2, bottom: 8),
-                            child: Text('DOMICILIOS SERVIEXPRESS',
-                                style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.bold,
-                                    letterSpacing: 1.0,
-                                    color: Colors.white70)),
-                          ),
-                          _hubCard(
-                            icon: Icons.delivery_dining,
-                            iconColor: Colors.black,
-                            iconBg: const Color(0xff3AF500),
-                            title: 'Pedidos entrantes',
-                            subtitle: 'Ver y gestionar pedidos en tiempo real',
-                            onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => CartaLocalScreen(
-                                  localId: perfilEnVivo['id'] as int,
-                                  localNombre: perfilEnVivo['nombre']?.toString() ?? 'Mi Local',
-                                  initialTab: 1,
-                                ),
-                              ),
-                            ),
-                            secondaryAction: Row(
-                              children: [
-                                OutlinedButton.icon(
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: Colors.deepPurple,
-                                    side: const BorderSide(color: Colors.deepPurple),
-                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                  ),
-                                  icon: const Icon(Icons.tune, size: 16),
-                                  label: const Text('Config. domicilios', style: TextStyle(fontSize: 13)),
-                                  onPressed: () => _abrirConfigDomicilios(perfilEnVivo),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 18),
-
-                          // ── SECCIÓN 3: PERFIL & CONFIG ──────────────
-                          const Padding(
-                            padding: EdgeInsets.only(left: 2, bottom: 8),
-                            child: Text('PERFIL Y CONFIGURACIÓN',
-                                style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.bold,
-                                    letterSpacing: 1.0,
-                                    color: Colors.white70)),
-                          ),
-                          Container(
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(kRadioTarjetaSE),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.3),
-                                  blurRadius: 6,
-                                  offset: const Offset(0, 2),
-                                ),
-                              ],
-                            ),
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text('Tipo de servicio por defecto',
-                                    style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.black54)),
-                                const SizedBox(height: 6),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                                  decoration: BoxDecoration(
-                                    color: kCampoSE,
-                                    borderRadius: BorderRadius.circular(kRadioCampoSE),
-                                  ),
-                                  child: DropdownButtonHideUnderline(
-                                    child: DropdownButton<String>(
-                                      value: _tipoServicioDefecto,
-                                      isExpanded: true,
-                                      dropdownColor: Colors.white,
-                                      iconEnabledColor: Colors.black54,
-                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black87),
-                                      items: ['PAQUETERÍA', 'COMIDA', 'FARMACIA', 'BEBIDAS']
-                                          .map((v) => DropdownMenuItem(
-                                                value: v,
-                                                child: Text(v,
-                                                    style: const TextStyle(
-                                                        fontWeight: FontWeight.bold,
-                                                        fontSize: 15,
-                                                        color: Colors.black87)),
-                                              ))
-                                          .toList(),
-                                      onChanged: (v) {
-                                        if (v != null) setState(() => _tipoServicioDefecto = v);
-                                      },
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 14),
-                                TextField(
-                                  controller: _telLocalController,
-                                  keyboardType: TextInputType.phone,
-                                  style: const TextStyle(color: Colors.black87, fontSize: 16),
-                                  decoration: const InputDecoration(
-                                    labelText: 'WhatsApp del local',
-                                    prefixIcon: Icon(Icons.phone, color: Colors.black54),
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                TextField(
-                                  controller: _instruccionesController,
-                                  maxLines: 2,
-                                  style: const TextStyle(color: Colors.black87, fontSize: 16),
-                                  decoration: const InputDecoration(
-                                    labelText: 'Instrucciones para el Móvil al recoger',
-                                    hintText: 'Ej: Quitarse el casco, entrar por el lado',
-                                    prefixIcon: Icon(Icons.assignment, color: Colors.black54),
-                                  ),
-                                ),
-                                const SizedBox(height: 14),
-                                SizedBox(
-                                  width: double.infinity,
-                                  height: 54,
-                                  child: ElevatedButton(
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: kVerdeSE,
-                                      elevation: 0,
-                                      shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(14)),
-                                    ),
-                                    onPressed: _guardandoPerfil
-                                        ? null
-                                        : () async {
-                                            setState(() => _guardandoPerfil = true);
-                                            try {
-                                              await Supabase.instance.client
-                                                  .from('usuarios')
-                                                  .update({
-                                                    'tipo_servicio_defecto': _tipoServicioDefecto,
-                                                    'telefono_local': _telLocalController.text.trim(),
-                                                    'instrucciones_recogida': _instruccionesController.text.trim(),
-                                                  }).eq('id', perfilEnVivo['id']);
-                                              if (context.mounted) {
-                                                ScaffoldMessenger.of(context).showSnackBar(
-                                                  const SnackBar(
-                                                      content: Text('✅ Perfil actualizado.'),
-                                                      backgroundColor: Colors.green),
-                                                );
-                                              }
-                                            } catch (e) {
-                                              if (context.mounted) {
-                                                ScaffoldMessenger.of(context).showSnackBar(
-                                                  SnackBar(
-                                                      content: Text(textoError(e)),
-                                                      backgroundColor: Colors.red),
-                                                );
-                                              }
-                                            } finally {
-                                              setState(() => _guardandoPerfil = false);
-                                            }
-                                          },
-                                    child: _guardandoPerfil
-                                        ? const SizedBox(
-                                            width: 20,
-                                            height: 20,
-                                            child: CircularProgressIndicator(
-                                                color: Colors.black, strokeWidth: 2))
-                                        : const Text('Guardar cambios',
-                                            style: TextStyle(
-                                                color: Colors.black,
-                                                fontSize: 16,
-                                                fontWeight: FontWeight.w800)),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 18),
-
-                          // ── OPCIONES ADICIONALES ────────────────────
-                          const Padding(
-                            padding: EdgeInsets.only(left: 2, bottom: 8),
-                            child: Text('MÁS OPCIONES',
-                                style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.bold,
-                                    letterSpacing: 1.0,
-                                    color: Colors.white70)),
-                          ),
-                          Container(
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(kRadioTarjetaSE),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.3),
-                                  blurRadius: 4,
-                                ),
-                              ],
-                            ),
-                            child: Column(
-                              children: [
-                                // (Lista de precios eliminada: los precios los
-                                // maneja la Central en la red SE; el local tiene
-                                // el CRM con los precios recientes del cliente.)
-                                Builder(builder: (ctx) {
-                                  final apertura = perfilEnVivo['horario_apertura']?.toString();
-                                  final cierre = perfilEnVivo['horario_cierre']?.toString();
-                                  final horaStr = (apertura != null && cierre != null)
-                                      ? '${horaTexto12(apertura)} – ${horaTexto12(cierre)}'
-                                      : 'Sin horario configurado';
-                                  return _hubListTile(
-                                    icon: Icons.schedule,
-                                    iconColor: Colors.teal,
-                                    title: 'Horario de atención',
-                                    subtitle: horaStr,
-                                    onTap: () => _abrirConfigDomicilios(perfilEnVivo),
-                                  );
-                                }),
-                                const Divider(height: 1, color: Colors.black12),
-                                _hubListTile(
-                                  icon: Icons.folder_shared,
-                                  iconColor: Colors.blueGrey,
-                                  title: 'Historial de todos mis pedidos',
-                                  onTap: () => _mostrarHistorialGlobal(context),
-                                ),
-                                const Divider(height: 1, color: Colors.black12),
-                                _hubListTile(
-                                  icon: Icons.people_alt,
-                                  iconColor: Colors.purple,
-                                  title: 'Mis clientes',
-                                  subtitle: 'Quién te compra, cuánto y sus direcciones',
-                                  onTap: () => _abrirCRMLocal(context, perfilEnVivo),
-                                ),
-                                const Divider(height: 1, color: Colors.black12),
-                                _hubListTile(
-                                  icon: Icons.add_location_alt,
-                                  iconColor: Colors.orange[800]!,
-                                  title: 'Ubicación del local',
-                                  onTap: () => _abrirMenuUbicacion(),
-                                ),
-                                const Divider(height: 1, color: Colors.black12),
-                                Builder(
-                                  builder: (ctx) {
-                                    final tieneAlarma = perfilEnVivo['chat_central'] == true;
-                                    return _hubListTile(
-                                      icon: tieneAlarma
-                                          ? Icons.mark_email_unread
-                                          : Icons.support_agent,
-                                      iconColor: tieneAlarma ? Colors.red : Colors.blue[800]!,
-                                      title: 'Soporte Central',
-                                      onTap: () {
-                                        Supabase.instance.client
-                                            .from('usuarios')
-                                            .update({'chat_central': false})
-                                            .eq('id', perfilEnVivo['id']);
-                                        Navigator.push(
-                                          context,
-                                          MaterialPageRoute(
-                                            builder: (_) => ChatScreen(
-                                              salaId: 'soporte_${perfilEnVivo['id']}',
-                                              miId: perfilEnVivo['id'],
-                                              miNombre: perfilEnVivo['nombre'],
-                                              titulo: 'Soporte Central',
-                                              usuarioId: perfilEnVivo['id'],
-                                              alarmaLocal: 'chat_central',
-                                              alarmaDestino: 'alarma_soporte',
-                                              tipoFaq: TipoFaqChat.local,
-                                            ),
-                                          ),
-                                        );
-                                      },
-                                    );
-                                  },
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-
-                          // ── CUENTA ──────────────────────────────────
-                          Container(
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(kRadioTarjetaSE),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.3),
-                                  blurRadius: 4,
-                                ),
-                              ],
-                            ),
-                            child: Column(
-                              children: [
-                                _hubListTile(
-                                  icon: Icons.person_remove,
-                                  iconColor: Colors.red,
-                                  title: 'Eliminar mi cuenta',
-                                  onTap: () => _eliminarMiCuenta(context),
-                                ),
-                                const Divider(height: 1, color: Colors.black12),
-                                _hubListTile(
-                                  icon: Icons.power_settings_new,
-                                  iconColor: Colors.redAccent,
-                                  title: 'Cerrar sesión',
-                                  onTap: _cerrarSesionSegura,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
+                        ),
+                      ],
+                    );
+                  },
+                ),
+                floatingActionButton: ValueListenableBuilder<int>(
+                  valueListenable: _chatLocalCount,
+                  builder: (_, total, __) {
+                    if (total == 0) return const SizedBox.shrink();
+                    return PulsingPanicoButton(
+                      color: const Color(0xFF3AF500),
+                      child: FloatingActionButton.extended(
+                        heroTag: 'fab_chat_local',
+                        backgroundColor: const Color(0xFF1B5E20),
+                        onPressed: _abrirChatPendienteLocal,
+                        icon:
+                            const Icon(Icons.chat_rounded, color: Colors.white),
+                        label: Text(
+                          total > 1 ? '💬 CHAT ($total)' : '💬 MENSAJE',
+                          style: const TextStyle(
+                              color: Colors.white, fontWeight: FontWeight.bold),
+                        ),
                       ),
-                    ),
-                  ],
-                );
-              },
-            ),
-            floatingActionButton: ValueListenableBuilder<int>(
-              valueListenable: _chatLocalCount,
-              builder: (_, total, __) {
-                if (total == 0) return const SizedBox.shrink();
-                return PulsingPanicoButton(
-                  color: const Color(0xFF3AF500),
-                  child: FloatingActionButton.extended(
-                    heroTag: 'fab_chat_local',
-                    backgroundColor: const Color(0xFF1B5E20),
-                    onPressed: _abrirChatPendienteLocal,
-                    icon: const Icon(Icons.chat_rounded, color: Colors.white),
-                    label: Text(
-                      total > 1 ? '💬 CHAT ($total)' : '💬 MENSAJE',
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ));  // Scaffold + Theme
-        },     // outer StreamBuilder builder
-      ),       // outer StreamBuilder (child: de DefaultTabController)
-    );         // DefaultTabController
+                    );
+                  },
+                ),
+              )); // Scaffold + Theme
+        }, // outer StreamBuilder builder
+      ), // outer StreamBuilder (child: de DefaultTabController)
+    ); // DefaultTabController
   }
 }
